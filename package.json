@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "engines": {
     "vscode": "^1.9.0"
   },
@@ -29,7 +29,15 @@
     "commands": [
       {
         "command": "otak-proxy.toggleProxy",
-        "title": "Toggle Proxy Settings"
+        "title": "Toggle Proxy"
+      },
+      {
+        "command": "otak-proxy.testProxy",
+        "title": "Test Proxy"
+      },
+      {
+        "command": "otak-proxy.importProxy",
+        "title": "Import System Proxy"
       }
     ],
     "configuration": {

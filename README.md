@@ -1,75 +1,114 @@
 <p align="center">
   <h1 align="center">otak-proxy</h1>
-  <p align="center">One-click proxy configuration for VSCode and Git.</p>
+  <p align="center">Dead-simple proxy toggling for VSCode & Git</p>
 </p>
 
 ---
 
-Simply click to enable/disable proxy settings for your development tools.
+Switch your proxy on and off with a single click. No hassle, no config files.
 
 ![](images/otak-proxy.png)
 
-## Features
+## What it does
 
-- One-click proxy configuration for:
-  - VSCode proxy
-  - Git proxy settings
-- Visual status indicator in status bar
-- Easy initial setup
+- **Three-mode system** - Auto (system), Manual, or Off
+- **Auto mode** - Syncs with your system/browser proxy in real-time
+- **Manual mode** - Use your own fixed proxy settings
+- **One-click cycling** - Click status bar to cycle: Off → Manual → Auto
+- **Live monitoring** - Auto mode checks for system proxy changes
+- **Connection testing** - Verify proxy works before enabling
+- **Smart detection** - Finds proxy from browser, system, or environment
 
-## Usage
+## Getting started
 
-1. Click the proxy icon in the status bar to toggle
-2. Or use the command palette (F1): "Toggle Proxy Settings"
+### Quick setup
+The extension asks how you want to configure proxy on first launch:
+- **Auto (System)** - Automatically uses your browser/system proxy
+- **Manual Setup** - Set your own proxy URL
+- **Skip** - Configure later
 
-Status bar shows:
-- ![Proxy On](images/plug.png) Proxy: On - Shows current proxy URL
-- ![Proxy Off](images/circle-slash.png) Proxy: Off - Click to enable
+### Three modes explained
 
-## Requirements
+#### Off Mode
+Proxy disabled - no proxy settings applied
 
-- Visual Studio Code 1.9.0 or higher
-- Git
+#### Manual Mode
+Uses your configured proxy URL - stays fixed until you change it
 
-## Extension Settings
+#### Auto Mode
+Automatically syncs with system proxy:
+- Detects browser/system proxy settings
+- Checks every minute for proxy changes
+- Also updates immediately when switching back to VSCode
+- Perfect for network switching scenarios
 
-* `otakProxy.proxyUrl`: Proxy server URL (e.g., `http://proxy.example.com:8080`)
+### Using it
+- **Click status bar** - Cycles through Off → Manual → Auto
+- **Command palette** (`F1`):
+  - "Toggle Proxy" - Cycle modes
+  - "Test Proxy" - Test current proxy
+  - "Import System Proxy" - Detect and use system proxy
+  - "Configure Manual" - Set manual proxy URL
+
+## Status indicators
+
+- **$(circle-slash) Proxy: Off** - Proxy disabled
+- **$(plug) Manual: http://...** - Using manual proxy
+- **$(sync~spin) Auto: http://...** - Using system proxy (auto-sync)
+- **$(sync~spin) Auto: No system proxy** - Auto mode, but no system proxy detected
+
+## Prerequisites
+
+- VSCode 1.9.0+
+- Git installed and in PATH
+
+## Configuration
+
+### Manual proxy URL
+Set your manual proxy in settings:
+```json
+{
+  "otakProxy.proxyUrl": "http://proxy.example.com:8080"
+}
+```
+
+### Auto mode detection sources
+Auto mode checks these sources (in order):
+1. Environment variables (`HTTP_PROXY`, `HTTPS_PROXY`)
+2. VSCode's existing proxy setting
+3. **Windows**: Internet Explorer settings (registry)
+4. **macOS**: System network preferences (Wi-Fi, Ethernet, etc.)
+5. **Linux**: GNOME proxy settings (gsettings)
 
 ## Troubleshooting
 
-If proxy settings fail to update:
-1. Check proxy URL format
-2. Ensure Git is installed
-3. Check Git global configuration permissions
+### Proxy won't enable?
+- Check the URL format (needs `http://` or `https://`)
+- Run "Test Proxy" to verify connection
+- Make sure Git is installed (`git --version`)
 
-## Related Extensions
-Check out our other VS Code extensions.
+### Settings not applying?
+- VSCode might need a restart for some proxy changes
+- Check you have permission to modify Git global config
 
-### [otak-monitor](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-monitor)
-Real-time system monitoring in VS Code. Track CPU, memory, and disk usage through the status bar with comprehensive tooltips and 1-minute averages.
+## More from otak
 
-### [otak-proxy](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-proxy)
-One-click proxy configuration for VS Code and Git. Perfect for environments where network settings change frequently.
+### System & Performance
+- **[otak-monitor](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-monitor)** - Live CPU, memory & disk monitoring in your status bar
+- **[otak-restart](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-restart)** - Quick restart buttons for Extension Host and VSCode
 
-### [otak-committer](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-committer)
-Intelligent SCM operations with AI support. Features multilingual commit message generation (25 languages supported) and upcoming PR management capabilities.
+### Productivity
+- **[otak-committer](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-committer)** - AI-powered commit messages in 25+ languages
+- **[otak-pomodoro](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-pomodoro)** - Pomodoro timer for focused work sessions
+- **[otak-clock](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-clock)** - Dual timezone clock for remote teams
 
-### [otak-restart](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-restart)
-Quick restart operations for Extension Host and VS Code window via status bar tooltip. Streamlines your development workflow.
-
-### [otak-clock](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-clock)
-Display date and time for two time zones from around the world in VS Code. Essential for working across different time zones.
-
-### [otak-pomodoro](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-pomodoro)
-Enhance your productivity with this Pomodoro Timer extension. Helps balance focused work sessions with refreshing breaks using the Pomodoro Technique.
-
-### [otak-zen](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-zen)
-Experience a distraction-free workflow with otak-zen. This extension transforms your VS Code interface into a minimalist environment by hiding non-essential UI elements, allowing you to focus solely on coding. Customize which components to show or hide, and toggle zen mode quickly via commands or the status bar.
+### Workflow
+- **[otak-zen](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-zen)** - Distraction-free coding mode
 
 ## License
 
-MIT License - see the LICENSE file for details.
+MIT
 
 ---
 
-For more information, visit the [GitHub repository](https://github.com/tsuyoshi-otake/otak-proxy).
+**Issues?** [Report on GitHub](https://github.com/tsuyoshi-otake/otak-proxy/issues) | **Source:** [GitHub](https://github.com/tsuyoshi-otake/otak-proxy)
