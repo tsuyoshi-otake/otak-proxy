@@ -15,16 +15,30 @@ import * as fc from 'fast-check';
 export const validProxyUrlGenerator = (): fc.Arbitrary<string> => {
     const protocolArb = fc.constantFrom('http', 'https');
     
-    // Valid hostname: alphanumeric, dots, hyphens
-    const hostnamePartArb = fc.stringMatching(/^[a-zA-Z0-9-]+$/);
-    const hostnameArb = fc.array(hostnamePartArb, { minLength: 1, maxLength: 4 })
-        .map(parts => parts.join('.'));
+    // Valid hostname part: must start with alphanumeric, can contain hyphens
+    // Each part must be at least 1 character and not start/end with hyphen
+    const hostnamePartArb = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$/)
+        .filter(s => s.length >= 1 && s.length <= 63);
+    
+    // Generate hostname with 2-4 parts (e.g., proxy.example.com)
+    const hostnameArb = fc.array(hostnamePartArb, { minLength: 2, maxLength: 4 })
+        .map(parts => parts.join('.'))
+        .filter(hostname => {
+            // Ensure the hostname is valid for URL parsing
+            try {
+                new URL(`http://${hostname}`);
+                return true;
+            } catch {
+                return false;
+            }
+        });
     
     // Valid port: 1-65535
     const portArb = fc.integer({ min: 1, max: 65535 });
     
-    // Valid credentials: alphanumeric, hyphens, underscores
-    const credentialPartArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/);
+    // Valid credentials: alphanumeric, hyphens, underscores (at least 1 char)
+    const credentialPartArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/)
+        .filter(s => s.length >= 1 && s.length <= 20);
     
     return fc.record({
         protocol: protocolArb,
@@ -72,8 +86,18 @@ export const urlWithShellMetacharactersGenerator = (): fc.Arbitrary<string> => {
  * These should be rejected by validation
  */
 export const urlWithoutProtocolGenerator = (): fc.Arbitrary<string> => {
+    // Shell metacharacters to exclude
+    const shellMetachars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
+    
     return fc.string({ minLength: 5 })
-        .filter(s => !s.startsWith('http://') && !s.startsWith('https://'))
+        .filter(s => {
+            // Exclude strings that start with protocol
+            if (s.startsWith('http://') || s.startsWith('https://')) {
+                return false;
+            }
+            // Exclude strings containing shell metacharacters
+            return !shellMetachars.some(char => s.includes(char));
+        })
         .map(s => `proxy.com:8080${s}`);
 };
 
@@ -163,5 +187,38 @@ export const urlWithMultipleAtSymbolsGenerator = (): fc.Arbitrary<string> => {
         fc.string({ minLength: 1 })
     ).map(([protocol, part1, part2, part3]) => {
         return `${protocol}://${part1}@${part2}@${part3}.com:8080`;
+    });
+};
+
+/**
+ * Generates URLs with invalid credential characters
+ * Used to test credential format validation
+ */
+export const urlWithInvalidCredentialsGenerator = (): fc.Arbitrary<string> => {
+    // Invalid characters for credentials (excluding shell metacharacters)
+    const invalidChars = ['!', '#', '$', '%', '^', '*', '=', '+', '[', ']', '{', '}', ' ', '~', '/', '\\', '?', ',', '.', ':'];
+    const invalidCharArb = fc.constantFrom(...invalidChars);
+    
+    const usernameArb = fc.tuple(
+        fc.string({ minLength: 0, maxLength: 10 }),
+        invalidCharArb,
+        fc.string({ minLength: 0, maxLength: 10 })
+    ).map(([before, invalidChar, after]) => `${before}${invalidChar}${after}`);
+    
+    const passwordArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 1 && s.length <= 20);
+    const hostnameArb = fc.stringMatching(/^[a-zA-Z0-9.-]+$/).filter(s => s.length >= 3 && s.length <= 50);
+    
+    return fc.tuple(
+        fc.constantFrom('http', 'https'),
+        usernameArb,
+        passwordArb,
+        hostnameArb,
+        fc.option(fc.integer({ min: 1, max: 65535 }), { nil: undefined })
+    ).map(([protocol, username, password, hostname, port]) => {
+        let url = `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostname}`;
+        if (port) {
+            url += `:${port}`;
+        }
+        return url;
     });
 };

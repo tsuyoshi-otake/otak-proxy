@@ -48,6 +48,49 @@ export class ProxyUrlValidator {
             return { isValid: false, errors };
         }
 
+        // Pre-parse validation: Proxy URLs should not contain path, query, or fragment
+        // Characters like ?, #, / after the hostname:port would indicate these components
+        const protocolMatch = url.match(/^(https?):\/\//);
+        if (protocolMatch) {
+            const afterProtocol = url.substring(protocolMatch[0].length);
+            
+            // Proxy URLs should only have: [username:password@]hostname[:port]
+            // No path (/), query (?), or fragment (#) should be present
+            // First, check for completely invalid characters
+            const invalidChars = /[/?#\s\\]/;
+            if (invalidChars.test(afterProtocol)) {
+                errors.push('Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)');
+                return { isValid: false, errors };
+            }
+            
+            // Check @ symbol usage: should appear at most once, separating credentials from hostname
+            const atCount = (afterProtocol.match(/@/g) || []).length;
+            if (atCount > 1) {
+                errors.push('Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)');
+                return { isValid: false, errors };
+            }
+            
+            // If @ is present, validate the hostname part (after @)
+            if (atCount === 1) {
+                const parts = afterProtocol.split('@');
+                const hostPortPart = parts[1];
+                
+                // Hostname part should only contain: alphanumeric, dots, hyphens, colons (for port)
+                const validHostPortPattern = /^[a-zA-Z0-9.\-:]+$/;
+                if (!validHostPortPattern.test(hostPortPart)) {
+                    errors.push('Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)');
+                    return { isValid: false, errors };
+                }
+            } else {
+                // No credentials, entire string should be hostname:port
+                const validHostPortPattern = /^[a-zA-Z0-9.\-:]+$/;
+                if (!validHostPortPattern.test(afterProtocol)) {
+                    errors.push('Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)');
+                    return { isValid: false, errors };
+                }
+            }
+        }
+
         // Parse URL
         let parsed: URL;
         try {

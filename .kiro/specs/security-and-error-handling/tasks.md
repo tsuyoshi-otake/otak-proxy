@@ -34,37 +34,87 @@ The extension currently has:
   - Create ValidationError interface with `field` and `message` properties
   - _Requirements: 1.1, 1.3, 1.4, 3.1, 3.2, 3.3, 3.4, 4.2_
 
-- [ ]* 2.1 Write property test for shell metacharacter rejection
+- [x] 2.1 Write property test for shell metacharacter rejection
+
+
+
+
+
+
   - **Property 1: Shell metacharacter rejection**
   - **Validates: Requirements 1.1**
 
-- [ ]* 2.2 Write property test for valid character acceptance
+- [x] 2.2 Write property test for valid character acceptance
+
+
+
+
+
+
   - **Property 2: Valid character acceptance**
   - **Validates: Requirements 1.3**
 
-- [ ]* 2.3 Write property test for protocol requirement
+- [x] 2.3 Write property test for protocol requirement
+
+
+
+
+
+
   - **Property 7: Protocol requirement**
   - **Validates: Requirements 3.2**
 
-- [ ]* 2.4 Write property test for port range validation
+
+- [x] 2.4 Write property test for port range validation
+
+
+
+
+
   - **Property 8: Port range validation**
   - **Validates: Requirements 3.3**
 
-- [ ]* 2.5 Write property test for hostname validation
+
+- [x] 2.5 Write property test for hostname validation
+
+
+
+
+
   - **Property 9: Hostname validation**
   - **Validates: Requirements 3.4**
 
-- [ ]* 2.6 Write property test for credential format validation
+- [x] 2.6 Write property test for credential format validation
+
+
+
+
+
+
   - **Property 11: Credential format validation**
   - **Validates: Requirements 4.2**
 
-- [ ]* 2.7 Write unit tests for validation edge cases
+
+
+- [x] 2.7 Write unit tests for validation edge cases
+
+
+
+
+
   - Test empty strings, whitespace-only URLs
   - Test boundary port numbers (0, 1, 65535, 65536)
   - Test various credential formats
   - _Requirements: 1.1, 1.3, 3.2, 3.3, 3.4, 4.1_
 
-- [ ] 3. Create InputSanitizer class for credential protection
+- [x] 3. Create InputSanitizer class for credential protection
+
+
+
+
+
+
+
   - Create `src/validation/InputSanitizer.ts` file
   - Extract existing `sanitizeProxyUrl()` logic into InputSanitizer class
   - Implement `maskPassword()` method (replace password with asterisks)
@@ -73,31 +123,59 @@ The extension currently has:
   - Ensure consistent masking across all display contexts
   - _Requirements: 1.5, 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ]* 3.1 Write property test for credential masking in logs
+
+- [x] 3.1 Write property test for credential masking in logs
+
+
+
+
   - **Property 4: Credential masking in logs**
   - **Validates: Requirements 1.5, 6.1, 6.3, 6.5**
 
-- [ ]* 3.2 Write property test for credential masking in UI
+- [x] 3.2 Write property test for credential masking in UI
+
+
+
+
   - **Property 5: Credential masking in UI**
   - **Validates: Requirements 6.2**
 
-- [ ]* 3.3 Write property test for storage and display separation
+- [x] 3.3 Write property test for storage and display separation
+
+
+
+
+
+
   - **Property 6: Storage and display separation**
   - **Validates: Requirements 6.4**
 
-- [ ]* 3.4 Write unit tests for sanitization edge cases
+
+
+- [x]* 3.4 Write unit tests for sanitization edge cases
+
+
+
+
   - Test URLs with passwords in various positions
   - Test special characters in passwords
   - Test multiple @ symbols
   - _Requirements: 1.5, 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 4. Create ProxyUrl data model
+
+- [x] 4. Create ProxyUrl data model
+
+
+
+
   - Create ProxyUrl interface with protocol, hostname, port, credentials
   - Implement toString() method
   - Implement toDisplayString() method using InputSanitizer
   - _Requirements: 6.4_
 
 - [ ] 5. Refactor GitConfigManager for secure command execution (CRITICAL SECURITY FIX)
+
+
   - Create GitConfigManager class to encapsulate Git operations
   - Replace `exec()` with `execFile()` to prevent shell interpretation
   - Implement setProxy() with parameterized command execution and timeout (5 seconds)

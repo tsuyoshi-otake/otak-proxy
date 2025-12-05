@@ -2,9 +2,11 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ProxyUrlValidator } from './validation/ProxyUrlValidator';
+import { InputSanitizer } from './validation/InputSanitizer';
 
 const execAsync = promisify(exec);
 const validator = new ProxyUrlValidator();
+const sanitizer = new InputSanitizer();
 
 let statusBarItem: vscode.StatusBarItem;
 let systemProxyCheckInterval: NodeJS.Timeout | undefined;
@@ -31,18 +33,8 @@ function validateProxyUrl(url: string): boolean {
 }
 
 function sanitizeProxyUrl(url: string): string {
-    // Remove potentially dangerous characters for shell commands
-    // URL class already validates the URL structure
-    try {
-        const parsed = new URL(url);
-        // Mask password if present for security
-        if (parsed.password) {
-            parsed.password = '****';
-        }
-        return parsed.toString();
-    } catch {
-        return url;
-    }
+    // Use InputSanitizer class for consistent credential masking
+    return sanitizer.maskPassword(url);
 }
 
 function escapeShellArg(arg: string): string {
