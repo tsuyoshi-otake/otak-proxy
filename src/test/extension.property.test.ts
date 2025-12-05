@@ -23,6 +23,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+const isWindows = process.platform === 'win32';
 
 /**
  * Helper function to check if npm is available
@@ -31,7 +32,8 @@ async function isNpmAvailable(): Promise<boolean> {
     try {
         await execFileAsync('npm', ['--version'], {
             timeout: 5000,
-            encoding: 'utf8'
+            encoding: 'utf8',
+            shell: isWindows
         });
         return true;
     } catch {
@@ -247,10 +249,10 @@ suite('Extension Integration Property-Based Tests', () => {
     /**
      * Feature: npm-proxy-support, Property 4: proxy設定の削除
      * 任意の設定済みproxy URLに対して、unsetProxy()を呼び出した後、
-     * npm configのhttp-proxyとhttps-proxyが存在しないべき
+     * npm configのproxyとhttps-proxyが存在しないべき
      * Validates: Requirements 2.1
      */
-    test('Property 4: Proxy deletion removes both http-proxy and https-proxy', async function() {
+    test('Property 4: Proxy deletion removes both proxy and https-proxy', async function() {
         if (!npmAvailable) {
             this.skip();
             return;
@@ -276,11 +278,11 @@ suite('Extension Integration Property-Based Tests', () => {
                     const unsetResult = await npmManager.unsetProxy();
                     assert.strictEqual(unsetResult.success, true, `Failed to unset proxy: ${unsetResult.error}`);
 
-                    // Verify both http-proxy and https-proxy are removed
-                    const httpProxy = await getNpmConfigValue('http-proxy');
+                    // Verify both proxy and https-proxy are removed
+                    const httpProxy = await getNpmConfigValue('proxy');
                     const httpsProxy = await getNpmConfigValue('https-proxy');
 
-                    assert.strictEqual(httpProxy, null, 'http-proxy should be null after unset');
+                    assert.strictEqual(httpProxy, null, 'proxy should be null after unset');
                     assert.strictEqual(httpsProxy, null, 'https-proxy should be null after unset');
 
                     return true;
@@ -526,10 +528,11 @@ async function getNpmConfigValue(key: string): Promise<string | null> {
     try {
         const { stdout } = await execFileAsync('npm', ['config', 'get', key], {
             timeout: 5000,
-            encoding: 'utf8'
+            encoding: 'utf8',
+            shell: isWindows
         });
         const value = stdout.trim();
-        return (value === '' || value === 'undefined') ? null : value;
+        return (value === '' || value === 'undefined' || value === 'null') ? null : value;
     } catch {
         return null;
     }

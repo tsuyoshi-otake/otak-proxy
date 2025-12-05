@@ -15,29 +15,40 @@ export interface OperationResult {
 
 /**
  * Manages npm proxy configuration with secure command execution.
- * Uses execFile() instead of exec() to prevent shell interpretation and command injection.
+ * Uses execFile() with shell:true on Windows to handle npm.cmd batch file.
+ * Arguments are passed as array to prevent command injection.
+ * 
+ * Note: npm 11.x uses 'proxy' instead of 'http-proxy' for HTTP proxy settings.
  */
 export class NpmConfigManager {
     private readonly timeout: number = 5000; // 5 seconds timeout
+    private readonly isWindows: boolean = process.platform === 'win32';
 
     /**
-     * Sets npm proxy configuration for both http-proxy and https-proxy
+     * Executes npm command with platform-appropriate options.
+     * On Windows, npm is a batch file (.cmd) so shell:true is required.
+     */
+    private async execNpm(args: string[]): Promise<{ stdout: string; stderr: string }> {
+        return execFileAsync('npm', args, {
+            timeout: this.timeout,
+            encoding: 'utf8',
+            shell: this.isWindows  // Required for Windows to execute npm.cmd
+        });
+    }
+
+    /**
+     * Sets npm proxy configuration for both proxy and https-proxy
+     * Note: npm 11.x uses 'proxy' (not 'http-proxy') for HTTP proxy
      * @param url - Validated proxy URL
      * @returns Result with success status and any errors
      */
     async setProxy(url: string): Promise<OperationResult> {
         try {
-            // Set http-proxy
-            await execFileAsync('npm', ['config', 'set', 'http-proxy', url], {
-                timeout: this.timeout,
-                encoding: 'utf8'
-            });
+            // Set proxy (for HTTP - npm 11.x naming)
+            await this.execNpm(['config', 'set', 'proxy', url]);
 
             // Set https-proxy
-            await execFileAsync('npm', ['config', 'set', 'https-proxy', url], {
-                timeout: this.timeout,
-                encoding: 'utf8'
-            });
+            await this.execNpm(['config', 'set', 'https-proxy', url]);
 
             return { success: true };
         } catch (error: any) {
@@ -51,24 +62,18 @@ export class NpmConfigManager {
      */
     async unsetProxy(): Promise<OperationResult> {
         try {
-            // Check if http-proxy exists
-            const hasHttpProxy = await this.hasConfig('http-proxy');
+            // Check if proxy exists
+            const hasProxy = await this.hasConfig('proxy');
             const hasHttpsProxy = await this.hasConfig('https-proxy');
 
-            // Delete http-proxy if it exists
-            if (hasHttpProxy) {
-                await execFileAsync('npm', ['config', 'delete', 'http-proxy'], {
-                    timeout: this.timeout,
-                    encoding: 'utf8'
-                });
+            // Delete proxy if it exists
+            if (hasProxy) {
+                await this.execNpm(['config', 'delete', 'proxy']);
             }
 
             // Delete https-proxy if it exists
             if (hasHttpsProxy) {
-                await execFileAsync('npm', ['config', 'delete', 'https-proxy'], {
-                    timeout: this.timeout,
-                    encoding: 'utf8'
-                });
+                await this.execNpm(['config', 'delete', 'https-proxy']);
             }
 
             return { success: true };
@@ -83,16 +88,13 @@ export class NpmConfigManager {
      */
     async getProxy(): Promise<string | null> {
         try {
-            // Try to get http-proxy
-            const { stdout } = await execFileAsync('npm', ['config', 'get', 'http-proxy'], {
-                timeout: this.timeout,
-                encoding: 'utf8'
-            });
+            // Try to get proxy (npm 11.x naming)
+            const { stdout } = await this.execNpm(['config', 'get', 'proxy']);
 
             const value = stdout.trim();
-            
-            // npm returns 'undefined' as a string when config doesn't exist
-            if (!value || value === 'undefined') {
+
+            // npm returns 'null' or 'undefined' as a string when config doesn't exist
+            if (!value || value === 'undefined' || value === 'null') {
                 return null;
             }
 
@@ -107,18 +109,15 @@ export class NpmConfigManager {
     /**
      * Checks if an npm config key exists
      * @param key - Config key to check
-     * @returns true if the key exists
+     * @returns true if the key exists and has a value
      */
     private async hasConfig(key: string): Promise<boolean> {
         try {
-            const { stdout } = await execFileAsync('npm', ['config', 'get', key], {
-                timeout: this.timeout,
-                encoding: 'utf8'
-            });
+            const { stdout } = await this.execNpm(['config', 'get', key]);
 
             const value = stdout.trim();
-            // npm returns 'undefined' as a string when config doesn't exist
-            return value !== '' && value !== 'undefined';
+            // npm returns 'null' or 'undefined' as a string when config doesn't exist
+            return value !== '' && value !== 'undefined' && value !== 'null';
         } catch {
             return false;
         }
@@ -143,7 +142,7 @@ export class NpmConfigManager {
             errorDescription = 'npm is not installed or not in PATH';
         }
         // Check for permission errors
-        else if (error.code === 'EACCES' || errorMessage.includes('EACCES') || 
+        else if (error.code === 'EACCES' || errorMessage.includes('EACCES') ||
                  stderr.includes('Permission denied') || stderr.includes('permission')) {
             errorType = 'NO_PERMISSION';
             errorDescription = 'Permission denied when accessing npm configuration';

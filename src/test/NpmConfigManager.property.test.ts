@@ -11,18 +11,21 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+const isWindows = process.platform === 'win32';
 
 /**
  * Helper function to get npm config value
+ * Note: npm 11.x uses 'proxy' instead of 'http-proxy'
  */
 async function getNpmConfigValue(key: string): Promise<string | null> {
     try {
         const { stdout } = await execFileAsync('npm', ['config', 'get', key], {
             timeout: 5000,
-            encoding: 'utf8'
+            encoding: 'utf8',
+            shell: isWindows
         });
         const value = stdout.trim();
-        return (value === '' || value === 'undefined') ? null : value;
+        return (value === '' || value === 'undefined' || value === 'null') ? null : value;
     } catch {
         return null;
     }
@@ -35,7 +38,8 @@ async function isNpmAvailable(): Promise<boolean> {
     try {
         await execFileAsync('npm', ['--version'], {
             timeout: 5000,
-            encoding: 'utf8'
+            encoding: 'utf8',
+            shell: isWindows
         });
         return true;
     } catch {
@@ -53,7 +57,8 @@ suite('NpmConfigManager Property-Based Tests', () => {
     /**
      * Feature: npm-proxy-support, Property 1: npm proxy設定の適用
      * 任意の有効なproxy URLに対して、setProxy()を呼び出した後、
-     * npm configのhttp-proxyとhttps-proxyの両方が同じURLに設定されているべき
+     * npm configのproxyとhttps-proxyの両方が同じURLに設定されているべき
+     * Note: npm 11.x uses 'proxy' instead of 'http-proxy'
      * Validates: Requirements 1.1
      */
     test('Property 1: npm proxy configuration applies to both http and https', async function() {
@@ -77,12 +82,12 @@ suite('NpmConfigManager Property-Based Tests', () => {
                 // Verify the operation succeeded
                 assert.strictEqual(result.success, true, `Failed to set proxy: ${result.error}`);
                 
-                // Get both config values
-                const httpProxy = await getNpmConfigValue('http-proxy');
+                // Get both config values (npm 11.x uses 'proxy' not 'http-proxy')
+                const httpProxy = await getNpmConfigValue('proxy');
                 const httpsProxy = await getNpmConfigValue('https-proxy');
                 
                 // Both should be set to the same URL
-                assert.strictEqual(httpProxy, proxyUrl, 'http-proxy should match the set URL');
+                assert.strictEqual(httpProxy, proxyUrl, 'proxy should match the set URL');
                 assert.strictEqual(httpsProxy, proxyUrl, 'https-proxy should match the set URL');
                 
                 // Clean up
