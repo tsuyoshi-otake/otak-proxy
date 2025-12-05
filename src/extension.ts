@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { ProxyUrlValidator } from './validation/ProxyUrlValidator';
 
 const execAsync = promisify(exec);
+const validator = new ProxyUrlValidator();
 
 let statusBarItem: vscode.StatusBarItem;
 let systemProxyCheckInterval: NodeJS.Timeout | undefined;
@@ -21,27 +23,11 @@ interface ProxyState {
 }
 
 function validateProxyUrl(url: string): boolean {
-    try {
-        const parsed = new URL(url);
-        // Only allow http and https protocols
-        if (!['http:', 'https:'].includes(parsed.protocol)) {
-            return false;
-        }
-        // Validate hostname
-        if (!parsed.hostname || parsed.hostname.length === 0) {
-            return false;
-        }
-        // Validate port if present
-        if (parsed.port) {
-            const port = parseInt(parsed.port);
-            if (isNaN(port) || port < 1 || port > 65535) {
-                return false;
-            }
-        }
-        return true;
-    } catch {
-        return false;
+    const result = validator.validate(url);
+    if (!result.isValid && result.errors.length > 0) {
+        console.error('Proxy URL validation failed:', result.errors.join(', '));
     }
+    return result.isValid;
 }
 
 function sanitizeProxyUrl(url: string): string {

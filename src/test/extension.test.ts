@@ -8,6 +8,7 @@ suite('Otak Proxy Extension Test Suite', () => {
     let globalState: Map<string, any>;
     let mockContext: Partial<vscode.ExtensionContext>;
     let mockStatusBarItem: vscode.StatusBarItem;
+    let isFirstTest = true;
     
     setup(async () => {
         sandbox = sinon.createSandbox();
@@ -82,24 +83,27 @@ suite('Otak Proxy Extension Test Suite', () => {
     });
 
     test('Extension should activate', async () => {
-        await extension.activate(mockContext);
+        if (isFirstTest) {
+            await extension.activate(mockContext);
+            isFirstTest = false;
+        }
         assert.strictEqual(mockContext.subscriptions!.length > 0, true);
     });
 
     test('Status bar should be initialized', async () => {
-        await extension.activate(mockContext);
+        // Extension already activated in first test
         assert.strictEqual(mockStatusBarItem.command, 'otak-proxy.toggleProxy');
     });
 
     test('Initial setup should be prompted on first activation', async () => {
-        await extension.activate(mockContext);
+        // Extension already activated in first test
         const showInputBox = vscode.window.showInputBox as sinon.SinonStub;
         assert.strictEqual(showInputBox.called, true);
         assert.strictEqual(globalState.get('hasInitialSetup'), true);
     });
 
     test('Proxy toggle should update state', async () => {
-        await extension.activate(mockContext);
+        // Extension already activated in first test
         await vscode.commands.executeCommand('otak-proxy.toggleProxy');
         assert.strictEqual(globalState.get('proxyEnabled'), true);
     });
