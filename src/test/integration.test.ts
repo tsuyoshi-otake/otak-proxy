@@ -4,6 +4,7 @@ import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { GitConfigManager } from '../config/GitConfigManager';
 import { VscodeConfigManager } from '../config/VscodeConfigManager';
+import { NpmConfigManager } from '../config/NpmConfigManager';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { UserNotifier } from '../errors/UserNotifier';
@@ -23,15 +24,36 @@ const execFileAsync = promisify(execFile);
  * 
  * Requirements: All (comprehensive integration testing)
  */
+/**
+ * Helper function to check if npm is available
+ */
+async function isNpmAvailable(): Promise<boolean> {
+    try {
+        await execFileAsync('npm', ['--version'], {
+            timeout: 5000,
+            encoding: 'utf8'
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 suite('Integration Tests', () => {
     let sandbox: sinon.SinonSandbox;
     let validator: ProxyUrlValidator;
     let sanitizer: InputSanitizer;
     let gitConfigManager: GitConfigManager;
     let vscodeConfigManager: VscodeConfigManager;
+    let npmConfigManager: NpmConfigManager;
     let systemProxyDetector: SystemProxyDetector;
     let errorAggregator: ErrorAggregator;
     let userNotifier: UserNotifier;
+    let npmAvailable: boolean;
+
+    suiteSetup(async () => {
+        npmAvailable = await isNpmAvailable();
+    });
 
     setup(() => {
         sandbox = sinon.createSandbox();
@@ -39,6 +61,7 @@ suite('Integration Tests', () => {
         sanitizer = new InputSanitizer();
         gitConfigManager = new GitConfigManager();
         vscodeConfigManager = new VscodeConfigManager();
+        npmConfigManager = new NpmConfigManager();
         systemProxyDetector = new SystemProxyDetector();
         errorAggregator = new ErrorAggregator();
         userNotifier = new UserNotifier();
@@ -454,6 +477,200 @@ suite('Integration Tests', () => {
             
             // Step 9: Verify no errors occurred
             assert.strictEqual(errorAgg.hasErrors(), false, 'Should have no errors in successful workflow');
+        });
+    });
+
+    /**
+     * Integration Test 6: npm Configuration Integration
+     *
+     * Tests npm proxy configuration as part of the complete workflow:
+     * 1. npm proxy is set alongside Git and VSCode
+     * 2. npm errors are isolated from other configurations
+     * 3. npm unset works correctly
+     * 4. npm errors are properly aggregated
+     *
+     * Requirements: 1.1, 1.2, 1.3, 2.1, 2.3, 5.1, 5.3
+     */
+    suite('npm Configuration Integration', () => {
+        test('should set npm proxy alongside Git', async function() {
+            if (!npmAvailable) {
+                this.skip();
+                return;
+            }
+
+            const testUrl = 'http://proxy.example.com:8080';
+            const errorAgg = new ErrorAggregator();
+
+            try {
+                // Step 1: Validate URL
+                const validationResult = validator.validate(testUrl);
+                assert.strictEqual(validationResult.isValid, true, 'URL should be valid');
+
+                // Step 2: Configure Git
+                const gitResult = await gitConfigManager.setProxy(testUrl);
+                if (!gitResult.success) {
+                    errorAgg.addError('Git configuration', gitResult.error || 'Unknown error');
+                }
+
+                // Step 3: Configure npm
+                const npmResult = await npmConfigManager.setProxy(testUrl);
+                if (!npmResult.success) {
+                    errorAgg.addError('npm configuration', npmResult.error || 'Unknown error');
+                }
+                assert.strictEqual(npmResult.success, true, `npm configuration should succeed: ${npmResult.error}`);
+
+                // Step 4: Verify npm proxy was set
+                const npmProxy = await npmConfigManager.getProxy();
+                assert.strictEqual(npmProxy, testUrl, 'npm proxy should match the set URL');
+
+                // Step 5: Verify no errors occurred
+                assert.strictEqual(errorAgg.hasErrors(), false, 'Should have no errors');
+            } finally {
+                // Cleanup
+                await gitConfigManager.unsetProxy();
+                await npmConfigManager.unsetProxy();
+            }
+        });
+
+        test('should handle npm error isolation', async function() {
+            // This test verifies that npm errors are captured separately
+            // and don't affect Git/VSCode operations
+
+            const testUrl = 'http://proxy.example.com:8080';
+            const errorAgg = new ErrorAggregator();
+
+            // Step 1: Configure Git (should succeed)
+            const gitResult = await gitConfigManager.setProxy(testUrl);
+            if (!gitResult.success) {
+                errorAgg.addError('Git configuration', gitResult.error || 'Unknown error');
+            }
+
+            // Step 2: Simulate npm failure
+            errorAgg.addError('npm configuration', 'npm is not installed or not in PATH');
+
+            // Step 3: Verify Git succeeded despite npm error
+            if (gitResult.success) {
+                const gitProxy = await gitConfigManager.getProxy();
+                assert.strictEqual(gitProxy, testUrl, 'Git proxy should be set despite npm error');
+            }
+
+            // Step 4: Verify error aggregation includes npm error
+            assert.strictEqual(errorAgg.hasErrors(), true, 'Should have npm error');
+            const formattedErrors = errorAgg.formatErrors();
+            assert.ok(formattedErrors.includes('npm configuration'), 'Should include npm error');
+            assert.ok(formattedErrors.includes('not installed'), 'Should include npm error details');
+
+            // Cleanup
+            await gitConfigManager.unsetProxy();
+        });
+
+        test('should unset npm proxy correctly', async function() {
+            if (!npmAvailable) {
+                this.skip();
+                return;
+            }
+
+            const testUrl = 'http://proxy.example.com:8080';
+
+            try {
+                // Step 1: Set npm proxy
+                const setResult = await npmConfigManager.setProxy(testUrl);
+                assert.strictEqual(setResult.success, true, `npm set should succeed: ${setResult.error}`);
+
+                // Step 2: Verify proxy is set
+                const npmProxy = await npmConfigManager.getProxy();
+                assert.strictEqual(npmProxy, testUrl, 'npm proxy should be set');
+
+                // Step 3: Unset npm proxy
+                const unsetResult = await npmConfigManager.unsetProxy();
+                assert.strictEqual(unsetResult.success, true, `npm unset should succeed: ${unsetResult.error}`);
+
+                // Step 4: Verify proxy is removed
+                const finalProxy = await npmConfigManager.getProxy();
+                assert.strictEqual(finalProxy, null, 'npm proxy should be null after unset');
+            } finally {
+                // Ensure cleanup
+                await npmConfigManager.unsetProxy();
+            }
+        });
+
+        test('should include npm suggestions in error output', async function() {
+            const errorAgg = new ErrorAggregator();
+
+            // Add npm-specific error
+            errorAgg.addError('npm configuration', 'npm is not installed or not in PATH');
+
+            // Verify suggestions are generated
+            const formattedErrors = errorAgg.formatErrors();
+            assert.ok(formattedErrors.includes('Suggestions:'), 'Should include suggestions');
+            assert.ok(
+                formattedErrors.includes('nodejs.org') || formattedErrors.includes('npm'),
+                'Should include npm-related suggestions'
+            );
+        });
+
+        test('should handle complete workflow with npm, Git, and VSCode', async function() {
+            if (!npmAvailable) {
+                this.skip();
+                return;
+            }
+
+            const testUrl = 'http://user:pass@proxy.example.com:8080';
+            const errorAgg = new ErrorAggregator();
+
+            try {
+                // Step 1: Validate URL
+                const validationResult = validator.validate(testUrl);
+                assert.strictEqual(validationResult.isValid, true, 'URL should be valid');
+
+                // Step 2: Configure all managers
+                const gitResult = await gitConfigManager.setProxy(testUrl);
+                if (!gitResult.success) {
+                    errorAgg.addError('Git configuration', gitResult.error || 'Unknown error');
+                }
+
+                const vscodeSetStub = sandbox.stub(vscodeConfigManager, 'setProxy').resolves({ success: true });
+                const vscodeResult = await vscodeConfigManager.setProxy(testUrl);
+                if (!vscodeResult.success) {
+                    errorAgg.addError('VSCode configuration', vscodeResult.error || 'Unknown error');
+                }
+
+                const npmResult = await npmConfigManager.setProxy(testUrl);
+                if (!npmResult.success) {
+                    errorAgg.addError('npm configuration', npmResult.error || 'Unknown error');
+                }
+
+                // Step 3: Verify all configurations
+                const gitProxy = await gitConfigManager.getProxy();
+                const npmProxy = await npmConfigManager.getProxy();
+
+                assert.strictEqual(gitProxy, testUrl, 'Git proxy should be set');
+                assert.strictEqual(npmProxy, testUrl, 'npm proxy should be set');
+
+                // Step 4: Sanitize for display
+                const sanitizedUrl = sanitizer.maskPassword(testUrl);
+                assert.strictEqual(sanitizedUrl.includes('pass'), false, 'Password should be masked');
+
+                // Step 5: Disable all proxies
+                await gitConfigManager.unsetProxy();
+                const vscodeUnsetStub = sandbox.stub(vscodeConfigManager, 'unsetProxy').resolves({ success: true });
+                await vscodeConfigManager.unsetProxy();
+                await npmConfigManager.unsetProxy();
+
+                // Step 6: Verify all proxies are removed
+                const finalGitProxy = await gitConfigManager.getProxy();
+                const finalNpmProxy = await npmConfigManager.getProxy();
+
+                assert.strictEqual(finalGitProxy, null, 'Git proxy should be removed');
+                assert.strictEqual(finalNpmProxy, null, 'npm proxy should be removed');
+
+                // Step 7: Verify no errors
+                assert.strictEqual(errorAgg.hasErrors(), false, 'Should have no errors');
+            } finally {
+                // Cleanup
+                await gitConfigManager.unsetProxy();
+                await npmConfigManager.unsetProxy();
+            }
         });
     });
 });

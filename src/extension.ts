@@ -3,6 +3,7 @@ import { ProxyUrlValidator } from './validation/ProxyUrlValidator';
 import { InputSanitizer } from './validation/InputSanitizer';
 import { GitConfigManager } from './config/GitConfigManager';
 import { VscodeConfigManager } from './config/VscodeConfigManager';
+import { NpmConfigManager } from './config/NpmConfigManager';
 import { SystemProxyDetector } from './config/SystemProxyDetector';
 import { UserNotifier } from './errors/UserNotifier';
 import { ErrorAggregator } from './errors/ErrorAggregator';
@@ -12,6 +13,7 @@ const validator = new ProxyUrlValidator();
 const sanitizer = new InputSanitizer();
 const gitConfigManager = new GitConfigManager();
 const vscodeConfigManager = new VscodeConfigManager();
+const npmConfigManager = new NpmConfigManager();
 const systemProxyDetector = new SystemProxyDetector();
 const userNotifier = new UserNotifier();
 
@@ -32,6 +34,7 @@ interface ProxyState {
     // Configuration state tracking
     gitConfigured?: boolean;
     vscodeConfigured?: boolean;
+    npmConfigured?: boolean;
     systemProxyDetected?: boolean;
     lastError?: string;
 }
@@ -766,6 +769,7 @@ async function disableProxySettings(context?: vscode.ExtensionContext): Promise<
     
     let gitSuccess = false;
     let vscodeSuccess = false;
+    let npmSuccess = false;
 
     // Use GitConfigManager.unsetProxy()
     try {
@@ -793,12 +797,26 @@ async function disableProxySettings(context?: vscode.ExtensionContext): Promise<
         errorAggregator.addError('VSCode configuration', errorMsg);
     }
 
+    // Use NpmConfigManager.unsetProxy()
+    try {
+        const result = await npmConfigManager.unsetProxy();
+        if (!result.success) {
+            errorAggregator.addError('npm configuration', result.error || 'Failed to unset npm proxy');
+        } else {
+            npmSuccess = true;
+        }
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errorAggregator.addError('npm configuration', errorMsg);
+    }
+
     // Track configuration state if context is provided
     if (context) {
         try {
             const state = await getProxyState(context);
             state.gitConfigured = false;
             state.vscodeConfigured = false;
+            state.npmConfigured = false;
             state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
             await saveProxyState(context, state);
         } catch (error) {
@@ -806,7 +824,7 @@ async function disableProxySettings(context?: vscode.ExtensionContext): Promise<
         }
     }
 
-    const success = gitSuccess && vscodeSuccess;
+    const success = gitSuccess && vscodeSuccess && npmSuccess;
     
     // Use ErrorAggregator for any failures and UserNotifier for feedback
     if (errorAggregator.hasErrors()) {
@@ -858,6 +876,7 @@ async function applyProxySettings(proxyUrl: string, enabled: boolean, context?: 
     
     let gitSuccess = false;
     let vscodeSuccess = false;
+    let npmSuccess = false;
 
     // Requirement 2.2: Try VSCode configuration, continue on failure
     try {
@@ -877,12 +896,22 @@ async function applyProxySettings(proxyUrl: string, enabled: boolean, context?: 
         errorAggregator.addError('Git configuration', errorMsg);
     }
 
+    // Try npm configuration
+    try {
+        await updateNpmProxy(enabled, proxyUrl);
+        npmSuccess = true;
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errorAggregator.addError('npm configuration', errorMsg);
+    }
+
     // Track configuration state if context is provided
     if (context) {
         try {
             const state = await getProxyState(context);
             state.gitConfigured = gitSuccess;
             state.vscodeConfigured = vscodeSuccess;
+            state.npmConfigured = npmSuccess;
             state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
             await saveProxyState(context, state);
         } catch (error) {
@@ -891,7 +920,7 @@ async function applyProxySettings(proxyUrl: string, enabled: boolean, context?: 
         }
     }
 
-    const success = gitSuccess && vscodeSuccess;
+    const success = gitSuccess && vscodeSuccess && npmSuccess;
     
     // Requirement 2.5: Use ErrorAggregator to display all errors together
     if (errorAggregator.hasErrors()) {
@@ -960,6 +989,31 @@ async function updateGitProxy(enabled: boolean, proxyUrl: string) {
         return true;
     } catch (error) {
         Logger.error('Git proxy setting error:', error);
+        throw error;
+    }
+}
+
+async function updateNpmProxy(enabled: boolean, proxyUrl: string) {
+    try {
+        let result;
+        
+        if (enabled) {
+            result = await npmConfigManager.setProxy(proxyUrl);
+        } else {
+            result = await npmConfigManager.unsetProxy();
+        }
+
+        if (!result.success) {
+            // Log the error with details
+            Logger.error('npm proxy configuration failed:', result.error, result.errorType);
+            
+            // Throw with specific error message
+            throw new Error(result.error || 'Failed to update npm proxy settings');
+        }
+
+        return true;
+    } catch (error) {
+        Logger.error('npm proxy setting error:', error);
         throw error;
     }
 }

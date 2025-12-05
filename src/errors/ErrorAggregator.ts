@@ -88,6 +88,35 @@ export class ErrorAggregator {
       suggestions.push('Try restarting VSCode');
     }
 
+    // npm-related suggestions
+    if (operations.some(op => op.toLowerCase().includes('npm'))) {
+      const npmError = errorMessages.find(err =>
+        err.toLowerCase().includes('not found') ||
+        err.toLowerCase().includes('not installed') ||
+        err.toLowerCase().includes('enoent')
+      );
+      if (npmError) {
+        suggestions.push('Install Node.js and npm from https://nodejs.org/');
+        suggestions.push('Verify npm is in your system PATH');
+        suggestions.push('Restart VSCode after installing npm');
+      } else if (errorMessages.some(err => err.toLowerCase().includes('permission'))) {
+        suggestions.push('Check file permissions for npm config files');
+        suggestions.push('Try running VSCode with appropriate permissions');
+        suggestions.push('Verify you have write access to npm\'s global config');
+      } else if (errorMessages.some(err => err.toLowerCase().includes('timeout') || err.toLowerCase().includes('timed out'))) {
+        suggestions.push('Check if npm is responding correctly');
+        suggestions.push('Try running \'npm config list\' manually to verify npm works');
+        suggestions.push('Restart VSCode and try again');
+      } else if (errorMessages.some(err => err.toLowerCase().includes('config'))) {
+        suggestions.push('Verify npm configuration is not corrupted');
+        suggestions.push('Try running \'npm config list\' to check npm config');
+        suggestions.push('Consider resetting npm config with \'npm config edit\'');
+      } else {
+        suggestions.push('Check npm installation and configuration');
+        suggestions.push('Try running npm commands manually to diagnose the issue');
+      }
+    }
+
     // System proxy detection suggestions
     if (operations.some(op => op.toLowerCase().includes('system') || op.toLowerCase().includes('detect'))) {
       suggestions.push('Manually enter proxy URL instead of auto-detection');
