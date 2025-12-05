@@ -1,12 +1,19 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { ProxyUrlValidator } from './validation/ProxyUrlValidator';
 import { InputSanitizer } from './validation/InputSanitizer';
+import { GitConfigManager } from './config/GitConfigManager';
+import { VscodeConfigManager } from './config/VscodeConfigManager';
+import { SystemProxyDetector } from './config/SystemProxyDetector';
+import { UserNotifier } from './errors/UserNotifier';
+import { ErrorAggregator } from './errors/ErrorAggregator';
+import { Logger } from './utils/Logger';
 
-const execAsync = promisify(exec);
 const validator = new ProxyUrlValidator();
 const sanitizer = new InputSanitizer();
+const gitConfigManager = new GitConfigManager();
+const vscodeConfigManager = new VscodeConfigManager();
+const systemProxyDetector = new SystemProxyDetector();
+const userNotifier = new UserNotifier();
 
 let statusBarItem: vscode.StatusBarItem;
 let systemProxyCheckInterval: NodeJS.Timeout | undefined;
@@ -22,12 +29,17 @@ interface ProxyState {
     manualProxyUrl?: string;
     autoProxyUrl?: string;
     lastSystemProxyCheck?: number;
+    // Configuration state tracking
+    gitConfigured?: boolean;
+    vscodeConfigured?: boolean;
+    systemProxyDetected?: boolean;
+    lastError?: string;
 }
 
 function validateProxyUrl(url: string): boolean {
     const result = validator.validate(url);
     if (!result.isValid && result.errors.length > 0) {
-        console.error('Proxy URL validation failed:', result.errors.join(', '));
+        Logger.error('Proxy URL validation failed:', result.errors.join(', '));
     }
     return result.isValid;
 }
@@ -37,13 +49,14 @@ function sanitizeProxyUrl(url: string): string {
     return sanitizer.maskPassword(url);
 }
 
-function escapeShellArg(arg: string): string {
-    // Escape shell special characters for safety
-    // Use double quotes and escape necessary characters
-    return arg.replace(/["\\$`]/g, '\\$&');
-}
+// escapeShellArg function removed - no longer needed with execFile()
 
 async function getProxyState(context: vscode.ExtensionContext): Promise<ProxyState> {
+    // If we have an in-memory fallback state, use it
+    if (inMemoryProxyState) {
+        return inMemoryProxyState;
+    }
+    
     const state = context.globalState.get<ProxyState>('proxyState');
     if (!state) {
         // Migrate from old settings
@@ -55,14 +68,36 @@ async function getProxyState(context: vscode.ExtensionContext): Promise<ProxySta
             mode: oldEnabled && manualUrl ? ProxyMode.Manual : ProxyMode.Off,
             manualProxyUrl: manualUrl,
             autoProxyUrl: undefined,
-            lastSystemProxyCheck: undefined
+            lastSystemProxyCheck: undefined,
+            gitConfigured: undefined,
+            vscodeConfigured: undefined,
+            systemProxyDetected: undefined,
+            lastError: undefined
         };
     }
     return state;
 }
 
+// In-memory fallback state for when global state write fails
+let inMemoryProxyState: ProxyState | null = null;
+
 async function saveProxyState(context: vscode.ExtensionContext, state: ProxyState): Promise<void> {
-    await context.globalState.update('proxyState', state);
+    try {
+        await context.globalState.update('proxyState', state);
+        // Clear in-memory fallback on successful write
+        inMemoryProxyState = null;
+    } catch (error) {
+        // Requirement 4.4: Log error and continue with in-memory state
+        Logger.error('Failed to write proxy state to global storage:', error);
+        Logger.log('Continuing with in-memory state as fallback');
+        inMemoryProxyState = { ...state };
+        
+        // Optionally notify user about the issue
+        vscode.window.showWarningMessage(
+            'Unable to persist proxy settings. Settings will be lost when VSCode restarts.',
+            'OK'
+        );
+    }
 }
 
 function getActiveProxyUrl(state: ProxyState): string {
@@ -127,6 +162,9 @@ async function checkAndUpdateSystemProxy(context: vscode.ExtensionContext): Prom
 
     const detectedProxy = await detectSystemProxySettings();
     state.lastSystemProxyCheck = now;
+    
+    // Track system proxy detection success/failure
+    state.systemProxyDetected = !!detectedProxy;
 
     if (state.mode === ProxyMode.Auto) {
         const previousProxy = state.autoProxyUrl;
@@ -135,13 +173,13 @@ async function checkAndUpdateSystemProxy(context: vscode.ExtensionContext): Prom
         if (previousProxy !== state.autoProxyUrl) {
             // System proxy changed, update everything
             await saveProxyState(context, state);
-            await applyProxySettings(state.autoProxyUrl || '', true);
+            await applyProxySettings(state.autoProxyUrl || '', true, context);
             updateStatusBar(state);
 
             if (state.autoProxyUrl) {
-                vscode.window.showInformationMessage(`System proxy changed: ${sanitizeProxyUrl(state.autoProxyUrl)}`);
+                userNotifier.showSuccess(`System proxy changed: ${sanitizeProxyUrl(state.autoProxyUrl)}`);
             } else if (previousProxy) {
-                vscode.window.showInformationMessage('System proxy removed');
+                userNotifier.showSuccess('System proxy removed');
             }
         }
     } else {
@@ -158,20 +196,27 @@ async function stopSystemProxyMonitoring(): Promise<void> {
     }
 }
 
-async function testProxyConnection(proxyUrl: string): Promise<boolean> {
+/**
+ * Tests proxy connection with comprehensive error reporting
+ * Requirement 2.4: Use ErrorAggregator to collect test failures from multiple URLs
+ * @returns Object with success status, error aggregator, and test URLs
+ */
+async function testProxyConnection(proxyUrl: string): Promise<{ success: boolean; errorAggregator: ErrorAggregator; testUrls: string[] }> {
+    const errorAggregator = new ErrorAggregator();
+    const testUrls = [
+        'https://www.github.com',
+        'https://www.microsoft.com',
+        'https://www.google.com'
+    ];
+
     try {
         const https = require('https');
         const http = require('http');
         const url = require('url');
 
         const proxyParsed = url.parse(proxyUrl);
-        const testUrls = [
-            'https://www.github.com',
-            'https://www.microsoft.com',
-            'https://www.google.com'
-        ];
 
-        // Test connection through proxy
+        // Test connection through proxy for each URL
         for (const testUrl of testUrls) {
             try {
                 const testParsed = url.parse(testUrl);
@@ -191,11 +236,15 @@ async function testProxyConnection(proxyUrl: string): Promise<boolean> {
                         req.destroy();
                     });
 
-                    req.on('error', () => {
+                    req.on('error', (error: Error) => {
+                        // Collect error for this test URL
+                        errorAggregator.addError(testUrl, error.message || 'Connection failed');
                         resolve(false);
                     });
 
                     req.on('timeout', () => {
+                        // Collect timeout error for this test URL
+                        errorAggregator.addError(testUrl, 'Connection timeout (5 seconds)');
                         req.destroy();
                         resolve(false);
                     });
@@ -204,110 +253,62 @@ async function testProxyConnection(proxyUrl: string): Promise<boolean> {
                 });
 
                 if (result) {
-                    return true; // At least one test URL worked
+                    // At least one test URL worked - success
+                    return { success: true, errorAggregator, testUrls };
                 }
-            } catch {
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                errorAggregator.addError(testUrl, errorMsg);
                 continue; // Try next URL
             }
         }
 
-        return false;
+        // All test URLs failed
+        return { success: false, errorAggregator, testUrls };
     } catch (error) {
-        console.error('Proxy test error:', error);
-        return false;
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        Logger.error('Proxy test error:', errorMsg);
+        errorAggregator.addError('Proxy test', errorMsg);
+        return { success: false, errorAggregator, testUrls };
     }
 }
 
 async function detectSystemProxySettings(): Promise<string | null> {
+    // Requirement 2.3, 3.5, 4.5: Use SystemProxyDetector class with validation and error handling
     try {
-        // First, check environment variables (works on all platforms)
-        const httpProxy = process.env.HTTP_PROXY || process.env.http_proxy;
-        const httpsProxy = process.env.HTTPS_PROXY || process.env.https_proxy;
-
-        if (httpProxy || httpsProxy) {
-            return httpProxy || httpsProxy || null;
+        const detectedProxy = await systemProxyDetector.detectSystemProxy();
+        
+        if (!detectedProxy) {
+            // Requirement 2.3: Log failure reason and inform user
+            Logger.log('No system proxy detected');
+            return null;
         }
-
-        // Check existing VSCode proxy setting
-        const vscodeProxy = vscode.workspace.getConfiguration('http').get<string>('proxy');
-        if (vscodeProxy) {
-            return vscodeProxy;
+        
+        // Requirement 3.5: Validate detected proxy before returning
+        const validationResult = validator.validate(detectedProxy);
+        if (!validationResult.isValid) {
+            // Requirement 3.5: Skip invalid proxy and log the issue
+            Logger.warn('Detected system proxy has invalid format:', detectedProxy);
+            Logger.warn('Validation errors:', validationResult.errors.join(', '));
+            
+            // Requirement 2.3: Inform user about invalid format
+            userNotifier.showWarning(
+                `Detected system proxy has invalid format: ${sanitizer.maskPassword(detectedProxy)}`
+            );
+            
+            return null;
         }
-
-        // Platform-specific detection
-        if (process.platform === 'win32') {
-            // Windows: Try to get proxy from registry
-            try {
-                // First check if proxy is enabled
-                const { stdout: enabledOutput } = await execAsync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable');
-                const enableMatch = enabledOutput.match(/ProxyEnable\s+REG_DWORD\s+0x(\d)/);
-
-                if (enableMatch && enableMatch[1] === '1') {
-                    // Proxy is enabled, get the server
-                    const { stdout } = await execAsync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer');
-                    const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/);
-                    if (match && match[1]) {
-                        // Windows proxy format might be "http=proxy:port;https=proxy:port"
-                        const proxyValue = match[1].trim();
-                        if (proxyValue.includes('=')) {
-                            const parts = proxyValue.split(';');
-                            for (const part of parts) {
-                                if (part.startsWith('http=') || part.startsWith('https=')) {
-                                    const url = part.split('=')[1];
-                                    return url.startsWith('http') ? url : `http://${url}`;
-                                }
-                            }
-                        } else {
-                            return proxyValue.startsWith('http') ? proxyValue : `http://${proxyValue}`;
-                        }
-                    }
-                }
-            } catch {
-                // Registry query failed, continue
-            }
-        } else if (process.platform === 'darwin') {
-            // macOS: Try multiple network interfaces
-            const interfaces = ['Wi-Fi', 'Ethernet', 'Thunderbolt Ethernet'];
-
-            for (const iface of interfaces) {
-                try {
-                    const { stdout } = await execAsync(`networksetup -getwebproxy "${iface}"`);
-                    const enabledMatch = stdout.match(/Enabled:\s*(\w+)/);
-                    const serverMatch = stdout.match(/Server:\s*(.+)/);
-                    const portMatch = stdout.match(/Port:\s*(\d+)/);
-
-                    if (enabledMatch && enabledMatch[1] === 'Yes' && serverMatch && portMatch) {
-                        const server = serverMatch[1].trim();
-                        const port = portMatch[1].trim();
-                        return `http://${server}:${port}`;
-                    }
-                } catch {
-                    // This interface might not exist, try next
-                    continue;
-                }
-            }
-        } else if (process.platform === 'linux') {
-            // Linux: Check gsettings for GNOME
-            try {
-                const { stdout: mode } = await execAsync('gsettings get org.gnome.system.proxy mode');
-                if (mode.includes('manual')) {
-                    const { stdout: host } = await execAsync('gsettings get org.gnome.system.proxy.http host');
-                    const { stdout: port } = await execAsync('gsettings get org.gnome.system.proxy.http port');
-
-                    const cleanHost = host.replace(/'/g, '').trim();
-                    const cleanPort = port.trim();
-
-                    if (cleanHost && cleanPort !== '0') {
-                        return `http://${cleanHost}:${cleanPort}`;
-                    }
-                }
-            } catch {
-                // gsettings not available or not GNOME
-            }
-        }
-
-        return null;
-    } catch {
+        
+        // Return validated proxy
+        return detectedProxy;
+    } catch (error) {
+        // Requirement 4.5: Handle detection failures gracefully
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        Logger.error('System proxy detection failed:', errorMsg);
+        
+        // Requirement 2.3: Inform user about detection failure
+        userNotifier.showWarning('System proxy detection failed. You can configure a proxy manually.');
+        
         return null;
     }
 }
@@ -331,9 +332,9 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
             state.autoProxyUrl = detectedProxy;
             state.mode = ProxyMode.Auto;
             await saveProxyState(context, state);
-            await applyProxySettings(detectedProxy, true);
+            await applyProxySettings(detectedProxy, true, context);
             updateStatusBar(state);
-            vscode.window.showInformationMessage(`Using system proxy: ${sanitizeProxyUrl(detectedProxy)}`);
+            userNotifier.showSuccess(`Using system proxy: ${sanitizeProxyUrl(detectedProxy)}`);
         } else {
             const fallback = await vscode.window.showInformationMessage(
                 "Couldn't detect system proxy. Set up manually?",
@@ -347,7 +348,7 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
                 if (updatedState.manualProxyUrl) {
                     updatedState.mode = ProxyMode.Manual;
                     await saveProxyState(context, updatedState);
-                    await applyProxySettings(updatedState.manualProxyUrl, true);
+                    await applyProxySettings(updatedState.manualProxyUrl, true, context);
                     updateStatusBar(updatedState);
                 }
             }
@@ -360,7 +361,14 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
 
         if (manualProxyUrl) {
             if (!validateProxyUrl(manualProxyUrl)) {
-                vscode.window.showErrorMessage('Invalid proxy URL format. Use format: http://proxy:8080');
+                userNotifier.showError(
+                    'Invalid proxy URL format',
+                    [
+                        'Use format: http://proxy.example.com:8080',
+                        'Include protocol (http:// or https://)',
+                        'Ensure hostname contains only alphanumeric characters, dots, and hyphens'
+                    ]
+                );
                 return;
             }
             state.manualProxyUrl = manualProxyUrl;
@@ -370,9 +378,9 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
             // Also save to config for backwards compatibility
             await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', manualProxyUrl, vscode.ConfigurationTarget.Global);
 
-            await applyProxySettings(manualProxyUrl, true);
+            await applyProxySettings(manualProxyUrl, true, context);
             updateStatusBar(state);
-            vscode.window.showInformationMessage(`Manual proxy configured: ${sanitizeProxyUrl(manualProxyUrl)}`);
+            userNotifier.showSuccess(`Manual proxy configured: ${sanitizeProxyUrl(manualProxyUrl)}`);
         }
     }
 
@@ -383,7 +391,7 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('Extension "otak-proxy" is now active.');
+    Logger.log('Extension "otak-proxy" is now active.');
 
     // Initialize status bar immediately
     statusBarItem = initializeStatusBar(context);
@@ -413,7 +421,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // Apply current proxy settings
     const activeUrl = getActiveProxyUrl(state);
     if (state.mode !== ProxyMode.Off && activeUrl) {
-        await applyProxySettings(activeUrl, true);
+        await applyProxySettings(activeUrl, true, context);
     }
 
     // Start monitoring system proxy if in auto mode
@@ -449,7 +457,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
             if (!updatedState.autoProxyUrl) {
                 // Show notification and automatically switch to Off mode
-                vscode.window.showInformationMessage('No system proxy detected. Switching to Off mode.');
+                userNotifier.showWarning('No system proxy detected. Switching to Off mode.');
                 currentState.mode = ProxyMode.Off;
             } else {
                 currentState.mode = nextMode;
@@ -461,7 +469,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Apply the new mode
         await saveProxyState(context, currentState);
         const newActiveUrl = getActiveProxyUrl(currentState);
-        await applyProxySettings(newActiveUrl, currentState.mode !== ProxyMode.Off);
+        await applyProxySettings(newActiveUrl, currentState.mode !== ProxyMode.Off, context);
         updateStatusBar(currentState);
 
         // Start or stop monitoring based on mode
@@ -484,7 +492,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
             if (proxyUrl !== undefined) {
                 if (proxyUrl && !validateProxyUrl(proxyUrl)) {
-                    vscode.window.showErrorMessage('Invalid proxy URL format. Use format: http://proxy:8080');
+                    userNotifier.showError(
+                        'Invalid proxy URL format',
+                        [
+                            'Use format: http://proxy.example.com:8080',
+                            'Include protocol (http:// or https://)',
+                            'Ensure hostname contains only alphanumeric characters, dots, and hyphens'
+                        ]
+                    );
                     return;
                 }
 
@@ -498,12 +513,12 @@ export async function activate(context: vscode.ExtensionContext) {
                 // If currently in manual mode, apply the new settings
                 if (state.mode === ProxyMode.Manual) {
                     if (proxyUrl) {
-                        await applyProxySettings(proxyUrl, true);
+                        await applyProxySettings(proxyUrl, true, context);
                     } else {
                         // Manual proxy was removed, switch to Off
                         state.mode = ProxyMode.Off;
                         await saveProxyState(context, state);
-                        await applyProxySettings('', false);
+                        await applyProxySettings('', false, context);
                     }
                     updateStatusBar(state);
                 }
@@ -512,38 +527,64 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // Proxy test command
+    // Requirement 2.4: Enhanced with comprehensive error reporting
     context.subscriptions.push(
         vscode.commands.registerCommand('otak-proxy.testProxy', async () => {
             const state = await getProxyState(context);
             const activeUrl = getActiveProxyUrl(state);
 
             if (!activeUrl) {
-                vscode.window.showErrorMessage(`No proxy configured. Current mode: ${state.mode.toUpperCase()}`);
+                userNotifier.showError(
+                    `No proxy configured. Current mode: ${state.mode.toUpperCase()}`,
+                    [
+                        'Configure a manual proxy using the Configure Manual command',
+                        'Switch to Auto mode to detect system proxy',
+                        'Import system proxy settings'
+                    ]
+                );
                 return;
             }
 
-            const result = await vscode.window.withProgress({
+            // Requirement 1.5, 6.2: Use sanitized URL for display
+            const sanitizedUrl = sanitizer.maskPassword(activeUrl);
+
+            const testResult = await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
-                title: `Testing ${state.mode} proxy: ${activeUrl}...`,
+                title: `Testing ${state.mode} proxy: ${sanitizedUrl}...`,
                 cancellable: false
             }, async () => {
                 return await testProxyConnection(activeUrl);
             });
 
-            if (result) {
-                vscode.window.showInformationMessage(`${state.mode.toUpperCase()} proxy works: ${activeUrl}`);
+            if (testResult.success) {
+                userNotifier.showSuccess(`${state.mode.toUpperCase()} proxy works: ${sanitizedUrl}`);
             } else {
-                const action = await vscode.window.showErrorMessage(
-                    `Can't connect through ${state.mode} proxy: ${activeUrl}`,
-                    state.mode === ProxyMode.Manual ? 'Reconfigure' : 'Check System Settings',
-                    'OK'
-                );
+                // Requirement 2.4: Display attempted URLs in error messages
+                const attemptedUrlsList = testResult.testUrls.map(url => `  • ${url}`).join('\n');
+                
+                // Requirement 2.4: Provide troubleshooting suggestions via UserNotifier
+                const suggestions = [
+                    'Verify the proxy URL is correct',
+                    'Check if the proxy server is running and accessible',
+                    'Ensure your network allows proxy connections',
+                    'Verify firewall settings are not blocking the proxy',
+                    state.mode === ProxyMode.Manual 
+                        ? 'Try reconfiguring the proxy URL' 
+                        : 'Check your system/browser proxy settings',
+                    'Test the proxy with a different application to verify it works'
+                ];
 
-                if (action === 'Reconfigure') {
-                    vscode.commands.executeCommand('otak-proxy.configureUrl');
-                } else if (action === 'Check System Settings') {
-                    vscode.window.showInformationMessage('Check your system/browser proxy settings');
+                // Build comprehensive error message with attempted URLs
+                let errorMessage = `Proxy connection test failed for: ${sanitizedUrl}\n\nAttempted test URLs:\n${attemptedUrlsList}`;
+                
+                // Add specific error details if available
+                if (testResult.errorAggregator.hasErrors()) {
+                    const formattedErrors = testResult.errorAggregator.formatErrors();
+                    errorMessage += `\n\n${formattedErrors}`;
                 }
+
+                // Use UserNotifier for consistent error display
+                userNotifier.showError(errorMessage, suggestions);
             }
         })
     );
@@ -562,8 +603,10 @@ export async function activate(context: vscode.ExtensionContext) {
             const state = await getProxyState(context);
 
             if (detectedProxy) {
+                // Requirement 2.3: Display sanitized proxy URL to user
+                const sanitizedProxy = sanitizer.maskPassword(detectedProxy);
                 const action = await vscode.window.showInformationMessage(
-                    `Found system proxy: ${detectedProxy}`,
+                    `Found system proxy: ${sanitizedProxy}`,
                     'Use Auto Mode',
                     'Test First',
                     'Save as Manual',
@@ -579,7 +622,7 @@ export async function activate(context: vscode.ExtensionContext) {
                         return await testProxyConnection(detectedProxy);
                     });
 
-                    if (testResult) {
+                    if (testResult.success) {
                         const useAction = await vscode.window.showInformationMessage(
                             'Proxy works! How would you like to use it?',
                             'Auto Mode',
@@ -592,12 +635,19 @@ export async function activate(context: vscode.ExtensionContext) {
                                 state.autoProxyUrl = detectedProxy;
                                 state.mode = ProxyMode.Auto;
                                 await saveProxyState(context, state);
-                                await applyProxySettings(detectedProxy, true);
+                                await applyProxySettings(detectedProxy, true, context);
                                 updateStatusBar(state);
                                 await startSystemProxyMonitoring(context);
-                                vscode.window.showInformationMessage(`Switched to Auto mode: ${sanitizeProxyUrl(detectedProxy)}`);
+                                userNotifier.showSuccess(`Switched to Auto mode: ${sanitizeProxyUrl(detectedProxy)}`);
                             } else {
-                                vscode.window.showErrorMessage('Invalid proxy URL format detected.');
+                                userNotifier.showError(
+                                    'Invalid proxy URL format detected',
+                                    [
+                                        'The detected system proxy has an invalid format',
+                                        'Check your system/browser proxy settings',
+                                        'Try configuring a manual proxy instead'
+                                    ]
+                                );
                             }
                         } else if (useAction === 'Save as Manual') {
                             if (validateProxyUrl(detectedProxy)) {
@@ -605,27 +655,49 @@ export async function activate(context: vscode.ExtensionContext) {
                                 state.mode = ProxyMode.Manual;
                                 await saveProxyState(context, state);
                                 await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', detectedProxy, vscode.ConfigurationTarget.Global);
-                                await applyProxySettings(detectedProxy, true);
+                                await applyProxySettings(detectedProxy, true, context);
                                 updateStatusBar(state);
-                                vscode.window.showInformationMessage(`Saved as manual proxy: ${sanitizeProxyUrl(detectedProxy)}`);
+                                userNotifier.showSuccess(`Saved as manual proxy: ${sanitizeProxyUrl(detectedProxy)}`);
                             } else {
-                                vscode.window.showErrorMessage('Invalid proxy URL format detected.');
+                                userNotifier.showError(
+                                    'Invalid proxy URL format detected',
+                                    [
+                                        'The detected system proxy has an invalid format',
+                                        'Check your system/browser proxy settings',
+                                        'Try configuring a manual proxy instead'
+                                    ]
+                                );
                             }
                         }
                     } else {
-                        vscode.window.showErrorMessage("Detected proxy doesn't work.");
+                        userNotifier.showError(
+                            "Detected proxy doesn't work",
+                            [
+                                'The proxy was detected but connection test failed',
+                                'Verify the proxy server is running',
+                                'Check your network connectivity',
+                                'Try a different proxy configuration'
+                            ]
+                        );
                     }
                 } else if (action === 'Use Auto Mode') {
                     if (validateProxyUrl(detectedProxy)) {
                         state.autoProxyUrl = detectedProxy;
                         state.mode = ProxyMode.Auto;
                         await saveProxyState(context, state);
-                        await applyProxySettings(detectedProxy, true);
+                        await applyProxySettings(detectedProxy, true, context);
                         updateStatusBar(state);
                         await startSystemProxyMonitoring(context);
-                        vscode.window.showInformationMessage(`Switched to Auto mode: ${sanitizeProxyUrl(detectedProxy)}`);
+                        userNotifier.showSuccess(`Switched to Auto mode: ${sanitizeProxyUrl(detectedProxy)}`);
                     } else {
-                        vscode.window.showErrorMessage('Invalid proxy URL format detected.');
+                        userNotifier.showError(
+                            'Invalid proxy URL format detected',
+                            [
+                                'The detected system proxy has an invalid format',
+                                'Check your system/browser proxy settings',
+                                'Try configuring a manual proxy instead'
+                            ]
+                        );
                     }
                 } else if (action === 'Save as Manual') {
                     if (validateProxyUrl(detectedProxy)) {
@@ -633,13 +705,20 @@ export async function activate(context: vscode.ExtensionContext) {
                         await saveProxyState(context, state);
                         await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', detectedProxy, vscode.ConfigurationTarget.Global);
                         updateStatusBar(state);
-                        vscode.window.showInformationMessage(`Saved as manual proxy: ${sanitizeProxyUrl(detectedProxy)}`);
+                        userNotifier.showSuccess(`Saved as manual proxy: ${sanitizeProxyUrl(detectedProxy)}`);
                     } else {
-                        vscode.window.showErrorMessage('Invalid proxy URL format detected.');
+                        userNotifier.showError(
+                            'Invalid proxy URL format detected',
+                            [
+                                'The detected system proxy has an invalid format',
+                                'Check your system/browser proxy settings',
+                                'Try configuring a manual proxy instead'
+                            ]
+                        );
                     }
                 }
             } else {
-                vscode.window.showWarningMessage('No system proxy detected. Check your system/browser proxy settings.');
+                userNotifier.showWarning('No system proxy detected. Check your system/browser proxy settings.');
             }
         })
     );
@@ -657,7 +736,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
                     // If currently in manual mode, apply the new settings
                     if (state.mode === ProxyMode.Manual) {
-                        await applyProxySettings(newUrl, !!newUrl);
+                        await applyProxySettings(newUrl, !!newUrl, context);
                         updateStatusBar(state);
                     }
                 }
@@ -678,30 +757,158 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 }
 
-async function applyProxySettings(proxyUrl: string, enabled: boolean): Promise<boolean> {
-    let success = true;
-    const errors: string[] = [];
+/**
+ * Disables proxy settings across all configuration targets
+ * Requirement 2.5: Use ErrorAggregator and UserNotifier for comprehensive error handling
+ */
+async function disableProxySettings(context?: vscode.ExtensionContext): Promise<boolean> {
+    const errorAggregator = new ErrorAggregator();
+    
+    let gitSuccess = false;
+    let vscodeSuccess = false;
 
+    // Use GitConfigManager.unsetProxy()
+    try {
+        const result = await gitConfigManager.unsetProxy();
+        if (!result.success) {
+            errorAggregator.addError('Git configuration', result.error || 'Failed to unset Git proxy');
+        } else {
+            gitSuccess = true;
+        }
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errorAggregator.addError('Git configuration', errorMsg);
+    }
+
+    // Use VscodeConfigManager.unsetProxy()
+    try {
+        const result = await vscodeConfigManager.unsetProxy();
+        if (!result.success) {
+            errorAggregator.addError('VSCode configuration', result.error || 'Failed to unset VSCode proxy');
+        } else {
+            vscodeSuccess = true;
+        }
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errorAggregator.addError('VSCode configuration', errorMsg);
+    }
+
+    // Track configuration state if context is provided
+    if (context) {
+        try {
+            const state = await getProxyState(context);
+            state.gitConfigured = false;
+            state.vscodeConfigured = false;
+            state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
+            await saveProxyState(context, state);
+        } catch (error) {
+            Logger.error('Failed to update configuration state tracking:', error);
+        }
+    }
+
+    const success = gitSuccess && vscodeSuccess;
+    
+    // Use ErrorAggregator for any failures and UserNotifier for feedback
+    if (errorAggregator.hasErrors()) {
+        const formattedErrors = errorAggregator.formatErrors();
+        const lines = formattedErrors.split('\n');
+        const suggestionStartIndex = lines.findIndex(line => line.includes('Suggestions:'));
+        const suggestions = suggestionStartIndex >= 0 
+            ? lines.slice(suggestionStartIndex + 1).filter(line => line.trim().startsWith('-')).map(line => line.trim().substring(2))
+            : [];
+        
+        const errorMessage = lines.slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length).join('\n');
+        userNotifier.showError(errorMessage, suggestions);
+    } else {
+        // Update status bar to show proxy disabled
+        userNotifier.showSuccess('Proxy disabled');
+    }
+
+    return success;
+}
+
+async function applyProxySettings(proxyUrl: string, enabled: boolean, context?: vscode.ExtensionContext): Promise<boolean> {
+    const errorAggregator = new ErrorAggregator();
+    
+    // Edge Case 1: Handle empty URL as disable proxy (Requirement 4.1)
+    if (!proxyUrl || proxyUrl.trim() === '') {
+        enabled = false;
+    }
+    
+    // If disabling, use the dedicated disable function
+    if (!enabled) {
+        return await disableProxySettings(context);
+    }
+    
+    // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
+    if (proxyUrl) {
+        const validationResult = validator.validate(proxyUrl);
+        if (!validationResult.isValid) {
+            // Display validation errors with specific details
+            const errorMessage = 'Invalid proxy URL format';
+            const suggestions = validationResult.errors.map(err => err);
+            suggestions.push('Use format: http://proxy.example.com:8080');
+            suggestions.push('Include protocol (http:// or https://)');
+            suggestions.push('Ensure hostname contains only alphanumeric characters, dots, and hyphens');
+            
+            userNotifier.showError(errorMessage, suggestions);
+            return false;
+        }
+    }
+    
+    let gitSuccess = false;
+    let vscodeSuccess = false;
+
+    // Requirement 2.2: Try VSCode configuration, continue on failure
     try {
         await updateVSCodeProxy(enabled, proxyUrl);
+        vscodeSuccess = true;
     } catch (error) {
-        success = false;
-        errors.push(`VSCode: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errorAggregator.addError('VSCode configuration', errorMsg);
     }
 
+    // Try Git configuration
     try {
         await updateGitProxy(enabled, proxyUrl);
+        gitSuccess = true;
     } catch (error) {
-        success = false;
-        errors.push(`Git: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        errorAggregator.addError('Git configuration', errorMsg);
     }
 
-    if (!success && errors.length > 0) {
-        void vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: `Some settings failed:\n${errors.join('\n')}`,
-            cancellable: false
-        }, () => new Promise(resolve => setTimeout(resolve, 7000)));
+    // Track configuration state if context is provided
+    if (context) {
+        try {
+            const state = await getProxyState(context);
+            state.gitConfigured = gitSuccess;
+            state.vscodeConfigured = vscodeSuccess;
+            state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
+            await saveProxyState(context, state);
+        } catch (error) {
+            // Requirement 4.4: If we can't save state, log but don't fail the operation
+            Logger.error('Failed to update configuration state tracking:', error);
+        }
+    }
+
+    const success = gitSuccess && vscodeSuccess;
+    
+    // Requirement 2.5: Use ErrorAggregator to display all errors together
+    if (errorAggregator.hasErrors()) {
+        const formattedErrors = errorAggregator.formatErrors();
+        // Parse the formatted error message to extract suggestions
+        const lines = formattedErrors.split('\n');
+        const suggestionStartIndex = lines.findIndex(line => line.includes('Suggestions:'));
+        const suggestions = suggestionStartIndex >= 0 
+            ? lines.slice(suggestionStartIndex + 1).filter(line => line.trim().startsWith('-')).map(line => line.trim().substring(2))
+            : [];
+        
+        const errorMessage = lines.slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length).join('\n');
+        userNotifier.showError(errorMessage, suggestions);
+    } else if (proxyUrl) {
+        // Requirement 1.5, 6.2: Update status bar with sanitized proxy URL
+        const sanitizedUrl = sanitizer.maskPassword(proxyUrl);
+        userNotifier.showSuccess(`Proxy configured: ${sanitizedUrl}`);
     }
 
     return success;
@@ -709,58 +916,58 @@ async function applyProxySettings(proxyUrl: string, enabled: boolean): Promise<b
 
 async function updateVSCodeProxy(enabled: boolean, proxyUrl: string) {
     try {
-        await vscode.workspace.getConfiguration('http').update('proxy', enabled ? proxyUrl : "", vscode.ConfigurationTarget.Global);
+        let result;
+        
+        if (enabled) {
+            result = await vscodeConfigManager.setProxy(proxyUrl);
+        } else {
+            result = await vscodeConfigManager.unsetProxy();
+        }
+
+        if (!result.success) {
+            // Log the error with details
+            Logger.error('VSCode proxy configuration failed:', result.error, result.errorType);
+            
+            // Throw with specific error message
+            throw new Error(result.error || 'Failed to update VSCode proxy settings');
+        }
+
         return true;
     } catch (error) {
-        console.error('VSCode proxy setting error:', error);
-        throw new Error('Failed to update VSCode proxy settings');
+        Logger.error('VSCode proxy setting error:', error);
+        throw error;
     }
 }
 
 async function updateGitProxy(enabled: boolean, proxyUrl: string) {
     try {
-        async function checkGitConfig(key: string): Promise<boolean> {
-            try {
-                await execAsync(`git config --global --get ${key}`);
-                return true;
-            } catch {
-                return false;
-            }
-        }
-
+        let result;
+        
         if (enabled) {
-            const escapedUrl = escapeShellArg(proxyUrl);
-            await execAsync(`git config --global http.proxy "${escapedUrl}"`, { encoding: 'utf8' });
-            await execAsync(`git config --global https.proxy "${escapedUrl}"`, { encoding: 'utf8' });
+            result = await gitConfigManager.setProxy(proxyUrl);
         } else {
-            const [hasHttpProxy, hasHttpsProxy] = await Promise.all([
-                checkGitConfig('http.proxy'),
-                checkGitConfig('https.proxy')
-            ]);
-
-            if (hasHttpProxy || hasHttpsProxy) {
-                if (hasHttpProxy) {
-                    await execAsync('git config --global --unset http.proxy', { encoding: 'utf8' });
-                }
-                if (hasHttpsProxy) {
-                    await execAsync('git config --global --unset https.proxy', { encoding: 'utf8' });
-                }
-            }
+            result = await gitConfigManager.unsetProxy();
         }
+
+        if (!result.success) {
+            // Log the error with details
+            Logger.error('Git proxy configuration failed:', result.error, result.errorType);
+            
+            // Throw with specific error message
+            throw new Error(result.error || 'Failed to update Git proxy settings');
+        }
+
         return true;
     } catch (error) {
-        console.error('Git proxy setting error:', error);
-        if (!enabled) {
-            return true; // プロキシ無効化時のエラーは無視する
-        }
-        throw new Error('Failed to update Git proxy settings');
+        Logger.error('Git proxy setting error:', error);
+        throw error;
     }
 }
 
 
 function updateStatusBar(state: ProxyState) {
     if (!statusBarItem) {
-        console.error('Status bar item not initialized');
+        Logger.error('Status bar item not initialized');
         return;
     }
 
