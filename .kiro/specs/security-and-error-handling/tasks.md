@@ -17,14 +17,6 @@ The extension currently has:
 ## Remaining Implementation Tasks
 
 - [x] 1. Set up property-based testing infrastructure
-
-
-
-
-
-
-
-
   - Install fast-check package (`npm install --save-dev fast-check`)
   - Create `src/test/generators.ts` with URL generators for property tests
   - Configure test runner to support property-based tests
@@ -33,10 +25,6 @@ The extension currently has:
 
 
 - [x] 2. Create ProxyUrlValidator class with comprehensive validation
-
-
-
-
   - Create `src/validation/ProxyUrlValidator.ts` file
   - Extract existing `validateProxyUrl()` logic into ProxyUrlValidator class
   - Add `containsShellMetacharacters()` method to detect (`;`, `|`, `&`, `` ` ``, `\n`, `\r`, `<`, `>`, `(`, `)`)
