@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import * as sinon from 'sinon';
 import * as fc from 'fast-check';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
+import { getPropertyTestRuns } from './helpers';
 
 suite('StatusBar Commands Property Tests', () => {
     let sandbox: sinon.SinonSandbox;
@@ -138,7 +139,7 @@ suite('StatusBar Commands Property Tests', () => {
                 }
                 return true; // Skip invalid URLs in this test
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -187,7 +188,7 @@ suite('StatusBar Commands Property Tests', () => {
                 }
                 return true;
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -222,7 +223,7 @@ suite('StatusBar Commands Property Tests', () => {
                 }
                 return true;
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -260,7 +261,7 @@ suite('StatusBar Commands Property Tests', () => {
                     return false;
                 }
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -302,7 +303,7 @@ suite('StatusBar Commands Property Tests', () => {
                 }
                 return true;
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -347,7 +348,7 @@ suite('StatusBar Commands Property Tests', () => {
                 }
                 return true;
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -378,7 +379,7 @@ suite('StatusBar Commands Property Tests', () => {
                 );
                 return true;
             }),
-            { numRuns: 20 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 });

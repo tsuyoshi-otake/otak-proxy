@@ -10,11 +10,26 @@ import {
     urlWithShellMetacharactersGenerator,
     urlWithCredentialsGenerator
 } from './generators';
-import {
-    containsShellMetacharacters,
-    extractPassword,
-    hasValidProtocol
-} from './helpers';
+import { getPropertyTestRuns } from './helpers';
+
+// Helper functions for testing
+function hasValidProtocol(url: string): boolean {
+    return url.startsWith('http://') || url.startsWith('https://');
+}
+
+function containsShellMetacharacters(url: string): boolean {
+    const shellMetachars = ['|', '&', ';', '$', '`', '\n', '<', '>', '(', ')', '{', '}', '[', ']', '!', '#', '*', '?', '~'];
+    return shellMetachars.some(char => url.includes(char));
+}
+
+function extractPassword(url: string): string | null {
+    try {
+        const parsed = new URL(url);
+        return parsed.password || null;
+    } catch {
+        return null;
+    }
+}
 
 suite('Property-Based Testing Infrastructure', () => {
     

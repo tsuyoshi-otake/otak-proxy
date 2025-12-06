@@ -1,5 +1,53 @@
 # Change Log
 
+## [2.0.0] - 2024-12-06
+
+### Added
+- **Multi-language UI Support**
+  - Automatic language detection (English and Japanese)
+  - Localized messages, commands, and configuration descriptions
+  - No configuration needed - uses VSCode Language Pack settings
+
+- **npm Proxy Support**
+  - Automatic npm proxy configuration alongside VSCode and Git
+  - Configures both http-proxy and https-proxy for npm
+  - Graceful error handling when npm is not installed
+
+- **Enhanced Auto Mode**
+  - Configurable polling interval (10-300 seconds, default 30)
+  - Automatic retry with exponential backoff on detection failures
+  - Customizable detection source priority
+  - Detailed logging of proxy changes and detection sources
+  - Immediate check when VSCode window gains focus
+
+- **Security Enhancements**
+  - Strict input validation to prevent command injection
+  - Shell metacharacter detection and rejection
+  - Credential masking in logs and UI
+  - Secure command execution using execFile()
+
+- **Improved Error Handling**
+  - Detailed error messages with troubleshooting suggestions
+  - Error aggregation across multiple configuration operations
+  - Platform-specific error detection and handling
+  - Graceful degradation when components fail
+
+### Changed
+- **Status Bar Improvements**
+  - Command links are now always available after extension activation
+  - Enhanced tooltip with last check time and detection source
+  - Better error feedback in status bar
+
+- **Configuration**
+  - Added `otakProxy.pollingInterval` setting
+  - Added `otakProxy.detectionSourcePriority` setting
+  - Added `otakProxy.maxRetries` setting
+
+### Fixed
+- Command registration order to ensure all commands are available immediately
+- Proxy detection reliability with retry logic
+- Error handling for partial configuration failures
+
 ## [1.5.0] - 2024-03-01
 
 ### Changed

@@ -1,0 +1,10 @@
+npm error code ENOTFOUND
+npm error syscall getaddrinfo
+npm error errno ENOTFOUND
+npm error network request to https://registry.npmjs.org/madge failed, reason: getaddrinfo ENOTFOUND l-r.wx-e.5--5es8
+npm error network This is a problem related to network connectivity.
+npm error network In most cases you are behind a proxy or have bad network settings.
+npm error network
+npm error network If you are behind a proxy, please make sure that the
+npm error network 'proxy' config is set properly.  See: 'npm help config'
+npm error A complete log of this run can be found in: C:\Users\developer\AppData\Local\npm-cache\_logs\2025-12-06T14_20_56_200Z-debug-0.log

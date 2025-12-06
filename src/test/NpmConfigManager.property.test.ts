@@ -9,6 +9,7 @@ import { NpmConfigManager } from '../config/NpmConfigManager';
 import { validProxyUrlWithoutCredentialsGenerator } from './generators';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { getPropertyTestRuns } from './helpers';
 
 const execFileAsync = promisify(execFile);
 const isWindows = process.platform === 'win32';
@@ -97,7 +98,7 @@ suite('NpmConfigManager Property-Based Tests', () => {
 
                 return true;
             }),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -145,7 +146,7 @@ suite('NpmConfigManager Property-Based Tests', () => {
                 
                 return true;
             }),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 });

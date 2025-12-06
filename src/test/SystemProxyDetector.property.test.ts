@@ -8,6 +8,7 @@
 import * as fc from 'fast-check';
 import * as assert from 'assert';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
+import { getPropertyTestRuns } from './helpers';
 
 suite('SystemProxyDetector Property-Based Tests', () => {
     /**
@@ -58,7 +59,7 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 10 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -112,7 +113,7 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 10 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -145,7 +146,7 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 10 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -181,7 +182,7 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 10 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -234,7 +235,7 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 });

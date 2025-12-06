@@ -23,6 +23,15 @@ suite('StatusBar Commands Availability Tests', () => {
         statusBarShowCallIndex = -1;
         callIndex = 0;
 
+        // Clear extension module cache to ensure fresh state
+        delete require.cache[require.resolve('../extension')];
+        // Also clear StatusBarManager cache since it's a separate module
+        try {
+            delete require.cache[require.resolve('../ui/StatusBarManager')];
+        } catch (e) {
+            // Ignore if module not found
+        }
+
         // Create mock memento
         const mockMemento: vscode.Memento & { setKeysForSync(keys: readonly string[]): void } = {
             get: <T>(key: string, defaultValue?: T): T => (globalState.get(key) ?? defaultValue) as T,

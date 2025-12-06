@@ -9,6 +9,7 @@ import * as fc from 'fast-check';
 import { ProxyMonitor, ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { InputSanitizer } from '../validation/InputSanitizer';
+import { getPropertyTestRuns } from './helpers';
 
 // Mock SystemProxyDetector for property testing
 class MockSystemProxyDetector {
@@ -310,7 +311,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -402,7 +403,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -536,7 +537,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -661,7 +662,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -842,7 +843,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -974,7 +975,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -1033,7 +1034,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 10 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -1098,7 +1099,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -1223,7 +1224,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     }
                 }
             ),
-            { numRuns: 5 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 });
+

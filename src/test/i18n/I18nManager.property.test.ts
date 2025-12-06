@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as fc from 'fast-check';
 import { I18nManager } from '../../i18n/I18nManager';
+import { getPropertyTestRuns } from '../helpers';
 
 suite('I18nManager Property Tests', () => {
     let i18n: I18nManager;
@@ -37,7 +38,7 @@ suite('I18nManager Property Tests', () => {
                 assert.strictEqual(message, 'Yes', 
                     `Expected English translation 'Yes', but got '${message}'`);
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -88,7 +89,7 @@ suite('I18nManager Property Tests', () => {
                         `Result should contain 'http://test:8080': ${result}`);
                 }
             ),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -130,11 +131,12 @@ suite('I18nManager Property Tests', () => {
                 assert.ok(result.includes('[missing:') || result.length > 0, 
                     `Expected fallback for missing key '${key}', but got '${result}'`);
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 });
 
+suite('I18nManager Unit Tests', () => {
     /**
      * Unit Test: Translation file validation
      * 
@@ -245,3 +247,4 @@ suite('I18nManager Property Tests', () => {
         assert.ok(result.includes('nonexistent.key.that.does.not.exist.xyz123'),
             `Expected result to include the missing key name, but got: ${result}`);
     });
+});

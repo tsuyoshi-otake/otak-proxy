@@ -22,6 +22,7 @@ import {
 } from './generators';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { getPropertyTestRuns } from './helpers';
 
 const execFileAsync = promisify(execFile);
 const isWindows = process.platform === 'win32';
@@ -62,7 +63,9 @@ suite('Extension Integration Property-Based Tests', () => {
     let gitAvailable: boolean;
     let sandbox: sinon.SinonSandbox;
 
-    suiteSetup(async () => {
+    suiteSetup(async function() {
+        // Increase timeout for setup that checks npm/git availability
+        this.timeout(20000);
         npmAvailable = await isNpmAvailable();
         gitAvailable = await isGitAvailable();
     });
@@ -132,7 +135,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     await npmManager.unsetProxy();
                 }
             }),
-            { numRuns: 3 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -189,7 +192,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     await npmManager.unsetProxy();
                 }
             }),
-            { numRuns: 3 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -246,7 +249,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     await npmManager.unsetProxy();
                 }
             }),
-            { numRuns: 3 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -296,7 +299,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     await npmManager.unsetProxy();
                 }
             }),
-            { numRuns: 3 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -381,7 +384,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     return true;
                 }
             ),
-            { numRuns: 50 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -442,7 +445,7 @@ suite('Extension Integration Property-Based Tests', () => {
 
                 return true;
             }),
-            { numRuns: 50 }
+            { numRuns: getPropertyTestRuns() }
         );
 
         // Test with invalid ports
@@ -467,7 +470,7 @@ suite('Extension Integration Property-Based Tests', () => {
 
                 return true;
             }),
-            { numRuns: 50 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 
@@ -521,7 +524,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     return true;
                 }
             }),
-            { numRuns: 100 }
+            { numRuns: getPropertyTestRuns() }
         );
     });
 });

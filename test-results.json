@@ -1,0 +1,19 @@
+
+> otak-proxy@2.0.0 pretest
+> npm run compile && npm run lint
+
+
+> otak-proxy@2.0.0 compile
+> tsc -p ./ && node -e "require('fs').cpSync('src/i18n/locales', 'out/i18n/locales', {recursive: true})"
+
+
+> otak-proxy@2.0.0 lint
+> eslint src
+
+
+> otak-proxy@2.0.0 test
+> vscode-test --run --reporter=json
+
+- Resolving version...
+Error: getaddrinfo ENOTFOUND l-r.wx-e.5--5es8
+    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)
