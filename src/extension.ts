@@ -10,6 +10,7 @@ import { ErrorAggregator } from './errors/ErrorAggregator';
 import { Logger } from './utils/Logger';
 import { ProxyMonitor, ProxyDetectionResult } from './monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from './monitoring/ProxyChangeLogger';
+import { I18nManager } from './i18n/I18nManager';
 
 const validator = new ProxyUrlValidator();
 const sanitizer = new InputSanitizer();
@@ -106,9 +107,10 @@ async function saveProxyState(context: vscode.ExtensionContext, state: ProxyStat
         inMemoryProxyState = { ...state };
         
         // Optionally notify user about the issue
+        const i18n = I18nManager.getInstance();
         vscode.window.showWarningMessage(
-            'Unable to persist proxy settings. Settings will be lost when VSCode restarts.',
-            'OK'
+            i18n.t('warning.unableToPersist'),
+            i18n.t('action.ok')
         );
     }
 }
@@ -189,9 +191,9 @@ async function checkAndUpdateSystemProxy(context: vscode.ExtensionContext): Prom
             updateStatusBar(state);
 
             if (state.autoProxyUrl) {
-                userNotifier.showSuccess(`System proxy changed: ${sanitizeProxyUrl(state.autoProxyUrl)}`);
+                userNotifier.showSuccess('message.systemProxyChanged', { url: sanitizeProxyUrl(state.autoProxyUrl) });
             } else if (previousProxy) {
-                userNotifier.showSuccess('System proxy removed');
+                userNotifier.showSuccess('message.systemProxyRemoved');
             }
         }
     } else {
@@ -334,16 +336,17 @@ async function detectSystemProxySettings(): Promise<string | null> {
 
 async function askForInitialSetup(context: vscode.ExtensionContext) {
     const state = await getProxyState(context);
+    const i18n = I18nManager.getInstance();
 
     // First, ask what mode to use
     const modeAnswer = await vscode.window.showInformationMessage(
-        'How would you like to configure proxy settings?',
-        'Auto (System)',
-        'Manual Setup',
-        'Skip'
+        i18n.t('prompt.initialSetup'),
+        i18n.t('action.autoSystem'),
+        i18n.t('action.manualSetup'),
+        i18n.t('action.skip')
     );
 
-    if (modeAnswer === 'Auto (System)') {
+    if (modeAnswer === i18n.t('action.autoSystem')) {
         // Try to detect system proxy settings
         const detectedProxy = await detectSystemProxySettings();
 
@@ -353,15 +356,15 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
             await saveProxyState(context, state);
             await applyProxySettings(detectedProxy, true, context);
             updateStatusBar(state);
-            userNotifier.showSuccess(`Using system proxy: ${sanitizeProxyUrl(detectedProxy)}`);
+            userNotifier.showSuccess('message.usingSystemProxy', { url: sanitizeProxyUrl(detectedProxy) });
         } else {
             const fallback = await vscode.window.showInformationMessage(
-                "Couldn't detect system proxy. Set up manually?",
-                'Yes',
-                'No'
+                i18n.t('prompt.couldNotDetect'),
+                i18n.t('action.yes'),
+                i18n.t('action.no')
             );
 
-            if (fallback === 'Yes') {
+            if (fallback === i18n.t('action.yes')) {
                 await vscode.commands.executeCommand('otak-proxy.configureUrl');
                 const updatedState = await getProxyState(context);
                 if (updatedState.manualProxyUrl) {
@@ -372,20 +375,20 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
                 }
             }
         }
-    } else if (modeAnswer === 'Manual Setup') {
+    } else if (modeAnswer === i18n.t('action.manualSetup')) {
         const manualProxyUrl = await vscode.window.showInputBox({
-            prompt: 'Enter proxy URL (e.g., http://proxy.example.com:8080)',
-            placeHolder: 'http://proxy.example.com:8080'
+            prompt: i18n.t('prompt.proxyUrl'),
+            placeHolder: i18n.t('prompt.proxyUrlPlaceholder')
         });
 
         if (manualProxyUrl) {
             if (!validateProxyUrl(manualProxyUrl)) {
                 userNotifier.showError(
-                    'Invalid proxy URL format',
+                    'error.invalidProxyUrl',
                     [
-                        'Use format: http://proxy.example.com:8080',
-                        'Include protocol (http:// or https://)',
-                        'Ensure hostname contains only alphanumeric characters, dots, and hyphens'
+                        'suggestion.useFormat',
+                        'suggestion.includeProtocol',
+                        'suggestion.validHostname'
                     ]
                 );
                 return;
@@ -399,7 +402,7 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
 
             await applyProxySettings(manualProxyUrl, true, context);
             updateStatusBar(state);
-            userNotifier.showSuccess(`Manual proxy configured: ${sanitizeProxyUrl(manualProxyUrl)}`);
+            userNotifier.showSuccess('message.manualProxyConfigured', { url: sanitizeProxyUrl(manualProxyUrl) });
         }
     }
 
@@ -448,10 +451,11 @@ function initializeProxyMonitor(context: vscode.ExtensionContext): void {
 
                 if (state.autoProxyUrl) {
                     userNotifier.showSuccess(
-                        `System proxy changed: ${sanitizeProxyUrl(state.autoProxyUrl)}`
+                        'message.systemProxyChanged',
+                        { url: sanitizeProxyUrl(state.autoProxyUrl) }
                     );
                 } else if (previousProxy) {
-                    userNotifier.showSuccess('System proxy removed');
+                    userNotifier.showSuccess('message.systemProxyRemoved');
                 }
             }
         }
@@ -484,18 +488,20 @@ export function registerCommands(context: vscode.ExtensionContext): void {
             const nextMode = getNextMode(currentState.mode);
 
         // Check if we can switch to the next mode
+        const i18n = I18nManager.getInstance();
+        
         if (nextMode === ProxyMode.Manual && !currentState.manualProxyUrl) {
             // No manual proxy configured, prompt for setup
             const answer = await vscode.window.showInformationMessage(
-                'No manual proxy configured. Set one up now?',
-                'Yes',
-                'Skip to Auto'
+                i18n.t('prompt.noManualProxy'),
+                i18n.t('action.yes'),
+                i18n.t('action.skipToAuto')
             );
 
-            if (answer === 'Yes') {
+            if (answer === i18n.t('action.yes')) {
                 await vscode.commands.executeCommand('otak-proxy.configureUrl');
                 return;
-            } else if (answer === 'Skip to Auto') {
+            } else if (answer === i18n.t('action.skipToAuto')) {
                 currentState.mode = ProxyMode.Auto;
             } else {
                 return; // User cancelled
@@ -507,7 +513,7 @@ export function registerCommands(context: vscode.ExtensionContext): void {
 
             if (!updatedState.autoProxyUrl) {
                 // Show notification and automatically switch to Off mode
-                userNotifier.showWarning('No system proxy detected. Switching to Off mode.');
+                userNotifier.showWarning('warning.noSystemProxyDetected');
                 currentState.mode = ProxyMode.Off;
             } else {
                 currentState.mode = nextMode;
@@ -529,8 +535,8 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         } catch (error) {
             Logger.error('Toggle proxy command failed:', error);
             userNotifier.showError(
-                'Failed to toggle proxy mode',
-                ['Check the output log for details', 'Try reloading the window']
+                'error.toggleFailed',
+                ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
             );
         }
     });
@@ -597,71 +603,72 @@ export function registerCommands(context: vscode.ExtensionContext): void {
     const testProxyDisposable = vscode.commands.registerCommand('otak-proxy.testProxy', async () => {
         try {
             const state = await getProxyState(context);
-        const activeUrl = getActiveProxyUrl(state);
+            const activeUrl = getActiveProxyUrl(state);
+            const i18n = I18nManager.getInstance();
 
-        if (!activeUrl) {
-            // Requirement 3.1, 3.2: Show error with action buttons
-            const action = await vscode.window.showErrorMessage(
-                `No proxy configured. Current mode: ${state.mode.toUpperCase()}`,
-                'Configure Manual',
-                'Import System',
-                'Cancel'
-            );
+            if (!activeUrl) {
+                // Requirement 3.1, 3.2: Show error with action buttons
+                const action = await vscode.window.showErrorMessage(
+                    i18n.t('message.noProxyConfigured', { mode: state.mode.toUpperCase() }),
+                    i18n.t('action.configureManual'),
+                    i18n.t('action.importSystem'),
+                    i18n.t('action.cancel')
+                );
 
-            if (action === 'Configure Manual') {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
-            } else if (action === 'Import System') {
-                await vscode.commands.executeCommand('otak-proxy.importProxy');
-            }
-            return;
-        }
-
-        // Requirement 1.5, 6.2: Use sanitized URL for display
-        const sanitizedUrl = sanitizer.maskPassword(activeUrl);
-
-        const testResult = await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: `Testing ${state.mode} proxy: ${sanitizedUrl}...`,
-            cancellable: false
-        }, async () => {
-            return await testProxyConnection(activeUrl);
-        });
-
-        if (testResult.success) {
-            userNotifier.showSuccess(`${state.mode.toUpperCase()} proxy works: ${sanitizedUrl}`);
-        } else {
-            // Requirement 2.4: Display attempted URLs in error messages
-            const attemptedUrlsList = testResult.testUrls.map(url => `  • ${url}`).join('\n');
-
-            // Requirement 2.4: Provide troubleshooting suggestions via UserNotifier
-            const suggestions = [
-                'Verify the proxy URL is correct',
-                'Check if the proxy server is running and accessible',
-                'Ensure your network allows proxy connections',
-                'Verify firewall settings are not blocking the proxy',
-                state.mode === ProxyMode.Manual
-                    ? 'Try reconfiguring the proxy URL'
-                    : 'Check your system/browser proxy settings',
-                'Test the proxy with a different application to verify it works'
-            ];
-
-            // Build comprehensive error message with attempted URLs
-            let errorMessage = `Proxy connection test failed for: ${sanitizedUrl}\n\nAttempted test URLs:\n${attemptedUrlsList}`;
-
-            // Add specific error details if available
-            if (testResult.errorAggregator.hasErrors()) {
-                const formattedErrors = testResult.errorAggregator.formatErrors();
-                errorMessage += `\n\n${formattedErrors}`;
+                if (action === i18n.t('action.configureManual')) {
+                    await vscode.commands.executeCommand('otak-proxy.configureUrl');
+                } else if (action === i18n.t('action.importSystem')) {
+                    await vscode.commands.executeCommand('otak-proxy.importProxy');
+                }
+                return;
             }
 
-            // Use UserNotifier for consistent error display
-            userNotifier.showError(errorMessage, suggestions);
-        }
+            // Requirement 1.5, 6.2: Use sanitized URL for display
+            const sanitizedUrl = sanitizer.maskPassword(activeUrl);
+
+            const testResult = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: i18n.t('message.testingProxy', { mode: state.mode, url: sanitizedUrl }),
+                cancellable: false
+            }, async () => {
+                return await testProxyConnection(activeUrl);
+            });
+
+            if (testResult.success) {
+                userNotifier.showSuccess('message.proxyWorks', { mode: state.mode.toUpperCase(), url: sanitizedUrl });
+            } else {
+                // Requirement 2.4: Display attempted URLs in error messages
+                const attemptedUrlsList = testResult.testUrls.map(url => `  • ${url}`).join('\n');
+
+                // Requirement 2.4: Provide troubleshooting suggestions via UserNotifier
+                const suggestions = [
+                    i18n.t('suggestion.verifyUrl'),
+                    i18n.t('suggestion.checkServer'),
+                    i18n.t('suggestion.checkNetwork'),
+                    i18n.t('suggestion.checkFirewall'),
+                    state.mode === ProxyMode.Manual
+                        ? i18n.t('suggestion.reconfigureManual')
+                        : i18n.t('suggestion.checkSystemSettings'),
+                    i18n.t('suggestion.testDifferentApp')
+                ];
+
+                // Build comprehensive error message with attempted URLs
+                let errorMessage = i18n.t('error.proxyTestFailed', { url: sanitizedUrl }) + `\n\n${i18n.t('error.attemptedUrls')}\n${attemptedUrlsList}`;
+
+                // Add specific error details if available
+                if (testResult.errorAggregator.hasErrors()) {
+                    const formattedErrors = testResult.errorAggregator.formatErrors();
+                    errorMessage += `\n\n${formattedErrors}`;
+                }
+
+                // Use UserNotifier for consistent error display
+                userNotifier.showError(errorMessage, suggestions);
+            }
         } catch (error) {
             Logger.error('Test proxy command failed:', error);
             userNotifier.showError(
-                'Failed to test proxy connection',
-                ['Check the output log for details', 'Try reloading the window']
+                'error.testProxyFailed',
+                ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
             );
         }
     });
@@ -671,139 +678,139 @@ export function registerCommands(context: vscode.ExtensionContext): void {
     // Requirement 1.4, 4.4: Error handling for command execution
     const importProxyDisposable = vscode.commands.registerCommand('otak-proxy.importProxy', async () => {
         try {
-        const detectedProxy = await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: 'Detecting system proxy...',
-            cancellable: false
-        }, async () => {
-            return await detectSystemProxySettings();
-        });
+            const i18n = I18nManager.getInstance();
+            const detectedProxy = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: i18n.t('message.detectingSystemProxy'),
+                cancellable: false
+            }, async () => {
+                return await detectSystemProxySettings();
+            });
 
-        const state = await getProxyState(context);
+            const state = await getProxyState(context);
 
-        if (detectedProxy) {
-            // Requirement 2.3: Display sanitized proxy URL to user
-            const sanitizedProxy = sanitizer.maskPassword(detectedProxy);
-            const action = await vscode.window.showInformationMessage(
-                `Found system proxy: ${sanitizedProxy}`,
-                'Use Auto Mode',
-                'Test First',
-                'Save as Manual',
-                'Cancel'
-            );
+            if (detectedProxy) {
+                // Requirement 2.3: Display sanitized proxy URL to user
+                const sanitizedProxy = sanitizer.maskPassword(detectedProxy);
+                const action = await vscode.window.showInformationMessage(
+                    i18n.t('prompt.foundSystemProxy', { url: sanitizedProxy }),
+                    i18n.t('action.useAutoMode'),
+                    i18n.t('action.testFirst'),
+                    i18n.t('action.saveAsManual'),
+                    i18n.t('action.cancel')
+                );
 
-            if (action === 'Test First') {
-                const testResult = await vscode.window.withProgress({
-                    location: vscode.ProgressLocation.Notification,
-                    title: 'Testing proxy...',
-                    cancellable: false
-                }, async () => {
-                    return await testProxyConnection(detectedProxy);
-                });
+                if (action === i18n.t('action.testFirst')) {
+                    const testResult = await vscode.window.withProgress({
+                        location: vscode.ProgressLocation.Notification,
+                        title: i18n.t('message.testingProxyGeneric'),
+                        cancellable: false
+                    }, async () => {
+                        return await testProxyConnection(detectedProxy);
+                    });
 
-                if (testResult.success) {
-                    const useAction = await vscode.window.showInformationMessage(
-                        'Proxy works! How would you like to use it?',
-                        'Auto Mode',
-                        'Save as Manual',
-                        'Cancel'
-                    );
+                    if (testResult.success) {
+                        const useAction = await vscode.window.showInformationMessage(
+                            i18n.t('prompt.proxyWorks'),
+                            i18n.t('action.useAutoMode'),
+                            i18n.t('action.saveAsManual'),
+                            i18n.t('action.cancel')
+                        );
 
-                    if (useAction === 'Auto Mode') {
-                        if (validateProxyUrl(detectedProxy)) {
-                            state.autoProxyUrl = detectedProxy;
-                            state.mode = ProxyMode.Auto;
-                            await saveProxyState(context, state);
-                            await applyProxySettings(detectedProxy, true, context);
-                            updateStatusBar(state);
-                            await startSystemProxyMonitoring(context);
-                            userNotifier.showSuccess(`Switched to Auto mode: ${sanitizeProxyUrl(detectedProxy)}`);
-                        } else {
-                            userNotifier.showError(
-                                'Invalid proxy URL format detected',
-                                [
-                                    'The detected system proxy has an invalid format',
-                                    'Check your system/browser proxy settings',
-                                    'Try configuring a manual proxy instead'
-                                ]
-                            );
+                        if (useAction === i18n.t('action.useAutoMode')) {
+                            if (validateProxyUrl(detectedProxy)) {
+                                state.autoProxyUrl = detectedProxy;
+                                state.mode = ProxyMode.Auto;
+                                await saveProxyState(context, state);
+                                await applyProxySettings(detectedProxy, true, context);
+                                updateStatusBar(state);
+                                await startSystemProxyMonitoring(context);
+                                userNotifier.showSuccess('message.switchedToAutoMode', { url: sanitizeProxyUrl(detectedProxy) });
+                            } else {
+                                userNotifier.showError(
+                                    'error.invalidProxyUrlDetected',
+                                    [
+                                        'suggestion.invalidFormatDetected',
+                                        'suggestion.checkSystemSettings',
+                                        'suggestion.configureManualInstead'
+                                    ]
+                                );
+                            }
+                        } else if (useAction === i18n.t('action.saveAsManual')) {
+                            if (validateProxyUrl(detectedProxy)) {
+                                state.manualProxyUrl = detectedProxy;
+                                state.mode = ProxyMode.Manual;
+                                await saveProxyState(context, state);
+                                await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', detectedProxy, vscode.ConfigurationTarget.Global);
+                                await applyProxySettings(detectedProxy, true, context);
+                                updateStatusBar(state);
+                                userNotifier.showSuccess('message.savedAsManualProxy', { url: sanitizeProxyUrl(detectedProxy) });
+                            } else {
+                                userNotifier.showError(
+                                    'error.invalidProxyUrlDetected',
+                                    [
+                                        'suggestion.invalidFormatDetected',
+                                        'suggestion.checkSystemSettings',
+                                        'suggestion.configureManualInstead'
+                                    ]
+                                );
+                            }
                         }
-                    } else if (useAction === 'Save as Manual') {
-                        if (validateProxyUrl(detectedProxy)) {
-                            state.manualProxyUrl = detectedProxy;
-                            state.mode = ProxyMode.Manual;
-                            await saveProxyState(context, state);
-                            await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', detectedProxy, vscode.ConfigurationTarget.Global);
-                            await applyProxySettings(detectedProxy, true, context);
-                            updateStatusBar(state);
-                            userNotifier.showSuccess(`Saved as manual proxy: ${sanitizeProxyUrl(detectedProxy)}`);
-                        } else {
-                            userNotifier.showError(
-                                'Invalid proxy URL format detected',
-                                [
-                                    'The detected system proxy has an invalid format',
-                                    'Check your system/browser proxy settings',
-                                    'Try configuring a manual proxy instead'
-                                ]
-                            );
-                        }
+                    } else {
+                        userNotifier.showError(
+                            'error.proxyDoesNotWork',
+                            [
+                                'suggestion.verifyServerRunning',
+                                'suggestion.checkConnectivity',
+                                'suggestion.tryDifferentConfig'
+                            ]
+                        );
                     }
-                } else {
-                    userNotifier.showError(
-                        "Detected proxy doesn't work",
-                        [
-                            'The proxy was detected but connection test failed',
-                            'Verify the proxy server is running',
-                            'Check your network connectivity',
-                            'Try a different proxy configuration'
-                        ]
-                    );
+                } else if (action === i18n.t('action.useAutoMode')) {
+                    if (validateProxyUrl(detectedProxy)) {
+                        state.autoProxyUrl = detectedProxy;
+                        state.mode = ProxyMode.Auto;
+                        await saveProxyState(context, state);
+                        await applyProxySettings(detectedProxy, true, context);
+                        updateStatusBar(state);
+                        await startSystemProxyMonitoring(context);
+                        userNotifier.showSuccess('message.switchedToAutoMode', { url: sanitizeProxyUrl(detectedProxy) });
+                    } else {
+                        userNotifier.showError(
+                            'error.invalidProxyUrlDetected',
+                            [
+                                'suggestion.invalidFormatDetected',
+                                'suggestion.checkSystemSettings',
+                                'suggestion.configureManualInstead'
+                            ]
+                        );
+                    }
+                } else if (action === i18n.t('action.saveAsManual')) {
+                    if (validateProxyUrl(detectedProxy)) {
+                        state.manualProxyUrl = detectedProxy;
+                        await saveProxyState(context, state);
+                        await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', detectedProxy, vscode.ConfigurationTarget.Global);
+                        updateStatusBar(state);
+                        userNotifier.showSuccess('message.savedAsManualProxy', { url: sanitizeProxyUrl(detectedProxy) });
+                    } else {
+                        userNotifier.showError(
+                            'error.invalidProxyUrlDetected',
+                            [
+                                'suggestion.invalidFormatDetected',
+                                'suggestion.checkSystemSettings',
+                                'suggestion.configureManualInstead'
+                            ]
+                        );
+                    }
                 }
-            } else if (action === 'Use Auto Mode') {
-                if (validateProxyUrl(detectedProxy)) {
-                    state.autoProxyUrl = detectedProxy;
-                    state.mode = ProxyMode.Auto;
-                    await saveProxyState(context, state);
-                    await applyProxySettings(detectedProxy, true, context);
-                    updateStatusBar(state);
-                    await startSystemProxyMonitoring(context);
-                    userNotifier.showSuccess(`Switched to Auto mode: ${sanitizeProxyUrl(detectedProxy)}`);
-                } else {
-                    userNotifier.showError(
-                        'Invalid proxy URL format detected',
-                        [
-                            'The detected system proxy has an invalid format',
-                            'Check your system/browser proxy settings',
-                            'Try configuring a manual proxy instead'
-                        ]
-                    );
-                }
-            } else if (action === 'Save as Manual') {
-                if (validateProxyUrl(detectedProxy)) {
-                    state.manualProxyUrl = detectedProxy;
-                    await saveProxyState(context, state);
-                    await vscode.workspace.getConfiguration('otakProxy').update('proxyUrl', detectedProxy, vscode.ConfigurationTarget.Global);
-                    updateStatusBar(state);
-                    userNotifier.showSuccess(`Saved as manual proxy: ${sanitizeProxyUrl(detectedProxy)}`);
-                } else {
-                    userNotifier.showError(
-                        'Invalid proxy URL format detected',
-                        [
-                            'The detected system proxy has an invalid format',
-                            'Check your system/browser proxy settings',
-                            'Try configuring a manual proxy instead'
-                        ]
-                    );
-                }
+            } else {
+                userNotifier.showWarning('warning.noSystemProxyCheck');
             }
-        } else {
-            userNotifier.showWarning('No system proxy detected. Check your system/browser proxy settings.');
-        }
         } catch (error) {
             Logger.error('Import proxy command failed:', error);
             userNotifier.showError(
-                'Failed to import system proxy',
-                ['Check the output log for details', 'Try reloading the window']
+                'error.importProxyFailed',
+                ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
             );
         }
     });
@@ -900,6 +907,11 @@ export async function performInitialSetup(context: vscode.ExtensionContext): Pro
 
 export async function activate(context: vscode.ExtensionContext) {
     Logger.log('Extension "otak-proxy" is now active.');
+
+    // Phase 0: Initialize I18n
+    const i18n = I18nManager.getInstance();
+    i18n.initialize();
+    Logger.log(`I18n initialized with locale: ${i18n.getCurrentLocale()}`);
 
     // Phase 1: Core initialization
     statusBarItem = initializeStatusBar(context);
@@ -1016,7 +1028,7 @@ async function disableProxySettings(context?: vscode.ExtensionContext): Promise<
         userNotifier.showError(errorMessage, suggestions);
     } else {
         // Update status bar to show proxy disabled
-        userNotifier.showSuccess('Proxy disabled');
+        userNotifier.showSuccess('message.proxyDisabled');
     }
 
     return success;
@@ -1114,7 +1126,7 @@ async function applyProxySettings(proxyUrl: string, enabled: boolean, context?: 
     } else if (proxyUrl) {
         // Requirement 1.5, 6.2: Update status bar with sanitized proxy URL
         const sanitizedUrl = sanitizer.maskPassword(proxyUrl);
-        userNotifier.showSuccess(`Proxy configured: ${sanitizedUrl}`);
+        userNotifier.showSuccess('message.proxyConfigured', { url: sanitizedUrl });
     }
 
     return success;
@@ -1202,6 +1214,7 @@ function updateStatusBar(state: ProxyState) {
         return;
     }
 
+    const i18n = I18nManager.getInstance();
     const activeUrl = getActiveProxyUrl(state);
     let text = '';
     let statusText = '';
@@ -1213,26 +1226,26 @@ function updateStatusBar(state: ProxyState) {
     switch (state.mode) {
         case ProxyMode.Auto:
             if (activeUrl) {
-                text = `$(sync~spin) Auto: ${activeUrl}`;
-                statusText = `Auto Mode - Using system proxy: ${activeUrl}`;
+                text = `$(sync~spin) ${i18n.t('statusbar.autoWithUrl', { url: activeUrl })}`;
+                statusText = i18n.t('statusbar.tooltip.autoModeUsing', { url: activeUrl });
             } else {
-                text = `$(sync~spin) Auto: No system proxy`;
-                statusText = `Auto Mode - No system proxy detected`;
+                text = `$(sync~spin) ${i18n.t('statusbar.autoNoProxy')}`;
+                statusText = i18n.t('statusbar.tooltip.autoModeNoProxy');
             }
             break;
         case ProxyMode.Manual:
             if (activeUrl) {
-                text = `$(plug) Manual: ${activeUrl}`;
-                statusText = `Manual Mode - Using: ${activeUrl}`;
+                text = `$(plug) ${i18n.t('statusbar.manualWithUrl', { url: activeUrl })}`;
+                statusText = i18n.t('statusbar.tooltip.manualModeUsing', { url: activeUrl });
             } else {
-                text = `$(plug) Manual: Not configured`;
-                statusText = `Manual Mode - No proxy configured`;
+                text = `$(plug) ${i18n.t('statusbar.manualNotConfigured')}`;
+                statusText = i18n.t('statusbar.tooltip.manualModeNotConfigured');
             }
             break;
         case ProxyMode.Off:
         default:
-            text = '$(circle-slash) Proxy: Off';
-            statusText = 'Proxy disabled';
+            text = `$(circle-slash) ${i18n.t('statusbar.proxyOff')}`;
+            statusText = i18n.t('statusbar.tooltip.proxyDisabled');
             break;
     }
 
@@ -1242,46 +1255,46 @@ function updateStatusBar(state: ProxyState) {
     tooltip.isTrusted = true;
     tooltip.supportThemeIcons = true;
 
-    tooltip.appendMarkdown(`**Proxy Configuration**\n\n`);
-    tooltip.appendMarkdown(`**Current Mode:** ${state.mode.toUpperCase()}\n\n`);
-    tooltip.appendMarkdown(`**Status:** ${statusText}\n\n`);
+    tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.title')}**\n\n`);
+    tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.currentMode')}:** ${state.mode.toUpperCase()}\n\n`);
+    tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.status')}:** ${statusText}\n\n`);
 
     // Add Auto mode specific information
     if (state.mode === ProxyMode.Auto && lastCheck) {
         const lastCheckTime = new Date(lastCheck.timestamp).toLocaleTimeString();
-        tooltip.appendMarkdown(`**Last Check:** ${lastCheckTime}\n\n`);
+        tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.lastCheck')}:** ${lastCheckTime}\n\n`);
 
         if (lastCheck.source) {
-            tooltip.appendMarkdown(`**Detection Source:** ${lastCheck.source}\n\n`);
+            tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.detectionSource')}:** ${lastCheck.source}\n\n`);
         }
 
         if (!lastCheck.success && lastCheck.error) {
-            tooltip.appendMarkdown(`**Last Error:** $(warning) ${lastCheck.error}\n\n`);
+            tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.lastError')}:** $(warning) ${lastCheck.error}\n\n`);
         }
     }
 
     // Add monitoring state information for Auto mode
     if (state.mode === ProxyMode.Auto && monitorState) {
         if (monitorState.consecutiveFailures > 0) {
-            tooltip.appendMarkdown(`**Consecutive Failures:** $(warning) ${monitorState.consecutiveFailures}\n\n`);
+            tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.consecutiveFailures')}:** $(warning) ${monitorState.consecutiveFailures}\n\n`);
         }
     }
 
     if (state.manualProxyUrl) {
-        tooltip.appendMarkdown(`**Manual Proxy:** ${sanitizer.maskPassword(state.manualProxyUrl)}\n\n`);
+        tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.manualProxy')}:** ${sanitizer.maskPassword(state.manualProxyUrl)}\n\n`);
     }
     if (state.autoProxyUrl) {
-        tooltip.appendMarkdown(`**System Proxy:** ${sanitizer.maskPassword(state.autoProxyUrl)}\n\n`);
+        tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.systemProxy')}:** ${sanitizer.maskPassword(state.autoProxyUrl)}\n\n`);
     }
 
     tooltip.appendMarkdown(`---\n\n`);
 
     // Requirement 5.4: Define command links with validation
     const commandLinks = [
-        { icon: '$(sync)', label: 'Toggle Mode', command: 'otak-proxy.toggleProxy' },
-        { icon: '$(gear)', label: 'Configure Manual', command: 'otak-proxy.configureUrl' },
-        { icon: '$(cloud-download)', label: 'Import System', command: 'otak-proxy.importProxy' },
-        { icon: '$(debug-start)', label: 'Test Proxy', command: 'otak-proxy.testProxy' }
+        { icon: '$(sync)', label: i18n.t('statusbar.link.toggleMode'), command: 'otak-proxy.toggleProxy' },
+        { icon: '$(gear)', label: i18n.t('statusbar.link.configureManual'), command: 'otak-proxy.configureUrl' },
+        { icon: '$(cloud-download)', label: i18n.t('statusbar.link.importSystem'), command: 'otak-proxy.importProxy' },
+        { icon: '$(debug-start)', label: i18n.t('statusbar.link.testProxy'), command: 'otak-proxy.testProxy' }
     ];
 
     // Requirement 5.4: Validate all command links reference registered commands

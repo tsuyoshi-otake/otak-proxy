@@ -62,6 +62,14 @@ Automatically syncs with system proxy:
 - VSCode 1.9.0+
 - Git installed and in PATH
 
+## Language Support
+
+The extension automatically detects your VS Code display language and shows messages in:
+- **English** (default)
+- **Japanese** (日本語)
+
+Language is detected from your VS Code Language Pack. No configuration needed - it just works!
+
 ## Configuration
 
 ### Manual proxy URL
