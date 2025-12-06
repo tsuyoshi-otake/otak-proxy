@@ -2,6 +2,7 @@ import { defineConfig } from '@vscode/test-cli';
 
 export default defineConfig({
 	files: 'out/test/**/*.test.js',
+	version: '1.106.3', // Use existing version to avoid network issues
 	mocha: {
 		// Enable parallel test execution for faster test runs
 		// Note: Some tests may need to be marked as serial if they have shared state

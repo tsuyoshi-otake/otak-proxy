@@ -289,7 +289,9 @@
 
 
 
-- [-] 11. Final verification
+- [x] 11. Final verification
+
+
 
   - すべてのテストが合格することを確認
   - Ensure all tests pass, ask the user if questions arise.
