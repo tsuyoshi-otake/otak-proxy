@@ -100,7 +100,8 @@ suite('Otak Proxy Extension Test Suite', () => {
         assert.strictEqual(globalState.get('hasInitialSetup'), true);
     });
 
-    test('Proxy toggle should update state', async () => {
+    test('Proxy toggle should update state', async function() {
+        this.timeout(10000);
         // The new implementation uses ProxyState with mode field
         await vscode.commands.executeCommand('otak-proxy.toggleProxy');
         const state = globalState.get('proxyState') as any;

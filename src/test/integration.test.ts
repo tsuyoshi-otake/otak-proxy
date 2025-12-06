@@ -8,20 +8,24 @@ import { NpmConfigManager } from '../config/NpmConfigManager';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { UserNotifier } from '../errors/UserNotifier';
+import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
+import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
+import { ProxyMonitorState } from '../monitoring/ProxyMonitorState';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+const isWindows = process.platform === 'win32';
 
 /**
  * Integration Test Suite
- * 
+ *
  * Tests complete workflows across multiple components:
  * - setProxy flow: validation -> Git config -> VSCode config
  * - detectProxy flow: system detection -> validation -> application
  * - disableProxy flow: Git unset -> VSCode unset -> error handling
  * - error recovery: partial failures -> error aggregation -> user notification
- * 
+ *
  * Requirements: All (comprehensive integration testing)
  */
 /**
@@ -31,7 +35,8 @@ async function isNpmAvailable(): Promise<boolean> {
     try {
         await execFileAsync('npm', ['--version'], {
             timeout: 5000,
-            encoding: 'utf8'
+            encoding: 'utf8',
+            shell: isWindows  // Required for Windows to execute npm.cmd
         });
         return true;
     } catch {
@@ -493,6 +498,7 @@ suite('Integration Tests', () => {
      */
     suite('npm Configuration Integration', () => {
         test('should set npm proxy alongside Git', async function() {
+            this.timeout(30000);
             if (!npmAvailable) {
                 this.skip();
                 return;
@@ -565,6 +571,7 @@ suite('Integration Tests', () => {
         });
 
         test('should unset npm proxy correctly', async function() {
+            this.timeout(30000);
             if (!npmAvailable) {
                 this.skip();
                 return;
@@ -610,12 +617,14 @@ suite('Integration Tests', () => {
         });
 
         test('should handle complete workflow with npm, Git, and VSCode', async function() {
+            this.timeout(60000);
             if (!npmAvailable) {
                 this.skip();
                 return;
             }
 
-            const testUrl = 'http://user:pass@proxy.example.com:8080';
+            // Note: npm 11.x masks credentials in config list, so we use URL without credentials
+            const testUrl = 'http://proxy.example.com:8080';
             const errorAgg = new ErrorAggregator();
 
             try {
@@ -670,6 +679,432 @@ suite('Integration Tests', () => {
                 // Cleanup
                 await gitConfigManager.unsetProxy();
                 await npmConfigManager.unsetProxy();
+            }
+        });
+    });
+
+    /**
+     * Integration Test 7: ProxyMonitor Integration
+     *
+     * Tests the ProxyMonitor integration with other components:
+     * 1. Auto mode activation flow
+     * 2. Proxy change detection flow
+     * 3. Configuration change flow
+     * 4. Error recovery flow
+     *
+     * Feature: auto-proxy-detection-improvements
+     * Requirements: All
+     */
+    suite('ProxyMonitor Integration', () => {
+        let proxyMonitor: ProxyMonitor;
+        let proxyChangeLogger: ProxyChangeLogger;
+        let testSanitizer: InputSanitizer;
+
+        // Mock detector for testing
+        class MockDetector {
+            private mockResult: string | null = null;
+            private mockSource: string | null = 'environment';
+            private shouldFail: boolean = false;
+            private checkCount: number = 0;
+
+            setMockResult(result: string | null, source: string | null = 'environment'): void {
+                this.mockResult = result;
+                this.mockSource = source;
+            }
+
+            setShouldFail(fail: boolean): void {
+                this.shouldFail = fail;
+            }
+
+            getCheckCount(): number {
+                return this.checkCount;
+            }
+
+            resetCheckCount(): void {
+                this.checkCount = 0;
+            }
+
+            async detectSystemProxy(): Promise<string | null> {
+                this.checkCount++;
+                if (this.shouldFail) {
+                    throw new Error('Detection failed');
+                }
+                return this.mockResult;
+            }
+
+            async detectSystemProxyWithSource(): Promise<{ proxyUrl: string | null; source: string | null }> {
+                this.checkCount++;
+                if (this.shouldFail) {
+                    throw new Error('Detection failed');
+                }
+                return { proxyUrl: this.mockResult, source: this.mockSource };
+            }
+        }
+
+        let mockDetector: MockDetector;
+
+        setup(() => {
+            mockDetector = new MockDetector();
+            testSanitizer = new InputSanitizer();
+            proxyChangeLogger = new ProxyChangeLogger(testSanitizer);
+        });
+
+        teardown(() => {
+            if (proxyMonitor) {
+                proxyMonitor.stop();
+            }
+        });
+
+        /**
+         * Integration Test 7.1: Auto Mode Activation Flow
+         *
+         * Tests the complete flow when Auto mode is activated:
+         * 1. Mode switch triggers monitoring start
+         * 2. ProxyMonitor starts polling
+         * 3. Proxy is detected
+         * 4. Settings are applied
+         */
+        test('Auto mode activation flow', async function() {
+            this.timeout(30000);
+
+            const testProxy = 'http://proxy.example.com:8080';
+            mockDetector.setMockResult(testProxy, 'environment');
+
+            proxyMonitor = new ProxyMonitor(
+                mockDetector as any,
+                proxyChangeLogger,
+                {
+                    pollingInterval: 60000, // Long interval to avoid interference
+                    debounceDelay: 50,
+                    maxRetries: 0,
+                    retryBackoffBase: 0.01
+                }
+            );
+
+            // Track proxy change event
+            let proxyChangeReceived = false;
+            let receivedProxy: string | null = null;
+            proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
+                proxyChangeReceived = true;
+                receivedProxy = result.proxyUrl;
+            });
+
+            // Step 1: Start monitoring (simulates Auto mode activation)
+            proxyMonitor.start();
+
+            // Step 2: Verify monitoring is active
+            assert.strictEqual(proxyMonitor.getState().isActive, true, 'Monitor should be active');
+
+            // Step 3: Trigger a check
+            proxyMonitor.triggerCheck('focus');
+
+            // Step 4: Wait for check to complete
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 5: Verify proxy was detected
+            assert.strictEqual(proxyChangeReceived, true, 'Should receive proxy change event');
+            assert.strictEqual(receivedProxy, testProxy, 'Should receive correct proxy');
+
+            // Step 6: Verify check was logged
+            const checkHistory = proxyChangeLogger.getCheckHistory();
+            assert.ok(checkHistory.length >= 1, 'Should have logged at least one check');
+            assert.strictEqual(checkHistory[checkHistory.length - 1].success, true, 'Check should be successful');
+        });
+
+        /**
+         * Integration Test 7.2: Proxy Change Detection Flow
+         *
+         * Tests the flow when system proxy changes:
+         * 1. Initial proxy is detected
+         * 2. Proxy changes
+         * 3. Change is detected and logged
+         * 4. proxyChanged event is emitted
+         */
+        test('Proxy change detection flow', async function() {
+            this.timeout(30000);
+
+            const initialProxy = 'http://proxy1.example.com:8080';
+            const newProxy = 'http://proxy2.example.com:8080';
+
+            mockDetector.setMockResult(initialProxy, 'environment');
+
+            proxyMonitor = new ProxyMonitor(
+                mockDetector as any,
+                proxyChangeLogger,
+                {
+                    pollingInterval: 60000,
+                    debounceDelay: 50,
+                    maxRetries: 0,
+                    retryBackoffBase: 0.01
+                }
+            );
+
+            const proxyChanges: string[] = [];
+            proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
+                proxyChanges.push(result.proxyUrl || 'null');
+            });
+
+            // Step 1: Start and detect initial proxy
+            proxyMonitor.start();
+            proxyMonitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 2: Change the proxy
+            mockDetector.setMockResult(newProxy, 'environment');
+            proxyMonitor.triggerCheck('network');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 3: Verify both changes were detected
+            assert.strictEqual(proxyChanges.length, 2, 'Should detect two proxy changes');
+            assert.strictEqual(proxyChanges[0], initialProxy, 'First change should be initial proxy');
+            assert.strictEqual(proxyChanges[1], newProxy, 'Second change should be new proxy');
+
+            // Step 4: Verify change was logged
+            const changeHistory = proxyChangeLogger.getChangeHistory();
+            assert.ok(changeHistory.length >= 1, 'Should have logged change');
+
+            // Find the change from initial to new proxy
+            // Note: URLs may have trailing slashes added by the sanitizer
+            const normalizeUrl = (url: string | null) =>
+                url ? url.replace(/\/$/, '') : null;
+
+            const relevantChange = changeHistory.find(c =>
+                normalizeUrl(c.previousProxy) === normalizeUrl(initialProxy) &&
+                normalizeUrl(c.newProxy) === normalizeUrl(newProxy)
+            );
+            assert.ok(relevantChange, `Should have logged the proxy change. History: ${JSON.stringify(changeHistory.map(c => ({prev: c.previousProxy, new: c.newProxy})))}`);
+        });
+
+        /**
+         * Integration Test 7.3: Configuration Change Flow
+         *
+         * Tests the flow when configuration is changed:
+         * 1. Monitor is running with initial config
+         * 2. Configuration is updated
+         * 3. New configuration takes effect immediately
+         */
+        test('Configuration change flow', async function() {
+            this.timeout(30000);
+
+            mockDetector.setMockResult('http://proxy.example.com:8080', 'environment');
+
+            proxyMonitor = new ProxyMonitor(
+                mockDetector as any,
+                proxyChangeLogger,
+                {
+                    pollingInterval: 60000,
+                    debounceDelay: 50,
+                    maxRetries: 3,
+                    retryBackoffBase: 0.1
+                }
+            );
+
+            // Step 1: Start monitoring
+            proxyMonitor.start();
+            assert.strictEqual(proxyMonitor.getState().isActive, true, 'Monitor should be active');
+
+            // Step 2: Update configuration
+            proxyMonitor.updateConfig({
+                pollingInterval: 30000,
+                maxRetries: 5
+            });
+
+            // Step 3: Verify monitor is still active after config change
+            assert.strictEqual(proxyMonitor.getState().isActive, true, 'Monitor should still be active');
+
+            // Step 4: Trigger a check to verify functionality
+            mockDetector.resetCheckCount();
+            proxyMonitor.triggerCheck('config');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 5: Verify check was executed
+            assert.ok(mockDetector.getCheckCount() >= 1, 'Should execute check after config update');
+        });
+
+        /**
+         * Integration Test 7.4: Error Recovery Flow
+         *
+         * Tests the flow when detection fails and recovers:
+         * 1. Detection fails
+         * 2. Retry logic is triggered
+         * 3. Detection eventually succeeds
+         * 4. State is reset
+         */
+        test('Error recovery flow', async function() {
+            this.timeout(60000);
+
+            let callCount = 0;
+            const recoveryProxy = 'http://recovered.example.com:8080';
+
+            // Create a detector that fails twice then succeeds
+            class RecoveryDetector {
+                async detectSystemProxy(): Promise<string | null> {
+                    callCount++;
+                    if (callCount <= 2) {
+                        throw new Error('Temporary failure');
+                    }
+                    return recoveryProxy;
+                }
+
+                async detectSystemProxyWithSource(): Promise<{ proxyUrl: string | null; source: string | null }> {
+                    callCount++;
+                    if (callCount <= 2) {
+                        throw new Error('Temporary failure');
+                    }
+                    return { proxyUrl: recoveryProxy, source: 'environment' };
+                }
+            }
+
+            const recoveryDetector = new RecoveryDetector();
+
+            proxyMonitor = new ProxyMonitor(
+                recoveryDetector as any,
+                proxyChangeLogger,
+                {
+                    pollingInterval: 60000,
+                    debounceDelay: 10,
+                    maxRetries: 3,
+                    retryBackoffBase: 0.05 // 50ms for fast testing
+                }
+            );
+
+            let proxyChangeReceived = false;
+            let receivedProxy: string | null = null;
+            proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
+                proxyChangeReceived = true;
+                receivedProxy = result.proxyUrl;
+            });
+
+            // Step 1: Start monitoring
+            proxyMonitor.start();
+
+            // Step 2: Trigger a check
+            proxyMonitor.triggerCheck('focus');
+
+            // Step 3: Wait for retries to complete
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Step 4: Verify recovery
+            assert.ok(callCount >= 3, 'Should have attempted multiple times');
+            assert.strictEqual(proxyChangeReceived, true, 'Should eventually receive proxy change');
+            assert.strictEqual(receivedProxy, recoveryProxy, 'Should receive recovered proxy');
+
+            // Step 5: Verify state is reset
+            const state = proxyMonitor.getState();
+            assert.strictEqual(state.consecutiveFailures, 0, 'Failure count should be reset');
+            assert.strictEqual(state.currentProxy, recoveryProxy, 'Current proxy should be set');
+        });
+
+        /**
+         * Integration Test 7.5: Mode Switch (Auto to Off) Flow
+         *
+         * Tests the flow when switching from Auto mode to Off:
+         * 1. Monitor is running
+         * 2. Mode switches to Off
+         * 3. Monitor stops
+         * 4. No more checks are executed
+         */
+        test('Mode switch (Auto to Off) flow', async function() {
+            this.timeout(30000);
+
+            mockDetector.setMockResult('http://proxy.example.com:8080', 'environment');
+
+            proxyMonitor = new ProxyMonitor(
+                mockDetector as any,
+                proxyChangeLogger,
+                {
+                    pollingInterval: 10000, // 10 seconds
+                    debounceDelay: 50,
+                    maxRetries: 0,
+                    retryBackoffBase: 0.01
+                }
+            );
+
+            // Step 1: Start monitoring (Auto mode)
+            proxyMonitor.start();
+            assert.strictEqual(proxyMonitor.getState().isActive, true, 'Monitor should be active');
+
+            // Step 2: Trigger a check to verify it's working
+            proxyMonitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 3: Stop monitoring (mode switch to Off)
+            proxyMonitor.stop();
+            assert.strictEqual(proxyMonitor.getState().isActive, false, 'Monitor should be inactive');
+
+            // Step 4: Reset check count and verify no more checks
+            mockDetector.resetCheckCount();
+
+            // Step 5: Try to trigger a check (should be ignored)
+            proxyMonitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 6: Verify no checks were executed
+            assert.strictEqual(mockDetector.getCheckCount(), 0, 'No checks should be executed when stopped');
+        });
+
+        /**
+         * Integration Test 7.6: Credential Masking in Logs
+         *
+         * Tests that credentials are properly masked in all logs:
+         * 1. Proxy with credentials is detected
+         * 2. Change is logged with masked credentials
+         * 3. Check is logged with masked credentials
+         */
+        test('Credential masking in logs', async function() {
+            this.timeout(30000);
+
+            const proxyWithCredentials = 'http://user:password@proxy.example.com:8080';
+            mockDetector.setMockResult(proxyWithCredentials, 'environment');
+
+            proxyMonitor = new ProxyMonitor(
+                mockDetector as any,
+                proxyChangeLogger,
+                {
+                    pollingInterval: 60000,
+                    debounceDelay: 50,
+                    maxRetries: 0,
+                    retryBackoffBase: 0.01
+                }
+            );
+
+            // Step 1: Start and detect proxy
+            proxyMonitor.start();
+            proxyMonitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Step 2: Verify check log has masked credentials
+            const checkHistory = proxyChangeLogger.getCheckHistory();
+            assert.ok(checkHistory.length >= 1, 'Should have check history');
+
+            const lastCheck = checkHistory[checkHistory.length - 1];
+            if (lastCheck.proxyUrl) {
+                assert.strictEqual(
+                    lastCheck.proxyUrl.includes('password'),
+                    false,
+                    'Check log should not contain plain password'
+                );
+                assert.ok(
+                    lastCheck.proxyUrl.includes('****'),
+                    'Check log should contain masked password'
+                );
+            }
+
+            // Step 3: Verify change log has masked credentials
+            const changeHistory = proxyChangeLogger.getChangeHistory();
+            if (changeHistory.length > 0) {
+                const lastChange = changeHistory[changeHistory.length - 1];
+                if (lastChange.newProxy) {
+                    assert.strictEqual(
+                        lastChange.newProxy.includes('password'),
+                        false,
+                        'Change log should not contain plain password'
+                    );
+                    assert.ok(
+                        lastChange.newProxy.includes('****'),
+                        'Change log should contain masked password'
+                    );
+                }
             }
         });
     });

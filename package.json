@@ -47,6 +47,29 @@
           "type": "string",
           "default": "",
           "description": "Proxy server URL (e.g., http://proxy.example.com:8080) for VSCode and Git proxy settings"
+        },
+        "otakProxy.pollingInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "maximum": 300,
+          "description": "Auto mode polling interval in seconds (10-300). How often to check for system proxy changes."
+        },
+        "otakProxy.detectionSourcePriority": {
+          "type": "array",
+          "default": ["environment", "vscode", "platform"],
+          "items": {
+            "type": "string",
+            "enum": ["environment", "vscode", "platform"]
+          },
+          "description": "Priority order for proxy detection sources. Sources are tried in order until one succeeds."
+        },
+        "otakProxy.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Maximum number of retries for proxy detection when it fails."
         }
       }
     }

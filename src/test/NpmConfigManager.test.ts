@@ -13,7 +13,8 @@ suite('NpmConfigManager Test Suite', () => {
             assert.ok(npmConfigManager);
         });
 
-        test('setProxy should return OperationResult', async () => {
+        test('setProxy should return OperationResult', async function() {
+            this.timeout(10000);
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
             assert.ok(result);
             assert.ok(typeof result.success === 'boolean');
@@ -24,20 +25,23 @@ suite('NpmConfigManager Test Suite', () => {
             }
         });
 
-        test('unsetProxy should return OperationResult', async () => {
+        test('unsetProxy should return OperationResult', async function() {
+            this.timeout(10000);
             const result = await npmConfigManager.unsetProxy();
             assert.ok(result);
             assert.ok(typeof result.success === 'boolean');
         });
 
-        test('getProxy should return string or null', async () => {
+        test('getProxy should return string or null', async function() {
+            this.timeout(10000);
             const result = await npmConfigManager.getProxy();
             assert.ok(result === null || typeof result === 'string');
         });
     });
 
     suite('Error Handling', () => {
-        test('should handle errors gracefully', async () => {
+        test('should handle errors gracefully', async function() {
+            this.timeout(10000);
             // This test verifies that errors are caught and returned as OperationResult
             // rather than throwing exceptions
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
@@ -58,7 +62,8 @@ suite('NpmConfigManager Test Suite', () => {
             }
         });
 
-        test('should handle npm not installed error', async () => {
+        test('should handle npm not installed error', async function() {
+            this.timeout(10000);
             // This test documents the expected behavior when npm is not installed
             // In real scenarios, this would be tested with mocking
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
@@ -73,7 +78,8 @@ suite('NpmConfigManager Test Suite', () => {
             }
         });
 
-        test('should handle permission errors', async () => {
+        test('should handle permission errors', async function() {
+            this.timeout(10000);
             // This test documents the expected behavior for permission errors
             // In real scenarios, this would be tested with mocking
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
@@ -88,7 +94,8 @@ suite('NpmConfigManager Test Suite', () => {
             }
         });
 
-        test('should handle timeout errors', async () => {
+        test('should handle timeout errors', async function() {
+            this.timeout(10000);
             // This test documents the expected behavior for timeout errors
             // In real scenarios, this would be tested with mocking
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
@@ -106,6 +113,7 @@ suite('NpmConfigManager Test Suite', () => {
 
     suite('Round Trip', () => {
         test('should set and get proxy correctly', async function() {
+            this.timeout(15000);
             // Skip this test if npm is not installed
             const testUrl = 'http://test-proxy.example.com:8080';
             

@@ -51,24 +51,30 @@ export class GitConfigManager {
      */
     async unsetProxy(): Promise<OperationResult> {
         try {
-            // Check if http.proxy exists
-            const hasHttpProxy = await this.hasConfig('http.proxy');
-            const hasHttpsProxy = await this.hasConfig('https.proxy');
-
-            // Unset http.proxy if it exists
-            if (hasHttpProxy) {
+            // Unset http.proxy (git config --unset is idempotent - safe to call even if key doesn't exist)
+            try {
                 await execFileAsync('git', ['config', '--global', '--unset', 'http.proxy'], {
                     timeout: this.timeout,
                     encoding: 'utf8'
                 });
+            } catch (error: any) {
+                // Ignore error if key doesn't exist (exit code 5)
+                if (error.code !== 5) {
+                    throw error;
+                }
             }
 
-            // Unset https.proxy if it exists
-            if (hasHttpsProxy) {
+            // Unset https.proxy
+            try {
                 await execFileAsync('git', ['config', '--global', '--unset', 'https.proxy'], {
                     timeout: this.timeout,
                     encoding: 'utf8'
                 });
+            } catch (error: any) {
+                // Ignore error if key doesn't exist (exit code 5)
+                if (error.code !== 5) {
+                    throw error;
+                }
             }
 
             return { success: true };

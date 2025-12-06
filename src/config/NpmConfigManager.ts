@@ -62,18 +62,24 @@ export class NpmConfigManager {
      */
     async unsetProxy(): Promise<OperationResult> {
         try {
-            // Check if proxy exists
-            const hasProxy = await this.hasConfig('proxy');
-            const hasHttpsProxy = await this.hasConfig('https-proxy');
-
-            // Delete proxy if it exists
-            if (hasProxy) {
+            // Delete proxy (npm delete is idempotent - safe to call even if key doesn't exist)
+            try {
                 await this.execNpm(['config', 'delete', 'proxy']);
+            } catch (error: any) {
+                // Ignore errors if key doesn't exist
+                if (!error.stderr?.includes('not found') && error.code !== 1) {
+                    throw error;
+                }
             }
 
-            // Delete https-proxy if it exists
-            if (hasHttpsProxy) {
+            // Delete https-proxy
+            try {
                 await this.execNpm(['config', 'delete', 'https-proxy']);
+            } catch (error: any) {
+                // Ignore errors if key doesn't exist
+                if (!error.stderr?.includes('not found') && error.code !== 1) {
+                    throw error;
+                }
             }
 
             return { success: true };
@@ -88,10 +94,11 @@ export class NpmConfigManager {
      */
     async getProxy(): Promise<string | null> {
         try {
-            // Try to get proxy (npm 11.x naming)
-            const { stdout } = await this.execNpm(['config', 'get', 'proxy']);
+            // npm 11.x protects the 'proxy' option, so we use 'npm config list' instead
+            const { stdout } = await this.execNpm(['config', 'list', '--json']);
 
-            const value = stdout.trim();
+            const config = JSON.parse(stdout);
+            const value = config.proxy;
 
             // npm returns 'null' or 'undefined' as a string when config doesn't exist
             if (!value || value === 'undefined' || value === 'null') {

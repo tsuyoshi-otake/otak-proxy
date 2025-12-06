@@ -64,6 +64,45 @@ export const validProxyUrlGenerator = (): fc.Arbitrary<string> => {
 };
 
 /**
+ * Generates valid proxy URLs without credentials
+ * Used for npm proxy testing where credentials are masked by npm 11.x
+ */
+export const validProxyUrlWithoutCredentialsGenerator = (): fc.Arbitrary<string> => {
+    const protocolArb = fc.constantFrom('http', 'https');
+
+    // Valid hostname part: must start with alphanumeric, can contain hyphens
+    const hostnamePartArb = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$/)
+        .filter(s => s.length >= 1 && s.length <= 63);
+
+    // Generate hostname with 2-4 parts (e.g., proxy.example.com)
+    const hostnameArb = fc.array(hostnamePartArb, { minLength: 2, maxLength: 4 })
+        .map(parts => parts.join('.'))
+        .filter(hostname => {
+            try {
+                new URL(`http://${hostname}`);
+                return true;
+            } catch {
+                return false;
+            }
+        });
+
+    // Valid port: 1-65535
+    const portArb = fc.integer({ min: 1, max: 65535 });
+
+    return fc.record({
+        protocol: protocolArb,
+        hostname: hostnameArb,
+        port: fc.option(portArb, { nil: undefined })
+    }).map(({ protocol, hostname, port }) => {
+        let url = `${protocol}://${hostname}`;
+        if (port) {
+            url += `:${port}`;
+        }
+        return url;
+    });
+};
+
+/**
  * Generates URLs containing shell metacharacters
  * These should be rejected by validation
  */

@@ -8,14 +8,24 @@ import { SystemProxyDetector } from './config/SystemProxyDetector';
 import { UserNotifier } from './errors/UserNotifier';
 import { ErrorAggregator } from './errors/ErrorAggregator';
 import { Logger } from './utils/Logger';
+import { ProxyMonitor, ProxyDetectionResult } from './monitoring/ProxyMonitor';
+import { ProxyChangeLogger } from './monitoring/ProxyChangeLogger';
 
 const validator = new ProxyUrlValidator();
 const sanitizer = new InputSanitizer();
 const gitConfigManager = new GitConfigManager();
 const vscodeConfigManager = new VscodeConfigManager();
 const npmConfigManager = new NpmConfigManager();
-const systemProxyDetector = new SystemProxyDetector();
+
+// Initialize configuration from settings
+const config = vscode.workspace.getConfiguration('otakProxy');
+const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
+const systemProxyDetector = new SystemProxyDetector(detectionSourcePriority);
 const userNotifier = new UserNotifier();
+
+// Initialize ProxyMonitor components
+const proxyChangeLogger = new ProxyChangeLogger(sanitizer);
+let proxyMonitor: ProxyMonitor;
 
 let statusBarItem: vscode.StatusBarItem;
 let systemProxyCheckInterval: NodeJS.Timeout | undefined;
@@ -135,21 +145,20 @@ function initializeStatusBar(context: vscode.ExtensionContext) {
 }
 
 async function startSystemProxyMonitoring(context: vscode.ExtensionContext): Promise<void> {
-    // Check system proxy immediately
+    // Check system proxy immediately using legacy method
     await checkAndUpdateSystemProxy(context);
 
-    // Stop any existing interval
+    // Stop any existing legacy interval
     if (systemProxyCheckInterval) {
         clearInterval(systemProxyCheckInterval);
+        systemProxyCheckInterval = undefined;
     }
 
-    // Check every minute - essential for detecting proxy changes
-    systemProxyCheckInterval = setInterval(async () => {
-        const state = await getProxyState(context);
-        if (state.mode === ProxyMode.Auto) {
-            await checkAndUpdateSystemProxy(context);
-        }
-    }, 60000);  // 1 minute interval
+    // Start ProxyMonitor for polling-based checks
+    if (proxyMonitor && !proxyMonitor.getState().isActive) {
+        proxyMonitor.start();
+        Logger.info('ProxyMonitor started for Auto mode');
+    }
 }
 
 async function checkAndUpdateSystemProxy(context: vscode.ExtensionContext): Promise<void> {
@@ -193,9 +202,16 @@ async function checkAndUpdateSystemProxy(context: vscode.ExtensionContext): Prom
 }
 
 async function stopSystemProxyMonitoring(): Promise<void> {
+    // Stop legacy interval if running
     if (systemProxyCheckInterval) {
         clearInterval(systemProxyCheckInterval);
         systemProxyCheckInterval = undefined;
+    }
+
+    // Stop ProxyMonitor
+    if (proxyMonitor && proxyMonitor.getState().isActive) {
+        proxyMonitor.stop();
+        Logger.info('ProxyMonitor stopped');
     }
 }
 
@@ -393,11 +409,71 @@ async function askForInitialSetup(context: vscode.ExtensionContext) {
     }
 }
 
+/**
+ * Initialize ProxyMonitor with configuration from settings
+ */
+function initializeProxyMonitor(context: vscode.ExtensionContext): void {
+    const config = vscode.workspace.getConfiguration('otakProxy');
+    const pollingInterval = config.get<number>('pollingInterval', 30);
+    const maxRetries = config.get<number>('maxRetries', 3);
+    const priority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
+
+    // Update SystemProxyDetector priority
+    systemProxyDetector.updateDetectionPriority(priority);
+
+    // Create ProxyMonitor with configuration
+    proxyMonitor = new ProxyMonitor(
+        systemProxyDetector,
+        proxyChangeLogger,
+        {
+            pollingInterval: pollingInterval * 1000, // Convert seconds to ms
+            debounceDelay: 1000, // 1 second debounce
+            maxRetries: maxRetries,
+            retryBackoffBase: 1, // 1 second base
+            detectionSourcePriority: priority
+        }
+    );
+
+    // Set up proxyChanged event handler
+    proxyMonitor.on('proxyChanged', async (result: ProxyDetectionResult) => {
+        const state = await getProxyState(context);
+        if (state.mode === ProxyMode.Auto) {
+            const previousProxy = state.autoProxyUrl;
+            state.autoProxyUrl = result.proxyUrl || undefined;
+
+            if (previousProxy !== state.autoProxyUrl) {
+                await saveProxyState(context, state);
+                await applyProxySettings(state.autoProxyUrl || '', true, context);
+                updateStatusBar(state);
+
+                if (state.autoProxyUrl) {
+                    userNotifier.showSuccess(
+                        `System proxy changed: ${sanitizeProxyUrl(state.autoProxyUrl)}`
+                    );
+                } else if (previousProxy) {
+                    userNotifier.showSuccess('System proxy removed');
+                }
+            }
+        }
+    });
+
+    // Set up allRetriesFailed event handler
+    proxyMonitor.on('allRetriesFailed', (data: { error: string; trigger: string }) => {
+        Logger.error(`All proxy detection retries failed: ${data.error}`);
+        userNotifier.showWarning(
+            'System proxy detection failed after multiple retries. Check your system/browser proxy settings.'
+        );
+    });
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     Logger.log('Extension "otak-proxy" is now active.');
 
     // Initialize status bar immediately
     statusBarItem = initializeStatusBar(context);
+
+    // Initialize ProxyMonitor
+    initializeProxyMonitor(context);
 
     // Get or initialize proxy state
     let state = await getProxyState(context);
@@ -744,16 +820,51 @@ export async function activate(context: vscode.ExtensionContext) {
                     }
                 }
             }
+
+            // Handle polling interval change
+            if (e.affectsConfiguration('otakProxy.pollingInterval')) {
+                const newInterval = vscode.workspace
+                    .getConfiguration('otakProxy')
+                    .get<number>('pollingInterval', 30);
+                proxyMonitor.updateConfig({
+                    pollingInterval: newInterval * 1000 // Convert seconds to ms
+                });
+                Logger.info(`Polling interval updated to ${newInterval} seconds`);
+            }
+
+            // Handle detection source priority change
+            if (e.affectsConfiguration('otakProxy.detectionSourcePriority')) {
+                const newPriority = vscode.workspace
+                    .getConfiguration('otakProxy')
+                    .get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
+                systemProxyDetector.updateDetectionPriority(newPriority);
+                proxyMonitor.updateConfig({
+                    detectionSourcePriority: newPriority
+                });
+                Logger.info(`Detection source priority updated to: ${newPriority.join(', ')}`);
+            }
+
+            // Handle max retries change
+            if (e.affectsConfiguration('otakProxy.maxRetries')) {
+                const newMaxRetries = vscode.workspace
+                    .getConfiguration('otakProxy')
+                    .get<number>('maxRetries', 3);
+                proxyMonitor.updateConfig({
+                    maxRetries: newMaxRetries
+                });
+                Logger.info(`Max retries updated to ${newMaxRetries}`);
+            }
         })
     );
 
-    // Listen for window focus to check system proxy changes
+    // Listen for window focus to check system proxy changes (using ProxyMonitor)
     context.subscriptions.push(
         vscode.window.onDidChangeWindowState(async (windowState) => {
             if (windowState.focused) {
                 const state = await getProxyState(context);
                 if (state.mode === ProxyMode.Auto) {
-                    await checkAndUpdateSystemProxy(context);
+                    // Use ProxyMonitor for focus-based check
+                    proxyMonitor.triggerCheck('focus');
                 }
             }
         })
@@ -1029,6 +1140,10 @@ function updateStatusBar(state: ProxyState) {
     let text = '';
     let statusText = '';
 
+    // Get monitoring state and last check info from ProxyMonitor
+    const monitorState = proxyMonitor ? proxyMonitor.getState() : null;
+    const lastCheck = proxyChangeLogger ? proxyChangeLogger.getLastCheck() : null;
+
     switch (state.mode) {
         case ProxyMode.Auto:
             if (activeUrl) {
@@ -1065,11 +1180,32 @@ function updateStatusBar(state: ProxyState) {
     tooltip.appendMarkdown(`**Current Mode:** ${state.mode.toUpperCase()}\n\n`);
     tooltip.appendMarkdown(`**Status:** ${statusText}\n\n`);
 
+    // Add Auto mode specific information
+    if (state.mode === ProxyMode.Auto && lastCheck) {
+        const lastCheckTime = new Date(lastCheck.timestamp).toLocaleTimeString();
+        tooltip.appendMarkdown(`**Last Check:** ${lastCheckTime}\n\n`);
+
+        if (lastCheck.source) {
+            tooltip.appendMarkdown(`**Detection Source:** ${lastCheck.source}\n\n`);
+        }
+
+        if (!lastCheck.success && lastCheck.error) {
+            tooltip.appendMarkdown(`**Last Error:** $(warning) ${lastCheck.error}\n\n`);
+        }
+    }
+
+    // Add monitoring state information for Auto mode
+    if (state.mode === ProxyMode.Auto && monitorState) {
+        if (monitorState.consecutiveFailures > 0) {
+            tooltip.appendMarkdown(`**Consecutive Failures:** $(warning) ${monitorState.consecutiveFailures}\n\n`);
+        }
+    }
+
     if (state.manualProxyUrl) {
-        tooltip.appendMarkdown(`**Manual Proxy:** ${state.manualProxyUrl}\n\n`);
+        tooltip.appendMarkdown(`**Manual Proxy:** ${sanitizer.maskPassword(state.manualProxyUrl)}\n\n`);
     }
     if (state.autoProxyUrl) {
-        tooltip.appendMarkdown(`**System Proxy:** ${state.autoProxyUrl}\n\n`);
+        tooltip.appendMarkdown(`**System Proxy:** ${sanitizer.maskPassword(state.autoProxyUrl)}\n\n`);
     }
 
     tooltip.appendMarkdown(`---\n\n`);
@@ -1083,6 +1219,11 @@ function updateStatusBar(state: ProxyState) {
 }
 
 export async function deactivate() {
+    // Stop ProxyMonitor
+    if (proxyMonitor) {
+        proxyMonitor.stop();
+    }
+    // Also stop legacy monitoring if running
     await stopSystemProxyMonitoring();
     if (statusBarItem) {
         statusBarItem.dispose();
