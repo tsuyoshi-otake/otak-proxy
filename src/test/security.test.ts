@@ -387,18 +387,25 @@ suite('Security Test Suite', () => {
                     fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 5 && s.length <= 20),
                     fc.stringMatching(/^[a-zA-Z0-9.-]+$/).filter(s => s.length >= 5 && s.length <= 50),
                     (protocol, username, password, hostname) => {
+                        // Skip if password is substring of username or hostname (false positive case)
+                        // This is not a security issue - we're testing that the password field is masked
+                        if (username.toLowerCase().includes(password.toLowerCase()) ||
+                            hostname.toLowerCase().includes(password.toLowerCase())) {
+                            return true;
+                        }
+
                         const url = `${protocol}://${username}:${password}@${hostname}:8080`;
-                        
+
                         // Mask the password
                         const masked = sanitizer.maskPassword(url);
-                        
+
                         // Password should never appear in masked version
                         assert.ok(!masked.includes(password),
                             `Password '${password}' should not appear in: ${masked}`);
-                        
+
                         // Remove credentials
                         const cleaned = sanitizer.removeCredentials(url);
-                        
+
                         // Neither username nor password should appear
                         assert.ok(!cleaned.includes(username) || !cleaned.includes(':'),
                             `Credentials should be removed from: ${cleaned}`);
