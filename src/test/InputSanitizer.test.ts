@@ -260,13 +260,13 @@ suite('InputSanitizer Test Suite', () => {
             fc.assert(
                 fc.property(
                     fc.constantFrom('http', 'https'),
-                    // Generate valid username (alphanumeric, hyphens, underscores only, min length 3)
-                    fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 3 && s.length <= 20),
+                    // Generate valid username (alphanumeric, hyphens, underscores only, min length 3, must start with letter)
+                    fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9_-]*$/).filter(s => s.length >= 3 && s.length <= 20),
                     // Generate valid password (alphanumeric, hyphens, underscores only, min length 5)
                     // Use a unique prefix to avoid accidental substring matches
                     fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 5 && s.length <= 20).map(s => `pwd${s}`),
-                    // Generate valid hostname
-                    fc.stringMatching(/^[a-zA-Z0-9.-]+$/).filter(s => s.length >= 5 && s.length <= 50),
+                    // Generate valid hostname (must start with letter, not end with dot, won't be URL-normalized)
+                    fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z][a-zA-Z0-9-]*)*$/).filter(s => s.length >= 5 && s.length <= 50),
                     fc.option(fc.integer({ min: 1, max: 65535 }), { nil: undefined }),
                     (protocol, username, password, hostname, port) => {
                         // Construct URL with credentials

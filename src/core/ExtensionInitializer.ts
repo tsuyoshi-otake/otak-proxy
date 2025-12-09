@@ -37,6 +37,7 @@ export interface InitializerContext {
     userNotifier: UserNotifier;
     sanitizer: InputSanitizer;
     proxyChangeLogger: ProxyChangeLogger;
+    updateStatusBar?: (state: ProxyState) => void;
 }
 
 /**
@@ -56,6 +57,14 @@ export class ExtensionInitializer {
         this.context = context;
         // Initialize connection tester for startup and Auto mode testing
         this.connectionTester = new ProxyConnectionTester(this.context.userNotifier);
+    }
+
+    /**
+     * Set the status bar update callback
+     * Called after StatusBarManager is initialized
+     */
+    setStatusBarUpdater(updater: (state: ProxyState) => void): void {
+        this.context.updateStatusBar = updater;
     }
 
     /**
@@ -168,12 +177,34 @@ export class ExtensionInitializer {
     private async handleProxyTestComplete(testResult: TestResult): Promise<void> {
         const state = await this.context.proxyStateManager.getState();
 
+        // Only process for Auto mode
+        if (state.mode !== ProxyMode.Auto) {
+            return;
+        }
+
         // Update state with test result
         state.lastTestResult = testResult as ProxyTestResult;
         state.proxyReachable = testResult.success;
         state.lastTestTimestamp = Date.now();
 
+        // Update autoModeOff based on test result
+        if (!testResult.success) {
+            // Test failed - set Auto Mode OFF
+            state.autoModeOff = true;
+            state.usingFallbackProxy = false;
+            state.fallbackProxyUrl = undefined;
+            Logger.info('Proxy test failed - Auto Mode OFF');
+        } else {
+            // Test succeeded - ensure Auto Mode is ON
+            state.autoModeOff = false;
+        }
+
         await this.context.proxyStateManager.saveState(state);
+
+        // Update status bar
+        if (this.context.updateStatusBar) {
+            this.context.updateStatusBar(state);
+        }
 
         // Clear startup test pending flag if applicable
         if (this.isStartupTestPending) {
@@ -194,17 +225,25 @@ export class ExtensionInitializer {
         }
 
         state.proxyReachable = data.reachable;
-        await this.context.proxyStateManager.saveState(state);
 
         // Apply proxy settings based on new reachability state
         if (data.reachable && !data.previousState) {
             // Proxy became reachable
+            state.autoModeOff = false;
             await this.context.proxyApplier.applyProxy(data.proxyUrl, true);
             Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
         } else if (!data.reachable && data.previousState) {
-            // Proxy became unreachable
+            // Proxy became unreachable - set Auto Mode OFF
+            state.autoModeOff = true;
+            state.usingFallbackProxy = false;
+            state.fallbackProxyUrl = undefined;
             await this.context.proxyApplier.applyProxy(data.proxyUrl, false);
-            Logger.info(`Proxy ${data.proxyUrl} became unreachable, disabling proxy`);
+            Logger.info(`Proxy ${data.proxyUrl} became unreachable, Auto Mode OFF`);
+        }
+
+        await this.context.proxyStateManager.saveState(state);
+        if (this.context.updateStatusBar) {
+            this.context.updateStatusBar(state);
         }
     }
 
@@ -310,22 +349,74 @@ export class ExtensionInitializer {
 
         if (state.mode === ProxyMode.Auto) {
             const previousProxy = state.autoProxyUrl;
-            state.autoProxyUrl = detectedProxy || undefined;
+
+            if (detectedProxy) {
+                // System proxy detected - use it
+                state.autoProxyUrl = detectedProxy;
+                state.autoModeOff = false;
+                state.usingFallbackProxy = false;
+                state.fallbackProxyUrl = undefined;
+            } else {
+                // No system proxy detected - try fallback
+                const config = vscode.workspace.getConfiguration('otakProxy');
+                const fallbackEnabled = config.get<boolean>('enableFallback', true);
+
+                if (fallbackEnabled && state.manualProxyUrl) {
+                    // Test fallback proxy before using it
+                    let fallbackReachable = false;
+                    if (this.connectionTester) {
+                        Logger.log(`Testing fallback proxy: ${state.manualProxyUrl}`);
+                        const testResult = await this.connectionTester.testProxyAuto(state.manualProxyUrl);
+                        fallbackReachable = testResult.success;
+                    }
+
+                    if (fallbackReachable) {
+                        // Fallback proxy is working - use it
+                        state.autoProxyUrl = state.manualProxyUrl;
+                        state.autoModeOff = false;
+                        state.usingFallbackProxy = true;
+                        state.fallbackProxyUrl = state.manualProxyUrl;
+                        Logger.log(`Using fallback proxy: ${state.manualProxyUrl}`);
+                    } else {
+                        // Fallback proxy is also not reachable - Auto Mode OFF
+                        state.autoProxyUrl = undefined;
+                        state.autoModeOff = true;
+                        state.usingFallbackProxy = false;
+                        state.fallbackProxyUrl = undefined;
+                        Logger.log('Fallback proxy not reachable - Auto Mode OFF');
+                    }
+                } else {
+                    // No fallback available - Auto Mode OFF
+                    state.autoProxyUrl = undefined;
+                    state.autoModeOff = true;
+                    state.usingFallbackProxy = false;
+                    state.fallbackProxyUrl = undefined;
+                }
+            }
 
             if (previousProxy !== state.autoProxyUrl) {
-                // System proxy changed, update everything
+                // Proxy changed, update everything
                 await this.context.proxyStateManager.saveState(state);
                 await this.context.proxyApplier.applyProxy(state.autoProxyUrl || '', true);
 
-                if (state.autoProxyUrl) {
+                if (state.autoProxyUrl && !state.usingFallbackProxy) {
                     this.context.userNotifier.showSuccess(
                         'message.systemProxyChanged',
                         { url: this.context.sanitizer.maskPassword(state.autoProxyUrl) }
                     );
+                } else if (state.usingFallbackProxy) {
+                    this.context.userNotifier.showSuccess(
+                        'fallback.usingManualProxy',
+                        { url: this.context.sanitizer.maskPassword(state.autoProxyUrl!) }
+                    );
                 } else if (previousProxy) {
                     this.context.userNotifier.showSuccess('message.systemProxyRemoved');
                 }
+            } else {
+                // Even if proxy didn't change, save the updated fallback state
+                await this.context.proxyStateManager.saveState(state);
             }
+
         } else {
             // Just save the detected proxy for later use
             state.autoProxyUrl = detectedProxy || undefined;

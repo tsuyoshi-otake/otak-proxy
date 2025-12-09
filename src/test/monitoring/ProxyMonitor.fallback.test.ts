@@ -374,6 +374,10 @@ suite('ProxyMonitor Fallback Integration Tests', () => {
                         mockConnectionTester.testProxyAuto.reset();
                         mockStateManager.getState.reset();
 
+                        // Re-configure mocks after reset
+                        // System proxy tests should fail (simulating network issues)
+                        mockConnectionTester.testProxyAuto.resolves(createFailureTestResult(systemProxyUrl || ''));
+
                         // State is complete OFF (mode=Off, not autoModeOff)
                         mockStateManager.getState.resolves({
                             mode: ProxyMode.Off,

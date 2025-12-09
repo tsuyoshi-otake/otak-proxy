@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "engines": {
     "vscode": "^1.9.0"
   },
@@ -57,10 +57,18 @@
         },
         "otakProxy.detectionSourcePriority": {
           "type": "array",
-          "default": ["environment", "vscode", "platform"],
+          "default": [
+            "environment",
+            "vscode",
+            "platform"
+          ],
           "items": {
             "type": "string",
-            "enum": ["environment", "vscode", "platform"]
+            "enum": [
+              "environment",
+              "vscode",
+              "platform"
+            ]
           },
           "description": "%config.detectionSourcePriority%"
         },
@@ -104,10 +112,10 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:real-proxy": "vscode-test",
-    "test:real-proxy:grep": "vscode-test -- --grep \"Real Proxy\""
+    "test:real-proxy": "dotenvx run -f .env.local -- cross-env MOCHA_GREP=\"Real Proxy\" vscode-test"
   },
   "devDependencies": {
+    "@dotenvx/dotenvx": "^1.51.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/sinon": "^17.0.3",
@@ -116,6 +124,7 @@
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
+    "cross-env": "^10.1.0",
     "eslint": "^9.19.0",
     "fast-check": "^4.3.0",
     "sinon": "^19.0.2",

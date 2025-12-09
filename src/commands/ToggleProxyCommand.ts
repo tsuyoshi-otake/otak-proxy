@@ -51,24 +51,46 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
             const updatedState = await ctx.getProxyState();
 
             if (!updatedState.autoProxyUrl) {
-                // Requirement 6.1: Show action buttons for system import
-                const action = await vscode.window.showWarningMessage(
-                    i18n.t('warning.noSystemProxyDetected'),
-                    i18n.t('action.configureManual'),
-                    i18n.t('action.importSystem')
-                );
+                // Check if fallback to manual proxy is available
+                const config = vscode.workspace.getConfiguration('otakProxy');
+                const fallbackEnabled = config.get<boolean>('enableFallback', true);
+                const manualProxyUrl = currentState.manualProxyUrl;
 
-                if (action === i18n.t('action.configureManual')) {
-                    await vscode.commands.executeCommand('otak-proxy.configureUrl');
-                    return { success: true };
-                } else if (action === i18n.t('action.importSystem')) {
-                    await vscode.commands.executeCommand('otak-proxy.importProxy');
-                    return { success: true };
+                if (fallbackEnabled && manualProxyUrl) {
+                    // Use manual proxy as fallback - Fallback mode (NOT Auto Mode OFF)
+                    currentState.mode = ProxyMode.Auto;
+                    currentState.autoModeOff = false;  // Proxy is working, not OFF
+                    currentState.usingFallbackProxy = true;
+                    currentState.fallbackProxyUrl = manualProxyUrl;
+                    currentState.autoProxyUrl = manualProxyUrl; // Use fallback as active proxy
+
+                    Logger.log(`Fallback to Manual Proxy: ${manualProxyUrl}`);
+                    ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: manualProxyUrl });
+                } else {
+                    // Requirement 6.1: Show action buttons for system import
+                    const action = await vscode.window.showWarningMessage(
+                        i18n.t('warning.noSystemProxyDetected'),
+                        i18n.t('action.configureManual'),
+                        i18n.t('action.importSystem')
+                    );
+
+                    if (action === i18n.t('action.configureManual')) {
+                        await vscode.commands.executeCommand('otak-proxy.configureUrl');
+                        return { success: true };
+                    } else if (action === i18n.t('action.importSystem')) {
+                        await vscode.commands.executeCommand('otak-proxy.importProxy');
+                        return { success: true };
+                    }
+
+                    // No fallback available - set to Auto Mode OFF (not complete Off)
+                    currentState.mode = ProxyMode.Auto;
+                    currentState.autoModeOff = true;
+                    currentState.usingFallbackProxy = false;
                 }
-
-                currentState.mode = ProxyMode.Off;
             } else {
                 currentState.mode = nextMode as ProxyMode;
+                currentState.autoModeOff = false;
+                currentState.usingFallbackProxy = false;
             }
         } else {
             currentState.mode = nextMode as ProxyMode;

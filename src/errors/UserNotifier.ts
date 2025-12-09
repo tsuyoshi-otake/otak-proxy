@@ -64,12 +64,14 @@ export class UserNotifier {
 
     /**
      * Shows a success message with auto-close after 3 seconds
+     * Uses setStatusBarMessage for auto-dismiss capability
      * @param message - The success message to display (can be a message key or direct text)
      * @param params - Optional parameters for message key substitution
      */
     showSuccess(message: string, params?: Record<string, string>): void {
         const translatedMessage = this.translateIfKey(message, params);
-        this.showNotificationWithTimeout('info', translatedMessage, 3000);
+        // Use setStatusBarMessage for auto-dismiss (3 seconds)
+        vscode.window.setStatusBarMessage(`$(check) ${translatedMessage}`, 3000);
     }
 
     /**

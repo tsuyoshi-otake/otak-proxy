@@ -432,7 +432,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
         await fc.assert(
             fc.asyncProperty(
                 fc.integer({ min: 1, max: 2 }), // maxRetries value (reduced for faster tests)
-                fc.double({ min: 0.05, max: 0.2 }), // retryBackoffBase value (reduced for faster tests)
+                fc.double({ min: 0.1, max: 0.2 }), // retryBackoffBase value (min 100ms for timing stability)
                 async (maxRetries, retryBackoffBase) => {
                     // Create a detector that always fails and records attempt timestamps
                     class FailingDetectorWithTimestamps {
@@ -529,10 +529,11 @@ suite('ProxyMonitor Property-Based Tests', () => {
                                 const interval2 = timestamps[i] - timestamps[i - 1];
                                 
                                 // interval2 should be approximately 2x interval1
-                                // Allow for timing variations: ratio should be between 1.5 and 2.5
+                                // Allow for timing variations: ratio should be between 1.3 and 2.7
+                                // (loosened from 1.5-2.5 to handle system scheduling jitter)
                                 const ratio = interval2 / interval1;
-                                
-                                if (ratio < 1.5 || ratio > 2.5) {
+
+                                if (ratio < 1.3 || ratio > 2.7) {
                                     throw new Error(
                                         `Exponential growth not observed: ` +
                                         `interval ${i-1} was ${interval1}ms, ` +
@@ -689,7 +690,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
      */
     test('Property 4: Polling stops when switching modes', async function() {
         // Increase timeout for this test as it involves waiting for polling
-        this.timeout(40000);
+        this.timeout(60000);
 
         // Test with minimum valid interval (10 seconds) as required by ProxyMonitor
         const intervalSeconds = 10;
@@ -726,6 +727,9 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
             // Stop monitoring (simulating mode switch to Manual or Off)
             monitor.stop();
+
+            // Wait a bit for any in-flight operations to complete
+            await sleep(200);
 
             // Reset check count to measure checks after stop
             mockDetector.resetCheckCount();

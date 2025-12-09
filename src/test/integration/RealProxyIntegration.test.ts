@@ -370,7 +370,8 @@ suite('Real Proxy Integration Tests', function() {
                 return;
             }
 
-            const invalidProxyUrl = 'http://127.0.0.1:9999';
+            // Use a hostname that doesn't exist to ensure DNS failure
+            const invalidProxyUrl = 'http://nonexistent.invalid.proxy.test:9999';
 
             // Test real proxy
             const realResult = await testProxyConnectionParallel(

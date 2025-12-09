@@ -116,6 +116,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // Phase 5: Initialize StatusBar
     statusBarManager = new StatusBarManager(context);
     statusBarManager.setMonitorProviders(proxyMonitor, proxyChangeLogger);
+    initializer.setStatusBarUpdater((s) => statusBarManager.update(s));
 
     // Phase 6: State initialization
     let state = await proxyStateManager.getState();
