@@ -11,11 +11,17 @@ Toggle your proxy settings with a single click. Zero configuration required.
 
 ## Quick Start
 
+### Already have a system proxy?
 1. Install the extension
-2. Click the proxy indicator in the status bar
-3. Choose your mode: **Off** → **Manual** → **Auto**
+2. Click the status bar → select **Auto**
+3. Done — the extension syncs with your system proxy automatically
 
-That's it. The extension handles Git, VSCode, and npm proxy settings automatically.
+### Need to set a proxy manually?
+1. Install the extension
+2. Click the status bar → select **Manual**
+3. Enter your proxy URL (e.g., `http://proxy.example.com:8080`)
+
+The extension configures Git, VSCode, and npm proxy settings for you.
 
 ## Features
 
