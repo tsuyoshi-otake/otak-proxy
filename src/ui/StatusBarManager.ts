@@ -7,6 +7,10 @@
  * - 5.2: Reflect proxy state in status bar text and tooltip
  * - 5.3: Validate command links reference registered commands
  * - 5.4: Support internationalization for status bar text
+ *
+ * Feature: auto-mode-fallback-improvements
+ * - Task 4.1: Update for fallback status display
+ * - Task 4.4: Tooltip updates for Auto Mode OFF and OFF mode
  */
 
 import * as vscode from 'vscode';
@@ -116,9 +120,20 @@ export class StatusBarManager {
         const lastCheck = this.lastCheckProvider?.getLastCheck() ?? null;
 
         // Set text and status based on mode
+        // Feature: auto-mode-fallback-improvements (Tasks 4.1, 4.4)
         switch (state.mode) {
             case ProxyMode.Auto:
-                if (activeUrl) {
+                // Task 4.1: Handle Auto Mode OFF state
+                if (state.autoModeOff) {
+                    text = `$(circle-slash) ${i18n.t('statusbar.autoOff')}`;
+                    statusText = i18n.t('statusbar.tooltip.autoOff');
+                }
+                // Task 4.1: Handle fallback proxy state
+                else if (state.usingFallbackProxy && state.fallbackProxyUrl) {
+                    text = `$(plug) ${i18n.t('statusbar.autoFallback', { url: state.fallbackProxyUrl })}`;
+                    statusText = i18n.t('statusbar.tooltip.autoFallback', { url: state.fallbackProxyUrl });
+                }
+                else if (activeUrl) {
                     text = `$(sync~spin) ${i18n.t('statusbar.autoWithUrl', { url: activeUrl })}`;
                     statusText = i18n.t('statusbar.tooltip.autoModeUsing', { url: activeUrl });
                 } else {

@@ -299,4 +299,141 @@ suite('ProxyStateManager Unit Tests', () => {
             assert.strictEqual(retrievedState.lastTestResult!.errors[0].message, 'Connection refused');
         });
     });
+
+    /**
+     * Feature: auto-mode-fallback-improvements
+     * Tests for fallback proxy fields
+     * Task: 2.3
+     */
+    suite('Fallback Proxy Fields (auto-mode-fallback-improvements)', () => {
+        test('saveState should persist fallback proxy fields', async () => {
+            const testState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: undefined,
+                manualProxyUrl: 'http://manual.example.com:8080',
+                usingFallbackProxy: true,
+                autoModeOff: false,
+                lastSystemProxyUrl: 'http://system.example.com:8080',
+                fallbackProxyUrl: 'http://manual.example.com:8080'
+            };
+
+            await stateManager.saveState(testState);
+
+            assert.deepStrictEqual(storedState, testState);
+            assert.strictEqual(storedState!.usingFallbackProxy, true);
+            assert.strictEqual(storedState!.autoModeOff, false);
+            assert.strictEqual(storedState!.lastSystemProxyUrl, 'http://system.example.com:8080');
+            assert.strictEqual(storedState!.fallbackProxyUrl, 'http://manual.example.com:8080');
+        });
+
+        test('getState should return saved fallback proxy fields', async () => {
+            const testState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: undefined,
+                usingFallbackProxy: true,
+                autoModeOff: false,
+                lastSystemProxyUrl: 'http://old-system.example.com:8080',
+                fallbackProxyUrl: 'http://fallback.example.com:8080'
+            };
+
+            await stateManager.saveState(testState);
+            const retrievedState = await stateManager.getState();
+
+            assert.strictEqual(retrievedState.usingFallbackProxy, true);
+            assert.strictEqual(retrievedState.autoModeOff, false);
+            assert.strictEqual(retrievedState.lastSystemProxyUrl, 'http://old-system.example.com:8080');
+            assert.strictEqual(retrievedState.fallbackProxyUrl, 'http://fallback.example.com:8080');
+        });
+
+        test('Auto Mode OFF state should be saved and retrieved correctly', async () => {
+            const testState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: undefined,
+                usingFallbackProxy: false,
+                autoModeOff: true,
+                lastSystemProxyUrl: 'http://last-system.example.com:8080',
+                fallbackProxyUrl: undefined
+            };
+
+            await stateManager.saveState(testState);
+            const retrievedState = await stateManager.getState();
+
+            assert.strictEqual(retrievedState.autoModeOff, true);
+            assert.strictEqual(retrievedState.usingFallbackProxy, false);
+            assert.strictEqual(retrievedState.lastSystemProxyUrl, 'http://last-system.example.com:8080');
+            assert.strictEqual(retrievedState.fallbackProxyUrl, undefined);
+        });
+
+        test('backward compatibility: old state without fallback fields should work', async () => {
+            // Simulate old state format without fallback fields
+            const oldState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://auto.example.com:8080',
+                manualProxyUrl: 'http://manual.example.com:8080',
+                lastSystemProxyCheck: Date.now(),
+                gitConfigured: true,
+                vscodeConfigured: true,
+                systemProxyDetected: true
+                // No fallback fields
+            };
+
+            storedState = oldState as ProxyState;
+            const retrievedState = await stateManager.getState();
+
+            // Should work without errors and have undefined for fallback fields
+            assert.strictEqual(retrievedState.mode, ProxyMode.Auto);
+            assert.strictEqual(retrievedState.autoProxyUrl, 'http://auto.example.com:8080');
+            assert.strictEqual(retrievedState.usingFallbackProxy, undefined);
+            assert.strictEqual(retrievedState.autoModeOff, undefined);
+            assert.strictEqual(retrievedState.lastSystemProxyUrl, undefined);
+            assert.strictEqual(retrievedState.fallbackProxyUrl, undefined);
+        });
+
+        test('state with only some fallback fields should work', async () => {
+            const partialState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: undefined,
+                usingFallbackProxy: true
+                // No autoModeOff, lastSystemProxyUrl, or fallbackProxyUrl
+            };
+
+            await stateManager.saveState(partialState);
+            const retrievedState = await stateManager.getState();
+
+            assert.strictEqual(retrievedState.usingFallbackProxy, true);
+            assert.strictEqual(retrievedState.autoModeOff, undefined);
+            assert.strictEqual(retrievedState.lastSystemProxyUrl, undefined);
+            assert.strictEqual(retrievedState.fallbackProxyUrl, undefined);
+        });
+
+        test('transition from fallback to system proxy should update state correctly', async () => {
+            // Initial state: using fallback
+            const fallbackState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://fallback.example.com:8080',
+                usingFallbackProxy: true,
+                autoModeOff: false,
+                fallbackProxyUrl: 'http://fallback.example.com:8080'
+            };
+
+            await stateManager.saveState(fallbackState);
+
+            // Transition: system proxy becomes available
+            const systemState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://system.example.com:8080',
+                usingFallbackProxy: false,
+                autoModeOff: false,
+                lastSystemProxyUrl: 'http://system.example.com:8080',
+                fallbackProxyUrl: undefined
+            };
+
+            await stateManager.saveState(systemState);
+            const retrievedState = await stateManager.getState();
+
+            assert.strictEqual(retrievedState.usingFallbackProxy, false);
+            assert.strictEqual(retrievedState.autoProxyUrl, 'http://system.example.com:8080');
+            assert.strictEqual(retrievedState.fallbackProxyUrl, undefined);
+        });
+    });
 });

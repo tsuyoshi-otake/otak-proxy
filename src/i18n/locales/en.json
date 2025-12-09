@@ -130,5 +130,22 @@
   "connectionTest.proxyUnreachable": "Proxy is unreachable: {url}",
   "connectionTest.schedulerStarted": "Periodic proxy testing started",
   "connectionTest.schedulerStopped": "Periodic proxy testing stopped",
-  "connectionTest.intervalUpdated": "Test interval updated to {seconds} seconds"
+  "connectionTest.intervalUpdated": "Test interval updated to {seconds} seconds",
+
+  "fallback.usingManualProxy": "System proxy not detected, using manual proxy: {url}",
+  "fallback.manualProxyFailed": "Manual proxy is also unavailable",
+  "fallback.switchedToSystem": "Switched back to system proxy",
+  "fallback.autoModeOff": "Auto Mode OFF (waiting for proxy)",
+
+  "statusbar.autoOff": "Auto: OFF",
+  "statusbar.autoFallback": "Auto (Fallback): {url}",
+  "statusbar.tooltip.autoOff": "Auto Mode - Proxy temporarily disabled. System proxy or fallback proxy will be used when available.",
+  "statusbar.tooltip.autoFallback": "Auto Mode - Using manual proxy as fallback: {url}",
+
+  "log.fallbackToManual": "Fallback to Manual Proxy",
+  "log.autoModeOff": "Auto Mode OFF (waiting for proxy)",
+  "log.switchedToSystem": "Switched back to System Proxy",
+
+  "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only)",
+  "config.enableFallback.description": "When enabled, if no system proxy is detected in Auto mode, the extension will try to use the manually configured proxy as a fallback."
 }

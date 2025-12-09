@@ -82,6 +82,11 @@
           "type": "boolean",
           "default": true,
           "description": "%config.autoTestEnabled%"
+        },
+        "otakProxy.enableFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.enableFallback%"
         }
       }
     }

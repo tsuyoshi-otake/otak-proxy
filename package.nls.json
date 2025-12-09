@@ -7,5 +7,6 @@
   "config.detectionSourcePriority": "Priority order for proxy detection sources. Sources are tried in order until one succeeds.",
   "config.maxRetries": "Maximum number of retries for proxy detection when it fails.",
   "config.testInterval": "Proxy connection test interval in seconds (Auto mode only). Range: 30-600 seconds. Default: 60 seconds.",
-  "config.autoTestEnabled": "Enable automatic proxy connection testing in Auto mode. When enabled, proxy connectivity is tested periodically."
+  "config.autoTestEnabled": "Enable automatic proxy connection testing in Auto mode. When enabled, proxy connectivity is tested periodically.",
+  "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only). When enabled, if no system proxy is detected, the extension will try to use the manually configured proxy as a fallback."
 }

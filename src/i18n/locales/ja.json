@@ -130,5 +130,22 @@
   "connectionTest.proxyUnreachable": "Proxyに接続不可: {url}",
   "connectionTest.schedulerStarted": "定期的なProxyテストを開始しました",
   "connectionTest.schedulerStopped": "定期的なProxyテストを停止しました",
-  "connectionTest.intervalUpdated": "テスト間隔を{seconds}秒に更新しました"
+  "connectionTest.intervalUpdated": "テスト間隔を{seconds}秒に更新しました",
+
+  "fallback.usingManualProxy": "システムProxyが検出されないため、手動Proxyを使用しています: {url}",
+  "fallback.manualProxyFailed": "手動Proxyも利用できません",
+  "fallback.switchedToSystem": "システムProxyに切り替えました",
+  "fallback.autoModeOff": "Auto Mode OFF (Proxy待機中)",
+
+  "statusbar.autoOff": "Auto: OFF",
+  "statusbar.autoFallback": "Auto (フォールバック): {url}",
+  "statusbar.tooltip.autoOff": "Autoモード - Proxyが一時的に無効化されています。システムProxyまたはフォールバックProxyが利用可能になると自動的に有効化されます。",
+  "statusbar.tooltip.autoFallback": "Autoモード - 手動Proxyをフォールバックとして使用中: {url}",
+
+  "log.fallbackToManual": "手動Proxyへフォールバック",
+  "log.autoModeOff": "Auto Mode OFF (Proxy待機中)",
+  "log.switchedToSystem": "システムProxyに切り替え",
+
+  "config.enableFallback": "システムProxyが検出されない場合、手動Proxyにフォールバックする（Autoモードのみ）",
+  "config.enableFallback.description": "有効にすると、AutoモードでシステムProxyが検出されない場合、手動で設定されたProxyをフォールバックとして使用します。"
 }

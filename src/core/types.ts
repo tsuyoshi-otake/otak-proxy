@@ -55,6 +55,10 @@ export interface ProxyTestResult {
  * @property {ProxyTestResult} [lastTestResult] - Last connection test result (Feature: auto-mode-proxy-testing)
  * @property {boolean} [proxyReachable] - Whether the proxy is currently reachable (Feature: auto-mode-proxy-testing)
  * @property {number} [lastTestTimestamp] - Timestamp of last connection test (Feature: auto-mode-proxy-testing)
+ * @property {boolean} [usingFallbackProxy] - Whether currently using fallback proxy (Feature: auto-mode-fallback-improvements)
+ * @property {boolean} [autoModeOff] - Whether Auto mode is temporarily OFF (Feature: auto-mode-fallback-improvements)
+ * @property {string} [lastSystemProxyUrl] - Last detected system proxy URL (Feature: auto-mode-fallback-improvements)
+ * @property {string} [fallbackProxyUrl] - Currently used fallback proxy URL (Feature: auto-mode-fallback-improvements)
  */
 export interface ProxyState {
     mode: ProxyMode;
@@ -70,6 +74,11 @@ export interface ProxyState {
     lastTestResult?: ProxyTestResult;
     proxyReachable?: boolean;
     lastTestTimestamp?: number;
+    // Feature: auto-mode-fallback-improvements
+    usingFallbackProxy?: boolean;        // Whether currently using fallback proxy
+    autoModeOff?: boolean;               // Auto Mode OFF state (waiting for proxy)
+    lastSystemProxyUrl?: string;         // Last detected system proxy URL
+    fallbackProxyUrl?: string;           // Currently used fallback proxy URL
 }
 
 // Forward declarations for manager types to avoid circular dependencies
