@@ -3,9 +3,9 @@
  * @description Toggle proxy mode command implementation
  *
  * Requirements:
- * - 1.4: Error handling for command execution
- * - 2.1: Cycle through Off -> Manual -> Auto -> Off
- * - 4.4: Graceful error handling
+ * - 1.1: Concise error messages with details in output channel
+ * - 3.3: Log detailed information to output channel
+ * - 6.1: Action buttons for manual setup and system import
  */
 
 import * as vscode from 'vscode';
@@ -13,6 +13,7 @@ import { ProxyMode } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
+import { OutputChannelManager } from '../errors/OutputChannelManager';
 
 /**
  * Execute the toggle proxy command
@@ -26,16 +27,17 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
         const currentState = await ctx.getProxyState();
         const nextMode = ctx.getNextMode(currentState.mode);
         const i18n = I18nManager.getInstance();
+        const outputManager = OutputChannelManager.getInstance();
 
         if (nextMode === ProxyMode.Manual && !currentState.manualProxyUrl) {
-            // No manual proxy configured, prompt for setup
+            // Requirement 6.1: Show action buttons for manual setup
             const answer = await vscode.window.showInformationMessage(
                 i18n.t('prompt.noManualProxy'),
-                i18n.t('action.yes'),
+                i18n.t('action.configureManual'),
                 i18n.t('action.skipToAuto')
             );
 
-            if (answer === i18n.t('action.yes')) {
+            if (answer === i18n.t('action.configureManual')) {
                 await vscode.commands.executeCommand('otak-proxy.configureUrl');
                 return { success: true };
             } else if (answer === i18n.t('action.skipToAuto')) {
@@ -49,8 +51,21 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
             const updatedState = await ctx.getProxyState();
 
             if (!updatedState.autoProxyUrl) {
-                // Show notification and automatically switch to Off mode
-                ctx.userNotifier.showWarning('warning.noSystemProxyDetected');
+                // Requirement 6.1: Show action buttons for system import
+                const action = await vscode.window.showWarningMessage(
+                    i18n.t('warning.noSystemProxyDetected'),
+                    i18n.t('action.configureManual'),
+                    i18n.t('action.importSystem')
+                );
+
+                if (action === i18n.t('action.configureManual')) {
+                    await vscode.commands.executeCommand('otak-proxy.configureUrl');
+                    return { success: true };
+                } else if (action === i18n.t('action.importSystem')) {
+                    await vscode.commands.executeCommand('otak-proxy.importProxy');
+                    return { success: true };
+                }
+
                 currentState.mode = ProxyMode.Off;
             } else {
                 currentState.mode = nextMode as ProxyMode;
@@ -73,6 +88,15 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
         return { success: true };
     } catch (error) {
         Logger.error('Toggle proxy command failed:', error);
+        
+        // Requirement 1.1, 3.3: Log detailed error to output channel
+        const outputManager = OutputChannelManager.getInstance();
+        outputManager.logError('Toggle proxy command failed', {
+            timestamp: new Date(),
+            errorMessage: error instanceof Error ? error.message : String(error),
+            stackTrace: error instanceof Error ? error.stack : undefined
+        });
+        
         ctx.userNotifier.showError(
             'error.toggleFailed',
             ['suggestion.checkOutputLog', 'suggestion.reloadWindow']

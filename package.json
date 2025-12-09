@@ -70,6 +70,18 @@
           "minimum": 0,
           "maximum": 10,
           "description": "%config.maxRetries%"
+        },
+        "otakProxy.testInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 30,
+          "maximum": 600,
+          "description": "%config.testInterval%"
+        },
+        "otakProxy.autoTestEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.autoTestEnabled%"
         }
       }
     }

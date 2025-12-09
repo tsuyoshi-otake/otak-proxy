@@ -3,9 +3,9 @@
  * @description Import system proxy settings command
  *
  * Requirements:
- * - 1.4: Error handling for command execution
- * - 2.3: Display sanitized proxy URL
- * - 4.4: Graceful error handling
+ * - 1.1: Concise error messages with details in output channel
+ * - 3.3: Log detailed information to output channel
+ * - 6.3: Action buttons for manual setup and redetect
  */
 
 import * as vscode from 'vscode';
@@ -14,6 +14,7 @@ import { validateProxyUrl, sanitizeProxyUrl, testProxyConnection, detectSystemPr
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
+import { OutputChannelManager } from '../errors/OutputChannelManager';
 
 /**
  * Execute the import proxy command
@@ -25,6 +26,8 @@ import { CommandContext, CommandResult } from './types';
 export async function executeImportProxy(ctx: CommandContext): Promise<CommandResult> {
     try {
         const i18n = I18nManager.getInstance();
+        const outputManager = OutputChannelManager.getInstance();
+        
         const detectedProxy = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: i18n.t('message.detectingSystemProxy'),
@@ -54,12 +57,33 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
                 return await handleSaveAsManual(ctx, state, detectedProxy);
             }
         } else {
-            ctx.userNotifier.showWarning('warning.noSystemProxyCheck');
+            // Requirement 6.3: Show action buttons for manual setup and redetect
+            const action = await vscode.window.showWarningMessage(
+                i18n.t('warning.noSystemProxyCheck'),
+                i18n.t('action.configureManual'),
+                i18n.t('action.redetect')
+            );
+
+            if (action === i18n.t('action.configureManual')) {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            } else if (action === i18n.t('action.redetect')) {
+                // Recursively call import proxy again
+                return await executeImportProxy(ctx);
+            }
         }
 
         return { success: true };
     } catch (error) {
         Logger.error('Import proxy command failed:', error);
+        
+        // Requirement 1.1, 3.3: Log detailed error to output channel
+        const outputManager = OutputChannelManager.getInstance();
+        outputManager.logError('Import proxy command failed', {
+            timestamp: new Date(),
+            errorMessage: error instanceof Error ? error.message : String(error),
+            stackTrace: error instanceof Error ? error.stack : undefined
+        });
+        
         ctx.userNotifier.showError(
             'error.importProxyFailed',
             ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
@@ -99,8 +123,20 @@ async function handleTestFirst(
             return await handleSaveAsManual(ctx, state, detectedProxy);
         }
     } else {
-        ctx.userNotifier.showError(
+        // Requirement 1.1, 3.3: Use showErrorWithDetails for concise notification with detailed logging
+        const outputManager = OutputChannelManager.getInstance();
+        const errorDetails = {
+            timestamp: new Date(),
+            errorMessage: i18n.t('error.proxyDoesNotWork'),
+            attemptedUrls: testResult.testUrls,
+            context: testResult.errors ? {
+                errors: testResult.errors.map((err: any) => `${err.url}: ${err.message}`)
+            } : undefined
+        };
+
+        await ctx.userNotifier.showErrorWithDetails(
             'error.proxyDoesNotWork',
+            errorDetails,
             [
                 'suggestion.verifyServerRunning',
                 'suggestion.checkConnectivity',

@@ -8,6 +8,10 @@
   "action.skip": "Skip",
   "action.cancel": "Cancel",
   "action.ok": "OK",
+  "action.showDetails": "Show Details",
+  "action.retest": "Retest",
+  "action.changeSettings": "Change Settings",
+  "action.redetect": "Redetect",
   "action.configureManual": "Configure Manual",
   "action.importSystem": "Import System",
   "action.testFirst": "Test First",
@@ -106,5 +110,25 @@
   "statusbar.link.importSystem": "Import System",
   "statusbar.link.testProxy": "Test Proxy",
   
-  "error.attemptedUrls": "Attempted test URLs:"
+  "progress.testingProxy": "Testing proxy {current} of {total}...",
+  "progress.testingProxyUrl": "Testing proxy {current} of {total}: {url}",
+  "progress.detectingSystemProxy": "Detecting system proxy...",
+  "progress.applyingProxySettings": "Applying proxy settings...",
+  "progress.title.testingProxy": "Testing Proxy Connection",
+  "progress.title.detectingProxy": "Detecting System Proxy",
+  "progress.title.applyingSettings": "Applying Proxy Settings",
+  
+  "error.attemptedUrls": "Attempted test URLs:",
+
+  "connectionTest.testing": "Testing proxy connection...",
+  "connectionTest.success": "Proxy connection test successful: {url}",
+  "connectionTest.failed": "Proxy connection test failed: {url}",
+  "connectionTest.enabled": "Proxy enabled (connection verified): {url}",
+  "connectionTest.disabled": "Proxy disabled (connection failed)",
+  "connectionTest.autoTesting": "Auto-testing proxy: {url}",
+  "connectionTest.proxyReachable": "Proxy is reachable: {url}",
+  "connectionTest.proxyUnreachable": "Proxy is unreachable: {url}",
+  "connectionTest.schedulerStarted": "Periodic proxy testing started",
+  "connectionTest.schedulerStopped": "Periodic proxy testing stopped",
+  "connectionTest.intervalUpdated": "Test interval updated to {seconds} seconds"
 }

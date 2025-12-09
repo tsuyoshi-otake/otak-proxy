@@ -26,6 +26,20 @@ export enum ProxyMode {
 }
 
 /**
+ * Connection test result interface
+ * Feature: auto-mode-proxy-testing
+ * @interface ProxyTestResult
+ */
+export interface ProxyTestResult {
+    success: boolean;
+    testUrls: string[];
+    errors: Array<{ url: string; message: string }>;
+    proxyUrl?: string;
+    timestamp?: number;
+    duration?: number;
+}
+
+/**
  * Proxy state interface representing the current proxy configuration
  *
  * @interface ProxyState
@@ -38,6 +52,9 @@ export enum ProxyMode {
  * @property {boolean} [npmConfigured] - Whether npm proxy is configured
  * @property {boolean} [systemProxyDetected] - Whether system proxy was detected
  * @property {string} [lastError] - Last error message if any
+ * @property {ProxyTestResult} [lastTestResult] - Last connection test result (Feature: auto-mode-proxy-testing)
+ * @property {boolean} [proxyReachable] - Whether the proxy is currently reachable (Feature: auto-mode-proxy-testing)
+ * @property {number} [lastTestTimestamp] - Timestamp of last connection test (Feature: auto-mode-proxy-testing)
  */
 export interface ProxyState {
     mode: ProxyMode;
@@ -49,6 +66,10 @@ export interface ProxyState {
     npmConfigured?: boolean;
     systemProxyDetected?: boolean;
     lastError?: string;
+    // Feature: auto-mode-proxy-testing
+    lastTestResult?: ProxyTestResult;
+    proxyReachable?: boolean;
+    lastTestTimestamp?: number;
 }
 
 // Forward declarations for manager types to avoid circular dependencies

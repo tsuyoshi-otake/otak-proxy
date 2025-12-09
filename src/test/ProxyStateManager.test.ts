@@ -1,11 +1,13 @@
 /**
  * Unit tests for ProxyStateManager
+ * Feature: auto-mode-proxy-testing
+ * Validates: Requirements 1.2, 1.3 (Task 5.3)
  */
 
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
-import { ProxyMode, ProxyState } from '../core/types';
+import { ProxyMode, ProxyState, ProxyTestResult } from '../core/types';
 
 suite('ProxyStateManager Unit Tests', () => {
     let context: vscode.ExtensionContext;
@@ -166,5 +168,135 @@ suite('ProxyStateManager Unit Tests', () => {
 
         assert.strictEqual(stateManager.getActiveProxyUrl(manualState), '');
         assert.strictEqual(stateManager.getActiveProxyUrl(autoState), '');
+    });
+
+    /**
+     * Feature: auto-mode-proxy-testing
+     * Tests for new connection testing fields
+     */
+    suite('Connection Testing Fields (auto-mode-proxy-testing)', () => {
+        test('saveState should persist connection testing fields', async () => {
+            const testResult: ProxyTestResult = {
+                success: true,
+                testUrls: ['https://example.com', 'https://google.com'],
+                errors: [],
+                proxyUrl: 'http://proxy.example.com:8080',
+                timestamp: Date.now(),
+                duration: 150
+            };
+
+            const testState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                lastTestResult: testResult,
+                proxyReachable: true,
+                lastTestTimestamp: Date.now()
+            };
+
+            await stateManager.saveState(testState);
+
+            assert.deepStrictEqual(storedState, testState);
+            assert.strictEqual(storedState!.lastTestResult!.success, true);
+            assert.strictEqual(storedState!.proxyReachable, true);
+            assert.ok(storedState!.lastTestTimestamp);
+        });
+
+        test('getState should return saved connection testing fields', async () => {
+            const testResult: ProxyTestResult = {
+                success: false,
+                testUrls: ['https://example.com'],
+                errors: [{ url: 'https://example.com', message: 'Connection timeout' }],
+                proxyUrl: 'http://proxy.example.com:8080',
+                timestamp: Date.now(),
+                duration: 3000
+            };
+
+            const testState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                lastTestResult: testResult,
+                proxyReachable: false,
+                lastTestTimestamp: Date.now()
+            };
+
+            await stateManager.saveState(testState);
+            const retrievedState = await stateManager.getState();
+
+            assert.deepStrictEqual(retrievedState.lastTestResult, testResult);
+            assert.strictEqual(retrievedState.proxyReachable, false);
+            assert.strictEqual(retrievedState.lastTestTimestamp, testState.lastTestTimestamp);
+        });
+
+        test('backward compatibility: old state without new fields should work', async () => {
+            // Simulate old state format without new fields
+            const oldState = {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: 'http://proxy.example.com:8080',
+                autoProxyUrl: undefined,
+                lastSystemProxyCheck: Date.now(),
+                gitConfigured: true,
+                vscodeConfigured: true,
+                npmConfigured: false,
+                systemProxyDetected: false,
+                lastError: undefined
+                // No lastTestResult, proxyReachable, or lastTestTimestamp
+            };
+
+            storedState = oldState as ProxyState;
+            const retrievedState = await stateManager.getState();
+
+            // Should work without errors and have undefined for new fields
+            assert.strictEqual(retrievedState.mode, ProxyMode.Manual);
+            assert.strictEqual(retrievedState.manualProxyUrl, 'http://proxy.example.com:8080');
+            assert.strictEqual(retrievedState.lastTestResult, undefined);
+            assert.strictEqual(retrievedState.proxyReachable, undefined);
+            assert.strictEqual(retrievedState.lastTestTimestamp, undefined);
+        });
+
+        test('state with only some new fields should work', async () => {
+            const partialState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                proxyReachable: true
+                // No lastTestResult or lastTestTimestamp
+            };
+
+            await stateManager.saveState(partialState);
+            const retrievedState = await stateManager.getState();
+
+            assert.strictEqual(retrievedState.proxyReachable, true);
+            assert.strictEqual(retrievedState.lastTestResult, undefined);
+            assert.strictEqual(retrievedState.lastTestTimestamp, undefined);
+        });
+
+        test('test result with errors should be preserved correctly', async () => {
+            const testResult: ProxyTestResult = {
+                success: false,
+                testUrls: ['https://example.com', 'https://google.com', 'https://github.com'],
+                errors: [
+                    { url: 'https://example.com', message: 'Connection refused' },
+                    { url: 'https://google.com', message: 'Timeout' },
+                    { url: 'https://github.com', message: 'DNS resolution failed' }
+                ],
+                proxyUrl: 'http://bad-proxy.example.com:8080',
+                timestamp: 1702100000000,
+                duration: 3000
+            };
+
+            const testState: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://bad-proxy.example.com:8080',
+                lastTestResult: testResult,
+                proxyReachable: false,
+                lastTestTimestamp: 1702100000000
+            };
+
+            await stateManager.saveState(testState);
+            const retrievedState = await stateManager.getState();
+
+            assert.strictEqual(retrievedState.lastTestResult!.errors.length, 3);
+            assert.strictEqual(retrievedState.lastTestResult!.errors[0].url, 'https://example.com');
+            assert.strictEqual(retrievedState.lastTestResult!.errors[0].message, 'Connection refused');
+        });
     });
 });

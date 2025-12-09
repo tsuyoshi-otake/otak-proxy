@@ -156,6 +156,7 @@ suite('ProxyUtils Test Suite', () => {
                 'validateProxyUrl',
                 'sanitizeProxyUrl',
                 'testProxyConnection',
+                'testProxyConnectionParallel',
                 'detectSystemProxySettings'
             ];
 
@@ -163,6 +164,77 @@ suite('ProxyUtils Test Suite', () => {
                 assert.ok(exportName in proxyUtils,
                     `${exportName} should be exported from ProxyUtils`);
             }
+        });
+    });
+
+    suite('testProxyConnectionParallel', () => {
+        test('should export testProxyConnectionParallel function', () => {
+            assert.ok(typeof proxyUtils.testProxyConnectionParallel === 'function',
+                'testProxyConnectionParallel should be exported as a function');
+        });
+
+        test('should return TestResult object with proxyUrl and timestamp', async function() {
+            this.timeout(15000);
+
+            const testUrls = ['https://www.github.com', 'https://www.microsoft.com'];
+            const result = await proxyUtils.testProxyConnectionParallel(
+                'http://invalid-proxy:9999',
+                testUrls,
+                3000
+            );
+
+            assert.ok(typeof result.success === 'boolean', 'result.success should be boolean');
+            assert.ok(Array.isArray(result.testUrls), 'result.testUrls should be array');
+            assert.ok(Array.isArray(result.errors), 'result.errors should be array');
+            assert.ok(typeof result.proxyUrl === 'string', 'result.proxyUrl should be string');
+            assert.ok(typeof result.timestamp === 'number', 'result.timestamp should be number');
+            assert.ok(typeof result.duration === 'number', 'result.duration should be number');
+        });
+
+        test('should complete within timeout', async function() {
+            this.timeout(10000);
+
+            const startTime = Date.now();
+            const timeout = 2000;
+
+            await proxyUtils.testProxyConnectionParallel(
+                'http://invalid-proxy:9999',
+                ['https://www.github.com'],
+                timeout
+            );
+
+            const elapsed = Date.now() - startTime;
+            // Allow some tolerance for test execution overhead
+            assert.ok(elapsed < timeout + 2000,
+                `Should complete within timeout + tolerance (elapsed: ${elapsed}ms)`);
+        });
+
+        test('should succeed if any test URL succeeds (parallel early termination)', async function() {
+            this.timeout(15000);
+
+            // This test validates behavior - with invalid proxy all should fail
+            const result = await proxyUtils.testProxyConnectionParallel(
+                'http://invalid-proxy:9999',
+                ['https://www.github.com', 'https://www.microsoft.com', 'https://www.google.com'],
+                3000
+            );
+
+            // With invalid proxy, should fail
+            assert.strictEqual(result.success, false, 'Should fail with invalid proxy');
+            assert.ok(result.errors.length > 0, 'Should have errors when proxy fails');
+        });
+
+        test('should record duration of test execution', async function() {
+            this.timeout(15000);
+
+            const result = await proxyUtils.testProxyConnectionParallel(
+                'http://invalid-proxy:9999',
+                ['https://www.github.com'],
+                3000
+            );
+
+            assert.ok(result.duration !== undefined, 'duration should be defined');
+            assert.ok(result.duration >= 0, 'duration should be non-negative');
         });
     });
 });

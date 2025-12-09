@@ -78,6 +78,18 @@ export interface TestResult {
     success: boolean;
     testUrls: string[];
     errors: TestUrlError[];
+    proxyUrl?: string;
+    timestamp?: number;
+    duration?: number;
+}
+
+/**
+ * Options for proxy connection testing
+ */
+export interface TestOptions {
+    timeout?: number;
+    parallel?: boolean;
+    testUrls?: string[];
 }
 
 /**
@@ -108,19 +120,41 @@ export function sanitizeProxyUrl(url: string): string {
     return getSanitizer().maskPassword(url);
 }
 
+/** Default test URLs for proxy connection testing */
+const DEFAULT_TEST_URLS = [
+    'https://www.github.com',
+    'https://www.microsoft.com',
+    'https://www.google.com'
+];
+
+/** Default timeout for manual tests (5 seconds) */
+const DEFAULT_MANUAL_TIMEOUT = 5000;
+
+/** Default timeout for auto tests (3 seconds) */
+const DEFAULT_AUTO_TIMEOUT = 3000;
+
 /**
  * Tests proxy connection with comprehensive error reporting
  *
  * @param proxyUrl - The proxy URL to test
+ * @param options - Optional test configuration
  * @returns Object with success status and test details
  */
-export async function testProxyConnection(proxyUrl: string): Promise<TestResult> {
+export async function testProxyConnection(
+    proxyUrl: string,
+    options?: TestOptions
+): Promise<TestResult> {
+    const timeout = options?.timeout ?? DEFAULT_MANUAL_TIMEOUT;
+    const testUrls = options?.testUrls ?? DEFAULT_TEST_URLS;
+
+    // If parallel mode is requested, use the parallel implementation
+    if (options?.parallel) {
+        return testProxyConnectionParallel(proxyUrl, testUrls, timeout);
+    }
+
+    // Sequential mode (original behavior)
     const errors: TestUrlError[] = [];
-    const testUrls = [
-        'https://www.github.com',
-        'https://www.microsoft.com',
-        'https://www.google.com'
-    ];
+    const startTime = Date.now();
 
     try {
         const http = require('http');
@@ -128,7 +162,7 @@ export async function testProxyConnection(proxyUrl: string): Promise<TestResult>
 
         const proxyParsed = url.parse(proxyUrl);
 
-        // Test connection through proxy for each URL
+        // Test connection through proxy for each URL sequentially
         for (const testUrl of testUrls) {
             try {
                 const testParsed = url.parse(testUrl);
@@ -137,7 +171,7 @@ export async function testProxyConnection(proxyUrl: string): Promise<TestResult>
                     port: proxyParsed.port || 8080,
                     method: 'CONNECT',
                     path: `${testParsed.hostname}:443`,
-                    timeout: 5000
+                    timeout: timeout
                 };
 
                 const result = await new Promise<boolean>((resolve) => {
@@ -156,7 +190,7 @@ export async function testProxyConnection(proxyUrl: string): Promise<TestResult>
 
                     req.on('timeout', () => {
                         // Collect timeout error for this test URL
-                        errors.push({ url: testUrl, message: 'Connection timeout (5 seconds)' });
+                        errors.push({ url: testUrl, message: `Connection timeout (${timeout}ms)` });
                         req.destroy();
                         resolve(false);
                     });
@@ -166,7 +200,14 @@ export async function testProxyConnection(proxyUrl: string): Promise<TestResult>
 
                 if (result) {
                     // At least one test URL worked - success
-                    return { success: true, testUrls, errors };
+                    return {
+                        success: true,
+                        testUrls,
+                        errors,
+                        proxyUrl,
+                        timestamp: Date.now(),
+                        duration: Date.now() - startTime
+                    };
                 }
             } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -176,12 +217,175 @@ export async function testProxyConnection(proxyUrl: string): Promise<TestResult>
         }
 
         // All test URLs failed
-        return { success: false, testUrls, errors };
+        return {
+            success: false,
+            testUrls,
+            errors,
+            proxyUrl,
+            timestamp: Date.now(),
+            duration: Date.now() - startTime
+        };
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         Logger.error('Proxy test error:', errorMsg);
         errors.push({ url: 'Proxy test', message: errorMsg });
-        return { success: false, testUrls, errors };
+        return {
+            success: false,
+            testUrls,
+            errors,
+            proxyUrl,
+            timestamp: Date.now(),
+            duration: Date.now() - startTime
+        };
+    }
+}
+
+/**
+ * Get default test URLs
+ */
+export function getDefaultTestUrls(): string[] {
+    return [...DEFAULT_TEST_URLS];
+}
+
+/**
+ * Get default manual test timeout
+ */
+export function getDefaultManualTimeout(): number {
+    return DEFAULT_MANUAL_TIMEOUT;
+}
+
+/**
+ * Get default auto test timeout
+ */
+export function getDefaultAutoTimeout(): number {
+    return DEFAULT_AUTO_TIMEOUT;
+}
+
+/**
+ * Tests proxy connection in parallel with multiple test URLs
+ * Uses Promise.race() to complete as soon as any URL succeeds
+ *
+ * @param proxyUrl - The proxy URL to test
+ * @param testUrls - Array of URLs to test through the proxy
+ * @param timeout - Timeout in milliseconds for each test
+ * @returns Object with success status and test details including proxyUrl, timestamp, and duration
+ */
+export async function testProxyConnectionParallel(
+    proxyUrl: string,
+    testUrls: string[],
+    timeout: number
+): Promise<TestResult> {
+    const startTime = Date.now();
+    const errors: TestUrlError[] = [];
+
+    try {
+        const http = require('http');
+        const url = require('url');
+
+        const proxyParsed = url.parse(proxyUrl);
+
+        // Create a promise for each test URL
+        const testPromises = testUrls.map(async (testUrl): Promise<{ success: boolean; url: string; error?: string }> => {
+            return new Promise((resolve) => {
+                try {
+                    const testParsed = url.parse(testUrl);
+                    const options = {
+                        host: proxyParsed.hostname,
+                        port: proxyParsed.port || 8080,
+                        method: 'CONNECT',
+                        path: `${testParsed.hostname}:443`,
+                        timeout: timeout
+                    };
+
+                    const req = http.request(options);
+
+                    req.on('connect', () => {
+                        req.destroy();
+                        resolve({ success: true, url: testUrl });
+                    });
+
+                    req.on('error', (error: Error) => {
+                        resolve({ success: false, url: testUrl, error: error.message || 'Connection failed' });
+                    });
+
+                    req.on('timeout', () => {
+                        req.destroy();
+                        resolve({ success: false, url: testUrl, error: `Connection timeout (${timeout}ms)` });
+                    });
+
+                    req.end();
+                } catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                    resolve({ success: false, url: testUrl, error: errorMsg });
+                }
+            });
+        });
+
+        // Create a success promise that resolves when any test succeeds
+        const successPromise = new Promise<TestResult>((resolve) => {
+            let completedCount = 0;
+            const totalTests = testPromises.length;
+
+            testPromises.forEach(async (promise) => {
+                const result = await promise;
+                completedCount++;
+
+                if (result.success) {
+                    // Early termination on first success
+                    resolve({
+                        success: true,
+                        proxyUrl: proxyUrl,
+                        testUrls: testUrls,
+                        errors: errors,
+                        timestamp: Date.now(),
+                        duration: Date.now() - startTime
+                    });
+                } else if (result.error) {
+                    errors.push({ url: result.url, message: result.error });
+                }
+
+                // If all tests completed and none succeeded
+                if (completedCount === totalTests) {
+                    resolve({
+                        success: false,
+                        proxyUrl: proxyUrl,
+                        testUrls: testUrls,
+                        errors: errors,
+                        timestamp: Date.now(),
+                        duration: Date.now() - startTime
+                    });
+                }
+            });
+        });
+
+        // Create a timeout promise
+        const timeoutPromise = new Promise<TestResult>((resolve) => {
+            setTimeout(() => {
+                resolve({
+                    success: false,
+                    proxyUrl: proxyUrl,
+                    testUrls: testUrls,
+                    errors: [{ url: 'All tests', message: `Overall timeout (${timeout}ms)` }],
+                    timestamp: Date.now(),
+                    duration: Date.now() - startTime
+                });
+            }, timeout + 500); // Add small buffer to allow individual timeouts to complete
+        });
+
+        // Race between success/all-complete and overall timeout
+        return await Promise.race([successPromise, timeoutPromise]);
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        Logger.error('Proxy parallel test error:', errorMsg);
+        errors.push({ url: 'Proxy test', message: errorMsg });
+        return {
+            success: false,
+            proxyUrl: proxyUrl,
+            testUrls: testUrls,
+            errors: errors,
+            timestamp: Date.now(),
+            duration: Date.now() - startTime
+        };
     }
 }
 

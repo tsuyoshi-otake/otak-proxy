@@ -8,6 +8,10 @@
   "action.skip": "スキップ",
   "action.cancel": "キャンセル",
   "action.ok": "OK",
+  "action.showDetails": "詳細を表示",
+  "action.retest": "再テスト",
+  "action.changeSettings": "設定を変更",
+  "action.redetect": "再検出",
   "action.configureManual": "手動設定",
   "action.importSystem": "システムからインポート",
   "action.testFirst": "先にテスト",
@@ -106,5 +110,25 @@
   "statusbar.link.importSystem": "システムからインポート",
   "statusbar.link.testProxy": "Proxyをテスト",
   
-  "error.attemptedUrls": "試行したテストURL:"
+  "progress.testingProxy": "Proxyをテスト中 {current}/{total}...",
+  "progress.testingProxyUrl": "Proxyをテスト中 {current}/{total}: {url}",
+  "progress.detectingSystemProxy": "システムProxyを検出中...",
+  "progress.applyingProxySettings": "Proxy設定を適用中...",
+  "progress.title.testingProxy": "Proxy接続をテスト中",
+  "progress.title.detectingProxy": "システムProxyを検出中",
+  "progress.title.applyingSettings": "Proxy設定を適用中",
+  
+  "error.attemptedUrls": "試行したテストURL:",
+
+  "connectionTest.testing": "Proxy接続をテスト中...",
+  "connectionTest.success": "Proxy接続テスト成功: {url}",
+  "connectionTest.failed": "Proxy接続テスト失敗: {url}",
+  "connectionTest.enabled": "Proxyが有効化されました（接続確認済み）: {url}",
+  "connectionTest.disabled": "Proxyが無効化されました（接続失敗）",
+  "connectionTest.autoTesting": "Proxyを自動テスト中: {url}",
+  "connectionTest.proxyReachable": "Proxyに接続可能: {url}",
+  "connectionTest.proxyUnreachable": "Proxyに接続不可: {url}",
+  "connectionTest.schedulerStarted": "定期的なProxyテストを開始しました",
+  "connectionTest.schedulerStopped": "定期的なProxyテストを停止しました",
+  "connectionTest.intervalUpdated": "テスト間隔を{seconds}秒に更新しました"
 }

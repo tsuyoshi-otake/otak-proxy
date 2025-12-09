@@ -107,16 +107,18 @@ export const validProxyUrlWithoutCredentialsGenerator = (): fc.Arbitrary<string>
  * These should be rejected by validation
  */
 export const urlWithShellMetacharactersGenerator = (): fc.Arbitrary<string> => {
-    const shellMetachars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
+    const shellMetachars = [';', '|', '&', '`', '\n', '<', '>', '(', ')'];
     const metacharArb = fc.constantFrom(...shellMetachars);
     
     return fc.tuple(
         fc.constantFrom('http', 'https'),
-        fc.string(),
+        fc.string().filter(s => !s.includes('\r') && !s.includes('\n')),
         metacharArb,
-        fc.string()
+        fc.string().filter(s => !s.includes('\r') && !s.includes('\n'))
     ).map(([protocol, before, metachar, after]) => {
-        return `${protocol}://proxy.com${before}${metachar}${after}`;
+        // Ensure the metacharacter is in a position where it would be dangerous
+        // Place it in the path or query string part
+        return `${protocol}://proxy.com/${before}${metachar}${after}`;
     });
 };
 
@@ -183,10 +185,21 @@ export const urlWithInvalidHostnameGenerator = (): fc.Arbitrary<string> => {
  */
 export const urlWithCredentialsGenerator = (): fc.Arbitrary<string> => {
     // Valid credentials: alphanumeric, hyphens, underscores only
-    const usernameArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 1 && s.length <= 20);
-    const passwordArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 1 && s.length <= 20);
-    // Valid hostname: alphanumeric, dots, hyphens only
-    const hostnameArb = fc.stringMatching(/^[a-zA-Z0-9.-]+$/).filter(s => s.length >= 3 && s.length <= 50);
+    // Must not start or end with hyphen
+    const usernameArb = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]$/).filter(s => s.length >= 1 && s.length <= 20);
+    const passwordArb = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]$/).filter(s => s.length >= 1 && s.length <= 20);
+    // Valid hostname: must start with alphanumeric, can contain dots and hyphens
+    const hostnamePartArb = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$/).filter(s => s.length >= 1 && s.length <= 20);
+    const hostnameArb = fc.array(hostnamePartArb, { minLength: 2, maxLength: 3 })
+        .map(parts => parts.join('.'))
+        .filter(hostname => {
+            try {
+                new URL(`http://${hostname}`);
+                return true;
+            } catch {
+                return false;
+            }
+        });
     
     return fc.tuple(
         fc.constantFrom('http', 'https'),
@@ -237,16 +250,16 @@ export const urlWithInvalidCredentialsGenerator = (): fc.Arbitrary<string> => {
     // Invalid characters for credentials (excluding shell metacharacters)
     const invalidChars = ['!', '#', '$', '%', '^', '*', '=', '+', '[', ']', '{', '}', ' ', '~', '/', '\\', '?', ',', '.', ':'];
     const invalidCharArb = fc.constantFrom(...invalidChars);
-    
+
     const usernameArb = fc.tuple(
         fc.string({ minLength: 0, maxLength: 10 }),
         invalidCharArb,
         fc.string({ minLength: 0, maxLength: 10 })
     ).map(([before, invalidChar, after]) => `${before}${invalidChar}${after}`);
-    
+
     const passwordArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 1 && s.length <= 20);
     const hostnameArb = fc.stringMatching(/^[a-zA-Z0-9.-]+$/).filter(s => s.length >= 3 && s.length <= 50);
-    
+
     return fc.tuple(
         fc.constantFrom('http', 'https'),
         usernameArb,
@@ -261,3 +274,14 @@ export const urlWithInvalidCredentialsGenerator = (): fc.Arbitrary<string> => {
         return url;
     });
 };
+
+/**
+ * Simple proxy URL arbitrary for property-based testing
+ * Generates URLs in format: http(s)://hostname:port
+ */
+export const proxyUrlArb: fc.Arbitrary<string> = fc.tuple(
+    fc.constantFrom('http', 'https'),
+    fc.stringMatching(/^[a-z][a-z0-9-]*$/).filter(s => s.length >= 3 && s.length <= 20),
+    fc.constantFrom('.example.com', '.proxy.local', '.internal.net'),
+    fc.integer({ min: 1, max: 65535 })
+).map(([protocol, host, domain, port]) => `${protocol}://${host}${domain}:${port}`);

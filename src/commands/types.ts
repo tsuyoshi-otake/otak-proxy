@@ -36,6 +36,17 @@ export interface CommandContext {
         showSuccess: (key: string, params?: Record<string, string>) => void;
         showWarning: (key: string, params?: Record<string, string>) => void;
         showError: (key: string, suggestions?: string[]) => void;
+        showErrorWithDetails: (
+            message: string,
+            details: import('../errors/OutputChannelManager').ErrorDetails,
+            suggestions?: string[],
+            params?: Record<string, string>
+        ) => Promise<void>;
+        showProgressNotification: <T>(
+            title: string,
+            task: (progress: vscode.Progress<{ message?: string; increment?: number }>) => Promise<T>,
+            cancellable?: boolean
+        ) => Promise<T>;
     };
 
     // Sanitization

@@ -3,6 +3,7 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { UserNotifier } from '../../errors/UserNotifier';
 import { I18nManager } from '../../i18n/I18nManager';
+import { OutputChannelManager } from '../../errors/OutputChannelManager';
 
 suite('UserNotifier Tests', () => {
     let userNotifier: UserNotifier;
@@ -11,6 +12,9 @@ suite('UserNotifier Tests', () => {
     let showErrorMessageStub: sinon.SinonStub;
     let showInformationMessageStub: sinon.SinonStub;
     let showWarningMessageStub: sinon.SinonStub;
+    let withProgressStub: sinon.SinonStub;
+    let outputManagerShowStub: sinon.SinonStub;
+    let outputManagerLogErrorStub: sinon.SinonStub;
 
     setup(() => {
         sandbox = sinon.createSandbox();
@@ -23,6 +27,12 @@ suite('UserNotifier Tests', () => {
         showErrorMessageStub = sandbox.stub(vscode.window, 'showErrorMessage');
         showInformationMessageStub = sandbox.stub(vscode.window, 'showInformationMessage');
         showWarningMessageStub = sandbox.stub(vscode.window, 'showWarningMessage');
+        withProgressStub = sandbox.stub(vscode.window, 'withProgress');
+        
+        // Stub OutputChannelManager methods
+        const outputManager = OutputChannelManager.getInstance();
+        outputManagerShowStub = sandbox.stub(outputManager, 'show');
+        outputManagerLogErrorStub = sandbox.stub(outputManager, 'logError');
     });
 
     teardown(() => {
@@ -110,5 +120,162 @@ suite('UserNotifier Tests', () => {
         assert.ok(showInformationMessageStub.calledOnce);
         const message = showInformationMessageStub.firstCall.args[0];
         assert.strictEqual(message, 'Proxyが無効化されました');
+    });
+
+    suite('Enhanced Features Tests', () => {
+        test('showErrorWithDetails should log to output channel and show error with details button', async () => {
+            showErrorMessageStub.resolves(undefined);
+            
+            await userNotifier.showErrorWithDetails(
+                'Test error message',
+                {
+                    timestamp: new Date(),
+                    errorMessage: 'Detailed error',
+                    attemptedUrls: ['http://proxy1:8080', 'http://proxy2:8080']
+                },
+                ['Suggestion 1', 'Suggestion 2']
+            );
+
+            // Should log to output channel
+            assert.ok(outputManagerLogErrorStub.calledOnce);
+            const logCall = outputManagerLogErrorStub.firstCall.args;
+            assert.strictEqual(logCall[0], 'Test error message');
+            assert.ok(logCall[1].suggestions);
+            assert.strictEqual(logCall[1].suggestions.length, 2);
+
+            // Should show error message with Show Details button
+            assert.ok(showErrorMessageStub.calledOnce);
+            const errorCall = showErrorMessageStub.firstCall.args;
+            assert.ok(errorCall[0].includes('Test error message'));
+            assert.strictEqual(errorCall[1], 'Show Details');
+        });
+
+        test('showErrorWithDetails should open output channel when Show Details is clicked', async () => {
+            showErrorMessageStub.resolves('Show Details');
+            
+            await userNotifier.showErrorWithDetails(
+                'Test error',
+                {
+                    timestamp: new Date(),
+                    errorMessage: 'Error details'
+                }
+            );
+
+            // Should open output channel
+            assert.ok(outputManagerShowStub.calledOnce);
+        });
+
+        test('showErrorWithDetails should apply message formatting', async () => {
+            showErrorMessageStub.resolves(undefined);
+            
+            const longMessage = 'A'.repeat(250); // Message longer than 200 chars
+            await userNotifier.showErrorWithDetails(
+                longMessage,
+                {
+                    timestamp: new Date(),
+                    errorMessage: 'Error'
+                }
+            );
+
+            // Message should be truncated
+            const displayedMessage = showErrorMessageStub.firstCall.args[0];
+            assert.ok(displayedMessage.length <= 203); // 200 + '...'
+        });
+
+        test('showErrorWithDetails should summarize suggestions', async () => {
+            showErrorMessageStub.resolves(undefined);
+            
+            const suggestions = ['Suggestion 1', 'Suggestion 2', 'Suggestion 3', 'Suggestion 4', 'Suggestion 5'];
+            await userNotifier.showErrorWithDetails(
+                'Error',
+                {
+                    timestamp: new Date(),
+                    errorMessage: 'Error'
+                },
+                suggestions
+            );
+
+            const displayedMessage = showErrorMessageStub.firstCall.args[0];
+            // Should only show first 3 suggestions
+            assert.ok(displayedMessage.includes('Suggestion 1'));
+            assert.ok(displayedMessage.includes('Suggestion 2'));
+            assert.ok(displayedMessage.includes('Suggestion 3'));
+            assert.ok(!displayedMessage.includes('Suggestion 4'));
+        });
+
+        test('showErrorWithDetails should respect throttling', async () => {
+            showErrorMessageStub.resolves(undefined);
+            
+            // First call should show
+            await userNotifier.showErrorWithDetails(
+                'error.test',
+                {
+                    timestamp: new Date(),
+                    errorMessage: 'Error'
+                }
+            );
+            assert.strictEqual(showErrorMessageStub.callCount, 1);
+
+            // Second call within throttle window should not show but still log
+            await userNotifier.showErrorWithDetails(
+                'error.test',
+                {
+                    timestamp: new Date(),
+                    errorMessage: 'Error'
+                }
+            );
+            assert.strictEqual(showErrorMessageStub.callCount, 1); // Still 1
+            assert.strictEqual(outputManagerLogErrorStub.callCount, 2); // But logged twice
+        });
+
+        test('showProgressNotification should call withProgress', async () => {
+            const mockTask = async (progress: vscode.Progress<any>) => {
+                progress.report({ message: 'Working...' });
+                return 'result';
+            };
+            
+            withProgressStub.callsFake(async (options, task) => {
+                return await task({ report: () => {} }, {} as any);
+            });
+
+            const result = await userNotifier.showProgressNotification(
+                'Test Progress',
+                mockTask,
+                true
+            );
+
+            assert.ok(withProgressStub.calledOnce);
+            const progressOptions = withProgressStub.firstCall.args[0];
+            assert.strictEqual(progressOptions.title, 'Test Progress');
+            assert.strictEqual(progressOptions.cancellable, true);
+            assert.strictEqual(progressOptions.location, vscode.ProgressLocation.Notification);
+            assert.strictEqual(result, 'result');
+        });
+
+        test('showError should apply message formatting', () => {
+            const longMessage = 'B'.repeat(250);
+            userNotifier.showError(longMessage);
+
+            const displayedMessage = showErrorMessageStub.firstCall.args[0];
+            assert.ok(displayedMessage.length <= 203); // 200 + '...'
+        });
+
+        test('showError should respect throttling', () => {
+            userNotifier.showError('error.duplicate');
+            assert.strictEqual(showErrorMessageStub.callCount, 1);
+
+            // Second call within throttle window should not show
+            userNotifier.showError('error.duplicate');
+            assert.strictEqual(showErrorMessageStub.callCount, 1);
+        });
+
+        test('showError should still log throttled errors to output channel', () => {
+            userNotifier.showError('error.throttled', ['Suggestion']);
+            assert.strictEqual(outputManagerLogErrorStub.callCount, 0); // First call doesn't log
+
+            // Second call should log even if throttled
+            userNotifier.showError('error.throttled', ['Suggestion']);
+            assert.strictEqual(outputManagerLogErrorStub.callCount, 1);
+        });
     });
 });

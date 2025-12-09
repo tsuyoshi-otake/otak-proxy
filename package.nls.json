@@ -5,5 +5,7 @@
   "config.proxyUrl": "Proxy server URL (e.g., http://proxy.example.com:8080) for VSCode and Git proxy settings",
   "config.pollingInterval": "Auto mode polling interval in seconds (10-300). How often to check for system proxy changes.",
   "config.detectionSourcePriority": "Priority order for proxy detection sources. Sources are tried in order until one succeeds.",
-  "config.maxRetries": "Maximum number of retries for proxy detection when it fails."
+  "config.maxRetries": "Maximum number of retries for proxy detection when it fails.",
+  "config.testInterval": "Proxy connection test interval in seconds (Auto mode only). Range: 30-600 seconds. Default: 60 seconds.",
+  "config.autoTestEnabled": "Enable automatic proxy connection testing in Auto mode. When enabled, proxy connectivity is tested periodically."
 }

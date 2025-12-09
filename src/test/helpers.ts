@@ -4,10 +4,10 @@
 
 /**
  * Get the number of runs for property-based tests based on environment
- * @returns Number of test runs (100 for CI, 10 for development)
+ * @returns Number of test runs (100 for CI, 5 for development)
  */
 export function getPropertyTestRuns(): number {
-    return process.env.CI ? 100 : 10;
+    return process.env.CI ? 100 : 5;
 }
 
 /**

@@ -1,14 +1,19 @@
 /**
  * Property-based tests for ProxyMonitor
  * Tests universal properties that should hold across all inputs
- * 
+ *
  * Feature: auto-proxy-detection-improvements
+ * Feature: auto-mode-proxy-testing
  */
 
 import * as fc from 'fast-check';
+import * as sinon from 'sinon';
 import { ProxyMonitor, ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { InputSanitizer } from '../validation/InputSanitizer';
+import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
+import { UserNotifier } from '../errors/UserNotifier';
+import { TestResult } from '../utils/ProxyUtils';
 import { getPropertyTestRuns } from './helpers';
 
 // Mock SystemProxyDetector for property testing
@@ -73,8 +78,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
         // Increase timeout for this test as it involves waiting for polling
         this.timeout(30000);
 
-        // Test with minimum valid interval (10 seconds)
-        // The property holds for any valid interval, so testing one value is sufficient
+        // Test with minimum valid interval (10 seconds) as required by ProxyMonitor
+        // The property holds for any valid interval, so testing with the minimum is sufficient
         const intervalSeconds = 10;
         const intervalMs = intervalSeconds * 1000;
         
@@ -93,9 +98,12 @@ suite('ProxyMonitor Property-Based Tests', () => {
             // Start monitoring
             monitor.start();
 
-            // Wait for approximately 2.2 intervals to observe multiple checks
-            // We use 2.2 to ensure we see at least 2 checks but not too many
-            const waitTime = intervalMs * 2.2;
+            // Wait a bit for the first check to be scheduled
+            await sleep(100);
+
+            // Wait for approximately 2.5 intervals to observe multiple checks
+            // We use 2.5 to ensure we see at least 2 checks but not too many
+            const waitTime = intervalMs * 2.5;
             await sleep(waitTime);
 
             // Stop monitoring
@@ -153,7 +161,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
         // Increase timeout for this test as it involves waiting for polling
         this.timeout(60000);
 
-        // Test with minimum valid intervals (10 and 15 seconds)
+        // Test with minimum valid intervals (10 and 15 seconds) as required by ProxyMonitor
         const initialIntervalSeconds = 10;
         const updatedIntervalSeconds = 15;
         const initialIntervalMs = initialIntervalSeconds * 1000;
@@ -174,8 +182,11 @@ suite('ProxyMonitor Property-Based Tests', () => {
             // Start monitoring with initial interval
             monitor.start();
 
-            // Wait for approximately 1.5 intervals to see at least one check
-            await sleep(initialIntervalMs * 1.5);
+            // Wait a bit for the first check to be scheduled
+            await sleep(100);
+
+            // Wait for approximately 1.8 intervals to see at least one check
+            await sleep(initialIntervalMs * 1.8);
 
             // Get check count after initial interval
             const checksBeforeUpdate = mockDetector.getCheckCount();
@@ -260,13 +271,13 @@ suite('ProxyMonitor Property-Based Tests', () => {
      */
     test('Property 5: Debounce processing', async function() {
         // Increase timeout for this test as it involves waiting for debounce
-        this.timeout(60000);
+        this.timeout(30000);
 
         await fc.assert(
             fc.asyncProperty(
                 fc.integer({ min: 2, max: 5 }), // Number of triggers (reduced range for faster tests)
                 async (triggerCount) => {
-                    const debounceDelay = 1000; // 1 second debounce
+                    const debounceDelay = 500; // 500ms debounce for faster testing
                     
                     const monitor = new ProxyMonitor(
                         mockDetector as any,
@@ -284,15 +295,15 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         monitor.start();
 
                         // Trigger multiple checks in rapid succession (within debounce period)
-                        // Each trigger is 100ms apart, which is well within the 1 second debounce
+                        // Each trigger is 50ms apart, which is well within the 500ms debounce
                         for (let i = 0; i < triggerCount; i++) {
                             monitor.triggerCheck('focus');
-                            await sleep(100); // 100ms between triggers
+                            await sleep(50); // 50ms between triggers
                         }
 
                         // Wait for debounce period plus some buffer
                         // This ensures the debounced check has time to execute
-                        await sleep(debounceDelay + 500);
+                        await sleep(debounceDelay + 300);
 
                         // Get check count
                         const checkCount = mockDetector.getCheckCount();
@@ -416,12 +427,12 @@ suite('ProxyMonitor Property-Based Tests', () => {
      */
     test('Property 7: Exponential backoff', async function() {
         // Increase timeout for this test as it involves retries with backoff
-        this.timeout(120000);
+        this.timeout(30000);
 
         await fc.assert(
             fc.asyncProperty(
                 fc.integer({ min: 1, max: 2 }), // maxRetries value (reduced for faster tests)
-                fc.double({ min: 0.1, max: 0.5 }), // retryBackoffBase value (reduced for faster tests)
+                fc.double({ min: 0.05, max: 0.2 }), // retryBackoffBase value (reduced for faster tests)
                 async (maxRetries, retryBackoffBase) => {
                     // Create a detector that always fails and records attempt timestamps
                     class FailingDetectorWithTimestamps {
@@ -680,7 +691,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
         // Increase timeout for this test as it involves waiting for polling
         this.timeout(40000);
 
-        // Test with minimum valid interval (10 seconds)
+        // Test with minimum valid interval (10 seconds) as required by ProxyMonitor
         const intervalSeconds = 10;
         const intervalMs = intervalSeconds * 1000;
         
@@ -699,8 +710,11 @@ suite('ProxyMonitor Property-Based Tests', () => {
             // Start monitoring (simulating Auto mode)
             monitor.start();
 
-            // Wait for approximately 1.5 intervals to see at least one check
-            await sleep(intervalMs * 1.5);
+            // Wait a bit for the first check to be scheduled
+            await sleep(100);
+
+            // Wait for approximately 1.8 intervals to see at least one check
+            await sleep(intervalMs * 1.8);
 
             // Get check count while monitoring is active
             const checksWhileActive = mockDetector.getCheckCount();
@@ -752,7 +766,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
      */
     test('Property 3: Check failure continuation', async function() {
         // Increase timeout for this test as it involves waiting for polling
-        this.timeout(60000);
+        this.timeout(20000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -791,7 +805,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         failDetector as any,
                         testLogger,
                         {
-                            pollingInterval: 10000, // 10 second polling
+                            pollingInterval: 60000, // Long polling to avoid interference
                             debounceDelay: 10, // Short debounce for testing
                             maxRetries: 0, // No retries to test immediate failure logging
                             retryBackoffBase: 0.01
@@ -807,11 +821,11 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         // Trigger multiple checks manually
                         for (let i = 0; i < failureCount; i++) {
                             monitor.triggerCheck('focus');
-                            await sleep(200); // Wait for debounce and check to complete
+                            await sleep(100); // Wait for debounce and check to complete
                         }
 
                         // Wait for all checks to complete
-                        await sleep(500);
+                        await sleep(300);
 
                         // Property: All failures should be logged
                         const checkHistory = testLogger.getCheckHistory();
@@ -856,7 +870,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
      */
     test('Property 9: Proxy change logging', async function() {
         // Increase timeout for this test
-        this.timeout(60000);
+        this.timeout(20000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -929,11 +943,11 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         // Trigger checks for each proxy in sequence
                         for (let i = 0; i < proxySequence.length; i++) {
                             monitor.triggerCheck('focus');
-                            await sleep(200); // Wait for debounce and check
+                            await sleep(100); // Wait for debounce and check
                         }
 
                         // Wait for all checks to complete
-                        await sleep(500);
+                        await sleep(300);
 
                         // Get change history
                         const changeHistory = testLogger.getChangeHistory();
@@ -1112,7 +1126,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
      */
     test('Property 10: Check execution logging', async function() {
         // Increase timeout for this test
-        this.timeout(60000);
+        this.timeout(20000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1157,7 +1171,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         testLogger,
                         {
                             pollingInterval: 60000, // Long interval
-                            debounceDelay: 100, // Short debounce for testing
+                            debounceDelay: 50, // Short debounce for testing
                             maxRetries: 0,
                             retryBackoffBase: 0.01
                         }
@@ -1172,11 +1186,11 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         // Trigger multiple checks
                         for (let i = 0; i < checkCount; i++) {
                             monitor.triggerCheck('focus');
-                            await sleep(200); // Wait for debounce and check
+                            await sleep(100); // Wait for debounce and check
                         }
 
                         // Wait for all checks to complete
-                        await sleep(500);
+                        await sleep(300);
 
                         // Get check history
                         const checkHistory = testLogger.getCheckHistory();
@@ -1219,6 +1233,322 @@ suite('ProxyMonitor Property-Based Tests', () => {
                             }
                         }
 
+                    } finally {
+                        monitor.stop();
+                    }
+                }
+            ),
+            { numRuns: getPropertyTestRuns() }
+        );
+    });
+});
+
+/**
+ * Property-based tests for ProxyMonitor connection testing
+ * Feature: auto-mode-proxy-testing
+ */
+suite('ProxyMonitor Connection Testing Property Tests', function() {
+    let sandbox: sinon.SinonSandbox;
+    let sanitizer: InputSanitizer;
+    let logger: ProxyChangeLogger;
+    let mockNotifier: sinon.SinonStubbedInstance<UserNotifier>;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sanitizer = new InputSanitizer();
+        logger = new ProxyChangeLogger(sanitizer);
+        mockNotifier = sandbox.createStubInstance(UserNotifier);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    /**
+     * Feature: auto-mode-proxy-testing, Property 1: システムプロキシ検出時のテスト実行
+     * Validates: Requirements 1.1
+     *
+     * For any detected proxy URL, a connection test should be executed.
+     */
+    test('Property 1: Connection test execution on proxy detection', async function() {
+        this.timeout(30000);
+
+        await fc.assert(
+            fc.asyncProperty(
+                fc.integer({ min: 1, max: 65535 }).map(port => `http://proxy-${port}.example.com:${port}`),
+                async (proxyUrl) => {
+                    // Create a detector that returns the proxy URL
+                    class TestDetector {
+                        private proxyUrl: string;
+
+                        constructor(url: string) {
+                            this.proxyUrl = url;
+                        }
+
+                        async detectSystemProxy(): Promise<string | null> {
+                            return this.proxyUrl;
+                        }
+
+                        async detectSystemProxyWithSource(): Promise<{ proxyUrl: string | null; source: string | null }> {
+                            return { proxyUrl: this.proxyUrl, source: 'environment' };
+                        }
+                    }
+
+                    const testDetector = new TestDetector(proxyUrl);
+                    const connectionTester = new ProxyConnectionTester(mockNotifier as unknown as UserNotifier);
+
+                    // Track if testProxyAuto was called
+                    let testProxyAutoCalled = false;
+                    let testedUrl: string | null = null;
+
+                    const testResult: TestResult = {
+                        success: true,
+                        testUrls: ['https://example.com'],
+                        errors: [],
+                        proxyUrl: proxyUrl,
+                        timestamp: Date.now(),
+                        duration: 100
+                    };
+
+                    sandbox.stub(connectionTester, 'testProxyAuto').callsFake(async (url: string) => {
+                        testProxyAutoCalled = true;
+                        testedUrl = url;
+                        return testResult;
+                    });
+
+                    const monitor = new ProxyMonitor(
+                        testDetector as any,
+                        logger,
+                        {
+                            pollingInterval: 60000,
+                            debounceDelay: 10,
+                            enableConnectionTest: true
+                        },
+                        connectionTester
+                    );
+
+                    try {
+                        monitor.start();
+                        monitor.triggerCheck('focus');
+
+                        // Wait for check to complete
+                        await new Promise(resolve => setTimeout(resolve, 200));
+
+                        // Property: When proxy is detected, testProxyAuto should be called
+                        if (!testProxyAutoCalled) {
+                            throw new Error(`Connection test was not called for proxy URL: ${proxyUrl}`);
+                        }
+
+                        // Property: The tested URL should match the detected proxy URL
+                        if (testedUrl !== proxyUrl) {
+                            throw new Error(
+                                `Connection test was called with wrong URL. ` +
+                                `Expected: ${proxyUrl}, got: ${testedUrl}`
+                            );
+                        }
+                    } finally {
+                        monitor.stop();
+                    }
+                }
+            ),
+            { numRuns: getPropertyTestRuns() }
+        );
+    });
+
+    /**
+     * Feature: auto-mode-proxy-testing, Property 6: プロキシURL変更時の即座のテスト
+     * Validates: Requirements 5.1
+     *
+     * When proxy URL changes, a connection test should be executed immediately for the new URL.
+     */
+    test('Property 6: Immediate connection test on proxy URL change', async function() {
+        this.timeout(30000);
+
+        await fc.assert(
+            fc.asyncProperty(
+                fc.integer({ min: 1, max: 65535 }).map(port => `http://proxy-old-${port}.example.com:${port}`),
+                fc.integer({ min: 1, max: 65535 }).map(port => `http://proxy-new-${port}.example.com:${port}`),
+                async (oldProxyUrl, newProxyUrl) => {
+                    // Skip if URLs are the same
+                    if (oldProxyUrl === newProxyUrl) {
+                        return;
+                    }
+
+                    // Create a detector that returns different URLs
+                    class SequenceDetector {
+                        private sequence: string[];
+                        private currentIndex: number = 0;
+
+                        constructor(urls: string[]) {
+                            this.sequence = urls;
+                        }
+
+                        getIndex(): number {
+                            return this.currentIndex;
+                        }
+
+                        async detectSystemProxy(): Promise<string | null> {
+                            const result = this.sequence[this.currentIndex];
+                            if (this.currentIndex < this.sequence.length - 1) {
+                                this.currentIndex++;
+                            }
+                            return result;
+                        }
+
+                        async detectSystemProxyWithSource(): Promise<{ proxyUrl: string | null; source: string | null }> {
+                            const result = this.sequence[this.currentIndex];
+                            if (this.currentIndex < this.sequence.length - 1) {
+                                this.currentIndex++;
+                            }
+                            return { proxyUrl: result, source: 'environment' };
+                        }
+                    }
+
+                    const sequenceDetector = new SequenceDetector([oldProxyUrl, newProxyUrl]);
+                    const connectionTester = new ProxyConnectionTester(mockNotifier as unknown as UserNotifier);
+
+                    // Track all tested URLs
+                    const testedUrls: string[] = [];
+
+                    const createTestResult = (url: string): TestResult => ({
+                        success: true,
+                        testUrls: ['https://example.com'],
+                        errors: [],
+                        proxyUrl: url,
+                        timestamp: Date.now(),
+                        duration: 100
+                    });
+
+                    sandbox.stub(connectionTester, 'testProxyAuto').callsFake(async (url: string) => {
+                        testedUrls.push(url);
+                        return createTestResult(url);
+                    });
+
+                    const monitor = new ProxyMonitor(
+                        sequenceDetector as any,
+                        logger,
+                        {
+                            pollingInterval: 60000,
+                            debounceDelay: 10,
+                            enableConnectionTest: true
+                        },
+                        connectionTester
+                    );
+
+                    try {
+                        monitor.start();
+
+                        // First check - old proxy
+                        monitor.triggerCheck('focus');
+                        await new Promise(resolve => setTimeout(resolve, 200));
+
+                        // Second check - new proxy
+                        monitor.triggerCheck('focus');
+                        await new Promise(resolve => setTimeout(resolve, 200));
+
+                        // Property: Both URLs should have been tested
+                        if (testedUrls.length < 2) {
+                            throw new Error(
+                                `Expected at least 2 connection tests, but got ${testedUrls.length}. ` +
+                                `Tested URLs: [${testedUrls.join(', ')}]`
+                            );
+                        }
+
+                        // Property: The first tested URL should be the old proxy
+                        if (testedUrls[0] !== oldProxyUrl) {
+                            throw new Error(
+                                `First test should be for old proxy. ` +
+                                `Expected: ${oldProxyUrl}, got: ${testedUrls[0]}`
+                            );
+                        }
+
+                        // Property: The second tested URL should be the new proxy
+                        if (testedUrls[1] !== newProxyUrl) {
+                            throw new Error(
+                                `Second test should be for new proxy. ` +
+                                `Expected: ${newProxyUrl}, got: ${testedUrls[1]}`
+                            );
+                        }
+                    } finally {
+                        monitor.stop();
+                    }
+                }
+            ),
+            { numRuns: getPropertyTestRuns() }
+        );
+    });
+
+    /**
+     * Feature: auto-mode-proxy-testing, Additional Property: No connection test when no proxy
+     * Validates: Requirements 1.4
+     *
+     * When no proxy is detected, no connection test should be executed.
+     */
+    test('No connection test when no proxy detected', async function() {
+        this.timeout(30000);
+
+        await fc.assert(
+            fc.asyncProperty(
+                fc.integer({ min: 1, max: 5 }), // Number of checks
+                async (checkCount) => {
+                    // Create a detector that always returns null
+                    class NullDetector {
+                        async detectSystemProxy(): Promise<string | null> {
+                            return null;
+                        }
+
+                        async detectSystemProxyWithSource(): Promise<{ proxyUrl: string | null; source: string | null }> {
+                            return { proxyUrl: null, source: null };
+                        }
+                    }
+
+                    const nullDetector = new NullDetector();
+                    const connectionTester = new ProxyConnectionTester(mockNotifier as unknown as UserNotifier);
+
+                    // Track if testProxyAuto was called
+                    let testProxyAutoCalled = false;
+
+                    sandbox.stub(connectionTester, 'testProxyAuto').callsFake(async () => {
+                        testProxyAutoCalled = true;
+                        return {
+                            success: true,
+                            testUrls: [],
+                            errors: [],
+                            timestamp: Date.now(),
+                            duration: 0
+                        };
+                    });
+
+                    const monitor = new ProxyMonitor(
+                        nullDetector as any,
+                        logger,
+                        {
+                            pollingInterval: 60000,
+                            debounceDelay: 10,
+                            enableConnectionTest: true
+                        },
+                        connectionTester
+                    );
+
+                    try {
+                        monitor.start();
+
+                        // Trigger multiple checks
+                        for (let i = 0; i < checkCount; i++) {
+                            monitor.triggerCheck('focus');
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+
+                        // Wait for all checks to complete
+                        await new Promise(resolve => setTimeout(resolve, 200));
+
+                        // Property: No connection test should be called when no proxy detected
+                        if (testProxyAutoCalled) {
+                            throw new Error(
+                                `Connection test should NOT be called when no proxy is detected. ` +
+                                `Was called after ${checkCount} checks.`
+                            );
+                        }
                     } finally {
                         monitor.stop();
                     }

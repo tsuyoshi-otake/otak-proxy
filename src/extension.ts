@@ -139,7 +139,15 @@ export async function activate(context: vscode.ExtensionContext) {
         updateStatusBar: (s) => statusBarManager.update(s),
         checkAndUpdateSystemProxy: async () => { /* handled by initializer */ },
         startSystemProxyMonitoring: () => initializer.startSystemProxyMonitoring(),
-        userNotifier,
+        userNotifier: {
+            showSuccess: (key, params) => userNotifier.showSuccess(key, params),
+            showWarning: (key, params) => userNotifier.showWarning(key, params),
+            showError: (key, suggestions) => userNotifier.showError(key, suggestions),
+            showErrorWithDetails: (message, details, suggestions, params) => 
+                userNotifier.showErrorWithDetails(message, details, suggestions, params),
+            showProgressNotification: (title, task, cancellable) => 
+                userNotifier.showProgressNotification(title, task, cancellable)
+        },
         sanitizer,
         proxyMonitor,
         systemProxyDetector
@@ -160,6 +168,24 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Phase 11: Start monitoring
     await initializer.startSystemProxyMonitoring();
+
+    // Phase 12: Register configuration change listener (Task 7.2)
+    // Feature: auto-mode-proxy-testing
+    const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
+        // Check for testInterval change
+        if (e.affectsConfiguration('otakProxy.testInterval')) {
+            const newInterval = vscode.workspace.getConfiguration('otakProxy').get<number>('testInterval', 60);
+            initializer.handleConfigurationChange('testInterval', newInterval);
+        }
+
+        // Check for autoTestEnabled change
+        if (e.affectsConfiguration('otakProxy.autoTestEnabled')) {
+            const enabled = vscode.workspace.getConfiguration('otakProxy').get<boolean>('autoTestEnabled', true);
+            initializer.handleConfigurationChange('autoTestEnabled', enabled);
+        }
+    });
+
+    context.subscriptions.push(configChangeDisposable);
 }
 
 /**

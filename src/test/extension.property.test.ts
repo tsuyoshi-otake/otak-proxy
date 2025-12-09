@@ -91,7 +91,7 @@ suite('Extension Integration Property-Based Tests', () => {
         }
 
         // Increase timeout for property-based tests
-        this.timeout(120000);
+        this.timeout(60000);
 
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
@@ -153,7 +153,7 @@ suite('Extension Integration Property-Based Tests', () => {
         }
 
         // Increase timeout for property-based tests
-        this.timeout(60000);
+        this.timeout(30000);
 
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
@@ -209,7 +209,7 @@ suite('Extension Integration Property-Based Tests', () => {
         }
 
         // Increase timeout for property-based tests
-        this.timeout(120000);
+        this.timeout(60000);
 
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
@@ -265,7 +265,7 @@ suite('Extension Integration Property-Based Tests', () => {
             return;
         }
 
-        this.timeout(120000);
+        this.timeout(60000);
 
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
@@ -430,7 +430,7 @@ suite('Extension Integration Property-Based Tests', () => {
      * Validates: Requirements 4.1
      */
     test('Property 8: Invalid URLs are rejected before npm configuration', async function() {
-        this.timeout(30000);
+        this.timeout(15000);
 
         const validator = new ProxyUrlValidator();
 

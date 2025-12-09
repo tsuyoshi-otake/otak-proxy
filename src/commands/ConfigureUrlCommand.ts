@@ -3,9 +3,8 @@
  * @description Manual proxy URL configuration command
  *
  * Requirements:
- * - 1.4: Error handling for command execution
- * - 2.1: Configure manual proxy URL
- * - 4.4: Graceful error handling
+ * - 1.1: Concise error messages with details in output channel
+ * - 3.3: Log detailed information to output channel
  */
 
 import * as vscode from 'vscode';
@@ -13,6 +12,7 @@ import { ProxyMode } from '../core/types';
 import { validateProxyUrl } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
+import { OutputChannelManager } from '../errors/OutputChannelManager';
 
 /**
  * Execute the configure URL command
@@ -32,8 +32,18 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
 
         if (proxyUrl !== undefined) {
             if (proxyUrl && !validateProxyUrl(proxyUrl)) {
-                ctx.userNotifier.showError(
+                // Requirement 1.1, 3.3: Use showErrorWithDetails for concise notification with detailed logging
+                const errorDetails = {
+                    timestamp: new Date(),
+                    errorMessage: 'Invalid proxy URL format',
+                    context: {
+                        providedUrl: ctx.sanitizer.maskPassword(proxyUrl)
+                    }
+                };
+
+                await ctx.userNotifier.showErrorWithDetails(
                     'Invalid proxy URL format',
+                    errorDetails,
                     [
                         'Use format: http://proxy.example.com:8080',
                         'Include protocol (http:// or https://)',
@@ -71,6 +81,15 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
         return { success: true };
     } catch (error) {
         Logger.error('Configure URL command failed:', error);
+        
+        // Requirement 1.1, 3.3: Log detailed error to output channel
+        const outputManager = OutputChannelManager.getInstance();
+        outputManager.logError('Configure URL command failed', {
+            timestamp: new Date(),
+            errorMessage: error instanceof Error ? error.message : String(error),
+            stackTrace: error instanceof Error ? error.stack : undefined
+        });
+        
         ctx.userNotifier.showError(
             'Failed to configure proxy URL',
             ['Check the output log for details', 'Try reloading the window']
