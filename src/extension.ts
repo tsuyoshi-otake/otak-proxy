@@ -17,6 +17,7 @@ import { InputSanitizer } from './validation/InputSanitizer';
 import { GitConfigManager } from './config/GitConfigManager';
 import { VscodeConfigManager } from './config/VscodeConfigManager';
 import { NpmConfigManager } from './config/NpmConfigManager';
+import { TerminalEnvConfigManager } from './config/TerminalEnvConfigManager';
 import { SystemProxyDetector } from './config/SystemProxyDetector';
 import { UserNotifier } from './errors/UserNotifier';
 import { Logger } from './utils/Logger';
@@ -79,6 +80,14 @@ export async function activate(context: vscode.ExtensionContext) {
     const gitConfigManager = new GitConfigManager();
     const vscodeConfigManager = new VscodeConfigManager();
     const npmConfigManager = new NpmConfigManager();
+
+    // Integrated terminal env support (best-effort; only if API is available)
+    const envCollection = (context as any).environmentVariableCollection;
+    const terminalEnvManager = envCollection &&
+        typeof envCollection.replace === 'function' &&
+        typeof envCollection.delete === 'function'
+        ? new TerminalEnvConfigManager(envCollection)
+        : undefined;
     const userNotifier = new UserNotifier();
     const proxyChangeLogger = new ProxyChangeLogger(sanitizer);
 
@@ -96,7 +105,8 @@ export async function activate(context: vscode.ExtensionContext) {
         validator,
         sanitizer,
         userNotifier,
-        proxyStateManager
+        proxyStateManager,
+        terminalEnvManager
     );
 
     // Phase 3: Initialize ExtensionInitializer
@@ -163,7 +173,21 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Phase 10: Apply current proxy settings
     const activeUrl = proxyStateManager.getActiveProxyUrl(state);
-    if (state.mode !== ProxyMode.Off && activeUrl) {
+    if (state.mode === ProxyMode.Off) {
+        // If proxy is OFF, ensure any lingering proxy settings are cleared.
+        // We only disable when something is actually configured to avoid unnecessary noise.
+        if (terminalEnvManager) {
+            await terminalEnvManager.unsetProxy();
+        }
+        const [gitProxy, vscodeProxy, npmProxy] = await Promise.all([
+            gitConfigManager.getProxy().catch(() => null),
+            vscodeConfigManager.getProxy().catch(() => null),
+            npmConfigManager.getProxy().catch(() => null)
+        ]);
+        if (gitProxy || vscodeProxy || npmProxy) {
+            await proxyApplier.disableProxy();
+        }
+    } else if (activeUrl) {
         await proxyApplier.applyProxy(activeUrl, true);
     }
 

@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">otak-proxy</h1>
-  <p align="center">One-click proxy management for VSCode, Git, and npm</p>
+  <p align="center">One-click proxy management for VSCode, Git, npm, and integrated terminals</p>
 </p>
 
 ---
@@ -21,7 +21,7 @@ Toggle your proxy settings with a single click. Zero configuration required.
 2. Click the status bar → select **Manual**
 3. Enter your proxy URL (e.g., `http://proxy.example.com:8080`)
 
-The extension configures Git, VSCode, and npm proxy settings for you.
+The extension configures Git, VSCode, npm proxy settings, and proxy environment variables for VSCode integrated terminals for you.
 
 ## Features
 
@@ -29,7 +29,16 @@ The extension configures Git, VSCode, and npm proxy settings for you.
 - **Status bar toggle** — One click to switch between modes
 - **Auto-sync** — Detects system/browser proxy changes in real-time
 - **Connection validation** — Tests proxy connectivity before enabling
+- **Integrated terminal env** — Sets HTTP(S)_PROXY for new VSCode terminals
 - **i18n** — English and Japanese UI
+
+### Integrated Terminal Environment Variables
+When proxy is enabled, otak-proxy injects the following variables into **newly created** VSCode integrated terminals:
+
+- `HTTP_PROXY` / `HTTPS_PROXY`
+- `http_proxy` / `https_proxy`
+
+Existing terminals keep their current environment; reopen a terminal if you want the new values to apply.
 
 ## How It Works
 

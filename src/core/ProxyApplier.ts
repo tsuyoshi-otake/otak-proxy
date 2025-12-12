@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitConfigManager } from '../config/GitConfigManager';
 import { VscodeConfigManager } from '../config/VscodeConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
+import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { UserNotifier } from '../errors/UserNotifier';
@@ -26,7 +27,8 @@ export class ProxyApplier {
         private validator: ProxyUrlValidator,
         private sanitizer: InputSanitizer,
         private userNotifier: UserNotifier,
-        private stateManager?: ProxyStateManager
+        private stateManager?: ProxyStateManager,
+        private terminalEnvManager?: TerminalEnvConfigManager
     ) {}
 
     /**
@@ -68,6 +70,7 @@ export class ProxyApplier {
         let gitSuccess = false;
         let vscodeSuccess = false;
         let npmSuccess = false;
+        let terminalEnvSuccess = true;
 
         // Requirement 2.2: Try VSCode configuration, continue on failure
         vscodeSuccess = await this.updateManager(
@@ -96,6 +99,17 @@ export class ProxyApplier {
             errorAggregator
         );
 
+        // Try VSCode integrated terminal environment variables (best-effort)
+        if (this.terminalEnvManager) {
+            terminalEnvSuccess = await this.updateManager(
+                this.terminalEnvManager,
+                'Terminal environment',
+                enabled,
+                proxyUrl,
+                errorAggregator
+            );
+        }
+
         // Track configuration state if stateManager is provided
         if (this.stateManager) {
             try {
@@ -111,7 +125,7 @@ export class ProxyApplier {
             }
         }
 
-        const success = gitSuccess && vscodeSuccess && npmSuccess;
+        const success = gitSuccess && vscodeSuccess && npmSuccess && terminalEnvSuccess;
         
         // Requirement 2.5: Use ErrorAggregator to display all errors together
         if (errorAggregator.hasErrors()) {
@@ -146,6 +160,7 @@ export class ProxyApplier {
         let gitSuccess = false;
         let vscodeSuccess = false;
         let npmSuccess = false;
+        let terminalEnvSuccess = true;
 
         // Use GitConfigManager.unsetProxy()
         try {
@@ -186,6 +201,23 @@ export class ProxyApplier {
             errorAggregator.addError('npm configuration', errorMsg);
         }
 
+        // Use TerminalEnvConfigManager.unsetProxy() (best-effort)
+        if (this.terminalEnvManager) {
+            try {
+                const result = await this.terminalEnvManager.unsetProxy();
+                if (!result.success) {
+                    errorAggregator.addError('Terminal environment', result.error || 'Failed to unset terminal proxy env');
+                    terminalEnvSuccess = false;
+                } else {
+                    terminalEnvSuccess = true;
+                }
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                errorAggregator.addError('Terminal environment', errorMsg);
+                terminalEnvSuccess = false;
+            }
+        }
+
         // Track configuration state if stateManager is provided
         if (this.stateManager) {
             try {
@@ -200,7 +232,7 @@ export class ProxyApplier {
             }
         }
 
-        const success = gitSuccess && vscodeSuccess && npmSuccess;
+        const success = gitSuccess && vscodeSuccess && npmSuccess && terminalEnvSuccess;
         
         // Use ErrorAggregator for any failures and UserNotifier for feedback
         if (errorAggregator.hasErrors()) {
@@ -232,7 +264,7 @@ export class ProxyApplier {
      * @returns Promise<boolean> - True if the operation succeeded
      */
     private async updateManager(
-        manager: GitConfigManager | VscodeConfigManager | NpmConfigManager,
+        manager: GitConfigManager | VscodeConfigManager | NpmConfigManager | TerminalEnvConfigManager,
         name: string,
         enabled: boolean,
         proxyUrl: string,
