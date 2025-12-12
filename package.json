@@ -1,7 +1,7 @@
 {
   "name": "otak-proxy",
   "displayName": "otak-proxy",
-  "description": "One-click proxy configuration for VSCode and Git.",
+  "description": "One-click proxy management for VSCode, Git, npm, and integrated terminals.",
   "publisher": "odangoo",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "engines": {
     "vscode": "^1.9.0"
   },
@@ -102,7 +102,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true,
-      "description": "This extension manages VSCode and Git proxy settings"
+      "description": "This extension manages VSCode, Git, npm proxy settings and integrated terminal proxy env vars"
     }
   },
   "scripts": {

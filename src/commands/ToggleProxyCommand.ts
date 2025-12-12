@@ -99,8 +99,11 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
         // Apply the new mode
         await ctx.saveProxyState(currentState);
         const newActiveUrl = ctx.getActiveProxyUrl(currentState);
-        await ctx.applyProxySettings(newActiveUrl, currentState.mode !== ProxyMode.Off);
+
+        // Update the status bar immediately to reflect the user's action,
+        // then apply settings in the background.
         ctx.updateStatusBar(currentState);
+        await ctx.applyProxySettings(newActiveUrl, currentState.mode !== ProxyMode.Off);
 
         // Start or stop monitoring based on mode
         if (currentState.mode === ProxyMode.Auto) {

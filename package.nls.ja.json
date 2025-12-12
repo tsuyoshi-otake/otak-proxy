@@ -2,7 +2,7 @@
   "command.toggleProxy": "Proxyを切り替え",
   "command.testProxy": "Proxyをテスト",
   "command.importProxy": "システムProxyをインポート",
-  "config.proxyUrl": "VSCodeとGitのproxy設定用のProxyサーバーURL（例: http://proxy.example.com:8080）",
+  "config.proxyUrl": "VSCode・Git・npm・統合ターミナルのproxy設定用のProxyサーバーURL（例: http://proxy.example.com:8080）",
   "config.pollingInterval": "Autoモードのポーリング間隔（秒単位、10-300）。システムproxyの変更をチェックする頻度。",
   "config.detectionSourcePriority": "Proxy検出ソースの優先順位。指定された順序で試行され、最初に成功したものが使用されます。",
   "config.maxRetries": "Proxy検出が失敗した場合の最大リトライ回数。",

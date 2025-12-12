@@ -2,7 +2,7 @@
   "command.toggleProxy": "Toggle Proxy",
   "command.testProxy": "Test Proxy",
   "command.importProxy": "Import System Proxy",
-  "config.proxyUrl": "Proxy server URL (e.g., http://proxy.example.com:8080) for VSCode and Git proxy settings",
+  "config.proxyUrl": "Proxy server URL (e.g., http://proxy.example.com:8080) for VSCode, Git, npm, and integrated terminal proxy settings",
   "config.pollingInterval": "Auto mode polling interval in seconds (10-300). How often to check for system proxy changes.",
   "config.detectionSourcePriority": "Priority order for proxy detection sources. Sources are tried in order until one succeeds.",
   "config.maxRetries": "Maximum number of retries for proxy detection when it fails.",
