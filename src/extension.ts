@@ -26,6 +26,7 @@ import { ProxyChangeLogger } from './monitoring/ProxyChangeLogger';
 import { I18nManager } from './i18n/I18nManager';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { createCommandRegistry } from './commands/CommandRegistry';
+import { SyncManager, SyncConfigManager, SyncStatusProvider, registerSyncStatusCommand } from './sync';
 
 // Module-level instances
 let proxyStateManager: ProxyStateManager;
@@ -33,6 +34,9 @@ let proxyApplier: ProxyApplier;
 let statusBarManager: StatusBarManager;
 let initializer: ExtensionInitializer;
 let proxyMonitor: ProxyMonitor;
+let syncManager: SyncManager | null = null;
+let syncConfigManager: SyncConfigManager | null = null;
+let syncStatusProvider: SyncStatusProvider | null = null;
 
 /**
  * Perform initial setup for the extension
@@ -123,6 +127,55 @@ export async function activate(context: vscode.ExtensionContext) {
     // Phase 4: Initialize ProxyMonitor
     proxyMonitor = initializer.initializeProxyMonitor();
 
+    // Phase 4.5: Initialize SyncManager (Feature: multi-instance-sync)
+    try {
+        syncConfigManager = new SyncConfigManager();
+
+        // Only initialize sync if globalStorageUri is available
+        if (context.globalStorageUri) {
+            syncManager = new SyncManager(
+                context.globalStorageUri.fsPath,
+                `window-${process.pid}`,
+                syncConfigManager
+            );
+
+            // Set up event handlers for sync
+            syncManager.on('remoteChange', async (remoteState) => {
+                Logger.log('Received remote state change from another instance');
+                // Update local state with remote changes
+                await proxyStateManager.saveState(remoteState);
+                const activeUrl = proxyStateManager.getActiveProxyUrl(remoteState);
+                if (remoteState.mode !== ProxyMode.Off && activeUrl) {
+                    await proxyApplier.applyProxy(activeUrl, true);
+                } else if (remoteState.mode === ProxyMode.Off) {
+                    await proxyApplier.disableProxy();
+                }
+                // StatusBar will be updated after initialization
+            });
+
+            syncManager.on('conflictResolved', (conflictInfo) => {
+                Logger.log('Sync conflict resolved:', conflictInfo);
+                if (syncStatusProvider) {
+                    syncStatusProvider.showConflictResolved();
+                }
+            });
+
+            syncManager.on('syncStateChanged', (status) => {
+                if (syncStatusProvider) {
+                    syncStatusProvider.update(status);
+                }
+            });
+
+            // Initialize sync status provider
+            syncStatusProvider = new SyncStatusProvider(98); // Priority just before proxy status bar
+            registerSyncStatusCommand(context, syncStatusProvider);
+            context.subscriptions.push({ dispose: () => syncStatusProvider?.dispose() });
+        }
+    } catch (error) {
+        Logger.warn('Failed to initialize SyncManager, running in standalone mode:', error);
+        // Continue without sync - graceful degradation
+    }
+
     // Phase 5: Initialize StatusBar
     statusBarManager = new StatusBarManager(context);
     statusBarManager.setMonitorProviders(proxyMonitor, proxyChangeLogger);
@@ -194,6 +247,21 @@ export async function activate(context: vscode.ExtensionContext) {
     // Phase 11: Start monitoring
     await initializer.startSystemProxyMonitoring();
 
+    // Phase 11.5: Start SyncManager (Feature: multi-instance-sync)
+    if (syncManager) {
+        try {
+            await syncManager.start();
+            Logger.log('SyncManager started successfully');
+
+            // Notify initial state to sync
+            if (syncConfigManager?.isSyncEnabled()) {
+                await syncManager.notifyChange(state);
+            }
+        } catch (error) {
+            Logger.warn('Failed to start SyncManager:', error);
+        }
+    }
+
     // Phase 12: Register configuration change listener (Task 7.2)
     // Feature: auto-mode-proxy-testing
     const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
@@ -218,11 +286,26 @@ export async function activate(context: vscode.ExtensionContext) {
  * Clean up resources
  */
 export async function deactivate() {
+    // Stop SyncManager (Feature: multi-instance-sync)
+    if (syncManager) {
+        try {
+            await syncManager.stop();
+            Logger.log('SyncManager stopped');
+        } catch (error) {
+            Logger.warn('Error stopping SyncManager:', error);
+        }
+    }
+
+    // Dispose SyncConfigManager
+    if (syncConfigManager) {
+        syncConfigManager.dispose();
+    }
+
     // Stop monitoring
     if (initializer) {
         await initializer.stopSystemProxyMonitoring();
     }
-    
+
     // Stop ProxyMonitor
     if (proxyMonitor) {
         proxyMonitor.stop();

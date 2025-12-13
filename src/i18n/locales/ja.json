@@ -147,5 +147,25 @@
   "log.switchedToSystem": "システムProxyに切り替え",
 
   "config.enableFallback": "システムProxyが検出されない場合、手動Proxyにフォールバックする（Autoモードのみ）",
-  "config.enableFallback.description": "有効にすると、AutoモードでシステムProxyが検出されない場合、手動で設定されたProxyをフォールバックとして使用します。"
+  "config.enableFallback.description": "有効にすると、AutoモードでシステムProxyが検出されない場合、手動で設定されたProxyをフォールバックとして使用します。",
+
+  "config.syncEnabled": "複数のVSCode/Cursorインスタンス間での同期を有効にする",
+  "config.syncInterval": "同期間隔（ミリ秒）",
+
+  "sync.enabled": "同期が有効",
+  "sync.disabled": "同期が無効",
+  "sync.status.syncing": "同期中...",
+  "sync.status.synced": "同期完了",
+  "sync.status.error": "同期エラー",
+  "sync.instances": "{count}個のインスタンスが接続中",
+  "sync.conflict.resolved": "競合が解決されました（最新の変更が適用されました）",
+  "sync.error.fileAccess": "同期ファイルにアクセスできません",
+  "sync.error.timeout": "同期操作がタイムアウトしました",
+  "sync.error.recovery": "同期エラーから復旧中...",
+  "sync.standalone": "スタンドアロンモード（同期無効）",
+  "sync.tooltip.connected": "同期中 - {count}個のインスタンス",
+  "sync.tooltip.syncing": "同期処理中...",
+  "sync.tooltip.error": "同期エラー: {error}",
+  "sync.tooltip.lastSync": "最終同期: {time}",
+  "sync.notification.conflictResolved": "設定の競合が解決されました。最新の変更が適用されました。"
 }

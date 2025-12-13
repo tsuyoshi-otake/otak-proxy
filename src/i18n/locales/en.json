@@ -147,5 +147,25 @@
   "log.switchedToSystem": "Switched back to System Proxy",
 
   "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only)",
-  "config.enableFallback.description": "When enabled, if no system proxy is detected in Auto mode, the extension will try to use the manually configured proxy as a fallback."
+  "config.enableFallback.description": "When enabled, if no system proxy is detected in Auto mode, the extension will try to use the manually configured proxy as a fallback.",
+
+  "config.syncEnabled": "Enable synchronization between multiple VSCode/Cursor instances",
+  "config.syncInterval": "Synchronization interval (milliseconds)",
+
+  "sync.enabled": "Sync enabled",
+  "sync.disabled": "Sync disabled",
+  "sync.status.syncing": "Syncing...",
+  "sync.status.synced": "Synced",
+  "sync.status.error": "Sync error",
+  "sync.instances": "{count} instances connected",
+  "sync.conflict.resolved": "Conflict resolved (latest change applied)",
+  "sync.error.fileAccess": "Cannot access sync file",
+  "sync.error.timeout": "Sync operation timed out",
+  "sync.error.recovery": "Recovering from sync error...",
+  "sync.standalone": "Standalone mode (sync disabled)",
+  "sync.tooltip.connected": "Syncing - {count} instances",
+  "sync.tooltip.syncing": "Sync in progress...",
+  "sync.tooltip.error": "Sync error: {error}",
+  "sync.tooltip.lastSync": "Last sync: {time}",
+  "sync.notification.conflictResolved": "Settings conflict resolved. Latest change has been applied."
 }

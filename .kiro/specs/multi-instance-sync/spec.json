@@ -2,9 +2,9 @@
   "feature_name": "multi-instance-sync",
   "description": "複数のVSCodeやCursor等を起動している時にotak-proxy間が同期されるようにする",
   "created_at": "2025-12-13T04:45:00Z",
-  "updated_at": "2025-12-13T06:15:00Z",
+  "updated_at": "2025-12-13T06:30:00Z",
   "language": "ja",
-  "phase": "tasks-generated",
+  "phase": "implementation",
   "approvals": {
     "requirements": {
       "generated": true,
@@ -16,8 +16,8 @@
     },
     "tasks": {
       "generated": true,
-      "approved": false
+      "approved": true
     }
   },
-  "ready_for_implementation": false
+  "ready_for_implementation": true
 }
