@@ -1,71 +1,65 @@
 <p align="center">
   <h1 align="center">otak-proxy</h1>
-  <p align="center">One-click proxy management for VSCode, Git, npm, and integrated terminals</p>
+  <p align="center">One-click proxy management for VS Code, Git, npm, and integrated terminals.</p>
 </p>
 
 ---
 
-Toggle your proxy settings with a single click. Zero configuration required.
+Toggle proxy settings from the status bar. Auto-sync with your system proxy or set one manually.
 
-![](images/otak-proxy.png)
+![otak-proxy](images/otak-proxy.png)
 
 ## Quick Start
 
-### Already have a system proxy?
-1. Install the extension
-2. Click the status bar → select **Auto**
-3. Done — the extension syncs with your system proxy automatically
+### Auto Mode (System Proxy)
 
-### Need to set a proxy manually?
-1. Install the extension
-2. Click the status bar → select **Manual**
-3. Enter your proxy URL (e.g., `http://proxy.example.com:8080`)
+1. Install the extension.
+2. Click the status bar and select **Auto**.
+3. Done — it stays in sync with your system proxy.
 
-The extension configures Git, VSCode, npm proxy settings, and proxy environment variables for VSCode integrated terminals for you.
+### Manual Mode
+
+1. Install the extension.
+2. Click the status bar and select **Manual**.
+3. Enter your proxy URL (for example: `http://proxy.example.com:8080`).
+
+The extension updates VS Code, Git, and npm proxy settings, plus proxy environment variables for VS Code integrated terminals.
 
 ## Features
 
-- **Three modes** — Off, Manual, or Auto (syncs with system proxy)
-- **Status bar toggle** — One click to switch between modes
-- **Auto-sync** — Detects system/browser proxy changes in real-time
-- **Connection validation** — Tests proxy connectivity before enabling
-- **Integrated terminal env** — Sets HTTP(S)_PROXY for new VSCode terminals
-- **i18n** — English and Japanese UI
-
-### Integrated Terminal Environment Variables
-When proxy is enabled, otak-proxy injects the following variables into **newly created** VSCode integrated terminals:
-
-- `HTTP_PROXY` / `HTTPS_PROXY`
-- `http_proxy` / `https_proxy`
-
-Existing terminals keep their current environment; reopen a terminal if you want the new values to apply.
+- **Three modes** — Off, Manual, or Auto (syncs with system proxy).
+- **Status bar toggle** — One click to switch modes.
+- **Auto-sync** — Detects system/browser proxy changes in real time.
+- **Connection validation** — Tests proxy connectivity before enabling.
+- **Integrated terminal env** — Sets HTTP(S)_PROXY for new VS Code terminals.
+- **UI i18n** — English and Japanese.
 
 ## How It Works
 
 ### Status Bar
+
 Click the proxy indicator to cycle through modes:
 
 ```
 Off → Manual → Auto → Off
 ```
 
-### Commands (Cmd/Ctrl + Shift + P)
-| Command | Description |
-|---------|-------------|
-| Toggle Proxy | Cycle through modes |
-| Test Proxy | Verify proxy connectivity |
-| Import System Proxy | Detect and import system proxy |
-| Configure Manual | Set a custom proxy URL |
+### Status Indicators
 
-## Status Indicators
+- `Proxy: Off` — Disabled
+- `Manual: http://...` — Using configured proxy
+- `Auto: http://...` — Synced with system proxy
+- `Auto (Fallback): http://...` — System unavailable, using manual
+- `Auto: OFF` — Waiting for proxy availability
 
-| Indicator | State |
-|-----------|-------|
-| `Proxy: Off` | Disabled |
-| `Manual: http://...` | Using configured proxy |
-| `Auto: http://...` | Synced with system proxy |
-| `Auto (Fallback): http://...` | System unavailable, using manual |
-| `Auto: OFF` | Waiting for proxy availability |
+### Integrated Terminal Environment
+
+When proxy is enabled, otak-proxy injects the following variables into **newly created** VS Code integrated terminals:
+
+- `HTTP_PROXY` / `HTTPS_PROXY`
+- `http_proxy` / `https_proxy`
+
+Existing terminals keep their current environment; reopen a terminal if you want the new values to apply.
 
 ## Configuration
 
@@ -77,38 +71,68 @@ Off → Manual → Auto → Off
 }
 ```
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `proxyUrl` | Manual proxy URL | — |
-| `pollingInterval` | System proxy check interval (sec) | 30 |
-| `enableFallback` | Fall back to manual when system unavailable | true |
+### Settings
+
+- **`otakProxy.proxyUrl`**: Manual proxy URL (default: unset)
+- **`otakProxy.pollingInterval`**: System proxy check interval in seconds (default: `30`)
+- **`otakProxy.enableFallback`**: Fall back to manual when system unavailable (default: `true`)
+
+## Commands
+
+Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
+
+- `Toggle Proxy`
+- `Test Proxy`
+- `Import System Proxy`
+- `Configure Manual`
 
 ## Requirements
 
-- VSCode 1.9.0+
+- VS Code 1.9.0 or higher
 - Git (in PATH)
+
+## Installation
+
+1. Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-proxy).
+2. Click the status bar and choose **Auto** or **Manual**.
+
+## Security & Privacy
+
+### Local Changes
+
+- Updates VS Code, Git, and npm proxy settings.
+- Sets HTTP(S)_PROXY environment variables for new integrated terminals.
+
+### Credentials
+
+- No account or API key is required.
+- If your proxy requires credentials, include them in the URL you provide.
+
+### Network Activity
+
+- Connection validation checks reachability before enabling a proxy.
 
 ## Troubleshooting
 
-**Proxy not working?**
-- Verify URL format includes protocol (`http://` or `https://`)
-- Run "Test Proxy" to check connectivity
-- Confirm Git is installed: `git --version`
-
-**Auto mode not detecting changes?**
-- Verify system proxy is configured correctly
-- Adjust `pollingInterval` if needed
+- **Proxy not working**: Verify the URL includes `http://` or `https://` and run `Test Proxy`.
+- **Git not detected**: Confirm Git is installed and available in PATH (`git --version`).
+- **Auto mode not detecting changes**: Verify system proxy settings and adjust `otakProxy.pollingInterval`.
 
 ## Related Extensions
 
-- **[otak-monitor](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-monitor)** — System resource monitoring
-- **[otak-committer](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-committer)** — AI-powered commit messages
-- **[otak-restart](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-restart)** — Quick reload shortcuts
+- **[otak-monitor](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-monitor)** — Real-time system monitoring in VS Code.
+- **[otak-committer](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-committer)** — AI-assisted commit messages, pull requests, and issues.
+- **[otak-restart](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-restart)** — Quick reload shortcuts.
+- **[otak-clock](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-clock)** — Dual time zone clock for VS Code.
+- **[otak-pomodoro](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-pomodoro)** — Pomodoro timer in VS Code.
+- **[otak-zen](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-zen)** — Minimal, distraction-free VS Code UI.
 
 ## License
 
-MIT
+MIT License - see the [LICENSE](LICENSE) file for details.
 
----
+## Links
 
-[Report Issues](https://github.com/tsuyoshi-otake/otak-proxy/issues) · [Source Code](https://github.com/tsuyoshi-otake/otak-proxy)
+- **[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=odangoo.otak-proxy)**
+- **[GitHub](https://github.com/tsuyoshi-otake/otak-proxy)**
+- **[Issues](https://github.com/tsuyoshi-otake/otak-proxy/issues)**
