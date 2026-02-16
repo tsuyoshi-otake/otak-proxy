@@ -156,7 +156,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 } else {
                     await initializer.stopSystemProxyMonitoring();
                 }
-                // StatusBar will be updated after initialization
+                // Reflect the remote state in the status bar
+                statusBarManager.update(remoteState);
             });
 
             syncManager.on('conflictResolved', (conflictInfo) => {
