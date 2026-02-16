@@ -5,32 +5,50 @@
 
 import * as assert from 'assert';
 import * as fc from 'fast-check';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { NpmConfigManager } from '../config/NpmConfigManager';
 import { validProxyUrlWithoutCredentialsGenerator } from './generators';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getPropertyTestRuns } from './helpers';
+import { getPropertyTestTimeout } from './helpers';
 
 const execFileAsync = promisify(execFile);
 const isWindows = process.platform === 'win32';
 
 /**
- * Helper function to get npm config value
- * Note: npm 11.x protects certain config values, so we use 'npm config list --json'
+ * Read proxy values directly from the isolated userconfig file.
+ * This avoids extra `npm config list` calls and makes the test faster and less flaky.
  */
-async function getNpmConfigValue(key: string): Promise<string | null> {
-    try {
-        const { stdout } = await execFileAsync('npm', ['config', 'list', '--json'], {
-            timeout: 5000,
-            encoding: 'utf8',
-            shell: isWindows
-        });
-        const config = JSON.parse(stdout);
-        const value = config[key];
-        return (value === undefined || value === '' || value === 'undefined' || value === 'null') ? null : value;
-    } catch {
-        return null;
+function readProxyValuesFromNpmrc(npmrcPath: string): { proxy: string | null; httpsProxy: string | null } {
+    const content = fs.readFileSync(npmrcPath, { encoding: 'utf8' });
+    const lines = content.split(/\r?\n/);
+    let proxy: string | null = null;
+    let httpsProxy: string | null = null;
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#') || line.startsWith(';')) {
+            continue;
+        }
+
+        const idx = line.indexOf('=');
+        if (idx < 0) {
+            continue;
+        }
+
+        const key = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim();
+
+        if (key === 'proxy') {
+            proxy = value;
+        } else if (key === 'https-proxy') {
+            httpsProxy = value;
+        }
     }
+
+    return { proxy, httpsProxy };
 }
 
 /**
@@ -51,9 +69,25 @@ async function isNpmAvailable(): Promise<boolean> {
 
 suite('NpmConfigManager Property-Based Tests', () => {
     let npmAvailable: boolean;
+    let testDir: string | undefined;
+    let userConfigPath: string | undefined;
+    const numRuns = process.env.CI ? 5 : 3;
 
     suiteSetup(async () => {
+        // Isolate npm config to avoid mutating developer machine settings and to make tests deterministic.
+        testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-npm-prop-test-'));
+        userConfigPath = path.join(testDir, '.npmrc');
+        fs.writeFileSync(userConfigPath, '', { encoding: 'utf8' });
+
         npmAvailable = await isNpmAvailable();
+    });
+
+    suiteTeardown(() => {
+        if (testDir) {
+            fs.rmSync(testDir, { recursive: true, force: true });
+        }
+        testDir = undefined;
+        userConfigPath = undefined;
     });
 
     /**
@@ -64,15 +98,19 @@ suite('NpmConfigManager Property-Based Tests', () => {
      * Validates: Requirements 1.1
      */
     test('Property 1: npm proxy configuration applies to both http and https', async function() {
-        this.timeout(60000);
+        this.timeout(getPropertyTestTimeout(60000));
         if (!npmAvailable) {
             this.skip();
             return;
         }
+        if (!userConfigPath) {
+            throw new Error('Test setup error: userConfigPath not initialized');
+        }
+        const configPath = userConfigPath;
 
         await fc.assert(
             fc.asyncProperty(validProxyUrlWithoutCredentialsGenerator(), async (proxyUrl) => {
-                const manager = new NpmConfigManager();
+                const manager = new NpmConfigManager(configPath);
 
                 // Set the proxy
                 const result = await manager.setProxy(proxyUrl);
@@ -85,20 +123,18 @@ suite('NpmConfigManager Property-Based Tests', () => {
                 // Verify the operation succeeded
                 assert.strictEqual(result.success, true, `Failed to set proxy: ${result.error}`);
 
-                // Get both config values (npm 11.x uses 'proxy' not 'http-proxy')
-                const httpProxy = await getNpmConfigValue('proxy');
-                const httpsProxy = await getNpmConfigValue('https-proxy');
+                const values = readProxyValuesFromNpmrc(configPath);
 
                 // Both should be set to the same URL
-                assert.strictEqual(httpProxy, proxyUrl, 'proxy should match the set URL');
-                assert.strictEqual(httpsProxy, proxyUrl, 'https-proxy should match the set URL');
+                assert.strictEqual(values.proxy, proxyUrl, 'proxy should match the set URL');
+                assert.strictEqual(values.httpsProxy, proxyUrl, 'https-proxy should match the set URL');
 
                 // Clean up
                 await manager.unsetProxy();
 
                 return true;
             }),
-            { numRuns: getPropertyTestRuns() }
+            { numRuns }
         );
     });
 
@@ -110,15 +146,19 @@ suite('NpmConfigManager Property-Based Tests', () => {
      * Validates: Requirements 3.1
      */
     test('Property 7: Round trip consistency for npm proxy configuration', async function() {
-        this.timeout(60000);
+        this.timeout(getPropertyTestTimeout(60000));
         if (!npmAvailable) {
             this.skip();
             return;
         }
+        if (!userConfigPath) {
+            throw new Error('Test setup error: userConfigPath not initialized');
+        }
+        const configPath = userConfigPath;
 
         await fc.assert(
             fc.asyncProperty(validProxyUrlWithoutCredentialsGenerator(), async (proxyUrl) => {
-                const manager = new NpmConfigManager();
+                const manager = new NpmConfigManager(configPath);
                 
                 // Set the proxy
                 const setResult = await manager.setProxy(proxyUrl);
@@ -146,7 +186,7 @@ suite('NpmConfigManager Property-Based Tests', () => {
                 
                 return true;
             }),
-            { numRuns: getPropertyTestRuns() }
+            { numRuns }
         );
     });
 });

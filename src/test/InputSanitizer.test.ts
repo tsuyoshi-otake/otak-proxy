@@ -233,16 +233,27 @@ suite('InputSanitizer Test Suite', () => {
                             `Masked URL should contain asterisks: ${masked}`);
                         
                         // The username should still be present (we only mask password)
-                        // Note: URL class may lowercase the hostname, so we check case-insensitively
-                        const lowerMasked = masked.toLowerCase();
-                        const lowerUsername = username.toLowerCase();
-                        assert.ok(lowerMasked.includes(lowerUsername), 
-                            `Username '${username}' should still be present in masked URL: ${masked}`);
-                        
-                        // The hostname should still be present (case-insensitive due to URL normalization)
-                        const lowerHostname = hostname.toLowerCase();
-                        assert.ok(lowerMasked.includes(lowerHostname), 
-                            `Hostname '${hostname}' should still be present in masked URL: ${masked}`);
+                        // Prefer comparing URL components rather than raw string containment.
+                        // URL parsing can normalize IPv4-like hostnames (e.g. "00.00" -> "0.0.0.0"),
+                        // so string inclusion is not a reliable invariant for valid URLs.
+                        //
+                        // For malformed hostnames, URL parsing may throw; in that case we fall back to
+                        // case-insensitive string containment checks.
+                        try {
+                            const originalParsed = new URL(url);
+                            const maskedParsed = new URL(masked);
+
+                            assert.strictEqual(maskedParsed.username, originalParsed.username,
+                                `Username should be preserved. original=${originalParsed.username} masked=${maskedParsed.username}`);
+                            assert.strictEqual(maskedParsed.hostname, originalParsed.hostname,
+                                `Hostname should be preserved. original=${originalParsed.hostname} masked=${maskedParsed.hostname}`);
+                        } catch {
+                            const lowerMasked = masked.toLowerCase();
+                            assert.ok(lowerMasked.includes(username.toLowerCase()),
+                                `Username '${username}' should still be present in masked URL: ${masked}`);
+                            assert.ok(lowerMasked.includes(hostname.toLowerCase()),
+                                `Hostname '${hostname}' should still be present in masked URL: ${masked}`);
+                        }
                     }
                 ),
                 { numRuns: 100 }

@@ -300,15 +300,15 @@ suite('I18n Integration Tests', () => {
         test('should show translated success messages', () => {
             i18n.initialize('ja');
             
-            // Mock vscode.window.showInformationMessage
-            const showInfoStub = sandbox.stub(vscode.window, 'showInformationMessage');
+            // showSuccess uses setStatusBarMessage (auto-dismiss)
+            const setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
             
             // Show success with message key
             userNotifier.showSuccess('message.proxyConfigured', { url: 'http://proxy:8080' });
             
             // Verify the message was translated
-            assert.strictEqual(showInfoStub.calledOnce, true, 'Should call showInformationMessage once');
-            const calledMessage = showInfoStub.firstCall.args[0] as string;
+            assert.strictEqual(setStatusBarMessageStub.calledOnce, true, 'Should call setStatusBarMessage once');
+            const calledMessage = setStatusBarMessageStub.firstCall.args[0] as string;
             assert.ok(calledMessage.includes('http://proxy:8080'), 'Should include the URL');
         });
 
@@ -328,17 +328,17 @@ suite('I18n Integration Tests', () => {
         test('should support backward compatibility with direct messages', () => {
             i18n.initialize('en');
             
-            // Mock vscode.window.showInformationMessage
-            const showInfoStub = sandbox.stub(vscode.window, 'showInformationMessage');
+            // showSuccess uses setStatusBarMessage (auto-dismiss)
+            const setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
             
             // Show message with direct text (not a message key)
             const directMessage = 'This is a direct message';
             userNotifier.showSuccess(directMessage);
             
-            // Verify the direct message was shown as-is
-            assert.strictEqual(showInfoStub.calledOnce, true, 'Should call showInformationMessage once');
-            const calledMessage = showInfoStub.firstCall.args[0] as string;
-            assert.strictEqual(calledMessage, directMessage, 'Should show direct message as-is');
+            // Verify the direct message was shown (showSuccess prefixes an icon)
+            assert.strictEqual(setStatusBarMessageStub.calledOnce, true, 'Should call setStatusBarMessage once');
+            const calledMessage = setStatusBarMessageStub.firstCall.args[0] as string;
+            assert.ok(calledMessage.includes(directMessage), 'Should include the direct message');
         });
     });
 

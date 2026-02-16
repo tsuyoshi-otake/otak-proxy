@@ -97,7 +97,7 @@
   "statusbar.tooltip.manualProxy": "Manual Proxy",
   "statusbar.tooltip.systemProxy": "System Proxy",
   "statusbar.tooltip.autoModeUsing": "Auto Mode - Using system proxy: {url}",
-  "statusbar.tooltip.autoModeNoProxy": "Auto Mode - No proxy available",
+  "statusbar.tooltip.autoModeNoProxy": "Auto Mode - No system proxy detected",
   "statusbar.tooltip.manualModeUsing": "Manual Mode - Using: {url}",
   "statusbar.tooltip.manualModeNotConfigured": "Manual Mode - No proxy configured",
   "statusbar.tooltip.proxyDisabled": "Proxy disabled",

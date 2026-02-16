@@ -23,15 +23,37 @@ export interface OperationResult {
 export class NpmConfigManager {
     private readonly timeout: number = 5000; // 5 seconds timeout
     private readonly isWindows: boolean = process.platform === 'win32';
+    private readonly userConfigPath?: string;
+
+    /**
+     * @param userConfigPath Optional override for npm user config file (useful for tests).
+     */
+    constructor(userConfigPath?: string) {
+        this.userConfigPath = userConfigPath;
+    }
 
     /**
      * Executes npm command with platform-appropriate options.
      * On Windows, npm is a batch file (.cmd) so shell:true is required.
      */
     private async execNpm(args: string[]): Promise<{ stdout: string; stderr: string }> {
-        return execFileAsync('npm', args, {
+        const fullArgs = this.userConfigPath ? ['--userconfig', this.userConfigPath, ...args] : args;
+
+        // npm derives config from environment variables like npm_config_proxy, which can
+        // override values stored in npmrc files. In practice these env vars can leak into
+        // VS Code test runs (for example via npx), making get/set behavior non-deterministic.
+        // We remove them so we can reliably manage and read the persisted npm config.
+        const env: NodeJS.ProcessEnv = { ...process.env };
+        delete env.npm_config_proxy;
+        delete env.npm_config_https_proxy;
+        // Windows env names are case-insensitive, but Node may surface them in different cases.
+        delete (env as any).NPM_CONFIG_PROXY;
+        delete (env as any).NPM_CONFIG_HTTPS_PROXY;
+
+        return execFileAsync('npm', fullArgs, {
             timeout: this.timeout,
             encoding: 'utf8',
+            env,
             shell: this.isWindows  // Required for Windows to execute npm.cmd
         });
     }
@@ -62,25 +84,9 @@ export class NpmConfigManager {
      */
     async unsetProxy(): Promise<OperationResult> {
         try {
-            // Delete proxy (npm delete is idempotent - safe to call even if key doesn't exist)
-            try {
-                await this.execNpm(['config', 'delete', 'proxy']);
-            } catch (error: any) {
-                // Ignore errors if key doesn't exist
-                if (!error.stderr?.includes('not found') && error.code !== 1) {
-                    throw error;
-                }
-            }
-
-            // Delete https-proxy
-            try {
-                await this.execNpm(['config', 'delete', 'https-proxy']);
-            } catch (error: any) {
-                // Ignore errors if key doesn't exist
-                if (!error.stderr?.includes('not found') && error.code !== 1) {
-                    throw error;
-                }
-            }
+            // Prefer deleting keys to keep npmrc clean. Deletion is idempotent on modern npm.
+            await this.execNpm(['config', 'delete', 'proxy']);
+            await this.execNpm(['config', 'delete', 'https-proxy']);
 
             return { success: true };
         } catch (error: any) {
@@ -94,10 +100,6 @@ export class NpmConfigManager {
      */
     async getProxy(): Promise<string | null> {
         try {
-            // npm 11.x protects the 'proxy' option, so we use 'npm config list' instead
-            const { stdout } = await this.execNpm(['config', 'list', '--json']);
-
-            const config = JSON.parse(stdout);
             const normalizeValue = (value: any): string | null => {
                 if (value === undefined || value === null) {
                     return null;
@@ -112,10 +114,14 @@ export class NpmConfigManager {
             };
 
             // Prefer HTTP proxy setting, but fall back to https-proxy if only that is configured.
-            const proxy = normalizeValue(config.proxy);
-            const httpsProxy = normalizeValue(config['https-proxy']);
+            const { stdout: proxyStdout } = await this.execNpm(['config', 'get', 'proxy']);
+            const proxy = normalizeValue(proxyStdout);
+            if (proxy !== null) {
+                return proxy;
+            }
 
-            return proxy ?? httpsProxy;
+            const { stdout: httpsProxyStdout } = await this.execNpm(['config', 'get', 'https-proxy']);
+            return normalizeValue(httpsProxyStdout);
         } catch (error: any) {
             // For errors, log but return null
             Logger.error('Error getting npm proxy:', error);

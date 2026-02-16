@@ -366,10 +366,9 @@ suite('Notification Integration Tests', () => {
         test('should show complete proxy test flow: start -> progress -> complete -> result', async () => {
             // Mock VSCode APIs
             const withProgressStub = sandbox.stub(vscode.window, 'withProgress');
-            const showInfoStub = sandbox.stub(vscode.window, 'showInformationMessage');
+            const setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
             const showErrorStub = sandbox.stub(vscode.window, 'showErrorMessage');
             
-            showInfoStub.resolves(undefined);
             showErrorStub.resolves(undefined);
             
             // Track progress reports
@@ -441,13 +440,10 @@ suite('Notification Integration Tests', () => {
 
             // Step 6: Show result notification
             userNotifier.showSuccess('All proxy tests passed');
-            
-            // Wait for async notification
-            await new Promise(resolve => setTimeout(resolve, 50));
 
             // Step 7: Verify result notification was shown
             assert.strictEqual(
-                showInfoStub.called,
+                setStatusBarMessageStub.called,
                 true,
                 'Result notification should be shown after test completes'
             );
@@ -775,8 +771,7 @@ suite('Notification Integration Tests', () => {
             });
 
             // Mock result notification
-            const showInfoStub = sandbox.stub(vscode.window, 'showInformationMessage');
-            showInfoStub.resolves(undefined);
+            const setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
 
             // Step 1: Execute operation with progress
             await userNotifier.showProgressNotification(
@@ -792,11 +787,8 @@ suite('Notification Integration Tests', () => {
             userNotifier.showSuccess('All proxy tests passed');
 
             // Step 3: Verify result notification was shown
-            // Note: showSuccess uses showNotificationWithTimeout which calls showInformationMessage
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
             assert.strictEqual(
-                showInfoStub.called,
+                setStatusBarMessageStub.called,
                 true,
                 'Result notification should be shown'
             );

@@ -12,6 +12,7 @@ suite('UserNotifier Tests', () => {
     let showErrorMessageStub: sinon.SinonStub;
     let showInformationMessageStub: sinon.SinonStub;
     let showWarningMessageStub: sinon.SinonStub;
+    let setStatusBarMessageStub: sinon.SinonStub;
     let withProgressStub: sinon.SinonStub;
     let outputManagerShowStub: sinon.SinonStub;
     let outputManagerLogErrorStub: sinon.SinonStub;
@@ -27,6 +28,7 @@ suite('UserNotifier Tests', () => {
         showErrorMessageStub = sandbox.stub(vscode.window, 'showErrorMessage');
         showInformationMessageStub = sandbox.stub(vscode.window, 'showInformationMessage');
         showWarningMessageStub = sandbox.stub(vscode.window, 'showWarningMessage');
+        setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
         withProgressStub = sandbox.stub(vscode.window, 'withProgress');
         
         // Stub OutputChannelManager methods
@@ -42,17 +44,19 @@ suite('UserNotifier Tests', () => {
     test('showSuccess should display translated message for English', () => {
         userNotifier.showSuccess('message.proxyDisabled');
 
-        assert.ok(showInformationMessageStub.calledOnce);
-        const message = showInformationMessageStub.firstCall.args[0];
-        assert.strictEqual(message, 'Proxy disabled');
+        assert.ok(setStatusBarMessageStub.calledOnce);
+        const message = setStatusBarMessageStub.firstCall.args[0] as string;
+        assert.ok(message.includes('Proxy disabled'));
+        assert.strictEqual(setStatusBarMessageStub.firstCall.args[1], 3000);
     });
 
     test('showSuccess should display translated message with parameters', () => {
         userNotifier.showSuccess('message.proxyConfigured', { url: 'http://test:8080' });
 
-        assert.ok(showInformationMessageStub.calledOnce);
-        const message = showInformationMessageStub.firstCall.args[0];
-        assert.strictEqual(message, 'Proxy configured: http://test:8080');
+        assert.ok(setStatusBarMessageStub.calledOnce);
+        const message = setStatusBarMessageStub.firstCall.args[0] as string;
+        assert.ok(message.includes('Proxy configured: http://test:8080'));
+        assert.strictEqual(setStatusBarMessageStub.firstCall.args[1], 3000);
     });
 
     test('showWarning should display translated message for English', () => {
@@ -88,9 +92,10 @@ suite('UserNotifier Tests', () => {
     test('showSuccess should work with direct text for backward compatibility', () => {
         userNotifier.showSuccess('Direct success message');
 
-        assert.ok(showInformationMessageStub.calledOnce);
-        const message = showInformationMessageStub.firstCall.args[0];
-        assert.strictEqual(message, 'Direct success message');
+        assert.ok(setStatusBarMessageStub.calledOnce);
+        const message = setStatusBarMessageStub.firstCall.args[0] as string;
+        assert.ok(message.includes('Direct success message'));
+        assert.strictEqual(setStatusBarMessageStub.firstCall.args[1], 3000);
     });
 
     test('showWarning should work with direct text for backward compatibility', () => {
@@ -117,9 +122,10 @@ suite('UserNotifier Tests', () => {
 
         jaNotifier.showSuccess('message.proxyDisabled');
 
-        assert.ok(showInformationMessageStub.calledOnce);
-        const message = showInformationMessageStub.firstCall.args[0];
-        assert.strictEqual(message, 'Proxyが無効化されました');
+        assert.ok(setStatusBarMessageStub.calledOnce);
+        const message = setStatusBarMessageStub.firstCall.args[0] as string;
+        assert.ok(message.includes('Proxyが無効化されました'));
+        assert.strictEqual(setStatusBarMessageStub.firstCall.args[1], 3000);
     });
 
     suite('Enhanced Features Tests', () => {

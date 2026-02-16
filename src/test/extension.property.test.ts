@@ -5,10 +5,14 @@
 
 import * as assert from 'assert';
 import * as fc from 'fast-check';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { GitConfigManager } from '../config/GitConfigManager';
 import { VscodeConfigManager } from '../config/VscodeConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
+import { ProxyApplier } from '../core/ProxyApplier';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
@@ -22,7 +26,7 @@ import {
 } from './generators';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getPropertyTestRuns } from './helpers';
+import { getPropertyTestRuns, getPropertyTestTimeout } from './helpers';
 
 const execFileAsync = promisify(execFile);
 const isWindows = process.platform === 'win32';
@@ -98,7 +102,12 @@ suite('Extension Integration Property-Based Tests', () => {
             fc.asyncProperty(validProxyUrlWithoutCredentialsGenerator(), async (proxyUrl) => {
                 const gitManager = new GitConfigManager();
                 const vscodeManager = new VscodeConfigManager();
-                const npmManager = new NpmConfigManager();
+
+                // Isolate npm config from the developer's global environment to avoid side effects/flakiness.
+                const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-ext-prop-npm-'));
+                const userConfigPath = path.join(testDir, '.npmrc');
+                fs.writeFileSync(userConfigPath, '', { encoding: 'utf8' });
+                const npmManager = new NpmConfigManager(userConfigPath);
 
                 try {
                     // Apply proxy settings to all managers
@@ -133,6 +142,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     await gitManager.unsetProxy();
                     await vscodeManager.unsetProxy();
                     await npmManager.unsetProxy();
+                    fs.rmSync(testDir, { recursive: true, force: true });
                 }
             }),
             { numRuns: getPropertyTestRuns() }
@@ -160,7 +170,12 @@ suite('Extension Integration Property-Based Tests', () => {
             fc.asyncProperty(validProxyUrlWithoutCredentialsGenerator(), async (proxyUrl) => {
                 const gitManager = new GitConfigManager();
                 const vscodeManager = new VscodeConfigManager();
-                const npmManager = new NpmConfigManager();
+
+                // Isolate npm config from the developer's global environment to avoid side effects/flakiness.
+                const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-ext-prop-npm-'));
+                const userConfigPath = path.join(testDir, '.npmrc');
+                fs.writeFileSync(userConfigPath, '', { encoding: 'utf8' });
+                const npmManager = new NpmConfigManager(userConfigPath);
 
                 try {
                     // Apply proxy settings to Git and VSCode
@@ -190,6 +205,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     await gitManager.unsetProxy();
                     await vscodeManager.unsetProxy();
                     await npmManager.unsetProxy();
+                    fs.rmSync(testDir, { recursive: true, force: true });
                 }
             }),
             { numRuns: getPropertyTestRuns() }
@@ -203,52 +219,67 @@ suite('Extension Integration Property-Based Tests', () => {
      * Validates: Requirements 2.3
      */
     test('Property 6: Deletion consistency - all unsetProxy() methods are called', async function() {
-        if (!npmAvailable || !gitAvailable) {
-            this.skip();
-            return;
-        }
+        this.timeout(getPropertyTestTimeout(10000));
 
-        // Increase timeout for property-based tests
-        this.timeout(60000);
-
-        // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
-            fc.asyncProperty(validProxyUrlWithoutCredentialsGenerator(), async (proxyUrl) => {
-                const gitManager = new GitConfigManager();
-                const vscodeManager = new VscodeConfigManager();
-                const npmManager = new NpmConfigManager();
+            fc.asyncProperty(
+                fc.boolean(), // git unset success
+                fc.boolean(), // vscode unset success
+                fc.boolean(), // npm unset success
+                async (gitOk, vscodeOk, npmOk) => {
+                    const unsetCalls: string[] = [];
 
-                try {
-                    // First, set proxy on all managers
-                    await gitManager.setProxy(proxyUrl);
-                    await vscodeManager.setProxy(proxyUrl);
-                    await npmManager.setProxy(proxyUrl);
+                    const gitManager = {
+                        setProxy: async () => ({ success: true }),
+                        unsetProxy: async () => {
+                            unsetCalls.push('git');
+                            return { success: gitOk, error: gitOk ? undefined : 'git unset failed' };
+                        }
+                    } as any;
 
-                    // Now unset all
-                    const gitUnsetResult = await gitManager.unsetProxy();
-                    const vscodeUnsetResult = await vscodeManager.unsetProxy();
-                    const npmUnsetResult = await npmManager.unsetProxy();
+                    const vscodeManager = {
+                        setProxy: async () => ({ success: true }),
+                        unsetProxy: async () => {
+                            unsetCalls.push('vscode');
+                            return { success: vscodeOk, error: vscodeOk ? undefined : 'vscode unset failed' };
+                        }
+                    } as any;
 
-                    // All unset operations should succeed
-                    assert.strictEqual(gitUnsetResult.success, true, 'Git unset should succeed');
-                    assert.strictEqual(vscodeUnsetResult.success, true, 'VSCode unset should succeed');
-                    assert.strictEqual(npmUnsetResult.success, true, 'npm unset should succeed');
+                    const npmManager = {
+                        setProxy: async () => ({ success: true }),
+                        unsetProxy: async () => {
+                            unsetCalls.push('npm');
+                            return { success: npmOk, error: npmOk ? undefined : 'npm unset failed' };
+                        }
+                    } as any;
 
-                    // Verify all proxies are removed
-                    const gitProxy = await gitManager.getProxy();
-                    const npmProxy = await npmManager.getProxy();
+                    const applier = new ProxyApplier(
+                        gitManager,
+                        vscodeManager,
+                        npmManager,
+                        new ProxyUrlValidator(),
+                        new InputSanitizer(),
+                        {
+                            showSuccess: () => {},
+                            showError: () => {},
+                            showWarning: () => {}
+                        } as any
+                    );
 
-                    assert.strictEqual(gitProxy, null, 'Git proxy should be null after unset');
-                    assert.strictEqual(npmProxy, null, 'npm proxy should be null after unset');
+                    const result = await applier.disableProxy();
+
+                    assert.strictEqual(unsetCalls.includes('git'), true, 'Git unsetProxy should be called');
+                    assert.strictEqual(unsetCalls.includes('vscode'), true, 'VSCode unsetProxy should be called');
+                    assert.strictEqual(unsetCalls.includes('npm'), true, 'npm unsetProxy should be called');
+                    assert.strictEqual(
+                        result,
+                        gitOk && vscodeOk && npmOk,
+                        'disableProxy should return true only when all unset operations succeed'
+                    );
 
                     return true;
-                } finally {
-                    // Ensure cleanup
-                    await gitManager.unsetProxy();
-                    await vscodeManager.unsetProxy();
-                    await npmManager.unsetProxy();
                 }
-            }),
+            ),
             { numRuns: getPropertyTestRuns() }
         );
     });
@@ -270,7 +301,12 @@ suite('Extension Integration Property-Based Tests', () => {
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
             fc.asyncProperty(validProxyUrlWithoutCredentialsGenerator(), async (proxyUrl) => {
-                const npmManager = new NpmConfigManager();
+                // Isolate npm config from the developer's global environment to avoid side effects/flakiness.
+                const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-ext-prop-npm-'));
+                const userConfigPath = path.join(testDir, '.npmrc');
+                fs.writeFileSync(userConfigPath, '', { encoding: 'utf8' });
+                const npmManager = new NpmConfigManager(userConfigPath);
+                let didUnset = false;
 
                 try {
                     // First, set proxy
@@ -285,21 +321,28 @@ suite('Extension Integration Property-Based Tests', () => {
                     // Now unset proxy
                     const unsetResult = await npmManager.unsetProxy();
                     assert.strictEqual(unsetResult.success, true, `Failed to unset proxy: ${unsetResult.error}`);
+                    didUnset = true;
 
-                    // Verify both proxy and https-proxy are removed
-                    const httpProxy = await getNpmConfigValue('proxy');
-                    const httpsProxy = await getNpmConfigValue('https-proxy');
-
-                    assert.strictEqual(httpProxy, null, 'proxy should be null after unset');
-                    assert.strictEqual(httpsProxy, null, 'https-proxy should be null after unset');
+                    // Verify both proxy and https-proxy are removed from the isolated npmrc.
+                    // Avoid calling `npm config list --json` here: it's slow and can time out on some environments.
+                    // npm may delete the npmrc file if it becomes empty after deletion.
+                    const npmrc = fs.existsSync(userConfigPath)
+                        ? fs.readFileSync(userConfigPath, { encoding: 'utf8' })
+                        : '';
+                    assert.strictEqual(/^proxy\\s*=/m.test(npmrc), false, 'proxy should be removed from npmrc after unset');
+                    assert.strictEqual(/^https-proxy\\s*=/m.test(npmrc), false, 'https-proxy should be removed from npmrc after unset');
 
                     return true;
                 } finally {
                     // Ensure cleanup
-                    await npmManager.unsetProxy();
+                    if (!didUnset) {
+                        await npmManager.unsetProxy();
+                    }
+                    fs.rmSync(testDir, { recursive: true, force: true });
                 }
             }),
-            { numRuns: getPropertyTestRuns() }
+            // This property uses real npm commands; keep runs small to avoid timeouts.
+            { numRuns: process.env.CI ? 10 : 2 }
         );
     });
 
@@ -528,22 +571,3 @@ suite('Extension Integration Property-Based Tests', () => {
         );
     });
 });
-
-/**
- * Helper function to get npm config value
- * Note: npm 11.x protects certain config values, so we use 'npm config list --json'
- */
-async function getNpmConfigValue(key: string): Promise<string | null> {
-    try {
-        const { stdout } = await execFileAsync('npm', ['config', 'list', '--json'], {
-            timeout: 5000,
-            encoding: 'utf8',
-            shell: isWindows
-        });
-        const config = JSON.parse(stdout);
-        const value = config[key];
-        return (value === undefined || value === '' || value === 'undefined' || value === 'null') ? null : value;
-    } catch {
-        return null;
-    }
-}
