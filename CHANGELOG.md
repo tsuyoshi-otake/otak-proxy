@@ -1,5 +1,10 @@
 # Change Log
 
+## [2.2.4] - 2026-02-16
+
+### Fixed
+- Multi-instance sync: proxy state changes via commands (toggle, configure URL, import) were not propagated to other VSCode instances
+
 ## [2.2.3] - 2026-02-16
 
 ### Added

@@ -202,7 +202,13 @@ export async function activate(context: vscode.ExtensionContext) {
     createCommandRegistry({
         context,
         getProxyState: (ctx) => proxyStateManager.getState(),
-        saveProxyState: (ctx, s) => proxyStateManager.saveState(s),
+        saveProxyState: async (ctx, s) => {
+            await proxyStateManager.saveState(s);
+            // Propagate state change to other instances (Feature: multi-instance-sync)
+            if (syncManager && syncConfigManager?.isSyncEnabled()) {
+                await syncManager.notifyChange(s);
+            }
+        },
         getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
         getNextMode: (mode) => proxyStateManager.getNextMode(mode),
         applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled),
