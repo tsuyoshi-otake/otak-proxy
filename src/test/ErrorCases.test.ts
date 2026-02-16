@@ -176,26 +176,26 @@ suite('Timeout Error Tests (Task 4.2)', () => {
             // Actual test with real git - verify timeout handling structure
             const result = await manager.setProxy('http://proxy.example.com:8080');
 
-            // If timeout occurred, errorType should be TIMEOUT
-            if (!result.success && result.errorType === 'TIMEOUT') {
-                assert.strictEqual(result.errorType, 'TIMEOUT');
-                assert.ok(result.error?.includes('timeout'));
-            }
-        });
-    });
+             // If timeout occurred, errorType should be TIMEOUT
+             if (!result.success && result.errorType === 'TIMEOUT') {
+                 assert.strictEqual(result.errorType, 'TIMEOUT');
+                 assert.ok(/timeout|timed out/i.test(result.error ?? ''));
+             }
+         });
+     });
 
     suite('npm Command Timeout', () => {
         test('should handle npm timeout with TIMEOUT errorType', async () => {
             const manager = new NpmConfigManager();
 
-            const result = await manager.setProxy('http://proxy.example.com:8080');
+             const result = await manager.setProxy('http://proxy.example.com:8080');
 
-            if (!result.success && result.errorType === 'TIMEOUT') {
-                assert.strictEqual(result.errorType, 'TIMEOUT');
-                assert.ok(result.error?.includes('timeout'));
-            }
-        });
-    });
+             if (!result.success && result.errorType === 'TIMEOUT') {
+                 assert.strictEqual(result.errorType, 'TIMEOUT');
+                 assert.ok(/timeout|timed out/i.test(result.error ?? ''));
+             }
+         });
+     });
 
     suite('Error Type Verification', () => {
         test('should distinguish TIMEOUT from other error types', () => {

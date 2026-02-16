@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as sinon from 'sinon';
 
-suite('Otak Proxy Extension Test Suite', () => {
+suite('Otak Proxy Extension Test Suite @smoke', () => {
     let sandbox: sinon.SinonSandbox;
     let extension: any;
     let globalState: Map<string, any>;
@@ -103,11 +103,11 @@ suite('Otak Proxy Extension Test Suite', () => {
         sandbox.restore();
     });
 
-    test('Extension should activate', async () => {
+    test('Extension should activate @smoke', async () => {
         assert.strictEqual(mockContext.subscriptions!.length > 0, true);
     });
 
-    test('Status bar should be initialized', async () => {
+    test('Status bar should be initialized @smoke', async () => {
         // Verify that createStatusBarItem was called during activation
         assert.strictEqual(createStatusBarItemStub.called, true);
     });
@@ -118,7 +118,7 @@ suite('Otak Proxy Extension Test Suite', () => {
         assert.strictEqual(globalState.get('hasInitialSetup'), true);
     });
 
-    test('Proxy toggle command should be registered', async function() {
+    test('Proxy toggle command should be registered @smoke', async function() {
         this.timeout(10000);
         // Since we stub registerCommand, we just verify activate completed successfully
         // and the subscriptions array has items (commands were registered)

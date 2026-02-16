@@ -22,13 +22,19 @@ suite('I18nManager Property Tests', () => {
         const supportedLocales = new Set(['en', 'ja', 'zh-cn', 'zh-tw', 'ko']);
         const resolvesToSupported = (raw: string): boolean => {
             const normalized = (raw || '').trim().replace(/_/g, '-').toLowerCase();
-            if (supportedLocales.has(normalized)) return true;
+            if (supportedLocales.has(normalized)) {
+                return true;
+            }
 
             const base = normalized.split('-')[0];
-            if (supportedLocales.has(base)) return true; // en-US, ja-JP, ko-KR, etc.
+            if (supportedLocales.has(base)) {
+                return true; // en-US, ja-JP, ko-KR, etc.
+            }
 
             // Chinese variants map to supported zh-cn/zh-tw.
-            if (base === 'zh') return true;
+            if (base === 'zh') {
+                return true;
+            }
 
             return false;
         };

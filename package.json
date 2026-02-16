@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.2.0",
+  "version": "2.2.2",
   "engines": {
     "vscode": "^1.9.0"
   },
@@ -121,9 +121,17 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./ && node -e \"require('fs').cpSync('src/i18n/locales', 'out/i18n/locales', {recursive: true})\"",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "npm run compile",
     "lint": "eslint src",
     "test": "vscode-test",
+    "test:fast": "cross-env OTAK_PROXY_TEST_FAST=1 vscode-test --bail",
+    "test:vscode": "npm run compile && vscode-test",
+    "test:vscode:fast": "npm run compile && cross-env OTAK_PROXY_TEST_FAST=1 vscode-test --bail",
+    "test:smoke": "npm run compile && cross-env OTAK_PROXY_TEST_FAST=1 MOCHA_GREP=@smoke vscode-test --bail",
+    "test:mvp": "npm run lint && npm run test:unit:parallel && npm run test:smoke",
+    "test:ci": "npm run lint && npm test",
+    "test:unit": "npm run compile && node scripts/run-unit-tests.mjs",
+    "test:unit:parallel": "npm run compile && cross-env OTAK_PROXY_UNIT_PARALLEL=1 node scripts/run-unit-tests.mjs",
     "test:real-proxy": "dotenvx run -f .env.local -- cross-env MOCHA_GREP=\"Real Proxy\" vscode-test"
   },
   "devDependencies": {
@@ -139,6 +147,7 @@
     "cross-env": "^10.1.0",
     "eslint": "^9.19.0",
     "fast-check": "^4.3.0",
+    "mocha": "^10.8.2",
     "sinon": "^19.0.2",
     "typescript": "^5.7.3"
   }

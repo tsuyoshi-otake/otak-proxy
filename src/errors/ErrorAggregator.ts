@@ -68,6 +68,10 @@ export class ErrorAggregator {
 
     // Git-related suggestions
     if (operations.some(op => op.toLowerCase().includes('git'))) {
+      const lockError = errorMessages.find(err =>
+        err.toLowerCase().includes('could not lock config file') ||
+        err.toLowerCase().includes('git config file is locked')
+      );
       const gitError = errorMessages.find(err => 
         err.toLowerCase().includes('not found') || 
         err.toLowerCase().includes('not installed')
@@ -76,6 +80,10 @@ export class ErrorAggregator {
         suggestions.push('Install Git from https://git-scm.com');
         suggestions.push('Ensure Git is added to your system PATH');
         suggestions.push('Restart VSCode after installing Git');
+      } else if (lockError) {
+        suggestions.push('Close other VSCode windows and Git processes, then try again');
+        suggestions.push('If a stale lock file exists, delete the global Git config lock (e.g., ~/.gitconfig.lock or %USERPROFILE%\\.gitconfig.lock)');
+        suggestions.push('Retry the operation after removing the lock file');
       } else {
         suggestions.push('Check Git installation and permissions');
         suggestions.push('Try running Git commands manually in terminal');

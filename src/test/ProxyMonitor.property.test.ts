@@ -75,8 +75,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 1.1
      */
     test('Property 1: Polling interval adherence', async function() {
-        // Increase timeout for this test as it involves waiting for polling
-        this.timeout(30000);
+        // Make this test fast and deterministic using fake timers (no real 10s waits).
+        this.timeout(5000);
 
         // Test with minimum valid interval (10 seconds) as required by ProxyMonitor
         // The property holds for any valid interval, so testing with the minimum is sufficient
@@ -94,17 +94,18 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
         mockDetector.resetCheckCount();
 
+        const clock = sinon.useFakeTimers();
         try {
             // Start monitoring
             monitor.start();
 
             // Wait a bit for the first check to be scheduled
-            await sleep(100);
+            await clock.tickAsync(100);
 
             // Wait for approximately 2.5 intervals to observe multiple checks
             // We use 2.5 to ensure we see at least 2 checks but not too many
             const waitTime = intervalMs * 2.5;
-            await sleep(waitTime);
+            await clock.tickAsync(waitTime);
 
             // Stop monitoring
             monitor.stop();
@@ -147,6 +148,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
         } finally {
             monitor.stop();
+            clock.restore();
         }
     });
 
@@ -158,8 +160,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 1.2
      */
     test('Property 2: Dynamic polling interval update', async function() {
-        // Increase timeout for this test as it involves waiting for polling
-        this.timeout(60000);
+        // Make this test fast and deterministic using fake timers (no real 10s/15s waits).
+        this.timeout(7000);
 
         // Test with minimum valid intervals (10 and 15 seconds) as required by ProxyMonitor
         const initialIntervalSeconds = 10;
@@ -178,15 +180,16 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
         mockDetector.resetCheckCount();
 
+        const clock = sinon.useFakeTimers();
         try {
             // Start monitoring with initial interval
             monitor.start();
 
             // Wait a bit for the first check to be scheduled
-            await sleep(100);
+            await clock.tickAsync(100);
 
             // Wait for approximately 1.8 intervals to see at least one check
-            await sleep(initialIntervalMs * 1.8);
+            await clock.tickAsync(initialIntervalMs * 1.8);
 
             // Get check count after initial interval
             const checksBeforeUpdate = mockDetector.getCheckCount();
@@ -205,7 +208,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
             // Wait for approximately 2.2 intervals with the new interval
             const waitTime = updatedIntervalMs * 2.2;
-            await sleep(waitTime);
+            await clock.tickAsync(waitTime);
 
             // Get check count after update
             const checksAfterUpdate = mockDetector.getCheckCount();
@@ -258,6 +261,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
         } finally {
             monitor.stop();
+            clock.restore();
         }
     });
 
@@ -1253,7 +1257,8 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
      * For any detected proxy URL, a connection test should be executed.
      */
     test('Property 1: Connection test execution on proxy detection', async function() {
-        this.timeout(30000);
+        // Deterministic + faster: no real timer sleeps.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1309,12 +1314,13 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
                         connectionTester
                     );
 
+                    const clock = sinon.useFakeTimers();
                     try {
                         monitor.start();
                         monitor.triggerCheck('focus');
 
-                        // Wait for check to complete
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        // Wait for check to complete (debounce + async chain)
+                        await clock.tickAsync(50);
 
                         // Property: When proxy is detected, testProxyAuto should be called
                         if (!testProxyAutoCalled) {
@@ -1330,6 +1336,7 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
                         }
                     } finally {
                         monitor.stop();
+                        clock.restore();
                     }
                 }
             ),
@@ -1344,7 +1351,8 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
      * When proxy URL changes, a connection test should be executed immediately for the new URL.
      */
     test('Property 6: Immediate connection test on proxy URL change', async function() {
-        this.timeout(30000);
+        // Deterministic + faster: no real timer sleeps.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1417,16 +1425,17 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
                         connectionTester
                     );
 
+                    const clock = sinon.useFakeTimers();
                     try {
                         monitor.start();
 
                         // First check - old proxy
                         monitor.triggerCheck('focus');
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await clock.tickAsync(50);
 
                         // Second check - new proxy
                         monitor.triggerCheck('focus');
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await clock.tickAsync(50);
 
                         // Property: Both URLs should have been tested
                         if (testedUrls.length < 2) {
@@ -1453,6 +1462,7 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
                         }
                     } finally {
                         monitor.stop();
+                        clock.restore();
                     }
                 }
             ),
@@ -1467,7 +1477,8 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
      * When no proxy is detected, no connection test should be executed.
      */
     test('No connection test when no proxy detected', async function() {
-        this.timeout(30000);
+        // Deterministic + faster: no real timer sleeps.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1512,17 +1523,18 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
                         connectionTester
                     );
 
+                    const clock = sinon.useFakeTimers();
                     try {
                         monitor.start();
 
                         // Trigger multiple checks
                         for (let i = 0; i < checkCount; i++) {
                             monitor.triggerCheck('focus');
-                            await new Promise(resolve => setTimeout(resolve, 100));
+                            await clock.tickAsync(20);
                         }
 
                         // Wait for all checks to complete
-                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await clock.tickAsync(50);
 
                         // Property: No connection test should be called when no proxy detected
                         if (testProxyAutoCalled) {
@@ -1533,6 +1545,7 @@ suite('ProxyMonitor Connection Testing Property Tests', function() {
                         }
                     } finally {
                         monitor.stop();
+                        clock.restore();
                     }
                 }
             ),

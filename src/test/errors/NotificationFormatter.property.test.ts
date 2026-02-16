@@ -227,8 +227,8 @@ suite('NotificationFormatter Property Tests', () => {
                     // If more than 2 URLs, should show "+X more"
                     if (urls.length > 2) {
                         assert.ok(
-                            result.includes('+'),
-                            'Should include "+X more" when more than 2 URLs'
+                            result.includes(' (+'),
+                            'Should include "(+X more)" suffix when more than 2 URLs'
                         );
                         assert.strictEqual(
                             displayedUrls.length,
@@ -239,8 +239,8 @@ suite('NotificationFormatter Property Tests', () => {
                         // Verify the count is correct
                         const remaining = urls.length - 2;
                         assert.ok(
-                            result.includes(`+${remaining} more`),
-                            `Should show "+${remaining} more"`
+                            new RegExp(`\\(\\+${remaining} more\\)$`).test(result),
+                            `Should show "(+${remaining} more)" suffix`
                         );
                     }
                 }
@@ -278,11 +278,11 @@ suite('NotificationFormatter Property Tests', () => {
                         `Should display at most ${maxCount} URLs, but displayed ${displayedUrls.length}`
                     );
                     
-                    // If maxCount or fewer URLs, should display all without "+X more"
+                    // If maxCount or fewer URLs, should display all without "(+X more)" suffix
                     if (urls.length <= maxCount) {
                         assert.ok(
-                            !result.includes('+'),
-                            `Should not include "+X more" when ${maxCount} or fewer URLs`
+                            !result.includes(' (+'),
+                            `Should not include "(+X more)" when ${maxCount} or fewer URLs`
                         );
                         assert.strictEqual(
                             displayedUrls.length,
@@ -291,11 +291,11 @@ suite('NotificationFormatter Property Tests', () => {
                         );
                     }
                     
-                    // If more than maxCount URLs, should show "+X more"
+                    // If more than maxCount URLs, should show "(+X more)" suffix
                     if (urls.length > maxCount) {
                         assert.ok(
-                            result.includes('+'),
-                            `Should include "+X more" when more than ${maxCount} URLs`
+                            result.includes(' (+'),
+                            `Should include "(+X more)" when more than ${maxCount} URLs`
                         );
                         assert.strictEqual(
                             displayedUrls.length,
@@ -306,8 +306,8 @@ suite('NotificationFormatter Property Tests', () => {
                         // Verify the count is correct
                         const remaining = urls.length - maxCount;
                         assert.ok(
-                            result.includes(`+${remaining} more`),
-                            `Should show "+${remaining} more"`
+                            new RegExp(`\\(\\+${remaining} more\\)$`).test(result),
+                            `Should show "(+${remaining} more)" suffix`
                         );
                     }
                 }

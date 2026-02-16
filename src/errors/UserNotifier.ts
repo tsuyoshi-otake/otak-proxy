@@ -48,7 +48,13 @@ export class UserNotifier {
         
         // Check throttling
         const throttleKey = `error:${message}`;
-        if (!this.throttler.shouldShow(throttleKey)) {
+        // Git config lock errors can spam during repeated retries; throttle them harder.
+        const isGitLockError =
+            translatedMessage.toLowerCase().includes('could not lock config file') ||
+            translatedMessage.toLowerCase().includes('git config file is locked');
+        const throttleMs = isGitLockError ? 60000 : undefined;
+
+        if (!this.throttler.shouldShow(throttleKey, throttleMs)) {
             // Still log to output channel even if throttled
             this.outputManager.logError(translatedMessage, {
                 timestamp: new Date(),
@@ -132,7 +138,12 @@ export class UserNotifier {
         
         // Check throttling
         const throttleKey = `error:${message}`;
-        if (!this.throttler.shouldShow(throttleKey)) {
+        const isGitLockError =
+            translatedMessage.toLowerCase().includes('could not lock config file') ||
+            translatedMessage.toLowerCase().includes('git config file is locked');
+        const throttleMs = isGitLockError ? 60000 : undefined;
+
+        if (!this.throttler.shouldShow(throttleKey, throttleMs)) {
             return;
         }
         

@@ -1,4 +1,7 @@
 import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 
@@ -10,7 +13,7 @@ const execFileAsync = promisify(execFile);
 export interface OperationResult {
     success: boolean;
     error?: string;
-    errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'UNKNOWN';
+    errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'LOCKED' | 'UNKNOWN';
 }
 
 /**
@@ -20,6 +23,151 @@ export interface OperationResult {
 export class GitConfigManager {
     private readonly timeout: number = 5000; // 5 seconds timeout
 
+    // Cross-process mutex to avoid concurrent writes to the global git config from multiple VS Code windows.
+    private static readonly mutexFilePath = path.join(os.tmpdir(), 'otak-proxy.gitconfig.mutex');
+    private static readonly MUTEX_TIMEOUT_MS = 5000;
+    private static readonly MUTEX_STALE_MS = 30000;
+    private static readonly MUTEX_RETRY_DELAY_MS = 25;
+
+    private static async sleep(ms: number): Promise<void> {
+        await new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    private static async withWriteMutex<T>(fn: () => Promise<T>): Promise<T> {
+        const start = Date.now();
+
+        while (true) {
+            try {
+                const fd = fs.openSync(GitConfigManager.mutexFilePath, 'wx');
+                fs.closeSync(fd);
+                break;
+            } catch (error: any) {
+                if (error?.code !== 'EEXIST') {
+                    throw error;
+                }
+
+                // Remove stale mutex if a previous process crashed.
+                try {
+                    const stat = fs.statSync(GitConfigManager.mutexFilePath);
+                    if (Date.now() - stat.mtimeMs > GitConfigManager.MUTEX_STALE_MS) {
+                        fs.unlinkSync(GitConfigManager.mutexFilePath);
+                        continue;
+                    }
+                } catch {
+                    // ignore and retry
+                }
+
+                if (Date.now() - start > GitConfigManager.MUTEX_TIMEOUT_MS) {
+                    throw new Error('Timed out acquiring Git config mutex');
+                }
+
+                await GitConfigManager.sleep(GitConfigManager.MUTEX_RETRY_DELAY_MS);
+            }
+        }
+
+        try {
+            return await fn();
+        } finally {
+            try {
+                fs.unlinkSync(GitConfigManager.mutexFilePath);
+            } catch {
+                // ignore
+            }
+        }
+    }
+
+    private isGitConfigLockError(error: any): boolean {
+        const message = String(error?.message || '');
+        const stderr = String(error?.stderr || '');
+        const text = `${message}\n${stderr}`.toLowerCase();
+        return text.includes('could not lock config file') || (text.includes('unable to create') && text.includes('.lock'));
+    }
+
+    private normalizeConfigPathToFsPath(p: string): string {
+        // git error strings on Windows frequently use forward slashes even for local paths.
+        if (/^[A-Za-z]:\//.test(p)) {
+            return p.replace(/\//g, '\\');
+        }
+        return p;
+    }
+
+    private tryRemoveStaleGitConfigLock(error: any): void {
+        const lockedConfigPath = this.getLockedConfigPath(error);
+        if (!lockedConfigPath) {
+            return;
+        }
+
+        const fsConfigPath = this.normalizeConfigPathToFsPath(lockedConfigPath);
+        const lockPath = `${fsConfigPath}.lock`;
+
+        try {
+            if (!fs.existsSync(lockPath)) {
+                return;
+            }
+
+            const stat = fs.statSync(lockPath);
+            const ageMs = Date.now() - stat.mtimeMs;
+            if (ageMs <= GitConfigManager.MUTEX_STALE_MS) {
+                return; // lock is fresh; don't touch it
+            }
+
+            fs.unlinkSync(lockPath);
+            Logger.warn(`Removed stale git config lock: ${lockPath}`);
+        } catch (e) {
+            // Best-effort: if we can't stat/unlink, just leave it and let the retry logic fail.
+            Logger.warn('Failed to remove stale git config lock:', e);
+        }
+    }
+
+    private getLockedConfigPath(error: any): string | null {
+        const message = String(error?.message || '');
+        const stderr = String(error?.stderr || '');
+        const text = `${stderr}\n${message}`;
+
+        // Example (Windows): "error: could not lock config file C:/Users/.../.gitconfig: File exists"
+        // Example (Linux):   "error: could not lock config file '/home/.../.gitconfig': Permission denied"
+        const match = text.match(/could not lock config file\s+['"]?(.*?)(?::\s)/i);
+        if (!match) {
+            return null;
+        }
+
+        const raw = match[1].trim();
+        return raw.replace(/^['"]/, '').replace(/['"]$/, '');
+    }
+
+    private async execGitConfigWithRetry(args: string[]): Promise<void> {
+        const maxAttempts = 5;
+        let delayMs = 50;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                await execFileAsync('git', args, {
+                    timeout: this.timeout,
+                    encoding: 'utf8'
+                });
+                return;
+            } catch (error: any) {
+                if (!this.isGitConfigLockError(error)) {
+                    throw error;
+                }
+
+                // If we hit a persistent stale lock file, try to remove it once.
+                if (attempt === 1) {
+                    this.tryRemoveStaleGitConfigLock(error);
+                }
+
+                if (attempt === maxAttempts) {
+                    throw error;
+                }
+
+                // Wait a bit and retry. Lock contention is typically transient when multiple processes
+                // try to update the global git config concurrently.
+                await GitConfigManager.sleep(delayMs);
+                delayMs = Math.min(1000, delayMs * 2);
+            }
+        }
+    }
+
     /**
      * Sets Git global proxy configuration for both http and https
      * @param url - Validated proxy URL
@@ -27,16 +175,12 @@ export class GitConfigManager {
      */
     async setProxy(url: string): Promise<OperationResult> {
         try {
-            // Set http.proxy
-            await execFileAsync('git', ['config', '--global', 'http.proxy', url], {
-                timeout: this.timeout,
-                encoding: 'utf8'
-            });
+            await GitConfigManager.withWriteMutex(async () => {
+                // Set http.proxy
+                await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url]);
 
-            // Set https.proxy
-            await execFileAsync('git', ['config', '--global', 'https.proxy', url], {
-                timeout: this.timeout,
-                encoding: 'utf8'
+                // Set https.proxy
+                await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url]);
             });
 
             return { success: true };
@@ -51,31 +195,27 @@ export class GitConfigManager {
      */
     async unsetProxy(): Promise<OperationResult> {
         try {
-            // Unset http.proxy (git config --unset is idempotent - safe to call even if key doesn't exist)
-            try {
-                await execFileAsync('git', ['config', '--global', '--unset', 'http.proxy'], {
-                    timeout: this.timeout,
-                    encoding: 'utf8'
-                });
-            } catch (error: any) {
-                // Ignore error if key doesn't exist (exit code 5)
-                if (error.code !== 5) {
-                    throw error;
+            await GitConfigManager.withWriteMutex(async () => {
+                // Unset http.proxy (git config --unset is idempotent - safe to call even if key doesn't exist)
+                try {
+                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'http.proxy']);
+                } catch (error: any) {
+                    // Ignore error if key doesn't exist (exit code 5)
+                    if (error.code !== 5) {
+                        throw error;
+                    }
                 }
-            }
 
-            // Unset https.proxy
-            try {
-                await execFileAsync('git', ['config', '--global', '--unset', 'https.proxy'], {
-                    timeout: this.timeout,
-                    encoding: 'utf8'
-                });
-            } catch (error: any) {
-                // Ignore error if key doesn't exist (exit code 5)
-                if (error.code !== 5) {
-                    throw error;
+                // Unset https.proxy
+                try {
+                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'https.proxy']);
+                } catch (error: any) {
+                    // Ignore error if key doesn't exist (exit code 5)
+                    if (error.code !== 5) {
+                        throw error;
+                    }
                 }
-            }
+            });
 
             return { success: true };
         } catch (error: any) {
@@ -160,6 +300,16 @@ export class GitConfigManager {
         if (error.code === 'ENOENT' || errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
             errorType = 'NOT_INSTALLED';
             errorDescription = 'Git is not installed or not in PATH';
+        }
+        // Check for lock/contended config writes
+        else if (this.isGitConfigLockError(error)) {
+            errorType = 'LOCKED';
+
+            const lockedConfigPath = this.getLockedConfigPath(error);
+            const lockHint = lockedConfigPath
+                ? ` (lock: ${lockedConfigPath}.lock)`
+                : '';
+            errorDescription = `Git config file is locked by another process${lockHint}. ${errorMessage}`;
         }
         // Check for permission errors
         else if (error.code === 'EACCES' || errorMessage.includes('EACCES') || 
