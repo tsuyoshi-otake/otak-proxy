@@ -119,7 +119,8 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./ && node -e \"require('fs').cpSync('src/i18n/locales', 'out/i18n/locales', {recursive: true})\"",
+    "gen:nls": "node scripts/gen-package-nls.mjs",
+    "compile": "npm run gen:nls && tsc -p ./ && node -e \"require('fs').cpSync('src/i18n/locales', 'out/i18n/locales', {recursive: true})\"",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "lint": "eslint src",

@@ -2,7 +2,17 @@
   "command.toggleProxy": "Proxyを切り替え",
   "command.testProxy": "Proxyをテスト",
   "command.importProxy": "システムProxyをインポート",
-  
+
+  "config.proxyUrl": "VSCode・Git・npm・統合ターミナルのproxy設定用のProxyサーバーURL（例: http://proxy.example.com:8080）",
+  "config.pollingInterval": "Autoモードのポーリング間隔（秒単位、10-300）。システムproxyの変更をチェックする頻度。",
+  "config.detectionSourcePriority": "Proxy検出ソースの優先順位。指定された順序で試行され、最初に成功したものが使用されます。",
+  "config.maxRetries": "Proxy検出が失敗した場合の最大リトライ回数。",
+  "config.testInterval": "Proxy接続テストの間隔（秒単位、Autoモード専用）。範囲: 30-600秒。デフォルト: 60秒。",
+  "config.autoTestEnabled": "Autoモードで自動Proxy接続テストを有効にする。有効な場合、定期的にProxyの疎通性をテストします。",
+  "config.enableFallback": "システムProxyが検出されない場合に手動Proxyへフォールバックする（Autoモード専用）。有効な場合、システムProxyが検出されないと手動設定されたProxyをフォールバックとして使用します。",
+  "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
+  "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
+   
   "action.yes": "はい",
   "action.no": "いいえ",
   "action.skip": "スキップ",

@@ -42,6 +42,12 @@ Kiro-style Spec Driven Development implementation on AI-DLC (AI Development Life
 ## Testing (Fast + Isolated)
 This repo has two test modes: VS Code extension-host tests and plain Node unit tests. Keep them isolated and fast.
 
+## Localization Source Of Truth
+- UI/runtime messages: `src/i18n/locales/*.json`
+- VS Code contributed strings (`package.json` placeholders like `%command.toggleProxy%`):
+  - Generated from `src/i18n/locales/*.json` via `npm run gen:nls`
+  - Do not edit `package.nls*.json` by hand
+
 ### VS Code extension-host tests
 - Default behavior: run only VS Code-dependent tests (auto-detected by scanning built `out/test/**/*.test.js` for `import/require('vscode')`).
 - Override: set `OTAK_PROXY_VSCODE_TEST_ALL=1` to run all tests under the VS Code host.

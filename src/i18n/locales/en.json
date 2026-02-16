@@ -2,7 +2,17 @@
   "command.toggleProxy": "Toggle Proxy",
   "command.testProxy": "Test Proxy",
   "command.importProxy": "Import System Proxy",
-  
+
+  "config.proxyUrl": "Proxy server URL (e.g., http://proxy.example.com:8080) for VSCode, Git, npm, and integrated terminal proxy settings",
+  "config.pollingInterval": "Auto mode polling interval in seconds (10-300). How often to check for system proxy changes.",
+  "config.detectionSourcePriority": "Priority order for proxy detection sources. Sources are tried in order until one succeeds.",
+  "config.maxRetries": "Maximum number of retries for proxy detection when it fails.",
+  "config.testInterval": "Proxy connection test interval in seconds (Auto mode only). Range: 30-600 seconds. Default: 60 seconds.",
+  "config.autoTestEnabled": "Enable automatic proxy connection testing in Auto mode. When enabled, proxy connectivity is tested periodically.",
+  "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only). When enabled, if no system proxy is detected, the extension will try to use the manually configured proxy as a fallback.",
+  "config.syncEnabled": "Enable synchronization between multiple VSCode/Cursor instances. When enabled, proxy settings are shared across all instances.",
+  "config.syncInterval": "Synchronization check interval in milliseconds (100-5000). How often to check for changes from other instances.",
+   
   "action.yes": "Yes",
   "action.no": "No",
   "action.skip": "Skip",
