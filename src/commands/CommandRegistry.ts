@@ -35,6 +35,7 @@ export interface CommandRegistryConfig {
     updateStatusBar: (state: ProxyState) => void;
     checkAndUpdateSystemProxy: (context: vscode.ExtensionContext) => Promise<void>;
     startSystemProxyMonitoring: (context: vscode.ExtensionContext) => Promise<void>;
+    stopSystemProxyMonitoring: (context: vscode.ExtensionContext) => Promise<void>;
 
     // Utilities
     userNotifier: {
@@ -94,6 +95,7 @@ export class CommandRegistry {
             updateStatusBar: this.config.updateStatusBar,
             checkAndUpdateSystemProxy: () => this.config.checkAndUpdateSystemProxy(context),
             startSystemProxyMonitoring: () => this.config.startSystemProxyMonitoring(context),
+            stopSystemProxyMonitoring: () => this.config.stopSystemProxyMonitoring(context),
             userNotifier: this.config.userNotifier,
             sanitizer: this.config.sanitizer
         };

@@ -89,16 +89,33 @@ export class GitConfigManager {
      */
     async getProxy(): Promise<string | null> {
         try {
-            // Try to get http.proxy first
-            const { stdout } = await execFileAsync('git', ['config', '--global', '--get', 'http.proxy'], {
+            // Fetch both http.proxy and https.proxy in a single Git invocation to reduce overhead.
+            const { stdout } = await execFileAsync('git', ['config', '--global', '--get-regexp', '^(http|https)\\.proxy$'], {
                 timeout: this.timeout,
                 encoding: 'utf8'
             });
 
-            return stdout.trim() || null;
+            const lines = stdout
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .filter(Boolean);
+
+            const entries = lines
+                .map((line) => {
+                    const match = line.match(/^([^\s]+)\s+(.+)$/);
+                    if (!match) {
+                        return null;
+                    }
+                    return { key: match[1], value: match[2].trim() };
+                })
+                .filter((e): e is { key: string; value: string } => e !== null);
+
+            const httpProxy = entries.find(e => e.key === 'http.proxy')?.value;
+            const httpsProxy = entries.find(e => e.key === 'https.proxy')?.value;
+
+            return (httpProxy || httpsProxy) ? (httpProxy || httpsProxy)! : null;
         } catch (error: any) {
-            // If the config doesn't exist, git returns exit code 1
-            // This is not an error, just means no proxy is configured
+            // If no matching config exists, git returns exit code 1
             if (error.code === 1) {
                 return null;
             }

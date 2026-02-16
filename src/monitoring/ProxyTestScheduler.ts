@@ -167,6 +167,11 @@ export class ProxyTestScheduler {
             return;
         }
 
+        // Avoid piling up overlapping tests if a previous test is still running.
+        if (this.tester.isTestInProgress()) {
+            return;
+        }
+
         try {
             const result = await this.tester.testProxyAuto(this.currentProxyUrl);
             this.onTestComplete(result);

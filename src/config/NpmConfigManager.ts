@@ -98,14 +98,24 @@ export class NpmConfigManager {
             const { stdout } = await this.execNpm(['config', 'list', '--json']);
 
             const config = JSON.parse(stdout);
-            const value = config.proxy;
+            const normalizeValue = (value: any): string | null => {
+                if (value === undefined || value === null) {
+                    return null;
+                }
+                const str = typeof value === 'string' ? value : String(value);
+                const trimmed = str.trim();
+                // npm returns 'null' or 'undefined' as a string when config doesn't exist
+                if (trimmed === '' || trimmed === 'undefined' || trimmed === 'null') {
+                    return null;
+                }
+                return trimmed;
+            };
 
-            // npm returns 'null' or 'undefined' as a string when config doesn't exist
-            if (!value || value === 'undefined' || value === 'null') {
-                return null;
-            }
+            // Prefer HTTP proxy setting, but fall back to https-proxy if only that is configured.
+            const proxy = normalizeValue(config.proxy);
+            const httpsProxy = normalizeValue(config['https-proxy']);
 
-            return value;
+            return proxy ?? httpsProxy;
         } catch (error: any) {
             // For errors, log but return null
             Logger.error('Error getting npm proxy:', error);

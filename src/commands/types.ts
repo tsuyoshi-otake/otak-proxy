@@ -30,6 +30,7 @@ export interface CommandContext {
     updateStatusBar: (state: ProxyState) => void;
     checkAndUpdateSystemProxy: () => Promise<void>;
     startSystemProxyMonitoring: () => Promise<void>;
+    stopSystemProxyMonitoring: () => Promise<void>;
 
     // Notification utilities
     userNotifier: {

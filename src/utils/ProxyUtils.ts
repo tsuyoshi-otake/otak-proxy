@@ -284,9 +284,81 @@ export async function testProxyConnectionParallel(
 
         const proxyParsed = url.parse(proxyUrl);
 
-        // Create a promise for each test URL
-        const testPromises = testUrls.map(async (testUrl): Promise<{ success: boolean; url: string; error?: string }> => {
-            return new Promise((resolve) => {
+        const requests: any[] = [];
+        let settled = false;
+        let completedCount = 0;
+        let overallTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const finalize = (result: Omit<TestResult, 'timestamp' | 'duration'>): TestResult => ({
+            ...result,
+            errors: [...result.errors],
+            timestamp: Date.now(),
+            duration: Date.now() - startTime
+        });
+
+        const destroyOutstanding = () => {
+            for (const req of requests) {
+                try {
+                    req.destroy();
+                } catch {
+                    // Ignore destroy errors
+                }
+            }
+        };
+
+        const done = (result: Omit<TestResult, 'timestamp' | 'duration'>): TestResult => {
+            if (settled) {
+                return finalize(result);
+            }
+            settled = true;
+            if (overallTimer) {
+                clearTimeout(overallTimer);
+                overallTimer = null;
+            }
+            destroyOutstanding();
+            return finalize(result);
+        };
+
+        // Execute all tests in parallel and stop the rest as soon as any succeeds.
+        const successPromise = new Promise<TestResult>((resolve) => {
+            const totalTests = testUrls.length;
+
+            const resolveIfAllDone = () => {
+                if (completedCount === totalTests && !settled) {
+                    resolve(done({
+                        success: false,
+                        proxyUrl: proxyUrl,
+                        testUrls: testUrls,
+                        errors: errors
+                    }));
+                }
+            };
+
+            const onTestResult = (testUrl: string, success: boolean, error?: string) => {
+                if (settled) {
+                    return;
+                }
+
+                completedCount++;
+
+                if (success) {
+                    resolve(done({
+                        success: true,
+                        proxyUrl: proxyUrl,
+                        testUrls: testUrls,
+                        errors: errors
+                    }));
+                    return;
+                }
+
+                if (error) {
+                    errors.push({ url: testUrl, message: error });
+                }
+
+                resolveIfAllDone();
+            };
+
+            for (const testUrl of testUrls) {
                 try {
                     const testParsed = url.parse(testUrl);
                     const options = {
@@ -298,81 +370,55 @@ export async function testProxyConnectionParallel(
                     };
 
                     const req = http.request(options);
+                    requests.push(req);
 
                     req.on('connect', () => {
-                        req.destroy();
-                        resolve({ success: true, url: testUrl });
+                        try {
+                            req.destroy();
+                        } catch {
+                            // Ignore destroy errors
+                        }
+                        onTestResult(testUrl, true);
                     });
 
                     req.on('error', (error: Error) => {
-                        resolve({ success: false, url: testUrl, error: error.message || 'Connection failed' });
+                        onTestResult(testUrl, false, error.message || 'Connection failed');
                     });
 
                     req.on('timeout', () => {
-                        req.destroy();
-                        resolve({ success: false, url: testUrl, error: `Connection timeout (${timeout}ms)` });
+                        try {
+                            req.destroy();
+                        } catch {
+                            // Ignore destroy errors
+                        }
+                        onTestResult(testUrl, false, `Connection timeout (${timeout}ms)`);
                     });
 
                     req.end();
                 } catch (error) {
                     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-                    resolve({ success: false, url: testUrl, error: errorMsg });
+                    onTestResult(testUrl, false, errorMsg);
                 }
-            });
+            }
         });
 
-        // Create a success promise that resolves when any test succeeds
-        const successPromise = new Promise<TestResult>((resolve) => {
-            let completedCount = 0;
-            const totalTests = testPromises.length;
-
-            testPromises.forEach(async (promise) => {
-                const result = await promise;
-                completedCount++;
-
-                if (result.success) {
-                    // Early termination on first success
-                    resolve({
-                        success: true,
-                        proxyUrl: proxyUrl,
-                        testUrls: testUrls,
-                        errors: errors,
-                        timestamp: Date.now(),
-                        duration: Date.now() - startTime
-                    });
-                } else if (result.error) {
-                    errors.push({ url: result.url, message: result.error });
-                }
-
-                // If all tests completed and none succeeded
-                if (completedCount === totalTests) {
-                    resolve({
-                        success: false,
-                        proxyUrl: proxyUrl,
-                        testUrls: testUrls,
-                        errors: errors,
-                        timestamp: Date.now(),
-                        duration: Date.now() - startTime
-                    });
-                }
-            });
-        });
-
-        // Create a timeout promise
         const timeoutPromise = new Promise<TestResult>((resolve) => {
-            setTimeout(() => {
-                resolve({
+            overallTimer = setTimeout(() => {
+                if (settled) {
+                    return;
+                }
+                // Overall timeout: destroy outstanding requests and return what we know so far.
+                errors.push({ url: 'All tests', message: `Overall timeout (${timeout}ms)` });
+                resolve(done({
                     success: false,
                     proxyUrl: proxyUrl,
                     testUrls: testUrls,
-                    errors: [{ url: 'All tests', message: `Overall timeout (${timeout}ms)` }],
-                    timestamp: Date.now(),
-                    duration: Date.now() - startTime
-                });
-            }, timeout + 500); // Add small buffer to allow individual timeouts to complete
+                    errors: errors
+                }));
+            }, timeout + 500); // Buffer to allow per-request timeouts to fire first.
         });
 
-        // Race between success/all-complete and overall timeout
+        // Race between early success/all-complete and overall timeout.
         return await Promise.race([successPromise, timeoutPromise]);
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';

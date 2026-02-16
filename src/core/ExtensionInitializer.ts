@@ -254,12 +254,21 @@ export class ExtensionInitializer {
     async startSystemProxyMonitoring(): Promise<void> {
         const state = await this.context.proxyStateManager.getState();
 
-        // Feature: auto-mode-proxy-testing - Mark state as testing pending
-        if (state.mode === ProxyMode.Auto) {
-            this.isStartupTestPending = true;
-            state.proxyReachable = undefined; // Indeterminate until test completes
-            await this.context.proxyStateManager.saveState(state);
+        // Monitoring is only meaningful in Auto mode. In other modes, ensure it's stopped.
+        if (state.mode !== ProxyMode.Auto) {
+            await this.stopSystemProxyMonitoring();
+            return;
         }
+
+        // If already running, don't reset startup flags or redo expensive work.
+        if (this.proxyMonitor?.getState().isActive) {
+            return;
+        }
+
+        // Feature: auto-mode-proxy-testing - Mark state as testing pending
+        this.isStartupTestPending = true;
+        state.proxyReachable = undefined; // Indeterminate until test completes
+        await this.context.proxyStateManager.saveState(state);
 
         // Check system proxy immediately using legacy method
         await this.checkAndUpdateSystemProxy();
@@ -330,14 +339,15 @@ export class ExtensionInitializer {
     /**
      * Check and update system proxy
      */
-    private async checkAndUpdateSystemProxy(): Promise<void> {
+    async checkAndUpdateSystemProxy(): Promise<void> {
         const state = await this.context.proxyStateManager.getState();
 
         // Only check if in Auto mode or if it's been more than 5 minutes since last check
         const now = Date.now();
         if (state.mode !== ProxyMode.Auto &&
             state.lastSystemProxyCheck &&
-            (now - state.lastSystemProxyCheck) < 300000) {
+            (now - state.lastSystemProxyCheck) < 300000 &&
+            state.autoProxyUrl) {
             return;
         }
 

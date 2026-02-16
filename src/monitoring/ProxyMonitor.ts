@@ -82,6 +82,7 @@ export class ProxyMonitor extends EventEmitter {
     private connectionTester?: ProxyConnectionTester;
     private testScheduler?: ProxyTestScheduler;
     private lastProxyReachable: boolean = false;
+    private lastConnectionTestAt: number | null = null;
 
     constructor(
         detector: ISystemProxyDetector,
@@ -96,14 +97,30 @@ export class ProxyMonitor extends EventEmitter {
         this.config = { ...DEFAULT_CONFIG, ...config };
         this.validateConfig();
 
-        // Set up connection testing if enabled and tester provided
-        if (connectionTester && this.config.enableConnectionTest) {
+        // Set up connection testing if tester provided. Whether we actually run tests is controlled by config.
+        if (connectionTester) {
             this.connectionTester = connectionTester;
             this.testScheduler = new ProxyTestScheduler(
                 connectionTester,
                 this.config.connectionTestInterval
             );
         }
+    }
+
+    /**
+     * Whether we should run periodic connection tests in a dedicated scheduler.
+     *
+     * When polling is slower than the desired test interval, a scheduler is needed to
+     * test reachability at the configured cadence. Otherwise, polling-triggered checks
+     * can drive tests without duplicating work.
+     */
+    private shouldUseTestScheduler(): boolean {
+        return Boolean(
+            this.connectionTester &&
+            this.testScheduler &&
+            this.config.enableConnectionTest &&
+            this.config.pollingInterval > this.config.connectionTestInterval
+        );
     }
 
     /**
@@ -119,8 +136,8 @@ export class ProxyMonitor extends EventEmitter {
         this.setupPolling();
         Logger.info('ProxyMonitor started');
 
-        // Start connection test scheduler if we have a proxy URL
-        if (this.testScheduler && this.lastProxyUrl) {
+        // Start connection test scheduler only when needed (polling slower than test interval)
+        if (this.shouldUseTestScheduler() && this.lastProxyUrl) {
             this.startConnectionTestScheduler(this.lastProxyUrl);
         }
     }
@@ -169,8 +186,10 @@ export class ProxyMonitor extends EventEmitter {
         const oldInterval = this.config.pollingInterval;
         const oldTestInterval = this.config.connectionTestInterval;
         const oldTestEnabled = this.config.enableConnectionTest;
+        const wasUsingScheduler = this.shouldUseTestScheduler();
         this.config = { ...this.config, ...config };
         this.validateConfig();
+        const shouldUseSchedulerNow = this.shouldUseTestScheduler();
 
         // Restart polling if interval changed and monitoring is active
         if (oldInterval !== this.config.pollingInterval && this.state.getStatus().isActive) {
@@ -188,8 +207,8 @@ export class ProxyMonitor extends EventEmitter {
         // Handle enableConnectionTest change
         if (oldTestEnabled !== this.config.enableConnectionTest) {
             if (this.config.enableConnectionTest) {
-                // Re-enable connection testing - start scheduler if we have a proxy
-                if (this.lastProxyUrl && this.testScheduler && !this.testScheduler.isActive()) {
+                // Re-enable connection testing - start scheduler if needed and we have a proxy
+                if (shouldUseSchedulerNow && this.lastProxyUrl && this.testScheduler && !this.testScheduler.isActive()) {
                     this.startConnectionTestScheduler(this.lastProxyUrl);
                     Logger.info('Connection testing re-enabled');
                 }
@@ -198,6 +217,19 @@ export class ProxyMonitor extends EventEmitter {
                 this.stopConnectionTestScheduler();
                 Logger.info('Connection testing disabled');
             }
+        }
+
+        // Scheduler necessity can change with polling interval or test interval changes.
+        if (wasUsingScheduler !== shouldUseSchedulerNow) {
+            if (!shouldUseSchedulerNow) {
+                // Stop scheduler to avoid duplicate work; polling-driven checks will handle tests.
+                this.stopConnectionTestScheduler();
+            } else if (this.config.enableConnectionTest && this.lastProxyUrl && this.testScheduler && !this.testScheduler.isActive()) {
+                this.startConnectionTestScheduler(this.lastProxyUrl);
+            }
+        } else if (shouldUseSchedulerNow && this.config.enableConnectionTest && this.lastProxyUrl && this.testScheduler && this.testScheduler.isActive()) {
+            // Keep scheduler aligned with current proxy URL.
+            this.testScheduler.updateProxyUrl(this.lastProxyUrl);
         }
     }
 
@@ -231,46 +263,68 @@ export class ProxyMonitor extends EventEmitter {
 
         try {
             const result = await this.detectWithRetry(trigger);
+            const useScheduler = this.shouldUseTestScheduler();
+            const proxyChanged = result.success && result.proxyUrl !== this.lastProxyUrl;
 
             // If proxy detected and connection testing is enabled, test the connection
-            if (result.success && result.proxyUrl && this.connectionTester) {
-                const testResult = await this.connectionTester.testProxyAuto(result.proxyUrl);
-                result.testResult = testResult;
-                result.proxyReachable = testResult.success;
+            if (!useScheduler) {
+                // Avoid duplicate tests when polling can drive them.
+                this.stopConnectionTestScheduler();
+            }
 
-                // Emit test complete event
-                this.emit('proxyTestComplete', testResult);
-
-                // If test failed, the effective proxy URL should be null
-                if (!testResult.success) {
-                    Logger.warn(`Proxy ${result.proxyUrl} detected but not reachable`);
-                }
-
-                // Handle proxy state change based on reachability
-                const wasReachable = this.lastProxyReachable;
-                this.lastProxyReachable = testResult.success;
-
-                if (wasReachable !== testResult.success) {
-                    this.emit('proxyStateChanged', {
-                        proxyUrl: result.proxyUrl,
-                        reachable: testResult.success,
-                        previousState: wasReachable
-                    });
-                }
-
-                // Update or start the test scheduler
-                if (testResult.success && this.testScheduler) {
+            if (result.success && result.proxyUrl && this.connectionTester && this.config.enableConnectionTest) {
+                // If scheduler is needed, ensure it's running and aligned with current proxy.
+                if (useScheduler && this.testScheduler) {
                     if (this.testScheduler.isActive()) {
                         this.testScheduler.updateProxyUrl(result.proxyUrl);
-                    } else {
+                    } else if (this.state.getStatus().isActive) {
                         this.startConnectionTestScheduler(result.proxyUrl);
                     }
-                } else if (!testResult.success && this.testScheduler?.isActive()) {
-                    // Stop scheduler if proxy is not reachable
-                    this.stopConnectionTestScheduler();
                 }
-            } else if (!result.proxyUrl && this.testScheduler?.isActive()) {
-                // No proxy detected, stop scheduler
+
+                const now = Date.now();
+                const isPollingTrigger = trigger === 'polling';
+                const isTestDueForPolling = this.lastConnectionTestAt === null ||
+                    (now - this.lastConnectionTestAt) >= this.config.connectionTestInterval;
+
+                // In scheduler mode, periodic tests are handled by the scheduler; only test immediately on proxy change.
+                // Otherwise, test on non-polling triggers and on polling triggers when the test interval has elapsed.
+                const shouldRunTest =
+                    proxyChanged ||
+                    (!useScheduler && (!isPollingTrigger || isTestDueForPolling));
+
+                const testerBusy = typeof this.connectionTester.isTestInProgress === 'function'
+                    ? this.connectionTester.isTestInProgress()
+                    : false;
+
+                if (shouldRunTest && (!testerBusy || proxyChanged)) {
+                    const testResult = await this.connectionTester.testProxyAuto(result.proxyUrl);
+                    this.lastConnectionTestAt = testResult.timestamp ?? Date.now();
+                    result.testResult = testResult;
+                    result.proxyReachable = testResult.success;
+
+                    // Emit test complete event
+                    this.emit('proxyTestComplete', testResult);
+
+                    // If test failed, the effective proxy URL should be null (handled by consumer)
+                    if (!testResult.success) {
+                        Logger.warn(`Proxy ${result.proxyUrl} detected but not reachable`);
+                    }
+
+                    // Handle proxy state change based on reachability
+                    const wasReachable = this.lastProxyReachable;
+                    this.lastProxyReachable = testResult.success;
+
+                    if (wasReachable !== testResult.success) {
+                        this.emit('proxyStateChanged', {
+                            proxyUrl: result.proxyUrl,
+                            reachable: testResult.success,
+                            previousState: wasReachable
+                        });
+                    }
+                }
+            } else if (result.success && !result.proxyUrl) {
+                // No proxy detected: stop scheduler (if running) and reset reachability.
                 this.stopConnectionTestScheduler();
                 this.lastProxyReachable = false;
             }
@@ -455,23 +509,20 @@ export class ProxyMonitor extends EventEmitter {
         this.testScheduler.start(proxyUrl, (testResult: TestResult) => {
             // Handle periodic test result
             this.emit('proxyTestComplete', testResult);
+            this.lastConnectionTestAt = testResult.timestamp ?? Date.now();
 
             const wasReachable = this.lastProxyReachable;
             this.lastProxyReachable = testResult.success;
 
+            const effectiveProxyUrl = testResult.proxyUrl ?? proxyUrl;
+
             // Emit state change event if reachability changed
             if (wasReachable !== testResult.success) {
                 this.emit('proxyStateChanged', {
-                    proxyUrl: proxyUrl,
+                    proxyUrl: effectiveProxyUrl,
                     reachable: testResult.success,
                     previousState: wasReachable
                 });
-
-                // If proxy became unreachable, stop the scheduler
-                if (!testResult.success) {
-                    Logger.warn(`Periodic test failed for ${proxyUrl}, proxy may be down`);
-                    this.stopConnectionTestScheduler();
-                }
             }
         });
 

@@ -150,6 +150,12 @@ export async function activate(context: vscode.ExtensionContext) {
                 } else if (remoteState.mode === ProxyMode.Off) {
                     await proxyApplier.disableProxy();
                 }
+                // Align monitoring with the resolved mode to avoid background polling when not needed.
+                if (remoteState.mode === ProxyMode.Auto) {
+                    await initializer.startSystemProxyMonitoring();
+                } else {
+                    await initializer.stopSystemProxyMonitoring();
+                }
                 // StatusBar will be updated after initialization
             });
 
@@ -201,8 +207,9 @@ export async function activate(context: vscode.ExtensionContext) {
         getNextMode: (mode) => proxyStateManager.getNextMode(mode),
         applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled),
         updateStatusBar: (s) => statusBarManager.update(s),
-        checkAndUpdateSystemProxy: async () => { /* handled by initializer */ },
+        checkAndUpdateSystemProxy: async () => initializer.checkAndUpdateSystemProxy(),
         startSystemProxyMonitoring: () => initializer.startSystemProxyMonitoring(),
+        stopSystemProxyMonitoring: () => initializer.stopSystemProxyMonitoring(),
         userNotifier: {
             showSuccess: (key, params) => userNotifier.showSuccess(key, params),
             showWarning: (key, params) => userNotifier.showWarning(key, params),
@@ -245,7 +252,11 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     // Phase 11: Start monitoring
-    await initializer.startSystemProxyMonitoring();
+    if (state.mode === ProxyMode.Auto) {
+        await initializer.startSystemProxyMonitoring();
+    } else {
+        await initializer.stopSystemProxyMonitoring();
+    }
 
     // Phase 11.5: Start SyncManager (Feature: multi-instance-sync)
     if (syncManager) {

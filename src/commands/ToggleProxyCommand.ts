@@ -108,6 +108,8 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
         // Start or stop monitoring based on mode
         if (currentState.mode === ProxyMode.Auto) {
             await ctx.startSystemProxyMonitoring();
+        } else {
+            await ctx.stopSystemProxyMonitoring();
         }
 
         return { success: true };
