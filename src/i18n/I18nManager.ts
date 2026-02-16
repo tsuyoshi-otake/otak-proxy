@@ -20,7 +20,7 @@ export class I18nManager {
     private constructor() {
         this.config = {
             defaultLocale: 'en',
-            supportedLocales: ['en', 'ja'],
+            supportedLocales: ['en', 'ja', 'zh-cn', 'zh-tw', 'ko'],
             fallbackLocale: 'en'
         };
         this.currentLocale = this.config.defaultLocale;
@@ -44,15 +44,16 @@ export class I18nManager {
      */
     public initialize(locale?: string): void {
         // Detect locale
-        const detectedLocale = locale || vscode.env.language;
-        Logger.log(`Detected locale: ${detectedLocale}`);
+        const rawLocale = locale || vscode.env.language;
+        const normalizedLocale = this.normalizeLocale(rawLocale);
+        Logger.log(`Detected locale: ${rawLocale} (normalized: ${normalizedLocale})`);
 
-        // Check if the detected locale is supported
-        if (this.isSupportedLocale(detectedLocale)) {
-            this.currentLocale = detectedLocale as SupportedLocale;
+        const resolvedLocale = this.resolveSupportedLocale(normalizedLocale);
+        if (resolvedLocale) {
+            this.currentLocale = resolvedLocale;
         } else {
             // Fallback to default locale for unsupported languages
-            Logger.warn(`Locale '${detectedLocale}' is not supported. Falling back to '${this.config.fallbackLocale}'`);
+            Logger.warn(`Locale '${rawLocale}' is not supported. Falling back to '${this.config.fallbackLocale}'`);
             this.currentLocale = this.config.fallbackLocale;
         }
 
@@ -65,6 +66,44 @@ export class I18nManager {
      */
     private isSupportedLocale(locale: string): boolean {
         return this.config.supportedLocales.includes(locale as SupportedLocale);
+    }
+
+    /**
+     * Normalize locale to a consistent, comparable form.
+     * VS Code typically provides BCP 47 language tags, but casing/underscore variants can appear.
+     */
+    private normalizeLocale(locale: string): string {
+        return (locale || '').trim().replace(/_/g, '-').toLowerCase();
+    }
+
+    /**
+     * Resolve a locale (possibly with region/script) to a supported locale.
+     * Examples:
+     * - en-US -> en
+     * - ja-JP -> ja
+     * - ko-KR -> ko
+     * - zh / zh-Hans -> zh-cn, zh-Hant / zh-TW -> zh-tw
+     */
+    private resolveSupportedLocale(locale: string): SupportedLocale | null {
+        if (this.isSupportedLocale(locale)) {
+            return locale as SupportedLocale;
+        }
+
+        const base = locale.split('-')[0];
+        if (this.isSupportedLocale(base)) {
+            return base as SupportedLocale;
+        }
+
+        // Chinese: prefer zh-tw for Traditional, else zh-cn.
+        if (base === 'zh') {
+            const isTraditional = locale.includes('hant') || locale.includes('tw') || locale.includes('hk') || locale.includes('mo');
+            const preferred = isTraditional ? 'zh-tw' : 'zh-cn';
+            if (this.isSupportedLocale(preferred)) {
+                return preferred as SupportedLocale;
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -13,15 +13,29 @@ suite('I18nManager Property Tests', () => {
     /**
      * Feature: ui-internationalization, Property 1: 非対応言語のフォールバック
      * 
-     * For any 非対応の言語コード（"ja"と"en"以外）、I18nManagerを初期化すると、
+     * For any 非対応の言語コード（サポート対象以外）、I18nManagerを初期化すると、
      * 英語（フォールバック言語）が使用される
      * 
      * Validates: Requirements 1.4
      */
     test('Property 1: Unsupported locales should fallback to English', () => {
-        // Generate arbitrary locale strings that are NOT 'en' or 'ja'
+        const supportedLocales = new Set(['en', 'ja', 'zh-cn', 'zh-tw', 'ko']);
+        const resolvesToSupported = (raw: string): boolean => {
+            const normalized = (raw || '').trim().replace(/_/g, '-').toLowerCase();
+            if (supportedLocales.has(normalized)) return true;
+
+            const base = normalized.split('-')[0];
+            if (supportedLocales.has(base)) return true; // en-US, ja-JP, ko-KR, etc.
+
+            // Chinese variants map to supported zh-cn/zh-tw.
+            if (base === 'zh') return true;
+
+            return false;
+        };
+
+        // Generate arbitrary locale strings that do NOT resolve to a supported locale
         const unsupportedLocaleArb = fc.string({ minLength: 1, maxLength: 10 })
-            .filter(locale => locale !== 'en' && locale !== 'ja');
+            .filter(locale => !resolvesToSupported(locale));
 
         fc.assert(
             fc.property(unsupportedLocaleArb, (locale) => {
@@ -148,36 +162,36 @@ suite('I18nManager Unit Tests', () => {
         const fs = require('fs');
         const path = require('path');
 
-        // Load both translation files
-        const enPath = path.join(__dirname, '../../i18n/locales/en.json');
-        const jaPath = path.join(__dirname, '../../i18n/locales/ja.json');
+        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko'] as const;
 
-        const enContent = fs.readFileSync(enPath, 'utf-8');
-        const jaContent = fs.readFileSync(jaPath, 'utf-8');
+        // Load translation files from the compiled output folder (out/i18n/locales).
+        const loadLocale = (locale: string) => {
+            const p = path.join(__dirname, '../../i18n/locales', `${locale}.json`);
+            const content = fs.readFileSync(p, 'utf-8');
+            return JSON.parse(content);
+        };
 
-        const enTranslations = JSON.parse(enContent);
-        const jaTranslations = JSON.parse(jaContent);
-
-        // Get keys from both files
+        const enTranslations = loadLocale('en');
         const enKeys = Object.keys(enTranslations).sort();
-        const jaKeys = Object.keys(jaTranslations).sort();
 
-        // Check that both files have the same number of keys
-        assert.strictEqual(enKeys.length, jaKeys.length,
-            `English has ${enKeys.length} keys, but Japanese has ${jaKeys.length} keys`);
+        for (const locale of locales) {
+            const translations = loadLocale(locale);
+            const keys = Object.keys(translations).sort();
 
-        // Check that all keys match
-        const missingInJa = enKeys.filter(key => !jaKeys.includes(key));
-        const missingInEn = jaKeys.filter(key => !enKeys.includes(key));
+            assert.strictEqual(keys.length, enKeys.length,
+                `English has ${enKeys.length} keys, but ${locale} has ${keys.length} keys`);
 
-        assert.strictEqual(missingInJa.length, 0,
-            `Keys missing in Japanese translation: ${missingInJa.join(', ')}`);
-        assert.strictEqual(missingInEn.length, 0,
-            `Keys missing in English translation: ${missingInEn.join(', ')}`);
+            const missing = enKeys.filter(key => !keys.includes(key));
+            const extra = keys.filter(key => !enKeys.includes(key));
 
-        // Verify all keys are identical
-        assert.deepStrictEqual(enKeys, jaKeys,
-            'English and Japanese translation files should have identical keys');
+            assert.strictEqual(missing.length, 0,
+                `Keys missing in ${locale} translation: ${missing.join(', ')}`);
+            assert.strictEqual(extra.length, 0,
+                `Extra keys in ${locale} translation: ${extra.join(', ')}`);
+
+            assert.deepStrictEqual(keys, enKeys,
+                `English and ${locale} translation files should have identical keys`);
+        }
     });
 
     /**
@@ -191,35 +205,74 @@ suite('I18nManager Unit Tests', () => {
         const fs = require('fs');
         const path = require('path');
 
-        // Test English file
-        const enPath = path.join(__dirname, '../../i18n/locales/en.json');
-        const enContent = fs.readFileSync(enPath, 'utf-8');
-        
-        let enTranslations;
-        try {
-            enTranslations = JSON.parse(enContent);
-            assert.ok(enTranslations, 'English translation file should be valid JSON');
-        } catch (error) {
-            assert.fail(`English translation file has invalid JSON: ${error}`);
+        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko'];
+        const parsed: Record<string, unknown> = {};
+
+        for (const locale of locales) {
+            const p = path.join(__dirname, '../../i18n/locales', `${locale}.json`);
+            const content = fs.readFileSync(p, 'utf-8');
+
+            try {
+                parsed[locale] = JSON.parse(content);
+                assert.ok(parsed[locale], `${locale} translation file should be valid JSON`);
+            } catch (error) {
+                assert.fail(`${locale} translation file has invalid JSON: ${error}`);
+            }
         }
 
-        // Test Japanese file
-        const jaPath = path.join(__dirname, '../../i18n/locales/ja.json');
-        const jaContent = fs.readFileSync(jaPath, 'utf-8');
-        
-        let jaTranslations;
-        try {
-            jaTranslations = JSON.parse(jaContent);
-            assert.ok(jaTranslations, 'Japanese translation file should be valid JSON');
-        } catch (error) {
-            assert.fail(`Japanese translation file has invalid JSON: ${error}`);
+        for (const locale of locales) {
+            assert.strictEqual(typeof parsed[locale], 'object',
+                `${locale} translations should be an object`);
         }
+    });
 
-        // Verify both are objects
-        assert.strictEqual(typeof enTranslations, 'object',
-            'English translations should be an object');
-        assert.strictEqual(typeof jaTranslations, 'object',
-            'Japanese translations should be an object');
+    /**
+     * Unit Test: package.nls file validation
+     *
+     * Validates that all package.nls.*.json files have the same set of keys
+     */
+    test('All package.nls files should have the same set of keys', () => {
+        const fs = require('fs');
+        const path = require('path');
+
+        // __dirname: out/test/i18n -> ../../../ is repo root
+        const repoRoot = path.resolve(__dirname, '../../../');
+
+        const files = [
+            'package.nls.json',
+            'package.nls.ja.json',
+            'package.nls.zh-cn.json',
+            'package.nls.zh-tw.json',
+            'package.nls.ko.json',
+        ];
+
+        const load = (fileName: string) => {
+            const p = path.join(repoRoot, fileName);
+            const content = fs.readFileSync(p, 'utf-8');
+            return JSON.parse(content);
+        };
+
+        const en = load('package.nls.json');
+        const enKeys = Object.keys(en).sort();
+
+        for (const fileName of files) {
+            const obj = load(fileName);
+            const keys = Object.keys(obj).sort();
+
+            assert.strictEqual(keys.length, enKeys.length,
+                `${fileName} has ${keys.length} keys, but package.nls.json has ${enKeys.length} keys`);
+
+            const missing = enKeys.filter((k: string) => !keys.includes(k));
+            const extra = keys.filter((k: string) => !enKeys.includes(k));
+
+            assert.strictEqual(missing.length, 0,
+                `Keys missing in ${fileName}: ${missing.join(', ')}`);
+            assert.strictEqual(extra.length, 0,
+                `Extra keys in ${fileName}: ${extra.join(', ')}`);
+
+            assert.deepStrictEqual(keys, enKeys,
+                `package.nls.json and ${fileName} should have identical keys`);
+        }
     });
 
     /**

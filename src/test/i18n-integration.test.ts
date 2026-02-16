@@ -84,9 +84,9 @@ suite('I18n Integration Tests', () => {
             // but we can test that initialize() without parameters uses it
             i18n.initialize();
             
-            // Verify that a locale was set (either 'en' or 'ja' depending on test environment)
+            // Verify that a locale was set (supported locale depending on test environment)
             const currentLocale = i18n.getCurrentLocale();
-            assert.ok(['en', 'ja'].includes(currentLocale), 'Should set a supported locale');
+            assert.ok(['en', 'ja', 'zh-cn', 'zh-tw', 'ko'].includes(currentLocale), 'Should set a supported locale');
         });
     });
 

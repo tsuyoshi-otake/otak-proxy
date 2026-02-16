@@ -1,0 +1,14 @@
+{
+  "command.toggleProxy": "프록시 전환",
+  "command.testProxy": "프록시 테스트",
+  "command.importProxy": "시스템 프록시 가져오기",
+  "config.proxyUrl": "VS Code, Git, npm 및 통합 터미널 프록시 설정에 사용할 프록시 서버 URL(예: http://proxy.example.com:8080)",
+  "config.pollingInterval": "자동 모드 폴링 간격(초, 10-300). 시스템 프록시 변경을 확인하는 빈도입니다.",
+  "config.detectionSourcePriority": "프록시 감지 소스 우선순위. 지정된 순서대로 시도하여 하나가 성공할 때까지 진행합니다.",
+  "config.maxRetries": "프록시 감지가 실패했을 때의 최대 재시도 횟수입니다.",
+  "config.testInterval": "프록시 연결 테스트 간격(초, 자동 모드 전용). 범위: 30-600초. 기본값: 60초.",
+  "config.autoTestEnabled": "자동 모드에서 프록시 연결 자동 테스트를 활성화합니다. 활성화하면 주기적으로 프록시 연결을 테스트합니다.",
+  "config.enableFallback": "시스템 프록시를 감지하지 못한 경우 수동 프록시로 폴백(자동 모드 전용). 활성화하면 시스템 프록시가 없을 때 수동으로 설정한 프록시를 폴백으로 사용합니다.",
+  "config.syncEnabled": "여러 VSCode/Cursor 인스턴스 간 동기화를 활성화합니다. 활성화하면 프록시 설정이 모든 인스턴스에 공유됩니다.",
+  "config.syncInterval": "동기화 확인 간격(밀리초, 100-5000). 다른 인스턴스의 변경을 확인하는 빈도입니다."
+}

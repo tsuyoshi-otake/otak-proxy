@@ -1,0 +1,14 @@
+{
+  "command.toggleProxy": "切换代理",
+  "command.testProxy": "测试代理",
+  "command.importProxy": "导入系统代理",
+  "config.proxyUrl": "用于 VS Code、Git、npm 以及集成终端代理设置的代理服务器 URL（例如：http://proxy.example.com:8080）",
+  "config.pollingInterval": "自动模式轮询间隔（秒，10-300）。用于检查系统代理变化的频率。",
+  "config.detectionSourcePriority": "代理检测来源的优先顺序。按顺序尝试，直到有一个成功。",
+  "config.maxRetries": "代理检测失败时的最大重试次数。",
+  "config.testInterval": "代理连接测试间隔（秒，仅自动模式）。范围：30-600 秒。默认：60 秒。",
+  "config.autoTestEnabled": "在自动模式下启用自动代理连接测试。启用后会定期测试代理连通性。",
+  "config.enableFallback": "在未检测到系统代理时回退到手动代理（仅自动模式）。启用后，如果未检测到系统代理，扩展将尝试使用手动配置的代理作为回退。",
+  "config.syncEnabled": "启用多个 VSCode/Cursor 实例之间的同步。启用后，代理设置将在所有实例之间共享。",
+  "config.syncInterval": "同步检查间隔（毫秒，100-5000）。用于检查来自其他实例的更改的频率。"
+}

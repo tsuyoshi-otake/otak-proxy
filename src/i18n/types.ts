@@ -1,7 +1,7 @@
 /**
  * Supported locales for the extension
  */
-export type SupportedLocale = 'en' | 'ja';
+export type SupportedLocale = 'en' | 'ja' | 'zh-cn' | 'zh-tw' | 'ko';
 
 /**
  * Translation messages structure
