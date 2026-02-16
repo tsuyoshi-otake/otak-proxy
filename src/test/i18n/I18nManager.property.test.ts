@@ -19,7 +19,7 @@ suite('I18nManager Property Tests', () => {
      * Validates: Requirements 1.4
      */
     test('Property 1: Unsupported locales should fallback to English', () => {
-        const supportedLocales = new Set(['en', 'ja', 'zh-cn', 'zh-tw', 'ko']);
+        const supportedLocales = new Set(['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi']);
         const resolvesToSupported = (raw: string): boolean => {
             const normalized = (raw || '').trim().replace(/_/g, '-').toLowerCase();
             if (supportedLocales.has(normalized)) {
@@ -168,7 +168,7 @@ suite('I18nManager Unit Tests', () => {
         const fs = require('fs');
         const path = require('path');
 
-        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko'] as const;
+        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'] as const;
 
         // Load translation files from the compiled output folder (out/i18n/locales).
         const loadLocale = (locale: string) => {
@@ -211,7 +211,7 @@ suite('I18nManager Unit Tests', () => {
         const fs = require('fs');
         const path = require('path');
 
-        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko'];
+        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'];
         const parsed: Record<string, unknown> = {};
 
         for (const locale of locales) {
@@ -250,6 +250,7 @@ suite('I18nManager Unit Tests', () => {
             'package.nls.zh-cn.json',
             'package.nls.zh-tw.json',
             'package.nls.ko.json',
+            'package.nls.vi.json',
         ];
 
         const load = (fileName: string) => {

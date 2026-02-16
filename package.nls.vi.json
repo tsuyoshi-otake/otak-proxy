@@ -1,0 +1,14 @@
+{
+  "command.importProxy": "Nhập Proxy hệ thống",
+  "command.testProxy": "Kiểm tra Proxy",
+  "command.toggleProxy": "Bật/tắt Proxy",
+  "config.autoTestEnabled": "Bật kiểm tra kết nối proxy tự động trong chế độ Tự động. Khi bật, kết nối proxy sẽ được kiểm tra định kỳ.",
+  "config.detectionSourcePriority": "Thứ tự ưu tiên nguồn phát hiện proxy. Các nguồn sẽ được thử theo thứ tự cho đến khi một nguồn thành công.",
+  "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only)",
+  "config.maxRetries": "Số lần thử lại tối đa khi phát hiện proxy thất bại.",
+  "config.pollingInterval": "Khoảng thời gian thăm dò ở chế độ Tự động (giây, 10-300). Tần suất kiểm tra thay đổi proxy hệ thống.",
+  "config.proxyUrl": "URL máy chủ proxy (ví dụ: http://proxy.example.com:8080) dùng cho cài đặt proxy của VS Code, Git, npm và terminal tích hợp",
+  "config.syncEnabled": "Enable synchronization between multiple VSCode/Cursor instances",
+  "config.syncInterval": "Synchronization interval (milliseconds)",
+  "config.testInterval": "Khoảng thời gian kiểm tra kết nối proxy (giây, chỉ chế độ Tự động). Phạm vi: 30-600 giây. Mặc định: 60 giây."
+}

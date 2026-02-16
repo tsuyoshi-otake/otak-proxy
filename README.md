@@ -32,7 +32,7 @@ The extension updates VS Code, Git, and npm proxy settings, plus proxy environme
 - **Auto-sync** — Detects system/browser proxy changes in real time.
 - **Connection validation** — Tests proxy connectivity before enabling.
 - **Integrated terminal env** — Sets HTTP(S)_PROXY for new VS Code terminals.
-- **UI i18n** — English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean.
+- **UI i18n** — English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, Vietnamese.
 
 UI language follows your VS Code display language.
 

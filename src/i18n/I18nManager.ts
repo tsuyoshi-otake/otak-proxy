@@ -17,10 +17,10 @@ export class I18nManager {
     private fallbackMessages: TranslationMessages;
     private config: I18nConfig;
 
-    private constructor() {
+     private constructor() {
         this.config = {
             defaultLocale: 'en',
-            supportedLocales: ['en', 'ja', 'zh-cn', 'zh-tw', 'ko'],
+            supportedLocales: ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'],
             fallbackLocale: 'en'
         };
         this.currentLocale = this.config.defaultLocale;
@@ -82,6 +82,7 @@ export class I18nManager {
      * - en-US -> en
      * - ja-JP -> ja
      * - ko-KR -> ko
+     * - vi-VN -> vi
      * - zh / zh-Hans -> zh-cn, zh-Hant / zh-TW -> zh-tw
      */
     private resolveSupportedLocale(locale: string): SupportedLocale | null {

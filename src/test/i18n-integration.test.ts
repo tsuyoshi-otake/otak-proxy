@@ -86,7 +86,7 @@ suite('I18n Integration Tests', () => {
             
             // Verify that a locale was set (supported locale depending on test environment)
             const currentLocale = i18n.getCurrentLocale();
-            assert.ok(['en', 'ja', 'zh-cn', 'zh-tw', 'ko'].includes(currentLocale), 'Should set a supported locale');
+            assert.ok(['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'].includes(currentLocale), 'Should set a supported locale');
         });
     });
 

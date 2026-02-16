@@ -34,6 +34,7 @@ const targets = [
   { locale: 'en', inFile: 'en.json', outFile: 'package.nls.json' },
   { locale: 'ja', inFile: 'ja.json', outFile: 'package.nls.ja.json' },
   { locale: 'ko', inFile: 'ko.json', outFile: 'package.nls.ko.json' },
+  { locale: 'vi', inFile: 'vi.json', outFile: 'package.nls.vi.json' },
   { locale: 'zh-cn', inFile: 'zh-cn.json', outFile: 'package.nls.zh-cn.json' },
   { locale: 'zh-tw', inFile: 'zh-tw.json', outFile: 'package.nls.zh-tw.json' },
 ];
@@ -54,4 +55,3 @@ for (const t of targets) {
 
   writeJson(path.join(repoRoot, t.outFile), out);
 }
-
