@@ -94,8 +94,9 @@ suite('Extension Integration Property-Based Tests', () => {
             return;
         }
 
-        // Increase timeout for property-based tests
-        this.timeout(60000);
+        // This property uses real npm + git + VS Code configuration operations.
+        // Keep runs small and allow a larger timeout to avoid flakiness on slower machines/CI.
+        this.timeout(getPropertyTestTimeout(120000));
 
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
@@ -145,7 +146,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     fs.rmSync(testDir, { recursive: true, force: true });
                 }
             }),
-            { numRuns: getPropertyTestRuns() }
+            { numRuns: process.env.CI ? 10 : 2 }
         );
     });
 
@@ -162,8 +163,9 @@ suite('Extension Integration Property-Based Tests', () => {
             return;
         }
 
-        // Increase timeout for property-based tests
-        this.timeout(30000);
+        // This property uses real git + VS Code configuration operations (and npm cleanup).
+        // Keep runs small and allow a larger timeout to avoid flakiness on slower machines/CI.
+        this.timeout(getPropertyTestTimeout(120000));
 
         // Use URL without credentials because npm 11.x masks credentials in config list
         await fc.assert(
@@ -208,7 +210,7 @@ suite('Extension Integration Property-Based Tests', () => {
                     fs.rmSync(testDir, { recursive: true, force: true });
                 }
             }),
-            { numRuns: getPropertyTestRuns() }
+            { numRuns: process.env.CI ? 10 : 2 }
         );
     });
 

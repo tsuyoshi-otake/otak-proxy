@@ -426,38 +426,41 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 3.2
      */
     test('Property 7: Exponential backoff', async function() {
-        // Increase timeout for this test as it involves retries with backoff
-        this.timeout(30000);
+        // Make this test deterministic and fast by intercepting the internal sleep(),
+        // instead of relying on real timers (which can be flaky under load).
+        this.timeout(20000);
 
         await fc.assert(
             fc.asyncProperty(
-                fc.integer({ min: 1, max: 2 }), // maxRetries value (reduced for faster tests)
-                fc.double({ min: 0.1, max: 0.2 }), // retryBackoffBase value (min 100ms for timing stability)
-                async (maxRetries, retryBackoffBase) => {
-                    // Create a detector that always fails and records attempt timestamps
-                    class FailingDetectorWithTimestamps {
-                        private attemptTimestamps: number[] = [];
+                fc.integer({ min: 1, max: 2 }), // maxRetries value (reduced range for faster tests)
+                fc.integer({ min: 100, max: 200 }), // retryBackoffBase in ms (>=100ms for stability)
+                async (maxRetries, retryBackoffBaseMs) => {
+                    const retryBackoffBase = retryBackoffBaseMs / 1000;
 
-                        getAttemptTimestamps(): number[] {
-                            return this.attemptTimestamps;
+                    // Create a detector that always fails and records attempt count
+                    class FailingDetectorWithCount {
+                        private attemptCount: number = 0;
+
+                        getAttemptCount(): number {
+                            return this.attemptCount;
                         }
 
                         resetAttempts(): void {
-                            this.attemptTimestamps = [];
+                            this.attemptCount = 0;
                         }
 
                         async detectSystemProxy(): Promise<string | null> {
-                            this.attemptTimestamps.push(Date.now());
+                            this.attemptCount++;
                             throw new Error('Detection failed');
                         }
 
                         async detectSystemProxyWithSource(): Promise<{ proxyUrl: string | null; source: string | null }> {
-                            this.attemptTimestamps.push(Date.now());
+                            this.attemptCount++;
                             throw new Error('Detection failed');
                         }
                     }
 
-                    const failingDetector = new FailingDetectorWithTimestamps();
+                    const failingDetector = new FailingDetectorWithCount();
                     
                     const monitor = new ProxyMonitor(
                         failingDetector as any,
@@ -472,73 +475,48 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                     failingDetector.resetAttempts();
 
+                    // Capture the backoff delays that ProxyMonitor requested, and skip waiting.
+                    const backoffCalls: number[] = [];
+                    (monitor as any).sleep = async (ms: number): Promise<void> => {
+                        backoffCalls.push(ms);
+                    };
+
                     try {
-                        // Start monitoring
-                        monitor.start();
-
-                        // Trigger a check
-                        monitor.triggerCheck('focus');
-
-                        // Wait for debounce + all retries to complete
-                        // Calculate maximum wait time based on exponential backoff
-                        // backoff(i) = retryBackoffBase * 2^(i-1) seconds for retry i (i >= 1)
-                        // Total time = sum of all backoffs + buffer
-                        let maxBackoffTime = 0;
-                        for (let i = 1; i <= maxRetries; i++) {
-                            maxBackoffTime += retryBackoffBase * Math.pow(2, i - 1) * 1000;
-                        }
-                        await sleep(10 + maxBackoffTime + 2000); // debounce + backoff + buffer
-
-                        // Get attempt timestamps
-                        const timestamps = failingDetector.getAttemptTimestamps();
+                        // Call retry logic directly to avoid debounce/polling timers.
+                        await (monitor as any).detectWithRetry('focus');
 
                         // Property: Should have exactly maxRetries + 1 attempts
                         const expectedAttempts = maxRetries + 1;
-                        if (timestamps.length !== expectedAttempts) {
-                            throw new Error(
-                                `Expected exactly ${expectedAttempts} attempts, but got ${timestamps.length}`
-                            );
+                        const attemptCount = failingDetector.getAttemptCount();
+                        if (attemptCount !== expectedAttempts) {
+                            throw new Error(`Expected exactly ${expectedAttempts} attempts, but got ${attemptCount}`);
                         }
 
-                        // Property: Verify exponential backoff between consecutive attempts
-                        // For each retry i (i >= 1), the interval should be approximately:
-                        // retryBackoffBase * 2^(i-1) seconds
-                        for (let i = 1; i < timestamps.length; i++) {
-                            const actualInterval = timestamps[i] - timestamps[i - 1];
-                            const expectedInterval = retryBackoffBase * Math.pow(2, i - 1) * 1000;
-                            
-                            // Allow 30% tolerance for timing variations and system delays
-                            const tolerance = Math.max(expectedInterval * 0.3, 100); // At least 100ms tolerance
-                            const minInterval = expectedInterval - tolerance;
-                            const maxInterval = expectedInterval + tolerance;
+                        // Property: Should have exactly maxRetries backoff sleeps
+                        if (backoffCalls.length !== maxRetries) {
+                            throw new Error(`Expected exactly ${maxRetries} backoff sleeps, but got ${backoffCalls.length}`);
+                        }
 
-                            if (actualInterval < minInterval || actualInterval > maxInterval) {
+                        // Property: Backoff durations should match retryBackoffBase * 2^(i-1)
+                        for (let i = 1; i <= maxRetries; i++) {
+                            const actualBackoff = backoffCalls[i - 1];
+                            const expectedBackoff = retryBackoffBase * Math.pow(2, i - 1) * 1000;
+
+                            // Allow a tiny tolerance for floating point arithmetic.
+                            if (Math.abs(actualBackoff - expectedBackoff) > 1e-6) {
                                 throw new Error(
-                                    `Retry ${i} interval was ${actualInterval}ms, ` +
-                                    `expected ${expectedInterval}ms ±${tolerance}ms ` +
-                                    `(base=${retryBackoffBase}s, attempt=${i})`
+                                    `Retry ${i} backoff was ${actualBackoff}ms, expected ${expectedBackoff}ms ` +
+                                    `(base=${retryBackoffBase}s)`
                                 );
                             }
                         }
 
-                        // Property: Verify that intervals are increasing (exponential growth)
-                        // Each interval should be approximately double the previous one
-                        if (timestamps.length >= 3) {
-                            for (let i = 2; i < timestamps.length; i++) {
-                                const interval1 = timestamps[i - 1] - timestamps[i - 2];
-                                const interval2 = timestamps[i] - timestamps[i - 1];
-                                
-                                // interval2 should be approximately 2x interval1
-                                // Allow for timing variations: ratio should be between 1.3 and 2.7
-                                // (loosened from 1.5-2.5 to handle system scheduling jitter)
-                                const ratio = interval2 / interval1;
-
-                                if (ratio < 1.3 || ratio > 2.7) {
+                        // Property: Backoff durations should be increasing (exponential growth)
+                        if (backoffCalls.length >= 2) {
+                            for (let i = 1; i < backoffCalls.length; i++) {
+                                if (backoffCalls[i] <= backoffCalls[i - 1]) {
                                     throw new Error(
-                                        `Exponential growth not observed: ` +
-                                        `interval ${i-1} was ${interval1}ms, ` +
-                                        `interval ${i} was ${interval2}ms, ` +
-                                        `ratio ${ratio.toFixed(2)} (expected ~2.0)`
+                                        `Expected increasing backoff durations, but got ${backoffCalls[i - 1]}ms then ${backoffCalls[i]}ms`
                                     );
                                 }
                             }
