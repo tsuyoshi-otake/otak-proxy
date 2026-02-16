@@ -1,5 +1,14 @@
 # Change Log
 
+## [2.2.3] - 2026-02-16
+
+### Added
+- UI i18n: Vietnamese (`vi`)
+
+### Changed
+- Unit tests: hermetic Git/npm config + improved parallel stability
+- Sync conflict notification is now shown as a short-lived status bar message (auto-dismiss)
+
 ## [2.0.0] - 2024-12-06
 
 ### Added
