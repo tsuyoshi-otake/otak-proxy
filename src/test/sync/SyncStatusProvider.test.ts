@@ -142,7 +142,8 @@ suite('SyncStatusProvider Unit Tests', () => {
             statusProvider.update(status);
             const displayState = statusProvider.getDisplayState();
 
-            assert.ok(displayState!.tooltip.includes('error') || displayState!.tooltip.includes('Error'));
+            // Tooltip should include the underlying error message regardless of localization.
+            assert.ok(status.lastError !== null && displayState!.tooltip.includes(status.lastError));
         });
     });
 

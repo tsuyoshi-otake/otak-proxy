@@ -254,7 +254,8 @@ suite('SyncManager Unit Tests', () => {
             const manager = syncManager as any;
 
             if (manager.on) {
-                manager.on('syncStateChanged', (status: SyncStatus) => {
+                // Use `once` so teardown-induced stop() does not trigger the handler again.
+                manager.once('syncStateChanged', (status: SyncStatus) => {
                     assert.ok(status);
                     done();
                 });
@@ -263,7 +264,7 @@ suite('SyncManager Unit Tests', () => {
                 done();
             }
 
-            syncManager.start();
+            void syncManager.start();
         });
     });
 

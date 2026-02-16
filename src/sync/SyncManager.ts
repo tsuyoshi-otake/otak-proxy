@@ -117,6 +117,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
     private isStarted: boolean = false;
     private isSyncing: boolean = false;
+    private activeInstances: number = 0;
     private lastSyncTime: number | null = null;
     private lastError: string | null = null;
     private currentState: SyncableState | null = null;
@@ -197,6 +198,9 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             // Load initial state
             await this.loadInitialState();
 
+            // Populate cached instance count for synchronous status reporting.
+            await this.refreshActiveInstances();
+
             this.isStarted = true;
             this.emitStatusChanged();
 
@@ -237,6 +241,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
             this.isStarted = false;
             this.currentState = null;
+            this.activeInstances = 0;
             this.emitStatusChanged();
 
             Logger.log('SyncManager stopped');
@@ -313,6 +318,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
             // Get active instances
             const instances = await this.instanceRegistry.getActiveInstances();
+            this.activeInstances = instances.length;
 
             // Clean up zombies
             const cleaned = await this.instanceRegistry.cleanup();
@@ -347,7 +353,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     getSyncStatus(): SyncStatus {
         return {
             enabled: this.isStarted,
-            activeInstances: 0, // Will be updated asynchronously
+            activeInstances: this.activeInstances,
             lastSyncTime: this.lastSyncTime,
             lastError: this.lastError,
             isSyncing: this.isSyncing
@@ -461,5 +467,15 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      */
     private emitStatusChanged(): void {
         this.emit('syncStateChanged', this.getSyncStatus());
+    }
+
+    private async refreshActiveInstances(): Promise<void> {
+        try {
+            const instances = await this.instanceRegistry.getActiveInstances();
+            this.activeInstances = instances.length;
+        } catch (error) {
+            Logger.warn('Failed to refresh active instances:', error);
+            // Keep the last known value (defaults to 0).
+        }
     }
 }
