@@ -13,6 +13,7 @@
  */
 
 import * as vscode from 'vscode';
+import { Logger } from '../utils/Logger';
 
 /**
  * Minimum allowed sync interval in milliseconds
@@ -73,8 +74,8 @@ export interface ISyncConfigManager {
  * - Notify listeners of configuration changes
  */
 export class SyncConfigManager implements ISyncConfigManager {
-    private listeners: Set<ConfigChangeListener> = new Set();
-    private disposables: vscode.Disposable[] = [];
+    private readonly listeners = new Set<ConfigChangeListener>();
+    private readonly disposables: vscode.Disposable[] = [];
 
     constructor() {
         // Set up VSCode configuration change listener
@@ -187,7 +188,7 @@ export class SyncConfigManager implements ISyncConfigManager {
                 listener(key, value);
             } catch (error) {
                 // Don't let one listener failure affect others
-                console.error('Error in config change listener:', error);
+                Logger.error('Error in config change listener:', error);
             }
         }
     }
@@ -200,6 +201,6 @@ export class SyncConfigManager implements ISyncConfigManager {
         for (const disposable of this.disposables) {
             disposable.dispose();
         }
-        this.disposables = [];
+        this.disposables.length = 0;
     }
 }

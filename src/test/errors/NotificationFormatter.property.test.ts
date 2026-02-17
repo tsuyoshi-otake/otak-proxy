@@ -214,8 +214,8 @@ suite('NotificationFormatter Property Tests', () => {
                     // If 2 or fewer URLs, should display all without "+X more"
                     if (urls.length <= 2) {
                         assert.ok(
-                            !result.includes('+'),
-                            'Should not include "+X more" when 2 or fewer URLs'
+                            !result.includes(' (+'),
+                            'Should not include "(+X more)" suffix when 2 or fewer URLs'
                         );
                         assert.strictEqual(
                             displayedUrls.length,

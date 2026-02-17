@@ -123,12 +123,12 @@ suite('NpmConfigManager Cross-Platform Test Suite (Task 3.2)', () => {
         }
     });
 
-    suite('isWindows Flag Shell Control', () => {
-        test('should use shell:true on Windows for npm.cmd', async () => {
+    suite('Platform-Specific Execution', () => {
+        test('should execute npm on Windows (npm.cmd)', async () => {
             restorePlatform = PlatformMocker.mockPlatform('win32');
 
             // NpmConfigManager checks process.platform internally
-            // On Windows, npm is a batch file (.cmd) requiring shell:true
+            // On Windows, npm is a batch file (.cmd), so it must be invoked via cmd.exe.
             const manager = new NpmConfigManager();
             assert.ok(manager);
 

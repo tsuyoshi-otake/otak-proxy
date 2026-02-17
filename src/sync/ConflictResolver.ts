@@ -89,50 +89,62 @@ export class ConflictResolver {
         const localValid = this.isValidTimestamp(local.timestamp, now);
         const remoteValid = this.isValidTimestamp(remote.timestamp, now);
 
-        // If remote timestamp is invalid (too far in the future), local wins
+        const conflictDetails = (conflictType: 'simultaneous' | 'stale'): ConflictInfo | null => {
+            return sameInstance ? null : this.createConflictDetails(local, remote, conflictType);
+        };
+
+        // If remote timestamp is invalid (too far in the future), local wins.
+        // This is a real conflict (clock drift), so include details for diagnostics.
         if (!remoteValid && localValid) {
             Logger.warn(`Rejecting remote state with future timestamp: ${remote.timestamp}`);
             return {
                 winner: 'local',
                 resolvedState: local,
-                conflictDetails: sameInstance ? null : this.createConflictDetails(local, remote, 'stale')
+                conflictDetails: conflictDetails('stale')
             };
         }
 
-        // If local timestamp is invalid (too far in the future), remote wins
+        // If local timestamp is invalid (too far in the future), remote wins.
+        // This is a real conflict (clock drift), so include details for diagnostics.
         if (!localValid && remoteValid) {
             Logger.warn(`Rejecting local state with future timestamp: ${local.timestamp}`);
             return {
                 winner: 'remote',
                 resolvedState: remote,
-                conflictDetails: sameInstance ? null : this.createConflictDetails(local, remote, 'stale')
+                conflictDetails: conflictDetails('stale')
             };
         }
 
-        // Compare timestamps
+        // Compare timestamps.
+        // Only emit conflict details when we detect a real conflict condition:
+        // - simultaneous timestamps, or
+        // - an out-of-order write where a stale state overwrote a newer one.
         if (remote.timestamp > local.timestamp) {
-            // Remote is newer - remote wins
+            // Remote is newer - this is a normal update (not a conflict).
             return {
                 winner: 'remote',
                 resolvedState: remote,
-                conflictDetails: sameInstance ? null : this.createConflictDetails(local, remote, 'stale')
+                conflictDetails: null
             };
-        } else if (local.timestamp > remote.timestamp) {
-            // Local is newer - local wins
+        }
+
+        if (local.timestamp > remote.timestamp) {
+            // Local is newer but we observed a remote state write.
+            // This suggests an out-of-order write or clock drift; treat as a conflict.
             return {
                 winner: 'local',
                 resolvedState: local,
-                conflictDetails: sameInstance ? null : this.createConflictDetails(local, remote, 'stale')
-            };
-        } else {
-            // Timestamps are equal - remote wins (deterministic rule)
-            // This ensures all instances arrive at the same resolution
-            return {
-                winner: 'remote',
-                resolvedState: remote,
-                conflictDetails: sameInstance ? null : this.createConflictDetails(local, remote, 'simultaneous')
+                conflictDetails: conflictDetails('stale')
             };
         }
+
+        // Timestamps are equal - remote wins (deterministic rule).
+        // This is a true simultaneous write conflict.
+        return {
+            winner: 'remote',
+            resolvedState: remote,
+            conflictDetails: conflictDetails('simultaneous')
+        };
     }
 
     /**

@@ -406,8 +406,8 @@ suite('Security Test Suite', () => {
                         // Remove credentials
                         const cleaned = sanitizer.removeCredentials(url);
 
-                        // Neither username nor password should appear
-                        assert.ok(!cleaned.includes(username) || !cleaned.includes(':'),
+                        // Credentials must be removed from the URL userinfo (avoid false-positives from substrings in hostname)
+                        assert.ok(!/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(cleaned),
                             `Credentials should be removed from: ${cleaned}`);
                         assert.ok(!cleaned.includes(password),
                             `Password should be removed from: ${cleaned}`);

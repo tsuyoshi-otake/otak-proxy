@@ -9,13 +9,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { NpmConfigManager } from '../config/NpmConfigManager';
+import { isNpmAvailable } from './commandAvailability';
 import { validProxyUrlWithoutCredentialsGenerator } from './generators';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { getPropertyTestTimeout } from './helpers';
-
-const execFileAsync = promisify(execFile);
-const isWindows = process.platform === 'win32';
 
 /**
  * Read proxy values directly from the isolated userconfig file.
@@ -54,19 +50,6 @@ function readProxyValuesFromNpmrc(npmrcPath: string): { proxy: string | null; ht
 /**
  * Helper function to check if npm is available
  */
-async function isNpmAvailable(): Promise<boolean> {
-    try {
-        await execFileAsync('npm', ['--version'], {
-            timeout: 5000,
-            encoding: 'utf8',
-            shell: isWindows
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
 suite('NpmConfigManager Property-Based Tests', () => {
     let npmAvailable: boolean;
     let testDir: string | undefined;

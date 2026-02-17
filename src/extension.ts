@@ -38,6 +38,21 @@ let syncManager: SyncManager | null = null;
 let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
 
+type EnvironmentVariableCollectionLike = {
+    replace(name: string, value: string): void;
+    delete(name: string): void;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function isEnvironmentVariableCollection(value: unknown): value is EnvironmentVariableCollectionLike {
+    return isRecord(value) &&
+        typeof value['replace'] === 'function' &&
+        typeof value['delete'] === 'function';
+}
+
 /**
  * Perform initial setup for the extension
  * This function handles the initial setup dialog and applies settings.
@@ -70,7 +85,7 @@ export async function performInitialSetup(context: vscode.ExtensionContext): Pro
  * - 1.1: Simplified activation
  * - 1.2: Modular initialization
  */
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     Logger.log('Extension "otak-proxy" is now active.');
 
     // Phase 0: Initialize I18n
@@ -86,10 +101,8 @@ export async function activate(context: vscode.ExtensionContext) {
     const npmConfigManager = new NpmConfigManager();
 
     // Integrated terminal env support (best-effort; only if API is available)
-    const envCollection = (context as any).environmentVariableCollection;
-    const terminalEnvManager = envCollection &&
-        typeof envCollection.replace === 'function' &&
-        typeof envCollection.delete === 'function'
+    const envCollection = (context as unknown as Record<string, unknown>)['environmentVariableCollection'];
+    const terminalEnvManager = isEnvironmentVariableCollection(envCollection)
         ? new TerminalEnvConfigManager(envCollection)
         : undefined;
     const userNotifier = new UserNotifier();
@@ -133,10 +146,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // Only initialize sync if globalStorageUri is available
         if (context.globalStorageUri) {
+            const extensionVersion = context.extension?.packageJSON?.version
+                ? String(context.extension.packageJSON.version)
+                : 'unknown';
             syncManager = new SyncManager(
                 context.globalStorageUri.fsPath,
                 `window-${process.pid}`,
-                syncConfigManager
+                syncConfigManager,
+                extensionVersion
             );
 
             // Set up event handlers for sync
@@ -303,7 +320,7 @@ export async function activate(context: vscode.ExtensionContext) {
  * Deactivate the extension
  * Clean up resources
  */
-export async function deactivate() {
+export async function deactivate(): Promise<void> {
     // Stop SyncManager (Feature: multi-instance-sync)
     if (syncManager) {
         try {

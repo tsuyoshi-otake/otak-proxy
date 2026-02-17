@@ -93,7 +93,7 @@ suite('ConflictResolver Unit Tests', () => {
      * When conflict is detected, details should be provided
      */
     suite('Conflict Detection and Details (Requirement 4.2, 4.3)', () => {
-        test('should provide conflict details when timestamps differ', () => {
+        test('should return null conflictDetails for normal updates (remote newer)', () => {
             const local: SyncableState = {
                 state: { mode: ProxyMode.Manual },
                 timestamp: 1000,
@@ -110,9 +110,30 @@ suite('ConflictResolver Unit Tests', () => {
 
             const result = resolver.resolve(local, remote);
 
+            assert.strictEqual(result.conflictDetails, null);
+        });
+
+        test('should provide conflict details for out-of-order writes (local newer but remote observed)', () => {
+            const local: SyncableState = {
+                state: { mode: ProxyMode.Manual },
+                timestamp: 2000,
+                instanceId: 'instance-1',
+                version: 2
+            };
+
+            const remote: SyncableState = {
+                state: { mode: ProxyMode.Auto },
+                timestamp: 1000,
+                instanceId: 'instance-2',
+                version: 1
+            };
+
+            const result = resolver.resolve(local, remote);
+
+            assert.strictEqual(result.winner, 'local');
             assert.ok(result.conflictDetails);
-            assert.strictEqual(result.conflictDetails!.localTimestamp, 1000);
-            assert.strictEqual(result.conflictDetails!.remoteTimestamp, 2000);
+            assert.strictEqual(result.conflictDetails!.localTimestamp, 2000);
+            assert.strictEqual(result.conflictDetails!.remoteTimestamp, 1000);
             assert.strictEqual(result.conflictDetails!.localInstanceId, 'instance-1');
             assert.strictEqual(result.conflictDetails!.remoteInstanceId, 'instance-2');
             assert.strictEqual(result.conflictDetails!.conflictType, 'stale');

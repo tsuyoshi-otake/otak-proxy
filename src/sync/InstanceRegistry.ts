@@ -14,7 +14,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { Logger } from '../utils/Logger';
+import { getErrorCode } from '../utils/ErrorUtils';
 
 /**
  * Information about a registered instance
@@ -69,6 +71,11 @@ export interface IInstanceRegistry {
      * Update heartbeat for current instance
      */
     updateHeartbeat(): Promise<void>;
+
+    /**
+     * Get the current instance ID (available after successful register()).
+     */
+    getInstanceId(): string | null;
 }
 
 /**
@@ -117,14 +124,12 @@ const MUTEX_STALE_MS = 30000;
 const MUTEX_RETRY_DELAY_MS = 25;
 
 /**
- * Extension version (from package.json)
- */
-const EXTENSION_VERSION = '2.1.3';
-
-/**
  * Generate a UUID v4
  */
 function generateUUID(): string {
+    if (typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = Math.random() * 16 | 0;
         const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -145,19 +150,22 @@ export class InstanceRegistry implements IInstanceRegistry {
     private instanceId: string | null = null;
     private readonly windowId: string;
     private readonly pid: number;
+    private readonly extensionVersion: string;
 
     /**
      * Create a new InstanceRegistry
      *
      * @param baseDir Base directory (typically globalStorageUri.fsPath)
      * @param windowId VSCode window identifier
+     * @param extensionVersion Extension version string (for diagnostics)
      */
-    constructor(baseDir: string, windowId: string) {
+    constructor(baseDir: string, windowId: string, extensionVersion: string = 'unknown') {
         this.syncDir = path.join(baseDir, SYNC_DIR_NAME);
         this.lockFilePath = path.join(this.syncDir, LOCK_FILE_NAME);
         this.mutexFilePath = `${this.lockFilePath}.mutex`;
         this.windowId = windowId;
         this.pid = process.pid;
+        this.extensionVersion = extensionVersion;
     }
 
     /**
@@ -177,7 +185,7 @@ export class InstanceRegistry implements IInstanceRegistry {
                 windowId: this.windowId,
                 registeredAt: now,
                 lastHeartbeat: now,
-                extensionVersion: EXTENSION_VERSION
+                extensionVersion: this.extensionVersion
             };
 
             await this.withLock(async () => {
@@ -374,8 +382,8 @@ export class InstanceRegistry implements IInstanceRegistry {
                 try {
                     fs.renameSync(tempPath, this.lockFilePath);
                     return;
-                } catch (error: any) {
-                    const code = error?.code;
+                } catch (error) {
+                    const code = getErrorCode(error);
                     if ((code === 'EPERM' || code === 'EACCES') && i < attempts - 1) {
                         await new Promise(resolve => setTimeout(resolve, MUTEX_RETRY_DELAY_MS));
                         continue;
@@ -405,8 +413,8 @@ export class InstanceRegistry implements IInstanceRegistry {
                 const fd = fs.openSync(this.mutexFilePath, 'wx');
                 fs.closeSync(fd);
                 break;
-            } catch (error: any) {
-                if (error?.code !== 'EEXIST') {
+            } catch (error) {
+                if (getErrorCode(error) !== 'EEXIST') {
                     throw error;
                 }
 

@@ -18,7 +18,7 @@ import { Logger } from '../utils/Logger';
 import { SharedStateFile, SharedState, ISharedStateFile } from './SharedStateFile';
 import { InstanceRegistry, IInstanceRegistry } from './InstanceRegistry';
 import { FileWatcher, IFileWatcher } from './FileWatcher';
-import { ConflictResolver, SyncableState, ConflictInfo } from './ConflictResolver';
+import { ConflictResolver, SyncableState } from './ConflictResolver';
 import { ISyncConfigManager } from './SyncConfigManager';
 
 /**
@@ -31,6 +31,8 @@ export interface SyncResult {
     instancesNotified: number;
     /** Number of conflicts resolved */
     conflictsResolved: number;
+    /** Number of inactive instances removed from the registry (best-effort) */
+    instancesCleaned?: number;
     /** Error message if failed */
     error?: string;
 }
@@ -113,7 +115,6 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private readonly fileWatcher: IFileWatcher;
     private readonly conflictResolver: ConflictResolver;
     private readonly configManager: ISyncConfigManager;
-    private readonly windowId: string;
 
     private isStarted: boolean = false;
     private isSyncing: boolean = false;
@@ -123,6 +124,8 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private currentState: SyncableState | null = null;
     private heartbeatTimer: NodeJS.Timeout | null = null;
     private cleanupTimer: NodeJS.Timeout | null = null;
+    private syncTimer: NodeJS.Timeout | null = null;
+    private remoteChangeInProgress: boolean = false;
 
     /**
      * Create a new SyncManager
@@ -134,21 +137,21 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     constructor(
         baseDir: string,
         windowId: string,
-        configManager: ISyncConfigManager
+        configManager: ISyncConfigManager,
+        extensionVersion: string = 'unknown'
     ) {
         super();
 
-        this.windowId = windowId;
         this.configManager = configManager;
 
         // Initialize components
         this.sharedStateFile = new SharedStateFile(baseDir);
-        this.instanceRegistry = new InstanceRegistry(baseDir, windowId);
+        this.instanceRegistry = new InstanceRegistry(baseDir, windowId, extensionVersion);
         this.fileWatcher = new FileWatcher();
         this.conflictResolver = new ConflictResolver();
 
         // Set up file change handler
-        this.fileWatcher.on('change', () => this.handleRemoteChange());
+        this.fileWatcher.on('change', () => void this.handleRemoteChange());
 
         // Set up config change handler
         this.configManager.onConfigChange((key, value) => {
@@ -202,6 +205,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             await this.refreshActiveInstances();
 
             this.isStarted = true;
+            this.reschedulePeriodicSync();
             this.emitStatusChanged();
 
             Logger.log('SyncManager started successfully');
@@ -233,6 +237,8 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 this.cleanupTimer = null;
             }
 
+            this.stopPeriodicSync();
+
             // Stop file watcher
             this.fileWatcher.stop();
 
@@ -261,7 +267,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         }
 
         try {
-            const instanceId = (this.instanceRegistry as InstanceRegistry).getInstanceId();
+            const instanceId = this.instanceRegistry.getInstanceId();
             if (!instanceId) {
                 return;
             }
@@ -288,6 +294,8 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
             await this.sharedStateFile.write(sharedState);
             this.lastSyncTime = now;
+            this.lastError = null;
+            this.emitStatusChanged();
 
             Logger.log(`State change propagated (version ${version})`);
         } catch (error) {
@@ -300,7 +308,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * Manually trigger a sync
      */
     async triggerSync(): Promise<SyncResult> {
-        if (this.isSyncing) {
+        if (this.isSyncing || this.remoteChangeInProgress) {
             return {
                 success: false,
                 instancesNotified: 0,
@@ -313,15 +321,14 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         this.emitStatusChanged();
 
         try {
-            // Read shared state
-            const sharedState = await this.sharedStateFile.read();
+            const reconciliation = await this.reconcileWithSharedFile();
 
             // Get active instances
             const instances = await this.instanceRegistry.getActiveInstances();
             this.activeInstances = instances.length;
 
             // Clean up zombies
-            const cleaned = await this.instanceRegistry.cleanup();
+            const instancesCleaned = await this.instanceRegistry.cleanup();
 
             this.lastSyncTime = Date.now();
             this.lastError = null;
@@ -329,7 +336,8 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             return {
                 success: true,
                 instancesNotified: instances.length,
-                conflictsResolved: cleaned
+                conflictsResolved: reconciliation.conflictsResolved,
+                instancesCleaned
             };
         } catch (error) {
             Logger.error('Sync failed:', error);
@@ -339,6 +347,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 success: false,
                 instancesNotified: 0,
                 conflictsResolved: 0,
+                instancesCleaned: 0,
                 error: this.lastError
             };
         } finally {
@@ -371,57 +380,20 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * Handle remote state change detected by file watcher
      */
     private async handleRemoteChange(): Promise<void> {
-        if (!this.isStarted || this.isSyncing) {
+        if (!this.isStarted || this.isSyncing || this.remoteChangeInProgress) {
             return;
         }
 
+        this.remoteChangeInProgress = true;
         try {
-            // Read the shared state
-            const sharedState = await this.sharedStateFile.read();
-            if (!sharedState) {
-                return;
-            }
-
-            const instanceId = (this.instanceRegistry as InstanceRegistry).getInstanceId();
-
-            // Skip if this is our own change
-            if (sharedState.lastModifiedBy === instanceId) {
-                return;
-            }
-
-            // Create remote syncable state
-            const remoteState: SyncableState = {
-                state: sharedState.proxyState,
-                timestamp: sharedState.lastModified,
-                instanceId: sharedState.lastModifiedBy,
-                version: sharedState.version
-            };
-
-            // Resolve conflict if we have local state
-            if (this.currentState) {
-                const resolution = this.conflictResolver.resolve(this.currentState, remoteState);
-
-                if (resolution.winner === 'remote') {
-                    // Apply remote state
-                    this.currentState = remoteState;
-                    this.emit('remoteChange', sharedState.proxyState);
-
-                    if (resolution.conflictDetails) {
-                        this.emit('conflictResolved', resolution.conflictDetails);
-                        Logger.log('Conflict resolved: remote state applied');
-                    }
-                }
-            } else {
-                // No local state, accept remote
-                this.currentState = remoteState;
-                this.emit('remoteChange', sharedState.proxyState);
-            }
-
-            this.lastSyncTime = Date.now();
+            await this.reconcileWithSharedFile();
         } catch (error) {
             Logger.error('Failed to handle remote change:', error);
             this.lastError = error instanceof Error ? error.message : String(error);
+            this.emitStatusChanged();
             this.emit('syncError', error);
+        } finally {
+            this.remoteChangeInProgress = false;
         }
     }
 
@@ -454,12 +426,96 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         if (key === 'syncEnabled') {
             if (value === false && this.isStarted) {
                 Logger.log('Sync disabled via configuration, stopping...');
-                this.stop();
+                void this.stop();
             } else if (value === true && !this.isStarted) {
                 Logger.log('Sync enabled via configuration, starting...');
-                this.start();
+                void this.start();
             }
+            return;
         }
+
+        if (key === 'syncInterval' && this.isStarted) {
+            this.reschedulePeriodicSync();
+        }
+    }
+
+    private isSameProxyState(a: ProxyState, b: ProxyState): boolean {
+        try {
+            return JSON.stringify(a) === JSON.stringify(b);
+        } catch {
+            return false;
+        }
+    }
+
+    private async reconcileWithSharedFile(): Promise<{ conflictsResolved: number }> {
+        const sharedState = await this.sharedStateFile.read();
+        if (!sharedState) {
+            return { conflictsResolved: 0 };
+        }
+
+        const localInstanceId = this.instanceRegistry.getInstanceId();
+        if (!localInstanceId) {
+            return { conflictsResolved: 0 };
+        }
+
+        const fileState: SyncableState = {
+            state: sharedState.proxyState,
+            timestamp: sharedState.lastModified,
+            instanceId: sharedState.lastModifiedBy,
+            version: sharedState.version
+        };
+
+        // If the file reflects our own write, make sure we have a baseline local state and exit.
+        if (sharedState.lastModifiedBy === localInstanceId) {
+            if (!this.currentState) {
+                this.currentState = fileState;
+            }
+            return { conflictsResolved: 0 };
+        }
+
+        // No local state yet - accept remote state.
+        if (!this.currentState) {
+            this.currentState = fileState;
+            this.emit('remoteChange', sharedState.proxyState);
+            this.lastSyncTime = Date.now();
+            this.lastError = null;
+            this.emitStatusChanged();
+            return { conflictsResolved: 0 };
+        }
+
+        const resolution = this.conflictResolver.resolve(this.currentState, fileState);
+        const conflictsResolved = resolution.conflictDetails ? 1 : 0;
+
+        if (resolution.winner === 'remote') {
+            this.currentState = resolution.resolvedState;
+            this.emit('remoteChange', sharedState.proxyState);
+
+            if (resolution.conflictDetails) {
+                this.emit('conflictResolved', resolution.conflictDetails);
+                Logger.log('Conflict resolved: remote state applied');
+            }
+
+            this.lastSyncTime = Date.now();
+            this.lastError = null;
+            this.emitStatusChanged();
+            return { conflictsResolved };
+        }
+
+        // Local wins. If the file contains a different state, reassert local state so other instances converge.
+        if (resolution.conflictDetails) {
+            this.emit('conflictResolved', resolution.conflictDetails);
+            Logger.log('Conflict resolved: local state retained');
+        }
+
+        if (!this.isSameProxyState(this.currentState.state, fileState.state)) {
+            await this.notifyChange(this.currentState.state);
+            return { conflictsResolved };
+        }
+
+        this.lastSyncTime = Date.now();
+        this.lastError = null;
+        this.emitStatusChanged();
+        return { conflictsResolved };
     }
 
     /**
@@ -471,11 +527,33 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
     private async refreshActiveInstances(): Promise<void> {
         try {
+            const previous = this.activeInstances;
             const instances = await this.instanceRegistry.getActiveInstances();
             this.activeInstances = instances.length;
+            if (this.isStarted && this.activeInstances !== previous) {
+                this.emitStatusChanged();
+            }
         } catch (error) {
             Logger.warn('Failed to refresh active instances:', error);
             // Keep the last known value (defaults to 0).
         }
+    }
+
+    private stopPeriodicSync(): void {
+        if (this.syncTimer) {
+            clearInterval(this.syncTimer);
+            this.syncTimer = null;
+        }
+    }
+
+    private reschedulePeriodicSync(): void {
+        this.stopPeriodicSync();
+
+        // Polling provides a reliable fallback when fs.watch misses events.
+        const intervalMs = this.configManager.getSyncInterval();
+        this.syncTimer = setInterval(() => {
+            void this.handleRemoteChange();
+            void this.refreshActiveInstances();
+        }, intervalMs);
     }
 }

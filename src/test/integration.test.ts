@@ -11,11 +11,7 @@ import { UserNotifier } from '../errors/UserNotifier';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { ProxyMonitorState } from '../monitoring/ProxyMonitorState';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
-const isWindows = process.platform === 'win32';
+import { isNpmAvailable } from './commandAvailability';
 
 /**
  * Integration Test Suite
@@ -28,22 +24,6 @@ const isWindows = process.platform === 'win32';
  *
  * Requirements: All (comprehensive integration testing)
  */
-/**
- * Helper function to check if npm is available
- */
-async function isNpmAvailable(): Promise<boolean> {
-    try {
-        await execFileAsync('npm', ['--version'], {
-            timeout: 5000,
-            encoding: 'utf8',
-            shell: isWindows  // Required for Windows to execute npm.cmd
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
 suite('Integration Tests', () => {
     let sandbox: sinon.SinonSandbox;
     let validator: ProxyUrlValidator;

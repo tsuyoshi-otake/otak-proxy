@@ -202,9 +202,9 @@ suite('ConflictResolver Property-Based Tests', () => {
     });
 
     /**
-     * Property: Different instances report conflict details
+     * Property: Different instances only report conflict details for real conflicts
      */
-    test('different instances have conflict details when timestamps differ', () => {
+    test('different instances normal updates have null conflict details', () => {
         fc.assert(
             fc.property(
                 proxyStateArb,
@@ -227,10 +227,73 @@ suite('ConflictResolver Property-Based Tests', () => {
                     };
 
                     const result = resolver.resolve(local, remote);
-                    assert.ok(
-                        result.conflictDetails !== null,
-                        'Different instances should have conflict details'
+                    assert.strictEqual(
+                        result.conflictDetails,
+                        null,
+                        'Different instance normal updates should have null conflict details'
                     );
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+
+    test('different instances out-of-order writes have conflict details', () => {
+        fc.assert(
+            fc.property(
+                proxyStateArb,
+                proxyStateArb,
+                fc.integer({ min: 0, max: 1000000000000 }),
+                fc.integer({ min: 1, max: 100000 }),
+                (state1, state2, baseTimestamp, offset) => {
+                    const local: SyncableState = {
+                        state: state1,
+                        timestamp: baseTimestamp + offset, // Local is newer
+                        instanceId: 'instance-local',
+                        version: 2
+                    };
+
+                    const remote: SyncableState = {
+                        state: state2,
+                        timestamp: baseTimestamp, // Remote is older but appears after local
+                        instanceId: 'instance-remote',
+                        version: 1
+                    };
+
+                    const result = resolver.resolve(local, remote);
+                    assert.strictEqual(result.winner, 'local', 'Local should win when it is newer');
+                    assert.ok(result.conflictDetails !== null, 'Out-of-order writes should have conflict details');
+                }
+            ),
+            { numRuns: 100 }
+        );
+    });
+
+    test('different instances simultaneous timestamps have conflict details', () => {
+        fc.assert(
+            fc.property(
+                proxyStateArb,
+                proxyStateArb,
+                fc.integer({ min: 0, max: 1000000000000 }),
+                (state1, state2, timestamp) => {
+                    const local: SyncableState = {
+                        state: state1,
+                        timestamp,
+                        instanceId: 'instance-local',
+                        version: 1
+                    };
+
+                    const remote: SyncableState = {
+                        state: state2,
+                        timestamp,
+                        instanceId: 'instance-remote',
+                        version: 1
+                    };
+
+                    const result = resolver.resolve(local, remote);
+                    assert.strictEqual(result.winner, 'remote', 'Remote should win on equal timestamps');
+                    assert.ok(result.conflictDetails !== null, 'Simultaneous writes should have conflict details');
+                    assert.strictEqual(result.conflictDetails!.conflictType, 'simultaneous');
                 }
             ),
             { numRuns: 100 }

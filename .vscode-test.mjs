@@ -96,5 +96,6 @@ export default defineConfig({
 		...envToRecord(process.env),
 		GIT_CONFIG_GLOBAL: gitConfigGlobal,
 		NPM_CONFIG_USERCONFIG: npmUserConfig,
+		OTAK_PROXY_LOG_SILENT: process.env.OTAK_PROXY_LOG_SILENT ?? '1',
 	},
 });

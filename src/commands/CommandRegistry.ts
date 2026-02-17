@@ -16,6 +16,7 @@ import { executeToggleProxy } from './ToggleProxyCommand';
 import { executeConfigureUrl } from './ConfigureUrlCommand';
 import { executeTestProxy } from './TestProxyCommand';
 import { executeImportProxy } from './ImportProxyCommand';
+import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 
 /**
  * Configuration for CommandRegistry
@@ -60,7 +61,7 @@ export interface CommandRegistryConfig {
 
     // ProxyMonitor and SystemProxyDetector for config change handling
     proxyMonitor: {
-        updateConfig: (config: any) => void;
+        updateConfig: (config: Partial<ProxyMonitorConfig>) => void;
         triggerCheck: (source: 'config' | 'network' | 'polling' | 'focus') => void;
     };
     systemProxyDetector: {

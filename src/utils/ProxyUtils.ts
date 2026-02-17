@@ -14,6 +14,7 @@ import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { UserNotifier } from '../errors/UserNotifier';
 import { Logger } from './Logger';
 import * as vscode from 'vscode';
+import * as http from 'http';
 
 // Module-level instances (initialized lazily)
 let validator: ProxyUrlValidator | null = null;
@@ -133,6 +134,27 @@ const DEFAULT_MANUAL_TIMEOUT = 5000;
 /** Default timeout for auto tests (3 seconds) */
 const DEFAULT_AUTO_TIMEOUT = 3000;
 
+/** Default port when proxy URL doesn't specify one */
+const DEFAULT_PROXY_PORT = 8080;
+
+/** Default target port for CONNECT tests (HTTPS) */
+const DEFAULT_TARGET_PORT = 443;
+
+function parsePort(port: string, fallback: number): number {
+    const parsed = Number(port);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function buildConnectRequestOptions(proxy: URL, target: URL, timeout: number): http.RequestOptions {
+    return {
+        hostname: proxy.hostname,
+        port: parsePort(proxy.port, DEFAULT_PROXY_PORT),
+        method: 'CONNECT',
+        path: `${target.hostname}:${parsePort(target.port, DEFAULT_TARGET_PORT)}`,
+        timeout
+    };
+}
+
 /**
  * Tests proxy connection with comprehensive error reporting
  *
@@ -156,26 +178,26 @@ export async function testProxyConnection(
     const errors: TestUrlError[] = [];
     const startTime = Date.now();
 
-    try {
-        const http = require('http');
-        const url = require('url');
+    const finalize = (success: boolean): TestResult => ({
+        success,
+        testUrls,
+        errors,
+        proxyUrl,
+        timestamp: Date.now(),
+        duration: Date.now() - startTime
+    });
 
-        const proxyParsed = url.parse(proxyUrl);
+    try {
+        const proxyParsed = new URL(proxyUrl);
 
         // Test connection through proxy for each URL sequentially
         for (const testUrl of testUrls) {
             try {
-                const testParsed = url.parse(testUrl);
-                const options = {
-                    host: proxyParsed.hostname,
-                    port: proxyParsed.port || 8080,
-                    method: 'CONNECT',
-                    path: `${testParsed.hostname}:443`,
-                    timeout: timeout
-                };
+                const testParsed = new URL(testUrl);
+                const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
 
-                const result = await new Promise<boolean>((resolve) => {
-                    const req = http.request(options);
+                const isConnected = await new Promise<boolean>((resolve) => {
+                    const req = http.request(requestOptions);
 
                     req.on('connect', () => {
                         resolve(true);
@@ -198,45 +220,23 @@ export async function testProxyConnection(
                     req.end();
                 });
 
-                if (result) {
+                if (isConnected) {
                     // At least one test URL worked - success
-                    return {
-                        success: true,
-                        testUrls,
-                        errors,
-                        proxyUrl,
-                        timestamp: Date.now(),
-                        duration: Date.now() - startTime
-                    };
+                    return finalize(true);
                 }
             } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : 'Unknown error';
                 errors.push({ url: testUrl, message: errorMsg });
-                continue; // Try next URL
             }
         }
 
         // All test URLs failed
-        return {
-            success: false,
-            testUrls,
-            errors,
-            proxyUrl,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime
-        };
+        return finalize(false);
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         Logger.error('Proxy test error:', errorMsg);
         errors.push({ url: 'Proxy test', message: errorMsg });
-        return {
-            success: false,
-            testUrls,
-            errors,
-            proxyUrl,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime
-        };
+        return finalize(false);
     }
 }
 
@@ -279,12 +279,9 @@ export async function testProxyConnectionParallel(
     const errors: TestUrlError[] = [];
 
     try {
-        const http = require('http');
-        const url = require('url');
+        const proxyParsed = new URL(proxyUrl);
 
-        const proxyParsed = url.parse(proxyUrl);
-
-        const requests: any[] = [];
+        const requests: http.ClientRequest[] = [];
         let settled = false;
         let completedCount = 0;
         let overallTimer: ReturnType<typeof setTimeout> | null = null;
@@ -327,9 +324,9 @@ export async function testProxyConnectionParallel(
                 if (completedCount === totalTests && !settled) {
                     resolve(done({
                         success: false,
-                        proxyUrl: proxyUrl,
-                        testUrls: testUrls,
-                        errors: errors
+                        proxyUrl,
+                        testUrls,
+                        errors
                     }));
                 }
             };
@@ -344,9 +341,9 @@ export async function testProxyConnectionParallel(
                 if (success) {
                     resolve(done({
                         success: true,
-                        proxyUrl: proxyUrl,
-                        testUrls: testUrls,
-                        errors: errors
+                        proxyUrl,
+                        testUrls,
+                        errors
                     }));
                     return;
                 }
@@ -360,16 +357,10 @@ export async function testProxyConnectionParallel(
 
             for (const testUrl of testUrls) {
                 try {
-                    const testParsed = url.parse(testUrl);
-                    const options = {
-                        host: proxyParsed.hostname,
-                        port: proxyParsed.port || 8080,
-                        method: 'CONNECT',
-                        path: `${testParsed.hostname}:443`,
-                        timeout: timeout
-                    };
+                    const testParsed = new URL(testUrl);
+                    const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
 
-                    const req = http.request(options);
+                    const req = http.request(requestOptions);
                     requests.push(req);
 
                     req.on('connect', () => {
@@ -411,9 +402,9 @@ export async function testProxyConnectionParallel(
                 errors.push({ url: 'All tests', message: `Overall timeout (${timeout}ms)` });
                 resolve(done({
                     success: false,
-                    proxyUrl: proxyUrl,
-                    testUrls: testUrls,
-                    errors: errors
+                    proxyUrl,
+                    testUrls,
+                    errors
                 }));
             }, timeout + 500); // Buffer to allow per-request timeouts to fire first.
         });
@@ -426,9 +417,9 @@ export async function testProxyConnectionParallel(
         errors.push({ url: 'Proxy test', message: errorMsg });
         return {
             success: false,
-            proxyUrl: proxyUrl,
-            testUrls: testUrls,
-            errors: errors,
+            proxyUrl,
+            testUrls,
+            errors,
             timestamp: Date.now(),
             duration: Date.now() - startTime
         };

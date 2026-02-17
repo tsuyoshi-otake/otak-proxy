@@ -8,6 +8,17 @@ Kiro-style Spec Driven Development implementation on AI-DLC (AI Development Life
 - Steering: `.kiro/steering/`
 - Specs: `.kiro/specs/`
 
+### Code Map (high-signal entry points)
+- Extension entry: `src/extension.ts`
+- Core orchestration: `src/core/*` (state, apply/disable flows, initialization)
+- Proxy detection/monitoring: `src/monitoring/*` + `src/config/SystemProxyDetector.ts`
+- Config writers: `src/config/*ConfigManager.ts` (Git, npm, VS Code, terminal env)
+- Multi-instance sync: `src/sync/*`
+- Security/sanitization: `src/validation/*` + `src/utils/Logger.ts`
+- Tests:
+  - Unit (plain Node): `scripts/run-unit-tests.mjs`
+  - VS Code host: `.vscode-test.mjs`
+
 ### Steering vs Specification
 
 **Steering** (`.kiro/steering/`) - Guide AI with project-wide rules and context
@@ -72,6 +83,10 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
 - `OTAK_PROXY_TEST_FAST=1`: reduces property test runs and keeps timeouts tight.
 - `OTAK_PROXY_PROPERTY_RUNS=<n>`: explicit override for fast-check `numRuns`.
 - `OTAK_PROXY_TEST_TIMEOUT_MULTIPLIER=<x>`: multiplies some property test timeouts.
+
+### Log noise control
+- `OTAK_PROXY_LOG_SILENT=1`: suppresses `Logger.*` output (default for both unit tests and VS Code tests).
+- Set `OTAK_PROXY_LOG_SILENT=0` when you need verbose logs while debugging.
 
 ### CI convenience
 - `npm run test:ci` runs lint + `npm test`.

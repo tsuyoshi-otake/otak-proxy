@@ -81,6 +81,7 @@ const hermeticEnv = {
   GIT_CONFIG_GLOBAL: hermeticGitConfig,
   NPM_CONFIG_USERCONFIG: hermeticNpmrc,
   npm_config_userconfig: hermeticNpmrc,
+  OTAK_PROXY_LOG_SILENT: process.env.OTAK_PROXY_LOG_SILENT ?? '1',
 };
 
 // Some test suites do real round-trips against shared keys (git http.proxy, npm proxy).

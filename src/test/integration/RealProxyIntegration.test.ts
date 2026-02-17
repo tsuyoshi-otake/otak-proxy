@@ -25,6 +25,7 @@ import { ProxyConnectionTester } from '../../monitoring/ProxyConnectionTester';
 import { ProxyStateManager } from '../../core/ProxyStateManager';
 import { UserNotifier } from '../../errors/UserNotifier';
 import { ProxyMode } from '../../core/types';
+import { Logger } from '../../utils/Logger';
 import * as sinon from 'sinon';
 
 /**
@@ -37,26 +38,15 @@ function getRealProxyUrl(): string | undefined {
 /**
  * Check if real proxy tests should run
  */
-function shouldRunRealProxyTests(): boolean {
-    const proxyUrl = getRealProxyUrl();
-    if (!proxyUrl) {
-        console.log('⏭️  REAL_PROXY_URL not set, skipping real proxy tests');
-        return false;
-    }
-    console.log(`✅ Running real proxy tests with: ${proxyUrl}`);
-    return true;
-}
-
 suite('Real Proxy Integration Tests', function() {
     // Increase timeout for real network tests
     this.timeout(30000);
 
     const realProxyUrl = getRealProxyUrl();
-    const skipTests = !shouldRunRealProxyTests();
 
     suite('Direct Proxy Connection Tests', () => {
         test('should connect through real proxy with auto timeout', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -67,7 +57,7 @@ suite('Real Proxy Integration Tests', function() {
                 getDefaultAutoTimeout()
             );
 
-            console.log(`📊 Auto test result:`, {
+            Logger.info('Real proxy auto test result:', {
                 success: result.success,
                 duration: result.duration,
                 testUrls: result.testUrls,
@@ -81,7 +71,7 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should connect through real proxy with manual timeout', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -92,7 +82,7 @@ suite('Real Proxy Integration Tests', function() {
                 getDefaultManualTimeout()
             );
 
-            console.log(`📊 Manual test result:`, {
+            Logger.info('Real proxy manual test result:', {
                 success: result.success,
                 duration: result.duration,
                 testUrls: result.testUrls,
@@ -104,7 +94,7 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should test multiple URLs in parallel', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -121,7 +111,7 @@ suite('Real Proxy Integration Tests', function() {
                 getDefaultManualTimeout()
             );
 
-            console.log(`📊 Multi-URL test result:`, {
+            Logger.info('Real proxy multi-URL test result:', {
                 success: result.success,
                 duration: result.duration,
                 testUrls: result.testUrls,
@@ -155,14 +145,14 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should test real proxy in auto mode', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
 
             const result = await connectionTester.testProxyAuto(realProxyUrl!);
 
-            console.log(`📊 ProxyConnectionTester auto result:`, {
+            Logger.info('ProxyConnectionTester auto result:', {
                 success: result.success,
                 duration: result.duration
             });
@@ -176,14 +166,14 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should test real proxy in manual mode', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
 
             const result = await connectionTester.testProxyManual(realProxyUrl!);
 
-            console.log(`📊 ProxyConnectionTester manual result:`, {
+            Logger.info('ProxyConnectionTester manual result:', {
                 success: result.success,
                 duration: result.duration
             });
@@ -231,14 +221,14 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should select real proxy as system proxy', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
 
             const result = await fallbackManager.selectBestProxy(realProxyUrl!);
 
-            console.log(`📊 FallbackManager system proxy result:`, {
+            Logger.info('FallbackManager system proxy result:', {
                 success: result.success,
                 source: result.source,
                 proxyUrl: result.proxyUrl
@@ -250,14 +240,14 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should fallback to real proxy when system proxy is null', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
 
             const result = await fallbackManager.selectBestProxy(null);
 
-            console.log(`📊 FallbackManager fallback result:`, {
+            Logger.info('FallbackManager fallback result:', {
                 success: result.success,
                 source: result.source,
                 proxyUrl: result.proxyUrl
@@ -269,7 +259,7 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should not fallback when fallback is disabled', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -278,7 +268,7 @@ suite('Real Proxy Integration Tests', function() {
 
             const result = await fallbackManager.selectBestProxy(null);
 
-            console.log(`📊 FallbackManager disabled result:`, {
+            Logger.info('FallbackManager disabled result:', {
                 success: result.success,
                 source: result.source
             });
@@ -290,7 +280,7 @@ suite('Real Proxy Integration Tests', function() {
 
     suite('Performance Tests with Real Proxy', () => {
         test('should complete test within acceptable time', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -303,7 +293,7 @@ suite('Real Proxy Integration Tests', function() {
             );
             const totalTime = Date.now() - startTime;
 
-            console.log(`📊 Performance test:`, {
+            Logger.info('Real proxy performance test:', {
                 success: result.success,
                 testDuration: result.duration,
                 totalTime,
@@ -315,7 +305,7 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should handle multiple sequential tests efficiently', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -334,7 +324,7 @@ suite('Real Proxy Integration Tests', function() {
             }
 
             const avgTime = results.reduce((a, b) => a + b, 0) / results.length;
-            console.log(`📊 Sequential test times: ${results.join('ms, ')}ms (avg: ${avgTime.toFixed(0)}ms)`);
+            Logger.info(`Real proxy sequential test times: ${results.join('ms, ')}ms (avg: ${avgTime.toFixed(0)}ms)`);
 
             assert.ok(avgTime < 3000, `Average should be under 3 seconds, was ${avgTime}ms`);
         });
@@ -342,7 +332,7 @@ suite('Real Proxy Integration Tests', function() {
 
     suite('Error Handling with Invalid Proxy', () => {
         test('should fail gracefully with invalid proxy', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -355,7 +345,7 @@ suite('Real Proxy Integration Tests', function() {
                 3000 // Short timeout
             );
 
-            console.log(`📊 Invalid proxy result:`, {
+            Logger.info('Invalid proxy result:', {
                 success: result.success,
                 errors: result.errors
             });
@@ -365,7 +355,7 @@ suite('Real Proxy Integration Tests', function() {
         });
 
         test('should handle proxy comparison (real vs invalid)', async function() {
-            if (skipTests) {
+            if (!realProxyUrl) {
                 this.skip();
                 return;
             }
@@ -387,7 +377,7 @@ suite('Real Proxy Integration Tests', function() {
                 3000
             );
 
-            console.log(`📊 Comparison:`, {
+            Logger.info('Proxy comparison:', {
                 realProxy: { success: realResult.success, duration: realResult.duration },
                 invalidProxy: { success: invalidResult.success, errors: invalidResult.errors.length }
             });

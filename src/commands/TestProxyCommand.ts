@@ -30,7 +30,6 @@ export async function executeTestProxy(ctx: CommandContext): Promise<CommandResu
         const state = await ctx.getProxyState();
         const activeUrl = ctx.getActiveProxyUrl(state);
         const i18n = I18nManager.getInstance();
-        const outputManager = OutputChannelManager.getInstance();
 
         if (!activeUrl) {
             // Requirement 3.1, 3.2: Show error with action buttons
@@ -55,23 +54,7 @@ export async function executeTestProxy(ctx: CommandContext): Promise<CommandResu
         // Requirement 4.1, 4.2, 4.3: Show progress notification with URL count
         const testResult = await ctx.userNotifier.showProgressNotification(
             i18n.t('message.testingProxy', { mode: state.mode, url: sanitizedUrl }),
-            async (progress: vscode.Progress<{ message?: string; increment?: number }>) => {
-                // Report progress for each test URL
-                const result = await testProxyConnection(activeUrl);
-                
-                if (result.testUrls && result.testUrls.length > 0) {
-                    for (let i = 0; i < result.testUrls.length; i++) {
-                        progress.report({
-                            message: `Testing ${i + 1}/${result.testUrls.length}: ${result.testUrls[i]}`,
-                            increment: (100 / result.testUrls.length)
-                        });
-                        // Small delay to show progress
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    }
-                }
-                
-                return result;
-            },
+            async () => await testProxyConnection(activeUrl),
             false
         );
 
@@ -99,7 +82,7 @@ export async function executeTestProxy(ctx: CommandContext): Promise<CommandResu
                 errorMessage: i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
                 attemptedUrls: testResult.testUrls,
                 context: testResult.errors ? {
-                    errors: testResult.errors.map((err: any) => `${err.url}: ${err.message}`)
+                    errors: testResult.errors.map(err => `${err.url}: ${err.message}`)
                 } : undefined
             };
 

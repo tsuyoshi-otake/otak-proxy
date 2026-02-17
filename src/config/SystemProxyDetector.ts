@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Detection source types
@@ -32,10 +32,19 @@ export interface ProxyDetectionWithSource {
 export class SystemProxyDetector {
     private validator: ProxyUrlValidator;
     private detectionSourcePriority: string[];
+    private readonly timeoutMs = 5000;
 
     constructor(detectionSourcePriority?: string[]) {
         this.validator = new ProxyUrlValidator();
         this.detectionSourcePriority = detectionSourcePriority || ['environment', 'vscode', 'platform'];
+    }
+
+    private async exec(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+        return execFileAsync(command, args, {
+            timeout: this.timeoutMs,
+            encoding: 'utf8',
+            windowsHide: true
+        });
     }
 
     /**
@@ -203,16 +212,22 @@ export class SystemProxyDetector {
     private async detectWindowsProxy(): Promise<string | null> {
         try {
             // First check if proxy is enabled
-            const { stdout: enabledOutput } = await execAsync(
-                'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable'
-            );
+            const { stdout: enabledOutput } = await this.exec('reg', [
+                'query',
+                'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+                '/v',
+                'ProxyEnable'
+            ]);
             const enableMatch = enabledOutput.match(/ProxyEnable\s+REG_DWORD\s+0x(\d)/);
 
             if (enableMatch && enableMatch[1] === '1') {
                 // Proxy is enabled, get the server
-                const { stdout } = await execAsync(
-                    'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer'
-                );
+                const { stdout } = await this.exec('reg', [
+                    'query',
+                    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+                    '/v',
+                    'ProxyServer'
+                ]);
                 const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/);
                 
                 if (match && match[1]) {
@@ -263,7 +278,7 @@ export class SystemProxyDetector {
 
         for (const iface of interfaces) {
             try {
-                const { stdout } = await execAsync(`networksetup -getwebproxy "${iface}"`);
+                const { stdout } = await this.exec('networksetup', ['-getwebproxy', iface]);
                 const enabledMatch = stdout.match(/Enabled:\s*(\w+)/);
                 const serverMatch = stdout.match(/Server:\s*(.+)/);
                 const portMatch = stdout.match(/Port:\s*(\d+)/);
@@ -275,7 +290,7 @@ export class SystemProxyDetector {
                 }
             } catch (error) {
                 // This interface might not exist, try next
-                console.debug(`Interface ${iface} not available or failed:`, error);
+                Logger.debug(`Interface ${iface} not available or failed:`, error);
                 continue;
             }
         }
@@ -290,11 +305,11 @@ export class SystemProxyDetector {
      */
     private async detectLinuxProxy(): Promise<string | null> {
         try {
-            const { stdout: mode } = await execAsync('gsettings get org.gnome.system.proxy mode');
+            const { stdout: mode } = await this.exec('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
             
             if (mode.includes('manual')) {
-                const { stdout: host } = await execAsync('gsettings get org.gnome.system.proxy.http host');
-                const { stdout: port } = await execAsync('gsettings get org.gnome.system.proxy.http port');
+                const { stdout: host } = await this.exec('gsettings', ['get', 'org.gnome.system.proxy.http', 'host']);
+                const { stdout: port } = await this.exec('gsettings', ['get', 'org.gnome.system.proxy.http', 'port']);
 
                 const cleanHost = host.replace(/'/g, '').trim();
                 const cleanPort = port.trim();

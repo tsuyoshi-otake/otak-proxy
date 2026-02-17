@@ -10,7 +10,16 @@ export interface ErrorDetails {
     stackTrace?: string;
     attemptedUrls?: string[];
     suggestions?: string[];
-    context?: Record<string, any>;
+    context?: Record<string, unknown>;
+}
+
+function safeStringify(value: unknown, indent: number | undefined = undefined): string {
+    try {
+        const json = JSON.stringify(value, null, indent);
+        return json === undefined ? String(value) : json;
+    } catch {
+        return '[Unserializable]';
+    }
 }
 
 /**
@@ -63,7 +72,10 @@ export class OutputChannelManager {
 
         if (details.stackTrace) {
             this.outputChannel.appendLine(`\nStack Trace:`);
-            this.outputChannel.appendLine(details.stackTrace);
+            const sanitizedStack = details.stackTrace.replace(/https?:\/\/[^\s]+/g, (url) =>
+                this.sanitizer.maskPassword(url)
+            );
+            this.outputChannel.appendLine(sanitizedStack);
         }
 
         if (details.attemptedUrls && details.attemptedUrls.length > 0) {
@@ -86,7 +98,7 @@ export class OutputChannelManager {
             Object.entries(details.context).forEach(([key, value]) => {
                 const sanitizedValue = typeof value === 'string' 
                     ? this.sanitizer.maskPassword(value)
-                    : JSON.stringify(value);
+                    : safeStringify(value);
                 this.outputChannel.appendLine(`  ${key}: ${sanitizedValue}`);
             });
         }
@@ -99,14 +111,14 @@ export class OutputChannelManager {
      * @param message - The informational message
      * @param details - Optional additional details
      */
-    logInfo(message: string, details?: any): void {
+    logInfo(message: string, details?: unknown): void {
         const sanitizedMessage = this.sanitizer.maskPassword(message);
         this.outputChannel.appendLine(`[INFO] ${new Date().toISOString()} - ${sanitizedMessage}`);
         
         if (details) {
             const sanitizedDetails = typeof details === 'string'
                 ? this.sanitizer.maskPassword(details)
-                : JSON.stringify(details, null, 2);
+                : safeStringify(details, 2);
             this.outputChannel.appendLine(`Details: ${sanitizedDetails}`);
         }
     }
@@ -116,14 +128,14 @@ export class OutputChannelManager {
      * @param message - The warning message
      * @param details - Optional additional details
      */
-    logWarning(message: string, details?: any): void {
+    logWarning(message: string, details?: unknown): void {
         const sanitizedMessage = this.sanitizer.maskPassword(message);
         this.outputChannel.appendLine(`[WARNING] ${new Date().toISOString()} - ${sanitizedMessage}`);
         
         if (details) {
             const sanitizedDetails = typeof details === 'string'
                 ? this.sanitizer.maskPassword(details)
-                : JSON.stringify(details, null, 2);
+                : safeStringify(details, 2);
             this.outputChannel.appendLine(`Details: ${sanitizedDetails}`);
         }
     }

@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
+import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,8 +42,8 @@ export class GitConfigManager {
                 const fd = fs.openSync(GitConfigManager.mutexFilePath, 'wx');
                 fs.closeSync(fd);
                 break;
-            } catch (error: any) {
-                if (error?.code !== 'EEXIST') {
+            } catch (error) {
+                if (getErrorCode(error) !== 'EEXIST') {
                     throw error;
                 }
 
@@ -76,9 +77,9 @@ export class GitConfigManager {
         }
     }
 
-    private isGitConfigLockError(error: any): boolean {
-        const message = String(error?.message || '');
-        const stderr = String(error?.stderr || '');
+    private isGitConfigLockError(error: unknown): boolean {
+        const message = getErrorMessage(error);
+        const stderr = getErrorStderr(error);
         const text = `${message}\n${stderr}`.toLowerCase();
         return text.includes('could not lock config file') || (text.includes('unable to create') && text.includes('.lock'));
     }
@@ -91,7 +92,7 @@ export class GitConfigManager {
         return p;
     }
 
-    private tryRemoveStaleGitConfigLock(error: any): void {
+    private tryRemoveStaleGitConfigLock(error: unknown): void {
         const lockedConfigPath = this.getLockedConfigPath(error);
         if (!lockedConfigPath) {
             return;
@@ -119,9 +120,9 @@ export class GitConfigManager {
         }
     }
 
-    private getLockedConfigPath(error: any): string | null {
-        const message = String(error?.message || '');
-        const stderr = String(error?.stderr || '');
+    private getLockedConfigPath(error: unknown): string | null {
+        const message = getErrorMessage(error);
+        const stderr = getErrorStderr(error);
         const text = `${stderr}\n${message}`;
 
         // Example (Windows): "error: could not lock config file C:/Users/.../.gitconfig: File exists"
@@ -146,7 +147,7 @@ export class GitConfigManager {
                     encoding: 'utf8'
                 });
                 return;
-            } catch (error: any) {
+            } catch (error) {
                 if (!this.isGitConfigLockError(error)) {
                     throw error;
                 }
@@ -184,7 +185,7 @@ export class GitConfigManager {
             });
 
             return { success: true };
-        } catch (error: any) {
+        } catch (error) {
             return this.handleError(error);
         }
     }
@@ -199,9 +200,10 @@ export class GitConfigManager {
                 // Unset http.proxy (git config --unset is idempotent - safe to call even if key doesn't exist)
                 try {
                     await this.execGitConfigWithRetry(['config', '--global', '--unset', 'http.proxy']);
-                } catch (error: any) {
+                } catch (error) {
                     // Ignore error if key doesn't exist (exit code 5)
-                    if (error.code !== 5) {
+                    const code = getErrorCode(error);
+                    if (code !== 5 && code !== '5') {
                         throw error;
                     }
                 }
@@ -209,16 +211,17 @@ export class GitConfigManager {
                 // Unset https.proxy
                 try {
                     await this.execGitConfigWithRetry(['config', '--global', '--unset', 'https.proxy']);
-                } catch (error: any) {
+                } catch (error) {
                     // Ignore error if key doesn't exist (exit code 5)
-                    if (error.code !== 5) {
+                    const code = getErrorCode(error);
+                    if (code !== 5 && code !== '5') {
                         throw error;
                     }
                 }
             });
 
             return { success: true };
-        } catch (error: any) {
+        } catch (error) {
             return this.handleError(error);
         }
     }
@@ -254,9 +257,10 @@ export class GitConfigManager {
             const httpsProxy = entries.find(e => e.key === 'https.proxy')?.value;
 
             return (httpProxy || httpsProxy) ? (httpProxy || httpsProxy)! : null;
-        } catch (error: any) {
+        } catch (error) {
             // If no matching config exists, git returns exit code 1
-            if (error.code === 1) {
+            const code = getErrorCode(error);
+            if (code === 1 || code === '1') {
                 return null;
             }
 
@@ -267,37 +271,23 @@ export class GitConfigManager {
     }
 
     /**
-     * Checks if a Git config key exists
-     * @param key - Config key to check
-     * @returns true if the key exists
-     */
-    private async hasConfig(key: string): Promise<boolean> {
-        try {
-            await execFileAsync('git', ['config', '--global', '--get', key], {
-                timeout: this.timeout,
-                encoding: 'utf8'
-            });
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    /**
      * Handles errors from Git command execution and determines error type
      * @param error - Error from execFile
      * @returns OperationResult with error details
      */
-    private handleError(error: any): OperationResult {
-        const errorMessage = error.message || String(error);
-        const stderr = error.stderr || '';
+    private handleError(error: unknown): OperationResult {
+        const errorMessage = getErrorMessage(error);
+        const stderr = getErrorStderr(error);
+        const code = getErrorCode(error);
+        const signal = getErrorSignal(error);
+        const killed = wasProcessKilled(error);
 
         // Determine error type based on error details
         let errorType: OperationResult['errorType'] = 'UNKNOWN';
         let errorDescription = errorMessage;
 
         // Check for Git not installed
-        if (error.code === 'ENOENT' || errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
+        if (code === 'ENOENT' || errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
             errorType = 'NOT_INSTALLED';
             errorDescription = 'Git is not installed or not in PATH';
         }
@@ -312,15 +302,15 @@ export class GitConfigManager {
             errorDescription = `Git config file is locked by another process${lockHint}. ${errorMessage}`;
         }
         // Check for permission errors
-        else if (error.code === 'EACCES' || errorMessage.includes('EACCES') || 
+        else if (code === 'EACCES' || errorMessage.includes('EACCES') || 
                  stderr.includes('Permission denied') || stderr.includes('permission')) {
             errorType = 'NO_PERMISSION';
             errorDescription = 'Permission denied when accessing Git configuration';
         }
         // Check for timeout
-        else if (error.killed || errorMessage.includes('timeout') || error.signal === 'SIGTERM') {
+        else if (killed || errorMessage.includes('timeout') || signal === 'SIGTERM') {
             errorType = 'TIMEOUT';
-            errorDescription = 'Git command timed out after 5 seconds';
+            errorDescription = `Git command timed out after ${this.timeout}ms`;
         }
 
         return {

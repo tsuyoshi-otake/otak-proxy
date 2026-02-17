@@ -222,15 +222,16 @@ suite('InputSanitizer Test Suite', () => {
                             url += `:${port}`;
                         }
                         
-                        const masked = sanitizer.maskPassword(url);
-                        
-                        // The password should not appear in the masked URL
-                        assert.ok(!masked.includes(password), 
-                            `Password '${password}' should not appear in masked URL: ${masked}`);
-                        
-                        // The masked URL should contain asterisks
-                        assert.ok(masked.includes('****'), 
-                            `Masked URL should contain asterisks: ${masked}`);
+                         const masked = sanitizer.maskPassword(url);
+                         
+                         // The password should not appear in the URL credentials.
+                         // Avoid false positives where the password happens to be a substring of the hostname.
+                         assert.ok(!masked.includes(`:${password}@`),
+                             `Password '${password}' should not appear in masked URL credentials: ${masked}`);
+                         
+                         // The masked URL should contain asterisks
+                         assert.ok(masked.includes('****'), 
+                             `Masked URL should contain asterisks: ${masked}`);
                         
                         // The username should still be present (we only mask password)
                         // Prefer comparing URL components rather than raw string containment.
@@ -243,11 +244,13 @@ suite('InputSanitizer Test Suite', () => {
                             const originalParsed = new URL(url);
                             const maskedParsed = new URL(masked);
 
-                            assert.strictEqual(maskedParsed.username, originalParsed.username,
-                                `Username should be preserved. original=${originalParsed.username} masked=${maskedParsed.username}`);
-                            assert.strictEqual(maskedParsed.hostname, originalParsed.hostname,
-                                `Hostname should be preserved. original=${originalParsed.hostname} masked=${maskedParsed.hostname}`);
-                        } catch {
+                             assert.strictEqual(maskedParsed.username, originalParsed.username,
+                                 `Username should be preserved. original=${originalParsed.username} masked=${maskedParsed.username}`);
+                             assert.strictEqual(maskedParsed.password, '****',
+                                 `Password should be masked. masked=${masked}`);
+                             assert.strictEqual(maskedParsed.hostname, originalParsed.hostname,
+                                 `Hostname should be preserved. original=${originalParsed.hostname} masked=${maskedParsed.hostname}`);
+                         } catch {
                             const lowerMasked = masked.toLowerCase();
                             assert.ok(lowerMasked.includes(username.toLowerCase()),
                                 `Username '${username}' should still be present in masked URL: ${masked}`);

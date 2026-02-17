@@ -16,12 +16,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ProxyState, ProxyTestResult } from '../core/types';
 import { Logger } from '../utils/Logger';
+import { getErrorCode } from '../utils/ErrorUtils';
 
 /**
  * Shared state structure stored in JSON file
  */
 export interface SharedState {
-    /** Schema version for migration support */
+    /** Monotonic state version for conflict resolution */
     version: number;
     /** Unix timestamp (ms) of last modification */
     lastModified: number;
@@ -67,11 +68,6 @@ export interface ISharedStateFile {
 }
 
 /**
- * Current schema version
- */
-const SCHEMA_VERSION = 1;
-
-/**
  * Sync directory name
  */
 const SYNC_DIR_NAME = 'otak-proxy-sync';
@@ -87,6 +83,13 @@ const STATE_FILE_NAME = 'sync-state.json';
 const TEMP_FILE_SUFFIX = '.tmp';
 
 /**
+ * Atomic rename can be flaky on Windows when AV or indexers temporarily lock the file.
+ * Retry a few times for EPERM/EACCES to reduce test/usage flakes.
+ */
+const RENAME_RETRY_ATTEMPTS = 5;
+const RENAME_RETRY_DELAY_MS = 25;
+
+/**
  * SharedStateFile provides atomic read/write operations for the shared state file.
  *
  * Uses write-then-rename pattern for atomic writes to prevent corruption
@@ -95,7 +98,6 @@ const TEMP_FILE_SUFFIX = '.tmp';
 export class SharedStateFile implements ISharedStateFile {
     private readonly syncDir: string;
     private readonly stateFilePath: string;
-    private readonly tempFilePath: string;
 
     /**
      * Create a new SharedStateFile instance
@@ -105,7 +107,6 @@ export class SharedStateFile implements ISharedStateFile {
     constructor(baseDir: string) {
         this.syncDir = path.join(baseDir, SYNC_DIR_NAME);
         this.stateFilePath = path.join(this.syncDir, STATE_FILE_NAME);
-        this.tempFilePath = path.join(this.syncDir, `${STATE_FILE_NAME}${TEMP_FILE_SUFFIX}`);
     }
 
     /**
@@ -159,6 +160,10 @@ export class SharedStateFile implements ISharedStateFile {
      * @param state State to write
      */
     async write(state: SharedState): Promise<void> {
+        const tempPath = path.join(
+            this.syncDir,
+            `${STATE_FILE_NAME}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}${TEMP_FILE_SUFFIX}`
+        );
         try {
             // Ensure sync directory exists
             await this.ensureSyncDir();
@@ -167,18 +172,30 @@ export class SharedStateFile implements ISharedStateFile {
             const content = JSON.stringify(state, null, 2);
 
             // Write to temp file first
-            fs.writeFileSync(this.tempFilePath, content, 'utf-8');
+            fs.writeFileSync(tempPath, content, 'utf-8');
 
             // Atomic rename (this is the key to atomic writes)
-            fs.renameSync(this.tempFilePath, this.stateFilePath);
+            for (let attempt = 0; attempt < RENAME_RETRY_ATTEMPTS; attempt++) {
+                try {
+                    fs.renameSync(tempPath, this.stateFilePath);
+                    return;
+                } catch (error) {
+                    const code = getErrorCode(error);
+                    const shouldRetry = (code === 'EPERM' || code === 'EACCES') && attempt < RENAME_RETRY_ATTEMPTS - 1;
+                    if (!shouldRetry) {
+                        throw error;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, RENAME_RETRY_DELAY_MS));
+                }
+            }
 
         } catch (error) {
             Logger.error('Failed to write shared state file:', error);
 
             // Clean up temp file if it exists
             try {
-                if (fs.existsSync(this.tempFilePath)) {
-                    fs.unlinkSync(this.tempFilePath);
+                if (fs.existsSync(tempPath)) {
+                    fs.unlinkSync(tempPath);
                 }
             } catch {
                 // Ignore cleanup errors
@@ -222,9 +239,19 @@ export class SharedStateFile implements ISharedStateFile {
             }
 
             // Clean up any temp files
-            if (fs.existsSync(this.tempFilePath)) {
-                fs.unlinkSync(this.tempFilePath);
-                recovered = true;
+            if (fs.existsSync(this.syncDir)) {
+                const files = fs.readdirSync(this.syncDir);
+                for (const file of files) {
+                    if (!file.includes(TEMP_FILE_SUFFIX)) {
+                        continue;
+                    }
+                    try {
+                        fs.unlinkSync(path.join(this.syncDir, file));
+                        recovered = true;
+                    } catch {
+                        // Ignore cleanup errors
+                    }
+                }
             }
 
         } catch (error) {

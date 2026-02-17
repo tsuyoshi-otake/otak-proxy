@@ -19,6 +19,15 @@ export class Logger {
     private static sanitizer = new InputSanitizer();
     private static outputManager: OutputChannelManager | null = null;
 
+    private static isSilent(): boolean {
+        const raw = process.env.OTAK_PROXY_LOG_SILENT ?? process.env.OTAK_PROXY_TEST_SILENT;
+        if (!raw) {
+            return false;
+        }
+        const value = String(raw).trim().toLowerCase();
+        return value === '1' || value === 'true' || value === 'yes';
+    }
+
     /**
      * Gets the OutputChannelManager instance lazily
      * @returns OutputChannelManager instance or null if not available
@@ -41,16 +50,13 @@ export class Logger {
      * @param message - The message to sanitize
      * @returns Sanitized message with masked credentials
      */
-    private static sanitizeMessage(message: any): string {
-        if (typeof message === 'string') {
-            // Check if the message looks like it contains a URL
-            // Pattern: protocol://...
-            const urlPattern = /https?:\/\/[^\s]+/g;
-            return message.replace(urlPattern, (url) => this.sanitizer.maskPassword(url));
+    private static sanitizeMessage(message: unknown): string {
+        if (typeof message !== 'string') {
+            return String(message);
         }
-        
-        // For non-string messages, convert to string first
-        return String(message);
+
+        const urlPattern = /https?:\/\/[^\s]+/g;
+        return message.replace(urlPattern, (url) => this.sanitizer.maskPassword(url));
     }
 
     /**
@@ -59,20 +65,21 @@ export class Logger {
      * @param args - Arguments to sanitize
      * @returns Array of sanitized arguments
      */
-    private static sanitizeArgs(...args: any[]): any[] {
+    private static sanitizeArgs(...args: unknown[]): unknown[] {
         return args.map(arg => {
             if (typeof arg === 'string') {
                 return this.sanitizeMessage(arg);
             } else if (arg instanceof Error) {
                 // Sanitize error messages
                 const sanitizedError = new Error(this.sanitizeMessage(arg.message));
-                sanitizedError.stack = arg.stack;
+                sanitizedError.name = arg.name;
+                sanitizedError.stack = arg.stack ? this.sanitizeMessage(arg.stack) : arg.stack;
                 return sanitizedError;
             } else if (typeof arg === 'object' && arg !== null) {
                 // For objects, convert to string and sanitize
                 try {
                     const jsonStr = JSON.stringify(arg);
-                    return this.sanitizeMessage(jsonStr);
+                    return this.sanitizeMessage(typeof jsonStr === 'string' ? jsonStr : String(arg));
                 } catch {
                     return this.sanitizeMessage(String(arg));
                 }
@@ -87,8 +94,11 @@ export class Logger {
      * 
      * @param args - Messages to log
      */
-    static log(...args: any[]): void {
+    static log(...args: unknown[]): void {
         const sanitized = this.sanitizeArgs(...args);
+        if (this.isSilent()) {
+            return;
+        }
         console.log(...sanitized);
         
         // Also log to output channel
@@ -105,8 +115,11 @@ export class Logger {
      * 
      * @param args - Error messages to log
      */
-    static error(...args: any[]): void {
+    static error(...args: unknown[]): void {
         const sanitized = this.sanitizeArgs(...args);
+        if (this.isSilent()) {
+            return;
+        }
         console.error(...sanitized);
         
         // Also log to output channel with error details
@@ -120,8 +133,8 @@ export class Logger {
             }).join(' ');
             
             // Extract error details if available
-            const errorArg = args.find(arg => arg instanceof Error);
-            if (errorArg) {
+            const errorArg = sanitized.find(arg => arg instanceof Error);
+            if (errorArg instanceof Error) {
                 outputManager.logError(message, {
                     timestamp: new Date(),
                     errorMessage: message,
@@ -142,8 +155,11 @@ export class Logger {
      * 
      * @param args - Warning messages to log
      */
-    static warn(...args: any[]): void {
+    static warn(...args: unknown[]): void {
         const sanitized = this.sanitizeArgs(...args);
+        if (this.isSilent()) {
+            return;
+        }
         console.warn(...sanitized);
         
         // Also log to output channel
@@ -161,8 +177,11 @@ export class Logger {
      * 
      * @param args - Messages to log
      */
-    static info(...args: any[]): void {
+    static info(...args: unknown[]): void {
         const sanitized = this.sanitizeArgs(...args);
+        if (this.isSilent()) {
+            return;
+        }
         console.info(...sanitized);
         
         // Also log to output channel
@@ -171,5 +190,18 @@ export class Logger {
             const message = sanitized.map(arg => String(arg)).join(' ');
             outputManager.logInfo(message);
         }
+    }
+
+    /**
+     * Logs a debug message with sanitized content.
+     *
+     * Intentionally does not write to the output channel to avoid noise.
+     */
+    static debug(...args: unknown[]): void {
+        const sanitized = this.sanitizeArgs(...args);
+        if (this.isSilent()) {
+            return;
+        }
+        console.debug(...sanitized);
     }
 }

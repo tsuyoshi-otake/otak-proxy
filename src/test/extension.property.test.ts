@@ -24,43 +24,8 @@ import {
     urlWithInvalidPortGenerator,
     urlWithCredentialsGenerator
 } from './generators';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { isGitAvailable, isNpmAvailable } from './commandAvailability';
 import { getPropertyTestRuns, getPropertyTestTimeout } from './helpers';
-
-const execFileAsync = promisify(execFile);
-const isWindows = process.platform === 'win32';
-
-/**
- * Helper function to check if npm is available
- */
-async function isNpmAvailable(): Promise<boolean> {
-    try {
-        await execFileAsync('npm', ['--version'], {
-            timeout: 5000,
-            encoding: 'utf8',
-            shell: isWindows
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Helper function to check if git is available
- */
-async function isGitAvailable(): Promise<boolean> {
-    try {
-        await execFileAsync('git', ['--version'], {
-            timeout: 5000,
-            encoding: 'utf8'
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 suite('Extension Integration Property-Based Tests', () => {
     let npmAvailable: boolean;

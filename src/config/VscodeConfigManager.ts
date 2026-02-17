@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Logger } from '../utils/Logger';
+import { getErrorMessage } from '../utils/ErrorUtils';
 
 /**
  * Result of a VSCode configuration operation
@@ -26,7 +27,7 @@ export class VscodeConfigManager {
             await config.update('proxy', url, vscode.ConfigurationTarget.Global);
             
             return { success: true };
-        } catch (error: any) {
+        } catch (error) {
             return this.handleError(error, 'set');
         }
     }
@@ -41,7 +42,7 @@ export class VscodeConfigManager {
             await config.update('proxy', '', vscode.ConfigurationTarget.Global);
             
             return { success: true };
-        } catch (error: any) {
+        } catch (error) {
             return this.handleError(error, 'unset');
         }
     }
@@ -57,7 +58,7 @@ export class VscodeConfigManager {
             
             // Return null if proxy is empty string or undefined
             return proxy && proxy.trim() !== '' ? proxy : null;
-        } catch (error: any) {
+        } catch (error) {
             Logger.error('Error getting VSCode proxy:', error);
             return null;
         }
@@ -69,8 +70,8 @@ export class VscodeConfigManager {
      * @param operation - The operation that failed ('set', 'unset', or 'get')
      * @returns OperationResult with error details
      */
-    private handleError(error: any, operation: string): OperationResult {
-        const errorMessage = error.message || String(error);
+    private handleError(error: unknown, operation: 'set' | 'unset' | 'get'): OperationResult {
+        const errorMessage = getErrorMessage(error);
         
         let errorType: OperationResult['errorType'] = 'UNKNOWN';
         let errorDescription = errorMessage;

@@ -12,6 +12,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { Logger } from '../utils/Logger';
 
 /**
@@ -62,8 +63,17 @@ export class FileWatcher implements IFileWatcher {
     private watcher: fs.FSWatcher | null = null;
     private listeners: Set<() => void> = new Set();
     private debounceTimer: NodeJS.Timeout | null = null;
-    private currentFilePath: string | null = null;
     private watching: boolean = false;
+
+    private attachErrorHandler(): void {
+        if (!this.watcher) {
+            return;
+        }
+        this.watcher.on('error', (error) => {
+            Logger.warn('File watcher error:', error);
+            // Don't stop watching - the file might be recreated
+        });
+    }
 
     /**
      * Start watching a file for changes
@@ -76,26 +86,38 @@ export class FileWatcher implements IFileWatcher {
             this.stop();
         }
 
-        this.currentFilePath = filePath;
         this.watching = true;
 
+        const dirPath = path.dirname(filePath);
+        const targetFile = path.basename(filePath);
+
         try {
-            // Watch the file (or directory containing it)
-            this.watcher = fs.watch(filePath, { persistent: false }, (eventType) => {
-                this.handleChange(eventType);
+            this.watcher = fs.watch(filePath, { persistent: false }, () => {
+                this.handleChange();
             });
-
-            // Handle watcher errors
-            this.watcher.on('error', (error) => {
-                Logger.warn('File watcher error:', error);
-                // Don't stop watching - the file might be recreated
-            });
-
-            Logger.log(`Started watching file: ${filePath}`);
+            this.attachErrorHandler();
+            Logger.debug(`Started watching file: ${filePath}`);
+            return;
         } catch (error) {
-            // File might not exist yet - watch the directory instead
-            Logger.warn(`Could not watch file directly, will watch for creation: ${filePath}`);
-            this.watching = true;
+            // File might not exist yet - fall back to watching the directory.
+            Logger.debug(`Could not watch file directly, falling back to directory watch: ${filePath}`);
+        }
+
+        try {
+            this.watcher = fs.watch(dirPath, { persistent: false }, (_eventType, filename) => {
+                if (filename) {
+                    const name = Buffer.isBuffer(filename) ? filename.toString() : filename;
+                    if (name && name !== targetFile) {
+                        return;
+                    }
+                }
+                this.handleChange();
+            });
+            this.attachErrorHandler();
+            Logger.debug(`Started watching directory: ${dirPath} (target: ${targetFile})`);
+        } catch (error) {
+            // Watcher could not be started (directory missing, permissions, etc.). Keep watching=true but log.
+            Logger.warn(`Could not watch file or directory: ${filePath}`, error);
         }
     }
 
@@ -120,9 +142,8 @@ export class FileWatcher implements IFileWatcher {
         }
 
         this.watching = false;
-        this.currentFilePath = null;
 
-        Logger.log('File watcher stopped');
+        Logger.debug('File watcher stopped');
     }
 
     /**
@@ -158,10 +179,8 @@ export class FileWatcher implements IFileWatcher {
 
     /**
      * Handle a file change event
-     *
-     * @param eventType Type of change event
      */
-    private handleChange(eventType: string): void {
+    private handleChange(): void {
         // Debounce: reset timer on each change
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);

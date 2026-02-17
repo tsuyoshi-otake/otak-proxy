@@ -1,5 +1,21 @@
 # Change Log
 
+## [2.2.6] - 2026-02-17
+
+### Changed
+- Refactor: introduce `ErrorUtils` for type-safe error property access (`getErrorCode`, `getErrorMessage`, `getErrorStderr`, `getErrorSignal`, `wasProcessKilled`), replacing `error: any` casts across config managers and sync components
+- Logger: respect `OTAK_PROXY_LOG_SILENT` env-var at the method level; improve type safety (`unknown` over `any`); sanitize error stack traces
+- SyncManager: add periodic sync timer, `remoteChangeInProgress` guard to prevent concurrent remote/manual sync races, surface `instancesCleaned` in `SyncResult`
+- Config managers (Git, npm, Terminal, VSCode, SystemProxyDetector): migrate to `ErrorUtils`; tighten TypeScript types
+
+### Fixed
+- ConflictResolver / SharedStateFile / FileWatcher: harden edge cases found during expanded property tests
+
+## [2.2.5] - 2026-02-16
+
+### Fixed
+- Status bar not updating when receiving proxy state changes from another VSCode instance via multi-instance sync
+
 ## [2.2.4] - 2026-02-16
 
 ### Fixed

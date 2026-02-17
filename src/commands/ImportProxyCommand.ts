@@ -9,7 +9,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode } from '../core/types';
+import { ProxyMode, type ProxyState } from '../core/types';
 import { validateProxyUrl, sanitizeProxyUrl, testProxyConnection, detectSystemProxySettings } from '../utils/ProxyUtils';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
@@ -26,7 +26,6 @@ import { OutputChannelManager } from '../errors/OutputChannelManager';
 export async function executeImportProxy(ctx: CommandContext): Promise<CommandResult> {
     try {
         const i18n = I18nManager.getInstance();
-        const outputManager = OutputChannelManager.getInstance();
         
         const detectedProxy = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -97,7 +96,7 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
  */
 async function handleTestFirst(
     ctx: CommandContext,
-    state: any,
+    state: ProxyState,
     detectedProxy: string,
     i18n: I18nManager
 ): Promise<CommandResult> {
@@ -124,13 +123,12 @@ async function handleTestFirst(
         }
     } else {
         // Requirement 1.1, 3.3: Use showErrorWithDetails for concise notification with detailed logging
-        const outputManager = OutputChannelManager.getInstance();
         const errorDetails = {
             timestamp: new Date(),
             errorMessage: i18n.t('error.proxyDoesNotWork'),
             attemptedUrls: testResult.testUrls,
             context: testResult.errors ? {
-                errors: testResult.errors.map((err: any) => `${err.url}: ${err.message}`)
+                errors: testResult.errors.map(err => `${err.url}: ${err.message}`)
             } : undefined
         };
 
@@ -153,7 +151,7 @@ async function handleTestFirst(
  */
 async function handleUseAutoMode(
     ctx: CommandContext,
-    state: any,
+    state: ProxyState,
     detectedProxy: string
 ): Promise<CommandResult> {
     if (validateProxyUrl(detectedProxy)) {
@@ -178,7 +176,7 @@ async function handleUseAutoMode(
  */
 async function handleSaveAsManual(
     ctx: CommandContext,
-    state: any,
+    state: ProxyState,
     detectedProxy: string
 ): Promise<CommandResult> {
     if (validateProxyUrl(detectedProxy)) {
