@@ -76,32 +76,32 @@ export async function executeTestProxy(ctx: CommandContext): Promise<CommandResu
                 i18n.t('suggestion.testDifferentApp')
             ];
 
-            // Requirement 1.1, 3.3, 3.4: Use showErrorWithDetails for concise notification with detailed logging
+            // Requirement 1.1, 3.3, 3.4: Log detailed information to output channel
             const errorDetails = {
                 timestamp: new Date(),
                 errorMessage: i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
                 attemptedUrls: testResult.testUrls,
+                suggestions,
                 context: testResult.errors ? {
                     errors: testResult.errors.map(err => `${err.url}: ${err.message}`)
                 } : undefined
             };
-
-            await ctx.userNotifier.showErrorWithDetails(
-                'error.proxyTestFailed',
-                errorDetails,
-                suggestions,
-                { url: sanitizedUrl }
+            OutputChannelManager.getInstance().logError(
+                i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
+                errorDetails
             );
 
-            // Requirement 6.2: Show action buttons for retest and change settings
+            // Requirement 6.2: Single notification with all action buttons to avoid stacking
             const action = await vscode.window.showErrorMessage(
                 i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
+                i18n.t('action.showDetails'),
                 i18n.t('action.retest'),
                 i18n.t('action.changeSettings')
             );
 
-            if (action === i18n.t('action.retest')) {
-                // Recursively call test proxy again
+            if (action === i18n.t('action.showDetails')) {
+                OutputChannelManager.getInstance().show();
+            } else if (action === i18n.t('action.retest')) {
                 return await executeTestProxy(ctx);
             } else if (action === i18n.t('action.changeSettings')) {
                 await vscode.commands.executeCommand('otak-proxy.configureUrl');
