@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "engines": {
     "vscode": "^1.9.0"
   },
@@ -46,6 +46,7 @@
         "otakProxy.proxyUrl": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%config.proxyUrl%"
         },
         "otakProxy.pollingInterval": {
@@ -53,6 +54,7 @@
           "default": 30,
           "minimum": 10,
           "maximum": 300,
+          "scope": "machine-overridable",
           "description": "%config.pollingInterval%"
         },
         "otakProxy.detectionSourcePriority": {
@@ -70,6 +72,7 @@
               "platform"
             ]
           },
+          "scope": "machine",
           "description": "%config.detectionSourcePriority%"
         },
         "otakProxy.maxRetries": {
@@ -77,6 +80,7 @@
           "default": 3,
           "minimum": 0,
           "maximum": 10,
+          "scope": "machine-overridable",
           "description": "%config.maxRetries%"
         },
         "otakProxy.testInterval": {
@@ -84,21 +88,25 @@
           "default": 60,
           "minimum": 30,
           "maximum": 600,
+          "scope": "machine-overridable",
           "description": "%config.testInterval%"
         },
         "otakProxy.autoTestEnabled": {
           "type": "boolean",
           "default": true,
+          "scope": "machine-overridable",
           "description": "%config.autoTestEnabled%"
         },
         "otakProxy.enableFallback": {
           "type": "boolean",
           "default": true,
+          "scope": "machine-overridable",
           "description": "%config.enableFallback%"
         },
         "otakProxy.syncEnabled": {
           "type": "boolean",
           "default": true,
+          "scope": "machine",
           "description": "%config.syncEnabled%"
         },
         "otakProxy.syncInterval": {
@@ -106,6 +114,7 @@
           "default": 1000,
           "minimum": 100,
           "maximum": 5000,
+          "scope": "machine-overridable",
           "description": "%config.syncInterval%"
         }
       }
