@@ -10,9 +10,10 @@
   "config.testInterval": "Proxy接続テストの間隔（秒単位、Autoモード専用）。範囲: 30-600秒。デフォルト: 60秒。",
   "config.autoTestEnabled": "Autoモードで自動Proxy接続テストを有効にする。有効な場合、定期的にProxyの疎通性をテストします。",
   "config.enableFallback": "システムProxyが検出されない場合に手動Proxyへフォールバックする（Autoモード専用）。有効な場合、システムProxyが検出されないと手動設定されたProxyをフォールバックとして使用します。",
+  "config.enableFallback.description": "有効にすると、AutoモードでシステムProxyが検出されない場合、手動で設定されたProxyをフォールバックとして使用します。",
   "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
   "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
-   
+
   "action.yes": "はい",
   "action.no": "いいえ",
   "action.skip": "スキップ",
@@ -30,7 +31,7 @@
   "action.skipToAuto": "Autoにスキップ",
   "action.autoSystem": "Auto (システム)",
   "action.manualSetup": "手動セットアップ",
-  
+
   "prompt.proxyUrl": "Proxy URLを入力してください（例: http://proxy.example.com:8080）",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "Proxy設定をどのように構成しますか？",
@@ -38,7 +39,7 @@
   "prompt.couldNotDetect": "システムProxyを検出できませんでした。手動で設定しますか？",
   "prompt.foundSystemProxy": "システムProxyが見つかりました: {url}",
   "prompt.proxyWorks": "Proxyは動作しています！どのように使用しますか？",
-  
+
   "message.detectingSystemProxy": "システムProxyを検出中...",
   "message.testingProxy": "{mode} proxyをテスト中: {url}...",
   "message.testingProxyGeneric": "Proxyをテスト中...",
@@ -52,7 +53,7 @@
   "message.manualProxyConfigured": "手動Proxyが設定されました: {url}",
   "message.switchedToAutoMode": "Autoモードに切り替えました: {url}",
   "message.savedAsManualProxy": "手動Proxyとして保存しました: {url}",
-  
+
   "warning.noManualProxy": "手動Proxyが設定されていません",
   "warning.noSystemProxyDetected": "システムProxyが検出されませんでした。Offモードに切り替えます。",
   "warning.noSystemProxyCheck": "システムProxyが検出されませんでした。システム/ブラウザのProxy設定を確認してください。",
@@ -60,7 +61,7 @@
   "warning.detectionFailed": "システムProxyの検出に失敗しました。手動でProxyを設定できます。",
   "warning.detectionFailedRetries": "複数回の再試行後、システムProxyの検出に失敗しました。システム/ブラウザのProxy設定を確認してください。",
   "warning.invalidFormat": "検出されたシステムProxyの形式が無効です: {url}",
-  
+
   "error.invalidProxyUrl": "Proxy URLの形式が無効です",
   "error.invalidProxyUrlDetected": "検出されたProxy URLの形式が無効です",
   "error.proxyTestFailed": "Proxy接続テストが失敗しました: {url}",
@@ -69,7 +70,8 @@
   "error.configureUrlFailed": "Proxy URLの設定に失敗しました",
   "error.testProxyFailed": "Proxy接続のテストに失敗しました",
   "error.importProxyFailed": "システムProxyのインポートに失敗しました",
-  
+  "error.attemptedUrls": "試行したテストURL:",
+
   "suggestion.verifyUrl": "Proxy URLが正しいか確認してください",
   "suggestion.checkServer": "Proxyサーバーが実行中でアクセス可能か確認してください",
   "suggestion.checkNetwork": "ネットワークがProxy接続を許可しているか確認してください",
@@ -87,12 +89,14 @@
   "suggestion.verifyServerRunning": "Proxyサーバーが実行中か確認してください",
   "suggestion.checkConnectivity": "ネットワーク接続を確認してください",
   "suggestion.tryDifferentConfig": "別のProxy設定を試してください",
-  
+
   "statusbar.off": "Proxy: Off",
   "statusbar.proxyOff": "Proxy: Off",
   "statusbar.autoWithProxy": "Auto: {url}",
   "statusbar.autoWithUrl": "Auto: {url}",
   "statusbar.autoNoProxy": "Auto: システムproxyなし",
+  "statusbar.autoOff": "Auto: OFF",
+  "statusbar.autoFallback": "Auto (フォールバック): {url}",
   "statusbar.manualWithProxy": "Manual: {url}",
   "statusbar.manualWithUrl": "Manual: {url}",
   "statusbar.manualNotConfigured": "Manual: 未設定",
@@ -108,6 +112,8 @@
   "statusbar.tooltip.systemProxy": "システムProxy",
   "statusbar.tooltip.autoModeUsing": "Autoモード - システムproxyを使用中: {url}",
   "statusbar.tooltip.autoModeNoProxy": "Autoモード - システムproxyが検出されていません",
+  "statusbar.tooltip.autoOff": "Autoモード - Proxyが一時的に無効化されています。システムProxyまたはフォールバックProxyが利用可能になると自動的に有効化されます。",
+  "statusbar.tooltip.autoFallback": "Autoモード - 手動Proxyをフォールバックとして使用中: {url}",
   "statusbar.tooltip.manualModeUsing": "Manualモード - 使用中: {url}",
   "statusbar.tooltip.manualModeNotConfigured": "Manualモード - Proxyが設定されていません",
   "statusbar.tooltip.proxyDisabled": "Proxyが無効",
@@ -119,7 +125,7 @@
   "statusbar.link.configureManual": "手動設定",
   "statusbar.link.importSystem": "システムからインポート",
   "statusbar.link.testProxy": "Proxyをテスト",
-  
+
   "progress.testingProxy": "Proxyをテスト中 {current}/{total}...",
   "progress.testingProxyUrl": "Proxyをテスト中 {current}/{total}: {url}",
   "progress.detectingSystemProxy": "システムProxyを検出中...",
@@ -127,8 +133,6 @@
   "progress.title.testingProxy": "Proxy接続をテスト中",
   "progress.title.detectingProxy": "システムProxyを検出中",
   "progress.title.applyingSettings": "Proxy設定を適用中",
-  
-  "error.attemptedUrls": "試行したテストURL:",
 
   "connectionTest.testing": "Proxy接続をテスト中...",
   "connectionTest.success": "Proxy接続テスト成功: {url}",
@@ -147,20 +151,9 @@
   "fallback.switchedToSystem": "システムProxyに切り替えました",
   "fallback.autoModeOff": "Auto Mode OFF (Proxy待機中)",
 
-  "statusbar.autoOff": "Auto: OFF",
-  "statusbar.autoFallback": "Auto (フォールバック): {url}",
-  "statusbar.tooltip.autoOff": "Autoモード - Proxyが一時的に無効化されています。システムProxyまたはフォールバックProxyが利用可能になると自動的に有効化されます。",
-  "statusbar.tooltip.autoFallback": "Autoモード - 手動Proxyをフォールバックとして使用中: {url}",
-
   "log.fallbackToManual": "手動Proxyへフォールバック",
   "log.autoModeOff": "Auto Mode OFF (Proxy待機中)",
   "log.switchedToSystem": "システムProxyに切り替え",
-
-  "config.enableFallback": "システムProxyが検出されない場合、手動Proxyにフォールバックする（Autoモードのみ）",
-  "config.enableFallback.description": "有効にすると、AutoモードでシステムProxyが検出されない場合、手動で設定されたProxyをフォールバックとして使用します。",
-
-  "config.syncEnabled": "複数のVSCode/Cursorインスタンス間での同期を有効にする",
-  "config.syncInterval": "同期間隔（ミリ秒）",
 
   "sync.enabled": "同期が有効",
   "sync.disabled": "同期が無効",

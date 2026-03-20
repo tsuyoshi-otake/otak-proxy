@@ -10,9 +10,10 @@
   "config.testInterval": "Proxy connection test interval in seconds (Auto mode only). Range: 30-600 seconds. Default: 60 seconds.",
   "config.autoTestEnabled": "Enable automatic proxy connection testing in Auto mode. When enabled, proxy connectivity is tested periodically.",
   "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only). When enabled, if no system proxy is detected, the extension will try to use the manually configured proxy as a fallback.",
+  "config.enableFallback.description": "When enabled, if no system proxy is detected in Auto mode, the extension will try to use the manually configured proxy as a fallback.",
   "config.syncEnabled": "Enable synchronization between multiple VSCode/Cursor instances. When enabled, proxy settings are shared across all instances.",
   "config.syncInterval": "Synchronization check interval in milliseconds (100-5000). How often to check for changes from other instances.",
-   
+
   "action.yes": "Yes",
   "action.no": "No",
   "action.skip": "Skip",
@@ -30,7 +31,7 @@
   "action.skipToAuto": "Skip to Auto",
   "action.autoSystem": "Auto (System)",
   "action.manualSetup": "Manual Setup",
-  
+
   "prompt.proxyUrl": "Enter proxy URL (e.g., http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "How would you like to configure proxy settings?",
@@ -38,7 +39,7 @@
   "prompt.couldNotDetect": "Couldn't detect system proxy. Set up manually?",
   "prompt.foundSystemProxy": "Found system proxy: {url}",
   "prompt.proxyWorks": "Proxy works! How would you like to use it?",
-  
+
   "message.detectingSystemProxy": "Detecting system proxy...",
   "message.testingProxy": "Testing {mode} proxy: {url}...",
   "message.testingProxyGeneric": "Testing proxy...",
@@ -52,7 +53,7 @@
   "message.manualProxyConfigured": "Manual proxy configured: {url}",
   "message.switchedToAutoMode": "Switched to Auto mode: {url}",
   "message.savedAsManualProxy": "Saved as manual proxy: {url}",
-  
+
   "warning.noManualProxy": "No manual proxy configured",
   "warning.noSystemProxyDetected": "No system proxy detected. Switching to Off mode.",
   "warning.noSystemProxyCheck": "No system proxy detected. Check your system/browser proxy settings.",
@@ -60,7 +61,7 @@
   "warning.detectionFailed": "System proxy detection failed. You can configure a proxy manually.",
   "warning.detectionFailedRetries": "System proxy detection failed after multiple retries. Check your system/browser proxy settings.",
   "warning.invalidFormat": "Detected system proxy has invalid format: {url}",
-  
+
   "error.invalidProxyUrl": "Invalid proxy URL format",
   "error.invalidProxyUrlDetected": "Invalid proxy URL format detected",
   "error.proxyTestFailed": "Proxy connection test failed for: {url}",
@@ -69,7 +70,8 @@
   "error.configureUrlFailed": "Failed to configure proxy URL",
   "error.testProxyFailed": "Failed to test proxy connection",
   "error.importProxyFailed": "Failed to import system proxy",
-  
+  "error.attemptedUrls": "Attempted test URLs:",
+
   "suggestion.verifyUrl": "Verify the proxy URL is correct",
   "suggestion.checkServer": "Check if the proxy server is running and accessible",
   "suggestion.checkNetwork": "Ensure your network allows proxy connections",
@@ -87,12 +89,14 @@
   "suggestion.verifyServerRunning": "Verify the proxy server is running",
   "suggestion.checkConnectivity": "Check your network connectivity",
   "suggestion.tryDifferentConfig": "Try a different proxy configuration",
-  
+
   "statusbar.off": "Proxy: Off",
   "statusbar.proxyOff": "Proxy: Off",
   "statusbar.autoWithProxy": "Auto: {url}",
   "statusbar.autoWithUrl": "Auto: {url}",
   "statusbar.autoNoProxy": "Auto: No system proxy",
+  "statusbar.autoOff": "Auto: OFF",
+  "statusbar.autoFallback": "Auto (Fallback): {url}",
   "statusbar.manualWithProxy": "Manual: {url}",
   "statusbar.manualWithUrl": "Manual: {url}",
   "statusbar.manualNotConfigured": "Manual: Not configured",
@@ -108,6 +112,8 @@
   "statusbar.tooltip.systemProxy": "System Proxy",
   "statusbar.tooltip.autoModeUsing": "Auto Mode - Using system proxy: {url}",
   "statusbar.tooltip.autoModeNoProxy": "Auto Mode - No system proxy detected",
+  "statusbar.tooltip.autoOff": "Auto Mode - Proxy temporarily disabled. System proxy or fallback proxy will be used when available.",
+  "statusbar.tooltip.autoFallback": "Auto Mode - Using manual proxy as fallback: {url}",
   "statusbar.tooltip.manualModeUsing": "Manual Mode - Using: {url}",
   "statusbar.tooltip.manualModeNotConfigured": "Manual Mode - No proxy configured",
   "statusbar.tooltip.proxyDisabled": "Proxy disabled",
@@ -119,7 +125,7 @@
   "statusbar.link.configureManual": "Configure Manual",
   "statusbar.link.importSystem": "Import System",
   "statusbar.link.testProxy": "Test Proxy",
-  
+
   "progress.testingProxy": "Testing proxy {current} of {total}...",
   "progress.testingProxyUrl": "Testing proxy {current} of {total}: {url}",
   "progress.detectingSystemProxy": "Detecting system proxy...",
@@ -127,8 +133,6 @@
   "progress.title.testingProxy": "Testing Proxy Connection",
   "progress.title.detectingProxy": "Detecting System Proxy",
   "progress.title.applyingSettings": "Applying Proxy Settings",
-  
-  "error.attemptedUrls": "Attempted test URLs:",
 
   "connectionTest.testing": "Testing proxy connection...",
   "connectionTest.success": "Proxy connection test successful: {url}",
@@ -147,20 +151,9 @@
   "fallback.switchedToSystem": "Switched back to system proxy",
   "fallback.autoModeOff": "Auto Mode OFF (waiting for proxy)",
 
-  "statusbar.autoOff": "Auto: OFF",
-  "statusbar.autoFallback": "Auto (Fallback): {url}",
-  "statusbar.tooltip.autoOff": "Auto Mode - Proxy temporarily disabled. System proxy or fallback proxy will be used when available.",
-  "statusbar.tooltip.autoFallback": "Auto Mode - Using manual proxy as fallback: {url}",
-
   "log.fallbackToManual": "Fallback to Manual Proxy",
   "log.autoModeOff": "Auto Mode OFF (waiting for proxy)",
   "log.switchedToSystem": "Switched back to System Proxy",
-
-  "config.enableFallback": "Enable fallback to manual proxy when system proxy is not detected (Auto mode only)",
-  "config.enableFallback.description": "When enabled, if no system proxy is detected in Auto mode, the extension will try to use the manually configured proxy as a fallback.",
-
-  "config.syncEnabled": "Enable synchronization between multiple VSCode/Cursor instances",
-  "config.syncInterval": "Synchronization interval (milliseconds)",
 
   "sync.enabled": "Sync enabled",
   "sync.disabled": "Sync disabled",
