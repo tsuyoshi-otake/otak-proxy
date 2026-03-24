@@ -1,104 +1,138 @@
-# otak-proxy アーキテクチャドキュメント
+# otak-proxy Architecture Document
 
-## 概要
+## Overview
 
-このドキュメントは、otak-proxy拡張機能のアーキテクチャと設計判断について詳細に説明します。
+This document describes the architecture and design decisions of the otak-proxy extension in detail.
 
-## リファクタリングの背景
+## Refactoring Background
 
-### 問題点（リファクタリング前）
+### Problems (Before Refactoring)
 
-- **単一ファイルの肥大化**: extension.tsが1335行に達し、保守が困難
-- **責任の混在**: コマンド、状態管理、UI更新、設定適用が同一ファイルに混在
-- **コードの重複**: 特にimportProxyコマンド内で同様のロジックが3回繰り返される
-- **テストの遅さ**: 外部コマンド依存が多く、プロパティベーステストの実行回数が高い
+- **Bloated single file**: extension.ts reached 1335 lines, making maintenance difficult
+- **Mixed responsibilities**: Commands, state management, UI updates, and configuration application were all in one file
+- **Code duplication**: Particularly within the importProxy command, similar logic was repeated 3 times
+- **Slow tests**: Heavy dependence on external commands, high property-based test iteration counts
 
-### 改善結果（リファクタリング後）
+### Improvements (After Refactoring)
 
-- **ファイルサイズ**: extension.ts 1335行 → 160行（88%削減）
-- **モジュール数**: 30+の焦点を絞ったモジュール
-- **テストカバレッジ**: 389個のテスト（ユニット + プロパティベース）
-- **ファイルサイズ制限**: すべてのファイルが300行以下
-- **循環依存**: なし（madgeで検証済み）
+- **File size**: extension.ts from 1335 lines to ~350 lines (74% reduction)
+- **Module count**: 40+ focused modules
+- **Test coverage**: 1,000+ test cases (unit + property-based + integration), 74 test files
+- **Circular dependencies**: None (verified with madge)
 
-## フォルダ構造
+## Folder Structure
 
 ```
 src/
-├── extension.ts          # エントリーポイント（160行）
+├── extension.ts          # Entry point (~350 lines)
 │
-├── core/                 # コアビジネスロジック
-│   ├── types.ts         # 共通型定義
-│   ├── ProxyStateManager.ts    # 状態永続化
-│   ├── ProxyApplier.ts         # プロキシ設定オーケストレーション
-│   └── ExtensionInitializer.ts # 初期化ロジック
+├── core/                 # Core business logic
+│   ├── types.ts         # Common type definitions (ProxyMode: Off/Manual/Auto)
+│   ├── ProxyStateManager.ts    # State persistence
+│   ├── ProxyApplier.ts         # Proxy configuration orchestration
+│   └── ExtensionInitializer.ts # Initialization logic
 │
-├── commands/            # コマンド実装
-│   ├── types.ts         # コマンド固有の型
-│   ├── CommandRegistry.ts      # コマンド登録の一元管理
-│   ├── ToggleProxyCommand.ts   # モード切り替え
-│   ├── ConfigureUrlCommand.ts  # 手動プロキシURL設定
-│   ├── TestProxyCommand.ts     # プロキシ接続テスト
-│   ├── ImportProxyCommand.ts   # システムプロキシ検出とインポート
-│   └── index.ts         # モジュールエクスポート
+├── commands/            # Command implementations
+│   ├── types.ts         # Command-specific types
+│   ├── CommandRegistry.ts      # Centralized command registration
+│   ├── ToggleProxyCommand.ts   # Mode switching
+│   ├── ConfigureUrlCommand.ts  # Manual proxy URL configuration
+│   ├── TestProxyCommand.ts     # Proxy connection testing
+│   ├── ImportProxyCommand.ts   # System proxy detection and import
+│   └── index.ts         # Module exports
 │
-├── ui/                  # ユーザーインターフェース
-│   └── StatusBarManager.ts     # ステータスバー管理
+├── ui/                  # User interface
+│   └── StatusBarManager.ts     # Status bar management
 │
-├── config/              # 設定マネージャー
-│   ├── GitConfigManager.ts     # Git設定
-│   ├── VscodeConfigManager.ts  # VSCode設定
-│   ├── NpmConfigManager.ts     # npm設定
-│   └── SystemProxyDetector.ts  # システムプロキシ検出
+├── config/              # Configuration managers
+│   ├── GitConfigManager.ts     # Git configuration (with cross-process mutex)
+│   ├── VscodeConfigManager.ts  # VS Code configuration
+│   ├── NpmConfigManager.ts     # npm configuration (platform-aware)
+│   ├── TerminalEnvConfigManager.ts  # Terminal environment variable management
+│   └── SystemProxyDetector.ts  # System proxy detection
 │
-├── monitoring/          # プロキシ監視（Autoモード）
-│   ├── ProxyMonitor.ts         # ポーリングベースの変更検出
-│   ├── ProxyMonitorState.ts    # モニター状態管理
-│   └── ProxyChangeLogger.ts    # 変更イベントログ
+├── monitoring/          # Proxy monitoring (Auto mode)
+│   ├── ProxyMonitor.ts         # Polling-based change detection (EventEmitter)
+│   ├── ProxyMonitorState.ts    # Monitor state management
+│   ├── ProxyChangeLogger.ts    # Change event logging
+│   ├── ProxyConnectionTester.ts # Proxy connection testing (Auto/Manual modes)
+│   ├── ProxyFallbackManager.ts  # Fallback proxy selection
+│   └── ProxyTestScheduler.ts    # Periodic connection test scheduler
 │
-├── validation/          # 入力検証とセキュリティ
-│   ├── ProxyUrlValidator.ts    # URL検証
-│   └── InputSanitizer.ts       # コマンドインジェクション防止
+├── sync/                # Multi-instance synchronization
+│   ├── SyncManager.ts          # Sync orchestrator
+│   ├── InstanceRegistry.ts     # Instance registration and lifecycle management
+│   ├── SharedStateFile.ts      # Shared state file (atomic read/write)
+│   ├── FileWatcher.ts          # File change monitoring (with debounce)
+│   ├── ConflictResolver.ts     # Timestamp-based conflict resolution
+│   ├── SyncConfigManager.ts    # Sync configuration management
+│   ├── SyncStatusProvider.ts   # Status bar sync state display
+│   └── index.ts         # Module exports
 │
-├── errors/              # エラーハンドリング
-│   ├── ErrorAggregator.ts      # 複数ソースからのエラー収集
-│   └── UserNotifier.ts         # ユーザー向けエラー通知
+├── validation/          # Input validation and security
+│   ├── ProxyUrlValidator.ts    # URL validation
+│   └── InputSanitizer.ts       # Command injection prevention
 │
-├── i18n/                # 国際化
-│   ├── types.ts         # i18n型定義
-│   ├── I18nManager.ts          # 翻訳マネージャー（シングルトン）
-│   └── locales/                # 翻訳ファイル
-│       ├── en.json
-│       └── ja.json
+├── errors/              # Error handling
+│   ├── ErrorAggregator.ts      # Error collection from multiple sources
+│   ├── UserNotifier.ts         # User-facing error notifications (with throttling)
+│   ├── NotificationFormatter.ts # Notification message formatting
+│   ├── NotificationThrottler.ts # Duplicate notification suppression
+│   ├── OutputChannelManager.ts  # Output channel log management (singleton)
+│   └── StateChangeDebouncer.ts  # State change debouncing
 │
-├── models/              # データモデル
-│   └── ProxyUrl.ts             # プロキシURL解析と検証
+├── i18n/                # Internationalization
+│   ├── types.ts         # i18n type definitions
+│   ├── I18nManager.ts          # Translation manager (singleton)
+│   └── locales/                # Translation files
+│       ├── en.json             # English
+│       ├── ja.json             # Japanese
+│       ├── ko.json             # Korean
+│       ├── vi.json             # Vietnamese
+│       ├── zh-cn.json          # Simplified Chinese
+│       └── zh-tw.json          # Traditional Chinese
 │
-├── utils/               # 共有ユーティリティ
-│   ├── Logger.ts               # 集中ログ管理
-│   └── ProxyUtils.ts           # プロキシ関連ユーティリティ
+├── models/              # Data models
+│   └── ProxyUrl.ts             # Proxy URL parsing and validation
 │
-└── test/                # テストスイート
-    ├── *.test.ts               # ユニットテスト
-    ├── *.property.test.ts      # プロパティベーステスト
-    ├── generators.ts           # テストデータジェネレーター
-    └── helpers.ts              # テストユーティリティ
+├── utils/               # Shared utilities
+│   ├── Logger.ts               # Centralized logging (auto credential masking)
+│   ├── ProxyUtils.ts           # Proxy-related utilities
+│   └── ErrorUtils.ts           # Type-safe error property extraction
+│
+└── test/                # Test suite
+    ├── *.test.ts               # Unit tests
+    ├── *.property.test.ts      # Property-based tests
+    ├── *.integration.test.ts   # Integration tests
+    ├── generators.ts           # Test data generators
+    ├── helpers.ts              # Test utilities
+    ├── commands/               # Command tests
+    ├── core/                   # Core module tests
+    ├── errors/                 # Error handling tests
+    ├── i18n/                   # Internationalization tests
+    ├── integration/            # Integration tests
+    ├── monitoring/             # Monitoring module tests
+    ├── settings/               # Settings tests
+    ├── sync/                   # Sync module tests
+    ├── ui/                     # UI tests
+    └── utils/                  # Utility tests
 ```
 
-## 設計原則
+## Design Principles
 
-### 1. 単一責任の原則（Single Responsibility Principle）
+### 1. Single Responsibility Principle
 
-各モジュールは1つの明確な責任を持ちます：
+Each module has one clear responsibility:
 
-- **ProxyStateManager**: 状態の永続化のみを担当
-- **ProxyApplier**: プロキシ設定の適用のみを担当
-- **StatusBarManager**: UI更新のみを担当
-- **各Command**: 1つのコマンドの実行のみを担当
+- **ProxyStateManager**: Responsible only for state persistence
+- **ProxyApplier**: Responsible only for proxy configuration application
+- **StatusBarManager**: Responsible only for UI updates
+- **Each Command**: Responsible only for executing one command
+- **SyncManager**: Responsible only for coordinating multi-instance synchronization
 
-### 2. 依存性注入（Dependency Injection）
+### 2. Dependency Injection
 
-コンポーネントはコンストラクタを通じて依存関係を受け取ります：
+Components receive dependencies through their constructors:
 
 ```typescript
 export class ProxyApplier {
@@ -108,80 +142,82 @@ export class ProxyApplier {
         private npmManager: NpmConfigManager,
         private validator: ProxyUrlValidator,
         private sanitizer: InputSanitizer,
-        private userNotifier: UserNotifier
+        private userNotifier: UserNotifier,
+        private stateManager?: ProxyStateManager,
+        private terminalEnvManager?: TerminalEnvConfigManager
     ) {}
 }
 ```
 
-**利点**:
-- テスト時にモックを簡単に注入できる
-- 依存関係グラフが明確
-- 隠れたグローバル状態がない
+**Benefits**:
+- Easy to inject mocks during testing
+- Clear dependency graph
+- No hidden global state
 
-### 3. エラー集約（Error Aggregation）
+### 3. Error Aggregation
 
-複数の設定エラーを収集して一度に表示：
+Collects multiple configuration errors and displays them at once:
 
 ```typescript
 const errorAggregator = new ErrorAggregator();
 
-// Git、VSCode、npmの設定を試行
+// Attempt Git, VS Code, npm, and terminal configuration
 await this.updateManager(this.gitManager, 'Git', enabled, proxyUrl, errorAggregator);
 await this.updateManager(this.vscodeManager, 'VSCode', enabled, proxyUrl, errorAggregator);
 await this.updateManager(this.npmManager, 'npm', enabled, proxyUrl, errorAggregator);
 
-// すべてのエラーを一度に表示
+// Display all errors at once
 if (errorAggregator.hasErrors()) {
     this.userNotifier.showAggregatedErrors(errorAggregator);
 }
 ```
 
-**利点**:
-- ユーザーはすべての問題を一度に確認できる
-- 1つずつエラーを修正する必要がない
+**Benefits**:
+- Users can see all issues at once
+- No need to fix errors one at a time
 
-### 4. 状態管理の集中化
+### 4. Centralized State Management
 
-ProxyStateManagerがすべての状態操作を管理：
+ProxyStateManager manages all state operations:
 
 ```typescript
 export class ProxyStateManager {
     private inMemoryState: ProxyState | null = null;
-    
+
     async getState(): Promise<ProxyState> {
-        // globalStateから読み込み、失敗時はin-memoryフォールバック
+        // Read from globalState, fall back to in-memory on failure
     }
-    
+
     async saveState(state: ProxyState): Promise<void> {
-        // globalStateに保存、失敗時はin-memoryフォールバック
+        // Save to globalState, fall back to in-memory on failure
     }
 }
 ```
 
-**利点**:
-- 状態の読み書きが一貫性を持つ
-- 自動フォールバック機能
-- 古い設定からの透過的な移行
+**Benefits**:
+- Consistent state read/write
+- Automatic fallback mechanism
+- Transparent migration from legacy settings
 
-### 5. コマンドパターン
+### 5. Command Pattern
 
-各コマンドは純粋関数としてCommandContextを受け取ります：
+Each command receives a CommandContext as a pure function:
 
 ```typescript
 export async function executeToggleProxy(ctx: CommandContext): Promise<void> {
     const currentState = await ctx.stateManager.getState();
-    // コマンドロジック
+    // Command logic
 }
 ```
 
-**利点**:
-- 既存のコードを変更せずに新しいコマンドを追加できる
-- テストが容易
-- コマンド間の独立性が保証される
+**Benefits**:
+- New commands can be added without modifying existing code
+- Easy to test
+- Independence between commands is guaranteed
 
-### 6. プロパティベーステスト
+### 6. Property-Based Testing
 
-fast-checkを使用してコアロジックを検証：
+Core logic is verified using fast-check:
 
 ```typescript
 it('Property 3: State persistence fallback', () => {
@@ -193,7 +229,7 @@ it('Property 3: State persistence fallback', () => {
                 // ...
             }),
             async (state) => {
-                // globalState.updateが失敗してもin-memoryフォールバックが機能することを検証
+                // Verify in-memory fallback works even when globalState.update fails
             }
         ),
         { numRuns: 100 }
@@ -201,274 +237,439 @@ it('Property 3: State persistence fallback', () => {
 });
 ```
 
-**利点**:
-- ランダムな入力で境界ケースを発見
-- ユニットテストを補完して包括的なカバレッジを実現
+**Benefits**:
+- Discovers edge cases with random inputs
+- Complements unit tests for comprehensive coverage
 
-## コンポーネント間の相互作用
+### 7. Event-Driven Architecture
 
-### 起動フロー
+ProxyMonitor and SyncManager leverage EventEmitter for loose coupling:
+
+```typescript
+// Events emitted by ProxyMonitor
+proxyMonitor.on('proxyChanged', (result) => { /* Apply new proxy */ });
+proxyMonitor.on('proxyTestComplete', (result) => { /* Process test result */ });
+proxyMonitor.on('proxyStateChanged', (reachable) => { /* Update UI */ });
+
+// Events emitted by SyncManager
+syncManager.on('remoteChange', (state) => { /* Apply remote change */ });
+syncManager.on('conflictResolved', (resolution) => { /* Handle conflict resolution */ });
+syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
+```
+
+**Benefits**:
+- Loose coupling between components
+- Easy to add new event listeners
+- Events can be individually verified during testing
+
+## Component Interactions
+
+### Startup Flow
 
 ```
 1. extension.ts activate()
    ↓
-2. ExtensionInitializer.initialize()
-   ├─→ 初回起動チェック
-   ├─→ 状態の移行
-   └─→ コンポーネントの初期化
+2. I18nManager initialization
    ↓
-3. CommandRegistry.registerAll()
-   ├─→ コマンド登録
-   ├─→ 設定変更リスナー
-   └─→ ウィンドウフォーカスリスナー
+3. Core component creation
+   ├─→ Validator, Sanitizer, ConfigManagers
+   ├─→ ProxyStateManager, ProxyApplier
+   └─→ ExtensionInitializer
    ↓
-4. StatusBarManager.update()
-   └─→ 初期UI表示
+4. ProxyMonitor initialization
+   ↓
+5. SyncManager initialization (optional, falls back to standalone mode on failure)
+   ├─→ InstanceRegistry (instance registration)
+   ├─→ FileWatcher (shared state file monitoring)
+   ├─→ ConflictResolver
+   └─→ Event listener setup (remoteChange, conflictResolved, etc.)
+   ↓
+6. StatusBarManager initialization
+   ↓
+7. CommandRegistry.registerAll()
+   ├─→ Command registration
+   ├─→ Configuration change listeners
+   └─→ Window focus listeners
+   ↓
+8. Initial UI display / setup dialog
+   ↓
+9. Apply current proxy settings / start monitoring
 ```
 
-### コマンド実行フロー（例: Toggle Proxy）
+### Command Execution Flow (e.g., Toggle Proxy)
 
 ```
-1. ユーザーがステータスバーをクリック
+1. User clicks the status bar
    ↓
 2. ToggleProxyCommand.executeToggleProxy()
    ↓
 3. ProxyStateManager.getState()
-   └─→ 現在の状態を取得
+   └─→ Retrieve current state
    ↓
-4. 次のモードを決定（Off → Manual → Auto）
+4. Determine next mode (Off → Manual → Auto)
    ↓
-5. ProxyApplier.applyProxy() または disableProxy()
+5. ProxyApplier.applyProxy() or disableProxy()
    ├─→ GitConfigManager
    ├─→ VscodeConfigManager
-   └─→ NpmConfigManager
+   ├─→ NpmConfigManager
+   └─→ TerminalEnvConfigManager
    ↓
 6. ProxyStateManager.saveState()
-   └─→ 新しい状態を保存
+   └─→ Save new state
    ↓
-7. StatusBarManager.update()
-   └─→ UIを更新
+7. SyncManager (when enabled)
+   └─→ Propagate state to other instances
    ↓
-8. UserNotifier.showInfo()
-   └─→ 成功通知
+8. StatusBarManager.update()
+   └─→ Update UI
+   ↓
+9. UserNotifier.showSuccess()
+   └─→ Success notification
 ```
 
-### Autoモード監視フロー
+### Auto Mode Monitoring Flow
 
 ```
 1. ProxyMonitor.start()
    ↓
-2. 定期的にポーリング（デフォルト30秒）
+2. Periodic polling (default 30 seconds)
    ↓
-3. SystemProxyDetector.detectProxy()
-   ├─→ 環境変数チェック
-   ├─→ VSCode設定チェック
-   └─→ プラットフォーム固有の検出
+3. SystemProxyDetector.detectSystemProxyWithSource()
+   ├─→ Environment variable check
+   ├─→ VS Code configuration check
+   └─→ Platform-specific detection
    ↓
-4. プロキシ変更を検出
+4. Proxy change detected
    ↓
 5. ProxyChangeLogger.logChange()
-   └─→ 変更をログ記録
+   └─→ Log the change
    ↓
-6. ProxyApplier.applyProxy()
-   └─→ 新しいプロキシを適用
+6. ProxyConnectionTester.testProxyAuto() (when connection testing is enabled)
+   ├─→ Success: ProxyApplier.applyProxy()
+   └─→ Failure: ProxyFallbackManager.selectBestProxy()
+         ├─→ Apply fallback proxy if available
+         └─→ Otherwise use direct connection
    ↓
 7. StatusBarManager.update()
-   └─→ UIを更新
+   └─→ Update UI
 ```
 
-## モジュール詳細
+### Multi-Instance Sync Flow
+
+```
+1. Instance A: Changes proxy settings
+   ↓
+2. SyncManager.propagateState()
+   └─→ Write to SharedStateFile (atomic write-then-rename)
+   ↓
+3. Instance B: FileWatcher detects file change
+   ↓
+4. SyncManager.reconcileWithSharedFile()
+   ├─→ Compare local state with remote state
+   └─→ Resolve conflicts via ConflictResolver (timestamp-based, latest wins)
+   ↓
+5. Instance B: Apply remote change
+   ├─→ ProxyApplier.applyProxy()
+   └─→ StatusBarManager.update()
+```
+
+## Module Details
 
 ### Core Modules
 
 #### extension.ts
-- **責任**: エントリーポイント、コンポーネントのオーケストレーション
-- **行数**: 160行
-- **主要機能**:
-  - `activate()`: 拡張機能の初期化
-  - `deactivate()`: クリーンアップ
-  - コンポーネントのインスタンス化
+- **Responsibility**: Entry point, 12-phase initialization orchestration
+- **Lines**: ~350
+- **Key features**:
+  - `activate()`: Extension initialization (12 phases)
+  - `deactivate()`: SyncManager shutdown, resource disposal, monitoring stop
+  - Event listener setup (sync events, configuration changes)
 
 #### ExtensionInitializer
-- **責任**: 初回起動処理、状態移行、コンポーネント初期化
-- **主要機能**:
-  - 初回起動の検出とセットアップダイアログ
-  - 古い設定からの移行
-  - Autoモード監視の開始
+- **Responsibility**: First-launch processing, state migration, component initialization
+- **Key features**:
+  - First-launch detection and setup dialog
+  - Migration from legacy settings
+  - Auto mode monitoring startup
 
 #### ProxyStateManager
-- **責任**: ProxyStateの永続化と取得
-- **主要機能**:
-  - `getState()`: 状態の読み込み（自動フォールバック付き）
-  - `saveState()`: 状態の保存（自動フォールバック付き）
-  - `migrateOldSettings()`: 古い設定からの移行
-- **テスト**: ProxyStateManager.test.ts, ProxyStateManager.property.test.ts
+- **Responsibility**: ProxyState persistence and retrieval
+- **Key features**:
+  - `getState()`: State loading (with automatic fallback)
+  - `saveState()`: State saving (with automatic fallback)
+  - `migrateOldSettings()`: Migration from legacy settings
+- **Tests**: ProxyStateManager.test.ts, ProxyStateManager.property.test.ts
 
 #### ProxyApplier
-- **責任**: プロキシ設定の適用オーケストレーション
-- **主要機能**:
-  - `applyProxy()`: プロキシの有効化
-  - `disableProxy()`: プロキシの無効化
-  - エラー集約とユーザー通知
-- **テスト**: ProxyApplier.test.ts, ProxyApplier.property.test.ts
+- **Responsibility**: Proxy configuration application orchestration
+- **Key features**:
+  - `applyProxy()`: Enable proxy (Git, VS Code, npm, terminal environment variables)
+  - `disableProxy()`: Disable proxy
+  - Error aggregation and user notification
+- **Tests**: ProxyApplier.test.ts, ProxyApplier.property.test.ts
 
 ### Command Modules
 
 #### CommandRegistry
-- **責任**: すべてのコマンドとイベントリスナーの登録
-- **主要機能**:
-  - `registerAll()`: すべてのコマンドを登録
-  - 設定変更リスナー
-  - ウィンドウフォーカスリスナー
+- **Responsibility**: Registration of all commands and event listeners
+- **Key features**:
+  - `registerAll()`: Register all commands
+  - Configuration change listeners
+  - Window focus listeners
 
 #### ToggleProxyCommand
-- **責任**: Off → Manual → Autoのモード切り替え
-- **フロー**:
-  1. 現在のモードを取得
-  2. 次のモードを決定
-  3. プロキシを適用または無効化
-  4. 状態を保存
-  5. UIを更新
+- **Responsibility**: Mode switching (Off → Manual → Auto)
+- **Flow**:
+  1. Get current mode
+  2. Determine next mode
+  3. Apply or disable proxy
+  4. Save state
+  5. Update UI
 
 #### ConfigureUrlCommand
-- **責任**: 手動プロキシURLの設定
-- **フロー**:
-  1. ユーザーにURLを入力させる
-  2. URLを検証
-  3. Manualモードに切り替え
-  4. プロキシを適用
+- **Responsibility**: Manual proxy URL configuration
+- **Flow**:
+  1. Prompt user for URL input
+  2. Validate URL
+  3. Switch to Manual mode
+  4. Apply proxy
 
 #### TestProxyCommand
-- **責任**: プロキシ接続のテスト
-- **フロー**:
-  1. 現在のプロキシURLを取得
-  2. テスト接続を実行
-  3. 結果をユーザーに通知
+- **Responsibility**: Proxy connection testing
+- **Flow**:
+  1. Get current proxy URL
+  2. Execute test connection
+  3. Notify user of results
 
 #### ImportProxyCommand
-- **責任**: システムプロキシの検出とインポート
-- **フロー**:
-  1. システムプロキシを検出
-  2. ユーザーにアクションを選択させる（Auto/Manual/Test）
-  3. 選択に応じてプロキシを適用
+- **Responsibility**: System proxy detection and import
+- **Flow**:
+  1. Detect system proxy
+  2. Let user choose an action (Auto/Manual/Test)
+  3. Apply proxy based on selection
 
-**リファクタリングのポイント**: 以前は同様のロジックが3回繰り返されていましたが、`handleUserAction()`と`applyProxyMode()`に統合されました。
+**Refactoring note**: Previously, similar logic was repeated 3 times; now consolidated into `handleUserAction()` and `applyProxyMode()`.
 
 ### Configuration Modules
 
 #### GitConfigManager
-- **責任**: `git config --global http.proxy`の管理
-- **主要機能**:
-  - `setProxy()`: Gitプロキシを設定
-  - `unsetProxy()`: Gitプロキシを削除
-  - `getProxy()`: 現在のGitプロキシを取得
+- **Responsibility**: Managing `git config --global http.proxy`
+- **Key features**:
+  - `setProxy()`: Set http.proxy and https.proxy
+  - `unsetProxy()`: Remove Git proxy settings
+  - `getProxy()`: Get current Git proxy
+- **Features**: Cross-process mutex (5s timeout, 30s stale detection), retry logic (5 attempts, exponential backoff)
 
 #### VscodeConfigManager
-- **責任**: VSCodeワークスペースプロキシ設定の管理
-- **主要機能**:
-  - `setProxy()`: VSCodeプロキシを設定
-  - `unsetProxy()`: VSCodeプロキシを削除
-  - `getProxy()`: 現在のVSCodeプロキシを取得
+- **Responsibility**: Managing VS Code global http.proxy setting
+- **Key features**:
+  - `setProxy()`: Set VS Code proxy
+  - `unsetProxy()`: Remove VS Code proxy
+  - `getProxy()`: Get current VS Code proxy
 
 #### NpmConfigManager
-- **責任**: npm proxy設定の管理
-- **主要機能**:
-  - `setProxy()`: npmプロキシを設定（http-proxy、https-proxy）
-  - `unsetProxy()`: npmプロキシを削除
-  - `getProxy()`: 現在のnpmプロキシを取得
+- **Responsibility**: Managing npm proxy configuration
+- **Key features**:
+  - `setProxy()`: Set npm proxy (proxy, https-proxy)
+  - `unsetProxy()`: Remove npm proxy
+  - `getProxy()`: Get current npm proxy
+- **Features**: Windows support (via `cmd.exe /d /s /c`), environment variable sanitization
+
+#### TerminalEnvConfigManager
+- **Responsibility**: Injecting proxy environment variables into VS Code integrated terminals
+- **Key features**:
+  - `setProxy()`: Set HTTP_PROXY, HTTPS_PROXY, http_proxy, https_proxy
+  - `unsetProxy()`: Remove all proxy environment variables
+- **Features**: Flexible interface via duck-typing, graceful degradation when unavailable
 
 #### SystemProxyDetector
-- **責任**: マルチプラットフォームのシステムプロキシ検出
-- **検出ソース**:
-  - 環境変数（HTTP_PROXY、HTTPS_PROXY）
-  - VSCodeの既存プロキシ設定
-  - **Windows**: Internet Explorerレジストリ設定
-  - **macOS**: システムネットワーク設定（Wi-Fi、Ethernetなど）
-  - **Linux**: GNOMEプロキシ設定（gsettings）
+- **Responsibility**: Multi-platform system proxy detection
+- **Detection sources** (in priority order):
+  - Environment variables (HTTP_PROXY, HTTPS_PROXY, http_proxy, https_proxy)
+  - Existing VS Code proxy settings
+  - **Windows**: Internet Explorer registry settings
+  - **macOS**: System network settings (Wi-Fi, Ethernet, Thunderbolt Ethernet)
+  - **Linux**: GNOME proxy settings (gsettings)
+- **Features**: Detection source tracking, configurable priority, URL validation
 
-### UI & Monitoring
-
-#### StatusBarManager
-- **責任**: ステータスバーの表示とツールチップの管理
-- **主要機能**:
-  - `update()`: ProxyStateに基づいてUIを更新
-  - `updateText()`: ステータスバーテキストを生成
-  - `updateTooltip()`: ツールチップを生成
-  - i18n対応
+### Monitoring Modules
 
 #### ProxyMonitor
-- **責任**: Autoモードでのプロキシ変更の監視
-- **主要機能**:
-  - `start()`: ポーリングを開始
-  - `stop()`: ポーリングを停止
-  - 設定可能なポーリング間隔（10-300秒）
-  - 指数バックオフによる自動リトライ
+- **Responsibility**: Proxy change monitoring in Auto mode (extends EventEmitter)
+- **Key features**:
+  - `start()`: Start polling
+  - `stop()`: Stop polling
+  - `triggerCheck()`: Debounced check trigger
+  - `updateConfig()`: Dynamic configuration update
+- **Events**: `proxyChanged`, `proxyTestComplete`, `proxyStateChanged`, `checkComplete`, `allRetriesFailed`
+- **Default config**: 30s polling, 1s debounce, 3 retries, connection testing enabled (60s interval)
+
+#### ProxyMonitorState
+- **Responsibility**: Immutable holder for monitoring state
+- **Key features**:
+  - `recordCheckSuccess()`: Record success, reset failure count
+  - `recordCheckFailure()`: Increment failure count
+  - `getStatus()`: Return defensive copy
 
 #### ProxyChangeLogger
-- **責任**: プロキシ変更イベントのログ記録
-- **主要機能**:
-  - 変更の詳細をログに記録
-  - 検出ソースの追跡
-  - デバッグ情報の提供
+- **Responsibility**: Logging proxy change, test, and fallback events
+- **Key features**:
+  - `logChange()`: Log proxy changes (with credential masking)
+  - `logCheck()`: Log test attempts
+  - `logFallbackToManual()`: Log fallback usage
+  - 3 parallel history arrays (max 100 entries each)
+
+#### ProxyConnectionTester
+- **Responsibility**: Proxy connection testing (both Auto and Manual modes)
+- **Key features**:
+  - `testProxyAuto()`: 3s timeout, parallel execution, brief notifications
+  - `testProxyManual()`: 5s timeout, detailed notifications
+  - Result caching
+
+#### ProxyFallbackManager
+- **Responsibility**: Selecting the best proxy (system → manual fallback → direct connection)
+- **Key features**:
+  - `selectBestProxy()`: Priority-based selection with connection testing
+  - Fallback enable/disable toggle
+
+#### ProxyTestScheduler
+- **Responsibility**: Scheduling periodic proxy connection tests
+- **Key features**:
+  - `start()`: Start scheduler with callback
+  - `updateInterval()`: Update test interval (30s–10min)
+  - `triggerImmediateTest()`: Immediate test execution
+  - Overlapping test prevention
+
+### Sync Modules
+
+#### SyncManager
+- **Responsibility**: Multi-instance synchronization orchestrator
+- **Key features**:
+  - Instance lifecycle management
+  - State change propagation
+  - Remote change detection and application
+  - Error handling
+- **Features**: Heartbeat (10s), cleanup (30s), polling fallback
+
+#### InstanceRegistry
+- **Responsibility**: Active instance registration and lifecycle management
+- **Key features**:
+  - Instance registration/unregistration
+  - Zombie process detection (30s heartbeat timeout)
+  - Mutex-protected atomic file operations
+
+#### SharedStateFile
+- **Responsibility**: Atomic read/write of shared state JSON file
+- **Key features**:
+  - Atomic writes via write-then-rename pattern
+  - Corrupted file recovery
+  - Retry on Windows EPERM/EACCES errors
+
+#### FileWatcher
+- **Responsibility**: Shared state file change monitoring
+- **Key features**:
+  - File monitoring via `fs.watch` (100ms debounce)
+  - Platform difference absorption
+  - Graceful error handling for missing/deleted files
+
+#### ConflictResolver
+- **Responsibility**: Conflict resolution for simultaneous changes
+- **Resolution strategy**:
+  - Timestamp-based (latest wins)
+  - Deterministic tiebreaker (remote wins on equal timestamps)
+  - Clock drift protection (rejects timestamps >30s in the future)
+
+#### SyncConfigManager
+- **Responsibility**: Sync configuration management
+- **Key features**:
+  - `otakProxy.syncEnabled`: Enable/disable sync
+  - `otakProxy.syncInterval`: Sync interval (100–5000ms, default 1000ms)
+  - Real-time configuration change notifications
+
+#### SyncStatusProvider
+- **Responsibility**: Sync state display in the status bar
+- **Key features**:
+  - Icon display (sync, syncing-spin, sync-ignored, debug-disconnect)
+  - Tooltip (instance count, last sync time)
+  - Background color warning on errors
 
 ### Validation & Error Handling
 
 #### ProxyUrlValidator
-- **責任**: プロキシURLの形式とセキュリティ検証
-- **検証項目**:
-  - URL形式（http://またはhttps://）
-  - ホスト名の妥当性
-  - ポート番号の範囲
-  - セキュリティリスク（コマンドインジェクション）
+- **Responsibility**: Proxy URL format and security validation
+- **Validation items**:
+  - URL format (http:// or https:// only)
+  - Hostname validity
+  - Port number range
+  - Security risks (command injection)
 
 #### InputSanitizer
-- **責任**: コマンドインジェクション攻撃の防止
-- **主要機能**:
-  - シェルメタキャラクタの検出
-  - 危険な文字列のエスケープ
-  - ログとUIでの認証情報のマスキング
+- **Responsibility**: Command injection attack prevention
+- **Key features**:
+  - Shell metacharacter detection
+  - Dangerous string escaping
+  - Credential masking in logs and UI
 
 #### ErrorAggregator
-- **責任**: 複数ソースからのエラー収集
-- **主要機能**:
-  - `addError()`: エラーを追加
-  - `hasErrors()`: エラーの有無を確認
-  - `getErrors()`: すべてのエラーを取得
+- **Responsibility**: Error collection from multiple sources
+- **Key features**:
+  - `addError()`: Add an error
+  - `hasErrors()`: Check for errors
+  - `formatErrors()`: Get formatted error message
+  - `clear()`: Clear errors
+  - `generateSuggestions()`: Platform-specific troubleshooting suggestions
 
 #### UserNotifier
-- **責任**: ユーザー向けのエラー通知
-- **主要機能**:
-  - `showError()`: エラーメッセージを表示
-  - `showInfo()`: 情報メッセージを表示
-  - `showAggregatedErrors()`: 集約されたエラーを表示
-  - i18n対応
+- **Responsibility**: User-facing error notifications (with throttling and formatting)
+- **Key features**:
+  - `showError()`: Display error message (with throttling)
+  - `showSuccess()`: Success notification (auto-close after 3s)
+  - `showWarning()`: Warning notification (auto-close after 10s)
+  - `showErrorWithDetails()`: Error with detailed log ("Show Details" button)
+  - `showProgressNotification()`: Progress UI for long operations
+  - i18n support (message keys or direct text)
+
+#### NotificationFormatter
+- **Responsibility**: Notification message formatting (with size constraints)
+- **Key features**: Message truncation (200 chars), suggestion limit (3), URL limit (2)
+
+#### NotificationThrottler
+- **Responsibility**: Duplicate notification suppression
+- **Key features**: Time-based throttling (default 5s), failure-pattern-based exponential backoff
+
+#### OutputChannelManager
+- **Responsibility**: Centralized VS Code output channel management (singleton)
+- **Key features**: Error/info/warning logging, automatic credential masking
+
+#### StateChangeDebouncer
+- **Responsibility**: Proxy state change debouncing
+- **Key features**: Per-URL debouncing (default 1s), pending change cancellation
 
 ### Internationalization
 
 #### I18nManager
-- **責任**: 翻訳管理（シングルトン）
-- **主要機能**:
-  - `t()`: キーから翻訳を取得
-  - `getCurrentLocale()`: 現在のロケールを取得
-  - VSCode言語パックからの自動検出
-- **サポート言語**: 英語、日本語
+- **Responsibility**: Translation management (singleton)
+- **Key features**:
+  - `t()`: Get translation by key
+  - `getCurrentLocale()`: Get current locale
+  - Automatic detection from VS Code language pack
+- **Supported languages**: English, Japanese, Korean, Vietnamese, Simplified Chinese, Traditional Chinese
 
-## テスト戦略
+## Testing Strategy
 
-### デュアルテストアプローチ
+### Multi-Layer Test Approach
 
-拡張機能は2つのテストアプローチを使用します：
+The extension uses three testing approaches:
 
-#### 1. ユニットテスト
+#### 1. Unit Tests
 
-- **目的**: 特定の例とエッジケースを検証
-- **テスト数**: 200+
-- **特徴**:
-  - 個別関数をテスト
-  - 外部依存関係をモック（Git、npmコマンド）
-  - 高速実行でフィードバックが早い
+- **Purpose**: Verify specific examples and edge cases
+- **Characteristics**:
+  - Test individual functions
+  - Mock external dependencies (Git, npm commands)
+  - Fast execution for quick feedback
 
-**例**:
+**Example**:
 ```typescript
 it('should toggle from off to manual', async () => {
     const state = { mode: ProxyMode.Off };
@@ -477,23 +678,22 @@ it('should toggle from off to manual', async () => {
 });
 ```
 
-#### 2. プロパティベーステスト
+#### 2. Property-Based Tests
 
-- **目的**: 普遍的なプロパティを検証
-- **テスト数**: 15+
-- **ライブラリ**: fast-check
-- **特徴**:
-  - ランダムな入力を生成してエッジケースを発見
-  - 設計ドキュメントの正しさプロパティを検証
+- **Purpose**: Verify universal properties
+- **Library**: fast-check
+- **Characteristics**:
+  - Generate random inputs to discover edge cases
+  - Verify correctness properties from design documents
 
-**例**:
+**Example**:
 ```typescript
 it('Property 3: State persistence fallback', () => {
     fc.assert(
         fc.asyncProperty(
             arbitraryProxyState,
             async (state) => {
-                // globalState.updateが失敗してもin-memoryフォールバックが機能することを検証
+                // Verify in-memory fallback works even when globalState.update fails
                 mockGlobalState.update.mockRejectedValue(new Error('Storage failed'));
                 await stateManager.saveState(state);
                 const retrieved = await stateManager.getState();
@@ -505,28 +705,30 @@ it('Property 3: State persistence fallback', () => {
 });
 ```
 
-**検証されるプロパティ**:
-- Property 1: コマンドエラーハンドリングの一貫性
-- Property 2: コマンドの独立性
-- Property 3: 状態永続化のフォールバック
-- Property 4: レガシー状態の移行
-- Property 5: プロキシ有効化シーケンス
-- Property 6: プロキシ無効化の完全性
-- Property 7: エラー集約
-- Property 8: ステータスバーの状態反映
-- Property 9: コマンドリンクの検証
-- Property 10: ステータスバーの国際化
+**Verified properties**:
+- Property 1: Command error handling consistency
+- Property 2: Command independence
+- Property 3: State persistence fallback
+- Property 4: Legacy state migration
+- Property 5: Proxy enable sequence
+- Property 6: Proxy disable completeness
+- Property 7: Error aggregation
+- Property 8: Status bar state reflection
+- Property 9: Command link validation
+- Property 10: Status bar internationalization
 
-#### 3. 統合テスト
+#### 3. Integration Tests
 
-- **目的**: エンドツーエンドのワークフローを検証
-- **特徴**:
-  - コンポーネント間の連携をテスト
-  - 必要に応じて実際のGit/npmコマンドを使用
+- **Purpose**: Verify end-to-end workflows
+- **Characteristics**:
+  - Test interactions between components
+  - Use actual Git/npm commands when necessary
+  - Verify multi-instance sync scenarios
+  - Verify fallback flows
 
-### テストパフォーマンス最適化
+### Test Performance Optimization
 
-#### 環境変数による実行回数制御
+#### Iteration Count Control via Environment Variables
 
 ```typescript
 // src/test/helpers.ts
@@ -535,114 +737,106 @@ export function getTestIterations(): number {
 }
 ```
 
-- **開発モード**: 10回（高速フィードバック）
-- **CIモード**: 100回（包括的検証）
+- **Development mode**: 10 iterations (fast feedback)
+- **CI mode**: 100 iterations (comprehensive verification)
 
-#### 並列実行
+#### Parallel Execution
 
-`.vscode-test.mjs`で並列実行を有効化：
+- `npm run test:unit:parallel` enables Mocha parallel execution
 
-```javascript
-{
-    parallel: true,
-    workers: 4
-}
-```
+#### Mock Usage
 
-#### モックの活用
+- External commands (git, npm) are mocked by default
+- Only integration tests use actual commands
 
-- 外部コマンド（git、npm）はデフォルトでモック
-- 統合テストのみ実際のコマンドを使用
+## Security Considerations
 
-#### 結果
+### 1. Command Injection Prevention
 
-- **開発モード**: ~30秒
-- **CIモード**: ~2分
-- **テスト数**: 389個すべて合格
+- InputSanitizer validates all input
+- Commands are executed using `execFile()` (not via shell) to prevent injection
+- Shell metacharacter detection and rejection
 
-## セキュリティ考慮事項
+### 2. Credential Masking
 
-### 1. コマンドインジェクション防止
+- Automatic masking in Logger, OutputChannelManager, and ProxyChangeLogger
+- Credentials (username:password) in logs and UI are replaced with `***:***`
 
-InputSanitizerがすべての入力を検証：
+### 3. URL Validation
 
-```typescript
-export class InputSanitizer {
-    sanitize(input: string): string {
-        // シェルメタキャラクタを検出
-        const dangerousChars = /[;&|`$(){}[\]<>]/;
-        if (dangerousChars.test(input)) {
-            throw new Error('Invalid characters detected');
-        }
-        return input;
-    }
-}
-```
+ProxyUrlValidator performs strict validation:
 
-### 2. 認証情報のマスキング
+- Protocol validation (http:// or https:// only)
+- Hostname validity check
+- Port number range check (1–65535)
 
-ログとUIで認証情報を自動的にマスキング：
+### 4. File Operation Safety
 
-```typescript
-function maskCredentials(url: string): string {
-    return url.replace(/:\/\/([^:]+):([^@]+)@/, '://***:***@');
-}
-```
+- SharedStateFile uses write-then-rename pattern for atomic writes
+- InstanceRegistry uses mutex-protected file operations
+- GitConfigManager uses cross-process mutex to avoid lock contention
 
-### 3. URL検証
+## Performance Considerations
 
-ProxyUrlValidatorが厳格な検証を実施：
+### Benefits of File Size Reduction
 
-- プロトコルの検証（http://またはhttps://のみ）
-- ホスト名の妥当性チェック
-- ポート番号の範囲チェック（1-65535）
+- **Build time**: Module splitting enables parallel compilation
+- **Incremental builds**: Only changed modules are recompiled
+- **Memory usage**: Only required modules are loaded
 
-## パフォーマンス考慮事項
+### Startup Time
 
-### ファイルサイズ削減の効果
+- **12-phase staged initialization**: Components loaded sequentially as needed
+- **Optional SyncManager initialization**: Falls back to standalone mode on failure
 
-- **ビルド時間**: モジュール分割により並列コンパイルが可能
-- **増分ビルド**: 変更されたモジュールのみ再コンパイル
-- **メモリ使用量**: 必要なモジュールのみロード
+### Auto Mode Monitoring
 
-### 起動時間
+- **Configurable polling interval**: Default 30 seconds
+- **Debouncing**: 1-second debounce to suppress unnecessary checks
+- **Exponential backoff**: Automatic retry on detection failure (up to 3 times)
+- **Efficient detection**: Early return when no changes are detected
+- **Connection test scheduling**: Tests run at 30s–10min intervals
 
-- **遅延ロード**: 必要になるまでモジュールをロードしない
-- **軽量な初期化**: extension.tsは最小限の処理のみ実行
+### Multi-Instance Synchronization
 
-### Autoモード監視
+- **File watching**: Real-time detection via `fs.watch` (100ms debounce)
+- **Polling fallback**: Periodic polling as backup when `fs.watch` is unavailable
+- **Zombie process detection**: Inactive instances auto-cleaned via 30s heartbeat timeout
 
-- **設定可能なポーリング間隔**: デフォルト30秒、10-300秒で調整可能
-- **指数バックオフ**: 検出失敗時に自動リトライ
-- **効率的な検出**: 変更がない場合は早期リターン
+## Extensibility
 
-## 今後の拡張性
+### Adding a New Command
 
-### 新しいコマンドの追加
+1. Create `commands/NewCommand.ts`
+2. Implement `executeNewCommand(ctx: CommandContext)`
+3. Add registration to `CommandRegistry.registerAll()`
 
-1. `commands/NewCommand.ts`を作成
-2. `executeNewCommand(ctx: CommandContext)`を実装
-3. `CommandRegistry.registerAll()`に登録を追加
+### Adding a New Configuration Manager
 
-### 新しい設定マネージャーの追加
+1. Create `config/NewConfigManager.ts`
+2. Implement `setProxy()`, `unsetProxy()`, `getProxy()`
+3. Add to `ProxyApplier` constructor
 
-1. `config/NewConfigManager.ts`を作成
-2. `setProxy()`、`unsetProxy()`、`getProxy()`を実装
-3. `ProxyApplier`のコンストラクタに追加
+### Adding New Property Tests
 
-### 新しいプロパティテストの追加
+1. Add the property to design documents
+2. Implement tests in `src/test/*.property.test.ts`
+3. Add required generators to `generators.ts`
 
-1. 設計ドキュメントにプロパティを追加
-2. `src/test/*.property.test.ts`にテストを実装
-3. `generators.ts`に必要なジェネレーターを追加
+### Adding a New Language
 
-## 参考資料
+1. Create `src/i18n/locales/xx.json`
+2. Add to I18nManager locale mapping
+3. Run `npm run gen:nls` to generate `package.nls.xx.json`
+
+## References
 
 - [VSCode Extension API](https://code.visualstudio.com/api)
 - [fast-check Documentation](https://fast-check.dev/)
 - [Property-Based Testing](https://hypothesis.works/articles/what-is-property-based-testing/)
 - [SOLID Principles](https://en.wikipedia.org/wiki/SOLID)
 
-## 変更履歴
+## Changelog
 
-- **2024-12**: 初版作成（リファクタリング完了後）
+- **2024-12**: Initial version created (after refactoring completion)
+- **2025-03**: Document update — Reflects multi-instance sync, monitoring enhancements, error handling enhancements, TerminalEnvConfigManager, and expanded language support
