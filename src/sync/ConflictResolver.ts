@@ -48,8 +48,8 @@ export interface ConflictInfo {
  * Result of conflict resolution
  */
 export interface ConflictResolution {
-    /** Which state won the conflict */
-    winner: 'local' | 'remote';
+    /** Which state won the conflict, or 'none' if states are identical */
+    winner: 'local' | 'remote' | 'none';
     /** The resolved state to use */
     resolvedState: SyncableState;
     /** Conflict details if a real conflict occurred, null if just an update */
@@ -112,6 +112,18 @@ export class ConflictResolver {
                 winner: 'remote',
                 resolvedState: remote,
                 conflictDetails: conflictDetails('stale')
+            };
+        }
+
+        // If version, timestamp, and instance are identical the states represent
+        // the same logical write — no action required.
+        if (local.version === remote.version &&
+            local.timestamp === remote.timestamp &&
+            local.instanceId === remote.instanceId) {
+            return {
+                winner: 'none',
+                resolvedState: local,
+                conflictDetails: null
             };
         }
 

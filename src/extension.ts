@@ -162,10 +162,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 // Update local state with remote changes
                 await proxyStateManager.saveState(remoteState);
                 const activeUrl = proxyStateManager.getActiveProxyUrl(remoteState);
+                // Suppress success notifications for sync-driven updates to avoid
+                // "Proxy configured" repeatedly flashing in the status bar.
                 if (remoteState.mode !== ProxyMode.Off && activeUrl) {
-                    await proxyApplier.applyProxy(activeUrl, true);
+                    await proxyApplier.applyProxy(activeUrl, true, { silent: true });
                 } else if (remoteState.mode === ProxyMode.Off) {
-                    await proxyApplier.disableProxy();
+                    await proxyApplier.disableProxy({ silent: true });
                 }
                 // Align monitoring with the resolved mode to avoid background polling when not needed.
                 if (remoteState.mode === ProxyMode.Auto) {

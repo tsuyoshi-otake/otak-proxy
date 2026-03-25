@@ -36,9 +36,11 @@ export class ProxyApplier {
      * 
      * @param proxyUrl - The proxy URL to apply
      * @param enabled - Whether to enable or disable the proxy
+     * @param options - Optional flags; set `silent` to suppress success notifications
+     *                  (useful for background sync or monitor-driven updates)
      * @returns Promise<boolean> - True if all operations succeeded
      */
-    async applyProxy(proxyUrl: string, enabled: boolean): Promise<boolean> {
+    async applyProxy(proxyUrl: string, enabled: boolean, options?: { silent?: boolean }): Promise<boolean> {
         const errorAggregator = new ErrorAggregator();
         
         // Edge Case 1: Handle empty URL as disable proxy (Requirement 4.1)
@@ -48,7 +50,7 @@ export class ProxyApplier {
         
         // If disabling, use the dedicated disable function
         if (!enabled) {
-            return await this.disableProxy();
+            return await this.disableProxy(options);
         }
         
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
@@ -139,7 +141,7 @@ export class ProxyApplier {
             
             const errorMessage = lines.slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length).join('\n');
             this.userNotifier.showError(errorMessage, suggestions);
-        } else if (proxyUrl) {
+        } else if (proxyUrl && !options?.silent) {
             // Requirement 1.5, 6.2: Update status bar with sanitized proxy URL
             const sanitizedUrl = this.sanitizer.maskPassword(proxyUrl);
             this.userNotifier.showSuccess('message.proxyConfigured', { url: sanitizedUrl });
@@ -152,9 +154,10 @@ export class ProxyApplier {
      * Disable proxy settings across all configuration targets
      * Requirement 2.5: Use ErrorAggregator and UserNotifier for comprehensive error handling
      * 
+     * @param options - Optional flags; set `silent` to suppress success notifications
      * @returns Promise<boolean> - True if all operations succeeded
      */
-    async disableProxy(): Promise<boolean> {
+    async disableProxy(options?: { silent?: boolean }): Promise<boolean> {
         const errorAggregator = new ErrorAggregator();
         
         let gitSuccess = false;
@@ -245,7 +248,7 @@ export class ProxyApplier {
             
             const errorMessage = lines.slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length).join('\n');
             this.userNotifier.showError(errorMessage, suggestions);
-        } else {
+        } else if (!options?.silent) {
             // Update status bar to show proxy disabled
             this.userNotifier.showSuccess('message.proxyDisabled');
         }

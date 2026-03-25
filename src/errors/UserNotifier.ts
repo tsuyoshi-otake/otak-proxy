@@ -70,13 +70,20 @@ export class UserNotifier {
 
     /**
      * Shows a success message with auto-close after 3 seconds
-     * Uses setStatusBarMessage for auto-dismiss capability
+     * Uses setStatusBarMessage for auto-dismiss capability.
+     * Throttled to prevent the same message key from spamming the status bar
+     * when multiple code paths (sync, monitor, apply) trigger in quick succession.
      * @param message - The success message to display (can be a message key or direct text)
      * @param params - Optional parameters for message key substitution
      */
     showSuccess(message: string, params?: Record<string, string>): void {
+        const throttleKey = `success:${message}`;
+        if (!this.throttler.shouldShow(throttleKey)) {
+            return;
+        }
+        this.throttler.recordNotification(throttleKey);
+
         const translatedMessage = this.translateIfKey(message, params);
-        // Use setStatusBarMessage for auto-dismiss (3 seconds)
         vscode.window.setStatusBarMessage(`$(check) ${translatedMessage}`, 3000);
     }
 

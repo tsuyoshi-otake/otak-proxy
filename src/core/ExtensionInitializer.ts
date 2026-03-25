@@ -226,18 +226,20 @@ export class ExtensionInitializer {
 
         state.proxyReachable = data.reachable;
 
-        // Apply proxy settings based on new reachability state
+        // Apply proxy settings based on new reachability state.
+        // Use silent mode because these are automatic monitor-driven transitions,
+        // not explicit user actions.
         if (data.reachable && !data.previousState) {
             // Proxy became reachable
             state.autoModeOff = false;
-            await this.context.proxyApplier.applyProxy(data.proxyUrl, true);
+            await this.context.proxyApplier.applyProxy(data.proxyUrl, true, { silent: true });
             Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
         } else if (!data.reachable && data.previousState) {
             // Proxy became unreachable - set Auto Mode OFF
             state.autoModeOff = true;
             state.usingFallbackProxy = false;
             state.fallbackProxyUrl = undefined;
-            await this.context.proxyApplier.applyProxy(data.proxyUrl, false);
+            await this.context.proxyApplier.applyProxy(data.proxyUrl, false, { silent: true });
             Logger.info(`Proxy ${data.proxyUrl} became unreachable, Auto Mode OFF`);
         }
 

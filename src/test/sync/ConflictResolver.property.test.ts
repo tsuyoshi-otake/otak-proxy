@@ -67,8 +67,8 @@ suite('ConflictResolver Property-Based Tests', () => {
                 const result = resolver.resolve(local, remote);
 
                 assert.ok(
-                    result.winner === 'local' || result.winner === 'remote',
-                    'Winner must be either local or remote'
+                    result.winner === 'local' || result.winner === 'remote' || result.winner === 'none',
+                    'Winner must be local, remote, or none'
                 );
 
                 assert.ok(
@@ -156,7 +156,7 @@ suite('ConflictResolver Property-Based Tests', () => {
             fc.property(syncableStateArb, syncableStateArb, (local, remote) => {
                 const result = resolver.resolve(local, remote);
 
-                const expectedState = result.winner === 'local' ? local : remote;
+                const expectedState = result.winner === 'remote' ? remote : local;
                 assert.deepStrictEqual(result.resolvedState, expectedState);
             }),
             { numRuns: 100 }

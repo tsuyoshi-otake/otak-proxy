@@ -473,6 +473,15 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             return { conflictsResolved: 0 };
         }
 
+        // Already processed this exact version — skip to avoid re-emitting remoteChange
+        // on every polling tick for a state we've already applied.
+        if (this.currentState &&
+            fileState.version === this.currentState.version &&
+            fileState.timestamp === this.currentState.timestamp &&
+            this.isSameProxyState(this.currentState.state, fileState.state)) {
+            return { conflictsResolved: 0 };
+        }
+
         // No local state yet - accept remote state.
         if (!this.currentState) {
             this.currentState = fileState;
@@ -484,6 +493,12 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         }
 
         const resolution = this.conflictResolver.resolve(this.currentState, fileState);
+
+        // States are identical — nothing to do.
+        if (resolution.winner === 'none') {
+            return { conflictsResolved: 0 };
+        }
+
         const conflictsResolved = resolution.conflictDetails ? 1 : 0;
 
         if (resolution.winner === 'remote') {
