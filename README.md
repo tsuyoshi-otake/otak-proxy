@@ -32,6 +32,7 @@ The extension updates VS Code, Git, and npm proxy settings, plus proxy environme
 - **Auto-sync** — Detects system/browser proxy changes in real time.
 - **Connection validation** — Tests proxy connectivity before enabling.
 - **Integrated terminal env** — Sets HTTP(S)_PROXY for new VS Code terminals.
+- **Proxy URL visibility** — Show or hide the proxy URL in the status bar for privacy.
 - **UI i18n** — English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, Vietnamese.
 
 UI language follows your VS Code display language.
@@ -54,6 +55,8 @@ Off → Manual → Auto → Off
 - `Auto (Fallback): http://...` — System unavailable, using manual
 - `Auto: OFF` — Waiting for proxy availability
 
+When `otakProxy.showProxyUrl` is `false`, the URL is replaced with "Configured" (e.g. `Manual: Configured`).
+
 ### Integrated Terminal Environment
 
 When proxy is enabled, otak-proxy injects the following variables into **newly created** VS Code integrated terminals:
@@ -69,7 +72,8 @@ Existing terminals keep their current environment; reopen a terminal if you want
 {
   "otakProxy.proxyUrl": "http://proxy.example.com:8080",
   "otakProxy.pollingInterval": 30,
-  "otakProxy.enableFallback": true
+  "otakProxy.enableFallback": true,
+  "otakProxy.showProxyUrl": true
 }
 ```
 
@@ -78,6 +82,7 @@ Existing terminals keep their current environment; reopen a terminal if you want
 - **`otakProxy.proxyUrl`**: Manual proxy URL (default: unset)
 - **`otakProxy.pollingInterval`**: System proxy check interval in seconds (default: `30`)
 - **`otakProxy.enableFallback`**: Fall back to manual when system unavailable (default: `true`)
+- **`otakProxy.showProxyUrl`**: Show proxy URL in the status bar (default: `true`). Set to `false` to display "Configured" instead of the actual URL.
 
 ## Commands
 
@@ -86,7 +91,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 - `otak: Toggle Proxy`
 - `otak: Test Proxy`
 - `otak: Import System Proxy`
-- `Configure Manual`
+- `otak: Toggle Proxy URL Visibility`
 
 ## Requirements
 

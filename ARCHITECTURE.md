@@ -448,6 +448,12 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   2. Let user choose an action (Auto/Manual/Test)
   3. Apply proxy based on selection
 
+#### ToggleShowProxyUrlCommand
+- **Responsibility**: Toggling the visibility of the proxy URL in the status bar
+- **Flow**:
+  1. Toggle `otakProxy.showProxyUrl` configuration in workspace settings
+  2. Update UI (StatusBarManager reflects the hidden/shown state)
+
 **Refactoring note**: Previously, similar logic was repeated 3 times; now consolidated into `handleUserAction()` and `applyProxyMode()`.
 
 ### Configuration Modules
