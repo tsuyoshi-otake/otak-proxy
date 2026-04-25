@@ -1,0 +1,5 @@
+# Snyk Code ignore rules
+.vscode-test/
+out/
+node_modules/
+src/test/**

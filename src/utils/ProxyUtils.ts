@@ -15,6 +15,7 @@ import { UserNotifier } from '../errors/UserNotifier';
 import { Logger } from './Logger';
 import * as vscode from 'vscode';
 import * as http from 'http';
+import * as https from 'https';
 
 // Module-level instances (initialized lazily)
 let validator: ProxyUrlValidator | null = null;
@@ -134,8 +135,11 @@ const DEFAULT_MANUAL_TIMEOUT = 5000;
 /** Default timeout for auto tests (3 seconds) */
 const DEFAULT_AUTO_TIMEOUT = 3000;
 
-/** Default port when proxy URL doesn't specify one */
-const DEFAULT_PROXY_PORT = 8080;
+/** Default port when HTTP proxy URL doesn't specify one */
+const DEFAULT_HTTP_PROXY_PORT = 8080;
+
+/** Default port when HTTPS proxy URL doesn't specify one */
+const DEFAULT_HTTPS_PROXY_PORT = 443;
 
 /** Default target port for CONNECT tests (HTTPS) */
 const DEFAULT_TARGET_PORT = 443;
@@ -145,10 +149,19 @@ function parsePort(port: string, fallback: number): number {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function getDefaultProxyPort(proxy: URL): number {
+    return proxy.protocol === 'https:' ? DEFAULT_HTTPS_PROXY_PORT : DEFAULT_HTTP_PROXY_PORT;
+}
+
+function createProxyConnectRequest(proxy: URL, requestOptions: http.RequestOptions): http.ClientRequest {
+    const transport = proxy.protocol === 'https:' ? https : http;
+    return transport.request(requestOptions);
+}
+
 function buildConnectRequestOptions(proxy: URL, target: URL, timeout: number): http.RequestOptions {
     return {
         hostname: proxy.hostname,
-        port: parsePort(proxy.port, DEFAULT_PROXY_PORT),
+        port: parsePort(proxy.port, getDefaultProxyPort(proxy)),
         method: 'CONNECT',
         path: `${target.hostname}:${parsePort(target.port, DEFAULT_TARGET_PORT)}`,
         timeout
@@ -197,7 +210,7 @@ export async function testProxyConnection(
                 const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
 
                 const isConnected = await new Promise<boolean>((resolve) => {
-                    const req = http.request(requestOptions);
+                    const req = createProxyConnectRequest(proxyParsed, requestOptions);
 
                     req.on('connect', () => {
                         resolve(true);
@@ -360,7 +373,7 @@ export async function testProxyConnectionParallel(
                     const testParsed = new URL(testUrl);
                     const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
 
-                    const req = http.request(requestOptions);
+                    const req = createProxyConnectRequest(proxyParsed, requestOptions);
                     requests.push(req);
 
                     req.on('connect', () => {
