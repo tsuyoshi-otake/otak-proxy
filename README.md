@@ -1,11 +1,11 @@
 <p align="center">
   <h1 align="center">otak-proxy</h1>
-  <p align="center">One-click proxy management for VS Code, Git, npm, and integrated terminals.</p>
+  <p align="center">Proxy settings for VS Code, Git, npm, and integrated terminals.</p>
 </p>
 
 ---
 
-Toggle proxy settings from the status bar. Auto-sync with your system proxy or set one manually.
+Use the status bar to switch proxy modes. Auto mode follows your system proxy; Manual mode uses the proxy URL you enter.
 
 ![otak-proxy](images/otak-proxy.png)
 
@@ -15,7 +15,7 @@ Toggle proxy settings from the status bar. Auto-sync with your system proxy or s
 
 1. Install the extension.
 2. Click the status bar and select **Auto**.
-3. Done — it stays in sync with your system proxy.
+3. otak-proxy applies the system proxy to VS Code, Git, npm, and new integrated terminals.
 
 ### Manual Mode
 
@@ -23,17 +23,18 @@ Toggle proxy settings from the status bar. Auto-sync with your system proxy or s
 2. Click the status bar and select **Manual**.
 3. Enter your proxy URL (for example: `http://proxy.example.com:8080`).
 
-The extension updates VS Code, Git, and npm proxy settings, plus proxy environment variables for VS Code integrated terminals.
+In both modes, otak-proxy updates proxy settings for VS Code, Git, and npm. It also sets proxy environment variables for new VS Code integrated terminals.
 
 ## Features
 
-- **Three modes** — Off, Manual, or Auto (syncs with system proxy).
-- **Status bar toggle** — One click to switch modes.
-- **Auto-sync** — Detects system/browser proxy changes in real time.
-- **Connection validation** — Tests proxy connectivity before enabling.
-- **Integrated terminal env** — Sets HTTP(S)_PROXY for new VS Code terminals.
-- **Proxy URL visibility** — Show or hide the proxy URL in the status bar for privacy.
-- **UI i18n** — English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, Vietnamese.
+- **Modes** — Off, Manual, and Auto.
+- **Auto mode** — Reads the system proxy and applies changes in the background.
+- **Manual mode** — Uses the proxy URL you enter.
+- **Status bar control** — Switch modes from the VS Code status bar.
+- **Connection test** — Checks whether a proxy can be reached before enabling it.
+- **Integrated terminals** — Sets `HTTP_PROXY` and `HTTPS_PROXY` for new VS Code terminals.
+- **URL display setting** — Hide the proxy URL in the status bar when needed.
+- **UI languages** — English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, and Vietnamese.
 
 UI language follows your VS Code display language.
 
@@ -49,22 +50,22 @@ Off → Manual → Auto → Off
 
 ### Status Indicators
 
-- `Proxy: Off` — Disabled
-- `Manual: http://...` — Using configured proxy
-- `Auto: http://...` — Synced with system proxy
-- `Auto (Fallback): http://...` — System unavailable, using manual
-- `Auto: OFF` — Waiting for proxy availability
+- `Proxy: Off` — Proxy is disabled
+- `Manual: http://...` — Using the configured manual proxy
+- `Auto: http://...` — Synced with the system proxy
+- `Auto (Fallback): http://...` — The system proxy is unavailable; using the manual proxy
+- `Auto: OFF` — No proxy is currently available
 
-When `otakProxy.showProxyUrl` is `false`, the URL is replaced with "Configured" (e.g. `Manual: Configured`).
+When `otakProxy.showProxyUrl` is `false`, the URL is replaced with `Configured` (for example, `Manual: Configured`).
 
 ### Integrated Terminal Environment
 
-When proxy is enabled, otak-proxy injects the following variables into **newly created** VS Code integrated terminals:
+When proxy is enabled, otak-proxy sets these variables for **newly created** VS Code integrated terminals:
 
 - `HTTP_PROXY` / `HTTPS_PROXY`
 - `http_proxy` / `https_proxy`
 
-Existing terminals keep their current environment; reopen a terminal if you want the new values to apply.
+Existing terminals keep their current environment. Open a new terminal for the updated values to take effect.
 
 ## Configuration
 
@@ -80,9 +81,9 @@ Existing terminals keep their current environment; reopen a terminal if you want
 ### Settings
 
 - **`otakProxy.proxyUrl`**: Manual proxy URL (default: unset)
-- **`otakProxy.pollingInterval`**: System proxy check interval in seconds (default: `30`)
-- **`otakProxy.enableFallback`**: Fall back to manual when system unavailable (default: `true`)
-- **`otakProxy.showProxyUrl`**: Show proxy URL in the status bar (default: `true`). Set to `false` to display "Configured" instead of the actual URL.
+- **`otakProxy.pollingInterval`**: System proxy check interval, in seconds (default: `30`)
+- **`otakProxy.enableFallback`**: Fall back to the manual proxy when the system proxy is unavailable (default: `true`)
+- **`otakProxy.showProxyUrl`**: Show the proxy URL in the status bar (default: `true`). Set this to `false` to display `Configured` instead of the actual URL.
 
 ## Commands
 
@@ -96,7 +97,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 ## Requirements
 
 - VS Code 1.9.0 or higher
-- Git (in PATH)
+- Git available on PATH
 
 ## Installation
 
@@ -105,25 +106,26 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 
 ## Security & Privacy
 
-### Local Changes
+### Local Configuration Changes
 
 - Updates VS Code, Git, and npm proxy settings.
-- Sets HTTP(S)_PROXY environment variables for new integrated terminals.
+- Sets `HTTP_PROXY` and `HTTPS_PROXY` environment variables for new integrated terminals.
 
 ### Credentials
 
 - No account or API key is required.
 - If your proxy requires credentials, include them in the URL you provide.
+- Passwords are masked when proxy URLs are shown in the UI or logs.
 
 ### Network Activity
 
-- Connection validation checks reachability before enabling a proxy.
+- otak-proxy checks whether the proxy is reachable before enabling it.
 
 ## Troubleshooting
 
-- **Proxy not working**: Verify the URL includes `http://` or `https://` and run `Test Proxy`.
-- **Git not detected**: Confirm Git is installed and available in PATH (`git --version`).
-- **Auto mode not detecting changes**: Verify system proxy settings and adjust `otakProxy.pollingInterval`.
+- **Proxy not working**: Make sure the URL starts with `http://` or `https://`, then run `Test Proxy`.
+- **Git not detected**: Make sure Git is installed and available on PATH (`git --version`).
+- **Auto mode does not detect changes**: Check your system proxy settings and adjust `otakProxy.pollingInterval`.
 
 ## Related Extensions
 
@@ -136,7 +138,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 
 ## License
 
-MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Links
 

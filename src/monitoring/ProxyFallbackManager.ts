@@ -16,7 +16,7 @@
 import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { UserNotifier } from '../errors/UserNotifier';
-import { TestResult } from '../utils/ProxyUtils';
+import { TestResult, sanitizeProxyUrl } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
 import { I18nManager } from '../i18n/I18nManager';
 
@@ -197,15 +197,17 @@ export class ProxyFallbackManager {
      * @param proxyUrl - The fallback proxy URL
      */
     private notifyFallbackUsage(proxyUrl: string): void {
+        const sanitizedProxyUrl = sanitizeProxyUrl(proxyUrl);
+
         try {
             const i18n = I18nManager.getInstance();
             this.userNotifier.showSuccess(
-                i18n.t('fallback.usingManualProxy', { url: proxyUrl })
+                i18n.t('fallback.usingManualProxy', { url: sanitizedProxyUrl })
             );
             Logger.log(`Fallback to Manual Proxy: ${proxyUrl}`);
         } catch (error) {
             // In test environment, I18nManager may not be properly initialized
-            this.userNotifier.showSuccess(`Using manual proxy as fallback: ${proxyUrl}`);
+            this.userNotifier.showSuccess(`Using manual proxy as fallback: ${sanitizedProxyUrl}`);
             Logger.log(`Fallback to Manual Proxy: ${proxyUrl}`);
         }
     }

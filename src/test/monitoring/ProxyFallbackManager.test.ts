@@ -19,6 +19,7 @@ import { ProxyStateManager } from '../../core/ProxyStateManager';
 import { UserNotifier } from '../../errors/UserNotifier';
 import { TestResult } from '../../utils/ProxyUtils';
 import { ProxyMode } from '../../core/types';
+import { I18nManager } from '../../i18n/I18nManager';
 
 suite('ProxyFallbackManager Test Suite', () => {
     let sandbox: sinon.SinonSandbox;
@@ -255,7 +256,11 @@ suite('ProxyFallbackManager Test Suite', () => {
     suite('notifications', () => {
         // Requirement 2.1: Notify when using fallback proxy
         test('should notify when fallback proxy is used', async () => {
-            const manualProxyUrl = 'http://manual-proxy.example.com:8080';
+            const manualProxyUrl = 'http://user:secret123@manual-proxy.example.com:8080';
+            sandbox.stub(I18nManager, 'getInstance').returns({
+                t: (_key: string, params?: Record<string, string>) =>
+                    `Using manual proxy as fallback: ${params?.url ?? ''}`
+            } as unknown as I18nManager);
             mockStateManager.getState.resolves({
                 mode: ProxyMode.Auto,
                 manualProxyUrl
@@ -265,6 +270,11 @@ suite('ProxyFallbackManager Test Suite', () => {
             await fallbackManager.selectBestProxy(null);
 
             sinon.assert.called(mockUserNotifier.showSuccess);
+            const message = String(mockUserNotifier.showSuccess.firstCall.args[0]);
+            assert.ok(!message.includes('secret123'),
+                `Fallback notification should not contain password: ${message}`);
+            assert.ok(message.includes('****'),
+                `Fallback notification should mask password: ${message}`);
         });
 
         // Requirement 2.4: Notify when fallback proxy fails

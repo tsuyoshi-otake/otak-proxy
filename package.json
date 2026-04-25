@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.2.9",
+  "version": "2.2.10",
   "engines": {
     "vscode": "^1.9.0"
   },
@@ -158,17 +158,23 @@
     "@dotenvx/dotenvx": "^1.51.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
-    "@types/sinon": "^17.0.3",
+    "@types/sinon": "^21.0.1",
     "@types/vscode": "^1.9.0",
     "@typescript-eslint/eslint-plugin": "^8.22.0",
     "@typescript-eslint/parser": "^8.22.0",
-    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-cli": "0.0.11",
     "@vscode/test-electron": "^2.4.1",
     "cross-env": "^10.1.0",
     "eslint": "^9.19.0",
     "fast-check": "^4.3.0",
     "mocha": "^10.8.2",
-    "sinon": "^19.0.2",
+    "sinon": "^21.1.2",
     "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "@vscode/test-cli": {
+      "mocha": "11.3.0"
+    },
+    "serialize-javascript": "^7.0.5"
   }
 }

@@ -116,6 +116,42 @@ suite('StatusBarManager Fallback Display Tests', () => {
                 `Status bar should indicate Auto mode with fallback: ${mockStatusBarItem.text}`);
         });
 
+        test('should mask credentials in status bar text and tooltip', () => {
+            const state: ProxyState = {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: 'http://user:secret123@manual.example.com:8080'
+            };
+
+            statusBarManager.update(state);
+
+            const tooltipText = String((mockStatusBarItem.tooltip as any)?.value ?? mockStatusBarItem.tooltip ?? '');
+
+            assert.ok(!mockStatusBarItem.text.includes('secret123'),
+                `Status bar text should not contain password: ${mockStatusBarItem.text}`);
+            assert.ok(!tooltipText.includes('secret123'),
+                `Tooltip should not contain password: ${tooltipText}`);
+            assert.ok(mockStatusBarItem.text.includes('****') || tooltipText.includes('****'),
+                'Masked display should include password placeholder');
+        });
+
+        test('should mask credentials in fallback status display', () => {
+            const state: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoModeOff: false,
+                usingFallbackProxy: true,
+                fallbackProxyUrl: 'http://user:fallbackSecret@fallback.example.com:8080'
+            };
+
+            statusBarManager.update(state);
+
+            const tooltipText = String((mockStatusBarItem.tooltip as any)?.value ?? mockStatusBarItem.tooltip ?? '');
+
+            assert.ok(!mockStatusBarItem.text.includes('fallbackSecret'),
+                `Fallback status text should not contain password: ${mockStatusBarItem.text}`);
+            assert.ok(!tooltipText.includes('fallbackSecret'),
+                `Fallback tooltip should not contain password: ${tooltipText}`);
+        });
+
         test('should display normal Auto mode when using system proxy', () => {
             const state: ProxyState = {
                 mode: ProxyMode.Auto,

@@ -64,8 +64,9 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
                     currentState.fallbackProxyUrl = manualProxyUrl;
                     currentState.autoProxyUrl = manualProxyUrl; // Use fallback as active proxy
 
+                    const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
                     Logger.log(`Fallback to Manual Proxy: ${manualProxyUrl}`);
-                    ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: manualProxyUrl });
+                    ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: sanitizedManualProxyUrl });
                 } else {
                     // Requirement 6.1: Show action buttons for system import
                     const action = await vscode.window.showWarningMessage(

@@ -132,12 +132,16 @@ export class StatusBarManager {
                 }
                 // Task 4.1: Handle fallback proxy state
                 else if (state.usingFallbackProxy && state.fallbackProxyUrl) {
-                    const fallbackDisplay = showUrl ? state.fallbackProxyUrl : i18n.t('statusbar.urlHidden');
+                    const fallbackDisplay = showUrl
+                        ? this.sanitizer.maskPassword(state.fallbackProxyUrl)
+                        : i18n.t('statusbar.urlHidden');
                     text = `$(plug) ${i18n.t('statusbar.autoFallback', { url: fallbackDisplay })}`;
                     statusText = i18n.t('statusbar.tooltip.autoFallback', { url: fallbackDisplay });
                 }
                 else if (activeUrl) {
-                    const urlDisplay = showUrl ? activeUrl : i18n.t('statusbar.urlHidden');
+                    const urlDisplay = showUrl
+                        ? this.sanitizer.maskPassword(activeUrl)
+                        : i18n.t('statusbar.urlHidden');
                     text = `$(sync~spin) ${i18n.t('statusbar.autoWithUrl', { url: urlDisplay })}`;
                     statusText = i18n.t('statusbar.tooltip.autoModeUsing', { url: urlDisplay });
                 } else {
@@ -147,7 +151,9 @@ export class StatusBarManager {
                 break;
             case ProxyMode.Manual:
                 if (activeUrl) {
-                    const urlDisplay = showUrl ? activeUrl : i18n.t('statusbar.urlHidden');
+                    const urlDisplay = showUrl
+                        ? this.sanitizer.maskPassword(activeUrl)
+                        : i18n.t('statusbar.urlHidden');
                     text = `$(plug) ${i18n.t('statusbar.manualWithUrl', { url: urlDisplay })}`;
                     statusText = i18n.t('statusbar.tooltip.manualModeUsing', { url: urlDisplay });
                 } else {
