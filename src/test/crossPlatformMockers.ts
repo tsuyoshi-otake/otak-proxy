@@ -11,7 +11,7 @@ import * as sinon from 'sinon';
 /**
  * Response structure for exec/execFile mocks
  */
-export interface ExecMockResponse {
+interface ExecMockResponse {
     stdout?: string;
     stderr?: string;
     error?: {

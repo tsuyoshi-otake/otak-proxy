@@ -162,24 +162,6 @@ export const urlWithInvalidPortGenerator = (): fc.Arbitrary<string> => {
 };
 
 /**
- * Generates URLs with invalid hostname characters
- * Contains characters other than alphanumeric, dots, hyphens
- */
-export const urlWithInvalidHostnameGenerator = (): fc.Arbitrary<string> => {
-    const invalidChars = ['!', '@', '#', '$', '%', '^', '*', '(', ')', '=', '+', '[', ']', '{', '}'];
-    const invalidCharArb = fc.constantFrom(...invalidChars);
-    
-    return fc.tuple(
-        fc.constantFrom('http', 'https'),
-        fc.string(),
-        invalidCharArb,
-        fc.string()
-    ).map(([protocol, before, invalidChar, after]) => {
-        return `${protocol}://${before}${invalidChar}${after}.com:8080`;
-    });
-};
-
-/**
  * Generates URLs with credentials containing various formats
  * Used to test credential validation and masking
  */
@@ -209,65 +191,6 @@ export const urlWithCredentialsGenerator = (): fc.Arbitrary<string> => {
         fc.option(fc.integer({ min: 1, max: 65535 }), { nil: undefined })
     ).map(([protocol, username, password, hostname, port]) => {
         let url = `${protocol}://${username}:${password}@${hostname}`;
-        if (port) {
-            url += `:${port}`;
-        }
-        return url;
-    });
-};
-
-/**
- * Generates empty or whitespace-only strings
- * Used to test edge case handling
- */
-export const emptyOrWhitespaceGenerator = (): fc.Arbitrary<string> => {
-    return fc.oneof(
-        fc.constant(''),
-        fc.stringMatching(/^\s+$/)
-    );
-};
-
-/**
- * Generates URLs with multiple @ symbols
- * Edge case for credential parsing
- */
-export const urlWithMultipleAtSymbolsGenerator = (): fc.Arbitrary<string> => {
-    return fc.tuple(
-        fc.constantFrom('http', 'https'),
-        fc.string({ minLength: 1 }),
-        fc.string({ minLength: 1 }),
-        fc.string({ minLength: 1 })
-    ).map(([protocol, part1, part2, part3]) => {
-        return `${protocol}://${part1}@${part2}@${part3}.com:8080`;
-    });
-};
-
-/**
- * Generates URLs with invalid credential characters
- * Used to test credential format validation
- */
-export const urlWithInvalidCredentialsGenerator = (): fc.Arbitrary<string> => {
-    // Invalid characters for credentials (excluding shell metacharacters)
-    const invalidChars = ['!', '#', '$', '%', '^', '*', '=', '+', '[', ']', '{', '}', ' ', '~', '/', '\\', '?', ',', '.', ':'];
-    const invalidCharArb = fc.constantFrom(...invalidChars);
-
-    const usernameArb = fc.tuple(
-        fc.string({ minLength: 0, maxLength: 10 }),
-        invalidCharArb,
-        fc.string({ minLength: 0, maxLength: 10 })
-    ).map(([before, invalidChar, after]) => `${before}${invalidChar}${after}`);
-
-    const passwordArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/).filter(s => s.length >= 1 && s.length <= 20);
-    const hostnameArb = fc.stringMatching(/^[a-zA-Z0-9.-]+$/).filter(s => s.length >= 3 && s.length <= 50);
-
-    return fc.tuple(
-        fc.constantFrom('http', 'https'),
-        usernameArb,
-        passwordArb,
-        hostnameArb,
-        fc.option(fc.integer({ min: 1, max: 65535 }), { nil: undefined })
-    ).map(([protocol, username, password, hostname, port]) => {
-        let url = `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostname}`;
         if (port) {
             url += `:${port}`;
         }
