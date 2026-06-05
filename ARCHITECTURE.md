@@ -56,7 +56,6 @@ src/
 │   ├── ProxyMonitorState.ts    # Monitor state management
 │   ├── ProxyChangeLogger.ts    # Change event logging
 │   ├── ProxyConnectionTester.ts # Proxy connection testing (Auto/Manual modes)
-│   ├── ProxyFallbackManager.ts  # Fallback proxy selection
 │   └── ProxyTestScheduler.ts    # Periodic connection test scheduler
 │
 ├── sync/                # Multi-instance synchronization
@@ -78,8 +77,7 @@ src/
 │   ├── UserNotifier.ts         # User-facing error notifications (with throttling)
 │   ├── NotificationFormatter.ts # Notification message formatting
 │   ├── NotificationThrottler.ts # Duplicate notification suppression
-│   ├── OutputChannelManager.ts  # Output channel log management (singleton)
-│   └── StateChangeDebouncer.ts  # State change debouncing
+│   └── OutputChannelManager.ts  # Output channel log management (singleton)
 │
 ├── i18n/                # Internationalization
 │   ├── types.ts         # i18n type definitions
@@ -91,9 +89,6 @@ src/
 │       ├── vi.json             # Vietnamese
 │       ├── zh-cn.json          # Simplified Chinese
 │       └── zh-tw.json          # Traditional Chinese
-│
-├── models/              # Data models
-│   └── ProxyUrl.ts             # Proxy URL parsing and validation
 │
 ├── utils/               # Shared utilities
 │   ├── Logger.ts               # Centralized logging (auto credential masking)
@@ -346,9 +341,9 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
    ↓
 6. ProxyConnectionTester.testProxyAuto() (when connection testing is enabled)
    ├─→ Success: ProxyApplier.applyProxy()
-   └─→ Failure: ProxyFallbackManager.selectBestProxy()
-         ├─→ Apply fallback proxy if available
-         └─→ Otherwise use direct connection
+   └─→ Failure: SystemProxyUpdateService falls back to the configured
+                manual proxy (when enableFallback is on) or direct
+                connection
    ↓
 7. StatusBarManager.update()
    └─→ Update UI
@@ -532,12 +527,6 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   - `testProxyManual()`: 5s timeout, detailed notifications
   - Result caching
 
-#### ProxyFallbackManager
-- **Responsibility**: Selecting the best proxy (system → manual fallback → direct connection)
-- **Key features**:
-  - `selectBestProxy()`: Priority-based selection with connection testing
-  - Fallback enable/disable toggle
-
 #### ProxyTestScheduler
 - **Responsibility**: Scheduling periodic proxy connection tests
 - **Key features**:
@@ -646,10 +635,6 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### OutputChannelManager
 - **Responsibility**: Centralized VS Code output channel management (singleton)
 - **Key features**: Error/info/warning logging, automatic credential masking
-
-#### StateChangeDebouncer
-- **Responsibility**: Proxy state change debouncing
-- **Key features**: Per-URL debouncing (default 1s), pending change cancellation
 
 ### Internationalization
 
