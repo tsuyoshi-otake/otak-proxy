@@ -1,5 +1,14 @@
 # Change Log
 
+## [2.2.17] - 2026-06-06
+
+### Changed
+- Removed dead `updateDetectionPriority` helper and stale `TestOptions` / `TestUrlError` re-exports from the proxy utility entrypoint; consumers were already using the SystemProxyDetector method or the source modules directly
+- Added `knip.json` so dead-code detection reliably distinguishes real unused exports from test-only files
+
+### Fixed
+- Restored the missing `[2.2.6]` changelog entry from git history and slimmed the `[2.2.7]` entry back to its own two changes
+
 ## [2.2.16] - 2026-06-06
 
 ### Changed
