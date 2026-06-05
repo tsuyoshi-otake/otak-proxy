@@ -513,12 +513,11 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   - `getStatus()`: Return defensive copy
 
 #### ProxyChangeLogger
-- **Responsibility**: Logging proxy change, test, and fallback events
+- **Responsibility**: Logging proxy change and test events
 - **Key features**:
   - `logChange()`: Log proxy changes (with credential masking)
   - `logCheck()`: Log test attempts
-  - `logFallbackToManual()`: Log fallback usage
-  - 3 parallel history arrays (max 100 entries each)
+  - 2 parallel history arrays (max 100 entries each)
 
 #### ProxyConnectionTester
 - **Responsibility**: Proxy connection testing (both Auto and Manual modes)

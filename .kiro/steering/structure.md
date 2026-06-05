@@ -29,8 +29,8 @@
 
 ### モニタリング (`/src/monitoring/`)
 **目的**: プロキシ状態の監視と検証
-**内容**: 接続テスト、スケジューラー、フォールバック管理
-**例**: `ProxyMonitor.ts`, `ProxyConnectionTester.ts`
+**内容**: ポーリングによる変更検出、接続テスト、テスト周期スケジューラー
+**例**: `ProxyMonitor.ts`, `ProxyConnectionTester.ts`, `ProxyTestScheduler.ts`
 
 ### エラー処理 (`/src/errors/`)
 **目的**: エラーハンドリングと通知
