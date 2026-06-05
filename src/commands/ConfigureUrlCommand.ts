@@ -101,7 +101,7 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
             return { success: true };
         }
 
-        return handleProxyUrlInput(ctx, state, proxyUrl, i18n);
+        return await handleProxyUrlInput(ctx, state, proxyUrl, i18n);
     } catch (error) {
         Logger.error('Configure URL command failed:', error);
         
