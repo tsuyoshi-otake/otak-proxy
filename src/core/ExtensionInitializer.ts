@@ -43,8 +43,6 @@ export class ExtensionInitializer {
     private systemProxyCheckInterval: NodeJS.Timeout | undefined;
     private startupTestState: StartupTestState = { isPending: false };
 
-    private autoTestEnabled: boolean = true;
-
     constructor(context: InitializerContext) {
         this.context = context;
         // Initialize connection tester for startup and Auto mode testing
@@ -268,7 +266,6 @@ export class ExtensionInitializer {
 
             case 'autoTestEnabled': {
                 const enabled = typeof value === 'boolean' ? value : true;
-                this.autoTestEnabled = enabled;
 
                 // Update ProxyMonitor's connection test enabled state
                 this.proxyMonitor.updateConfig({
