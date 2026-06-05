@@ -7,9 +7,10 @@ import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { UserNotifier } from '../errors/UserNotifier';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
+import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { ProxyStateManager } from './ProxyStateManager';
-import { ProxyApplyOptions, ProxyConfigResults, ProxyConfigTarget } from './ProxyApplierTypes';
+import { ProxyApplyOptions, ProxyConfigResults, ProxyConfigStatusReporter, ProxyConfigTarget } from './ProxyApplierTypes';
 import { updateProxyConfigTarget } from './ProxyConfigTargetRunner';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
 import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
@@ -57,6 +58,39 @@ export class ProxyApplier {
         return true;
     }
 
+    private async withOptionalProgress<T>(
+        options: ProxyApplyOptions | undefined,
+        task: (reportStatus?: ProxyConfigStatusReporter) => Promise<T>
+    ): Promise<T> {
+        if (!options?.showProgress || options.silent) {
+            return task();
+        }
+
+        const i18n = I18nManager.getInstance();
+        return this.userNotifier.showProgressNotification(
+            i18n.t('progress.title.applyingSettings'),
+            async progress => task(messageKey => {
+                progress.report({ message: i18n.t(messageKey) });
+            }),
+            false
+        );
+    }
+
+    private getTargetProgressKey(target: ProxyConfigTarget, enabled: boolean): string {
+        switch (target.name) {
+            case 'Git configuration':
+                return enabled ? 'progress.gitConfigApplying' : 'progress.gitConfigClearing';
+            case 'VSCode configuration':
+                return enabled ? 'progress.vscodeConfigApplying' : 'progress.vscodeConfigClearing';
+            case 'npm configuration':
+                return enabled ? 'progress.npmConfigApplying' : 'progress.npmConfigClearing';
+            case 'Terminal environment':
+                return enabled ? 'progress.terminalEnvApplying' : 'progress.terminalEnvClearing';
+            default:
+                return enabled ? 'progress.applyingProxySettings' : 'progress.clearingProxySettings';
+        }
+    }
+
     /**
      * Apply proxy settings to all configuration targets
      * 
@@ -96,11 +130,15 @@ export class ProxyApplier {
             }
         }
         
-        const results = await this.updateTargets(
-            this.getApplyTargets(),
-            true,
-            proxyUrl,
-            errorAggregator
+        const results = await this.withOptionalProgress(
+            options,
+            async reportStatus => this.updateTargets(
+                this.getApplyTargets(),
+                true,
+                proxyUrl,
+                errorAggregator,
+                reportStatus
+            )
         );
 
         // Track configuration state if stateManager is provided
@@ -136,11 +174,15 @@ export class ProxyApplier {
             return false;
         }
         
-        const results = await this.updateTargets(
-            this.getDisableTargets(),
-            false,
-            '',
-            errorAggregator
+        const results = await this.withOptionalProgress(
+            options,
+            async reportStatus => this.updateTargets(
+                this.getDisableTargets(),
+                false,
+                '',
+                errorAggregator,
+                reportStatus
+            )
         );
 
         // Track configuration state if stateManager is provided
@@ -166,7 +208,8 @@ export class ProxyApplier {
         targets: ProxyConfigTarget[],
         enabled: boolean,
         proxyUrl: string,
-        errorAggregator: ErrorAggregator
+        errorAggregator: ErrorAggregator,
+        reportStatus?: ProxyConfigStatusReporter
     ): Promise<ProxyConfigResults> {
         const results: ProxyConfigResults = {
             gitSuccess: false,
@@ -176,7 +219,10 @@ export class ProxyApplier {
         };
 
         for (const target of targets) {
-            const success = await updateProxyConfigTarget(target, enabled, proxyUrl, errorAggregator);
+            reportStatus?.(this.getTargetProgressKey(target, enabled));
+            const success = await updateProxyConfigTarget(target, enabled, proxyUrl, errorAggregator, {
+                onStatus: reportStatus
+            });
             switch (target.name) {
                 case 'Git configuration':
                     results.gitSuccess = success;

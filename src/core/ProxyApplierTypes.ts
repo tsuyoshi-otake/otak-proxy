@@ -1,5 +1,12 @@
 export interface ProxyApplyOptions {
     silent?: boolean;
+    showProgress?: boolean;
+}
+
+export type ProxyConfigStatusReporter = (messageKey: string) => void;
+
+export interface ProxyConfigOperationOptions {
+    onStatus?: ProxyConfigStatusReporter;
 }
 
 export interface ProxyConfigOperationResult {
@@ -9,8 +16,8 @@ export interface ProxyConfigOperationResult {
 }
 
 export interface ProxyConfigManagerLike {
-    setProxy(url: string): Promise<ProxyConfigOperationResult>;
-    unsetProxy(): Promise<ProxyConfigOperationResult>;
+    setProxy(url: string, options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
+    unsetProxy(options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
 }
 
 export interface ProxyConfigTarget {

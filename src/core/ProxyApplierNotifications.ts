@@ -6,20 +6,8 @@ export function showAggregatedErrors(
     errorAggregator: ErrorAggregator,
     userNotifier: UserNotifier
 ): void {
-    const formattedErrors = errorAggregator.formatErrors();
-    const lines = formattedErrors.split('\n');
-    const suggestionStartIndex = lines.findIndex(line => line.includes('Suggestions:'));
-    const suggestions = suggestionStartIndex >= 0
-        ? lines
-            .slice(suggestionStartIndex + 1)
-            .filter(line => line.trim().startsWith('-'))
-            .map(line => line.trim().substring(2))
-        : [];
-
-    const errorMessage = lines
-        .slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length)
-        .join('\n');
-    userNotifier.showError(errorMessage, suggestions);
+    const { message, suggestions } = errorAggregator.getDisplayParts();
+    userNotifier.showError(message, suggestions);
 }
 
 export function showProxyConfigured(

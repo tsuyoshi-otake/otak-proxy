@@ -11,6 +11,7 @@ import * as vscode from 'vscode';
 import { ProxyApplier } from '../core/ProxyApplier';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
+import { I18nManager } from '../i18n/I18nManager';
 
 function overrideWorkspaceTrustForTest(value: boolean): () => void {
     const descriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'isTrusted');
@@ -29,6 +30,10 @@ function overrideWorkspaceTrustForTest(value: boolean): () => void {
 }
 
 suite('ProxyApplier Unit Tests', () => {
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+    });
+
     test('applyProxy with valid URL succeeds when all managers succeed', async () => {
         const mockGitManager = {
             setProxy: async () => ({ success: true }),
@@ -64,6 +69,53 @@ suite('ProxyApplier Unit Tests', () => {
         
         const result = await applier.applyProxy('http://proxy.example.com:8080', true);
         assert.strictEqual(result, true, 'applyProxy should return true when all managers succeed');
+    });
+
+    test('applyProxy reports progress when requested', async () => {
+        const mockGitManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockVscodeManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockNpmManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const progressMessages: string[] = [];
+        const mockNotifier = {
+            showSuccess: () => {},
+            showError: () => {},
+            showWarning: () => {},
+            showProgressNotification: async (_title: string, task: any) => task({
+                report: ({ message }: { message?: string }) => {
+                    if (message) {
+                        progressMessages.push(message);
+                    }
+                }
+            })
+        } as any;
+
+        const applier = new ProxyApplier(
+            mockGitManager,
+            mockVscodeManager,
+            mockNpmManager,
+            new ProxyUrlValidator(),
+            new InputSanitizer(),
+            mockNotifier
+        );
+
+        const result = await applier.applyProxy('http://proxy.example.com:8080', true, { showProgress: true });
+
+        assert.strictEqual(result, true);
+        assert.ok(progressMessages.includes('Updating VS Code proxy settings...'));
+        assert.ok(progressMessages.includes('Updating Git proxy settings...'));
+        assert.ok(progressMessages.includes('Updating npm proxy settings...'));
     });
 
     test('applyProxy with invalid URL fails validation', async () => {

@@ -17,6 +17,7 @@ import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { UserNotifier } from '../errors/UserNotifier';
 import { ProxyStateManager } from '../core/ProxyStateManager';
+import { I18nManager } from '../i18n/I18nManager';
 import { getPropertyTestRuns } from './helpers';
 
 /**
@@ -27,6 +28,14 @@ import { getPropertyTestRuns } from './helpers';
  * then application, then error aggregation in that order.
  */
 suite('ProxyApplier Property Tests', () => {
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+    });
+
+    teardown(() => {
+        I18nManager.getInstance().initialize('en');
+    });
+
     test('Property 5: Proxy enablement follows validation -> application -> error aggregation sequence', async () => {
         await fc.assert(
             fc.asyncProperty(

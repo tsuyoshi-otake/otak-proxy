@@ -14,6 +14,7 @@ import { VscodeConfigManager } from '../config/VscodeConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
 import { ProxyApplier } from '../core/ProxyApplier';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
+import { I18nManager } from '../i18n/I18nManager';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import {
@@ -40,11 +41,13 @@ suite('Extension Integration Property-Based Tests', () => {
     });
 
     setup(() => {
+        I18nManager.getInstance().initialize('en');
         sandbox = sinon.createSandbox();
     });
 
     teardown(() => {
         sandbox.restore();
+        I18nManager.getInstance().initialize('en');
     });
 
     /**

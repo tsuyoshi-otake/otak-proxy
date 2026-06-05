@@ -1,3 +1,10 @@
+import { I18nManager } from '../i18n/I18nManager';
+
+export interface AggregatedErrorDisplayParts {
+  message: string;
+  suggestions: string[];
+}
+
 /**
  * ErrorAggregator collects and formats multiple errors from configuration operations.
  * This allows the extension to attempt multiple operations and report all failures
@@ -24,30 +31,53 @@ export class ErrorAggregator {
   }
 
   /**
-   * Formats all errors into user-friendly message with structured output
+   * Formats all errors into user-friendly message with structured output.
    * @returns Formatted error message with troubleshooting steps
    */
   formatErrors(): string {
-    if (!this.hasErrors()) {
+    const parts = this.getDisplayParts();
+    if (!parts.message) {
       return '';
+    }
+
+    if (parts.suggestions.length === 0) {
+      return parts.message;
+    }
+
+    return `${parts.message}\n\n${this.t('label.suggestions', 'Suggestions:')}\n${this.generateSuggestions()}`;
+  }
+
+  /**
+   * Formats errors as structured display parts so callers do not need to parse
+   * localized strings to split the message from suggestions.
+   */
+  getDisplayParts(): AggregatedErrorDisplayParts {
+    if (!this.hasErrors()) {
+      return { message: '', suggestions: [] };
     }
 
     const errorCount = this.errors.size;
     const operations = Array.from(this.errors.keys());
-    
-    let message = errorCount === 1 
-      ? `Operation failed: ${operations[0]}\n\n`
-      : `Multiple operations failed (${errorCount} errors)\n\n`;
+    const messageLines: string[] = [];
 
-    message += 'What happened:\n';
+    messageLines.push(errorCount === 1
+      ? this.t('errorAggregator.singleFailure', 'Operation failed: {operation}', {
+        operation: this.localizeOperation(operations[0])
+      })
+      : this.t('errorAggregator.multipleFailure', 'Multiple operations failed ({count} errors)', {
+        count: String(errorCount)
+      }));
+    messageLines.push('');
+    messageLines.push(this.t('errorAggregator.whatHappened', 'What happened:'));
+
     for (const [operation, error] of this.errors) {
-      message += `- ${operation}: ${error}\n`;
+      messageLines.push(`- ${this.localizeOperation(operation)}: ${this.localizeError(error)}`);
     }
 
-    message += '\nSuggestions:\n';
-    message += this.generateSuggestions();
-
-    return message;
+    return {
+      message: messageLines.join('\n'),
+      suggestions: this.generateSuggestionList()
+    };
   }
 
   /**
@@ -58,10 +88,14 @@ export class ErrorAggregator {
   }
 
   /**
-   * Generates troubleshooting suggestions based on collected errors
+   * Generates troubleshooting suggestions based on collected errors.
    * @returns Formatted suggestions string
    */
   private generateSuggestions(): string {
+    return this.generateSuggestionList().map(s => `- ${s}`).join('\n');
+  }
+
+  private generateSuggestionList(): string[] {
     const suggestions: string[] = [];
     const operations = Array.from(this.errors.keys());
     const errorMessages = Array.from(this.errors.values());
@@ -70,30 +104,32 @@ export class ErrorAggregator {
     if (operations.some(op => op.toLowerCase().includes('git'))) {
       const lockError = errorMessages.find(err =>
         err.toLowerCase().includes('could not lock config file') ||
-        err.toLowerCase().includes('git config file is locked')
+        err.toLowerCase().includes('git config file is locked') ||
+        err.toLowerCase().includes('git configuration is already being updated') ||
+        err.toLowerCase().includes('timed out acquiring git config mutex')
       );
-      const gitError = errorMessages.find(err => 
-        err.toLowerCase().includes('not found') || 
+      const gitError = errorMessages.find(err =>
+        err.toLowerCase().includes('not found') ||
         err.toLowerCase().includes('not installed')
       );
       if (gitError) {
-        suggestions.push('Install Git from https://git-scm.com');
-        suggestions.push('Ensure Git is added to your system PATH');
-        suggestions.push('Restart VSCode after installing Git');
+        suggestions.push(this.t('suggestion.git.installGit', 'Install Git from https://git-scm.com'));
+        suggestions.push(this.t('suggestion.git.ensurePath', 'Ensure Git is added to your system PATH'));
+        suggestions.push(this.t('suggestion.git.restartAfterInstall', 'Restart VS Code after installing Git'));
       } else if (lockError) {
-        suggestions.push('Close other VSCode windows and Git processes, then try again');
-        suggestions.push('If a stale lock file exists, delete the global Git config lock (e.g., ~/.gitconfig.lock or %USERPROFILE%\\.gitconfig.lock)');
-        suggestions.push('Retry the operation after removing the lock file');
+        suggestions.push(this.t('suggestion.git.closeOtherWindows', 'Close other VS Code/Cursor windows and Git processes, then try again'));
+        suggestions.push(this.t('suggestion.git.waitAndRetry', 'Wait a few seconds and retry the operation'));
+        suggestions.push(this.t('suggestion.git.removeStaleLock', 'If a stale lock file exists, delete the global Git config lock (e.g., ~/.gitconfig.lock or %USERPROFILE%\\.gitconfig.lock)'));
       } else {
-        suggestions.push('Check Git installation and permissions');
-        suggestions.push('Try running Git commands manually in terminal');
+        suggestions.push(this.t('suggestion.git.checkInstallationAndPermissions', 'Check Git installation and permissions'));
+        suggestions.push(this.t('suggestion.git.tryManualCommands', 'Try running Git commands manually in terminal'));
       }
     }
 
     // VSCode configuration suggestions
     if (operations.some(op => op.toLowerCase().includes('vscode'))) {
-      suggestions.push('Check VSCode settings permissions');
-      suggestions.push('Try restarting VSCode');
+      suggestions.push(this.t('suggestion.vscode.checkSettingsPermissions', 'Check VS Code settings permissions'));
+      suggestions.push(this.t('suggestion.vscode.restart', 'Try restarting VS Code'));
     }
 
     // npm-related suggestions
@@ -104,60 +140,119 @@ export class ErrorAggregator {
         err.toLowerCase().includes('enoent')
       );
       if (npmError) {
-        suggestions.push('Install Node.js and npm from https://nodejs.org/');
-        suggestions.push('Verify npm is in your system PATH');
-        suggestions.push('Restart VSCode after installing npm');
+        suggestions.push(this.t('suggestion.npm.installNode', 'Install Node.js and npm from https://nodejs.org/'));
+        suggestions.push(this.t('suggestion.npm.verifyPath', 'Verify npm is in your system PATH'));
+        suggestions.push(this.t('suggestion.npm.restartAfterInstall', 'Restart VS Code after installing npm'));
       } else if (errorMessages.some(err => err.toLowerCase().includes('permission'))) {
-        suggestions.push('Check file permissions for npm config files');
-        suggestions.push('Try running VSCode with appropriate permissions');
-        suggestions.push('Verify you have write access to npm\'s global config');
+        suggestions.push(this.t('suggestion.npm.checkPermissions', 'Check file permissions for npm config files'));
+        suggestions.push(this.t('suggestion.npm.runWithPermissions', 'Try running VS Code with appropriate permissions'));
+        suggestions.push(this.t('suggestion.npm.verifyGlobalWrite', 'Verify you have write access to npm\'s global config'));
       } else if (errorMessages.some(err => err.toLowerCase().includes('timeout') || err.toLowerCase().includes('timed out'))) {
-        suggestions.push('Check if npm is responding correctly');
-        suggestions.push('Try running \'npm config list\' manually to verify npm works');
-        suggestions.push('Restart VSCode and try again');
+        suggestions.push(this.t('suggestion.npm.checkResponding', 'Check if npm is responding correctly'));
+        suggestions.push(this.t('suggestion.npm.tryConfigList', 'Try running \'npm config list\' manually to verify npm works'));
+        suggestions.push(this.t('suggestion.vscode.restartAndRetry', 'Restart VS Code and try again'));
       } else if (errorMessages.some(err => err.toLowerCase().includes('config'))) {
-        suggestions.push('Verify npm configuration is not corrupted');
-        suggestions.push('Try running \'npm config list\' to check npm config');
-        suggestions.push('Consider resetting npm config with \'npm config edit\'');
+        suggestions.push(this.t('suggestion.npm.verifyConfig', 'Verify npm configuration is not corrupted'));
+        suggestions.push(this.t('suggestion.npm.checkConfigList', 'Try running \'npm config list\' to check npm config'));
+        suggestions.push(this.t('suggestion.npm.resetConfig', 'Consider resetting npm config with \'npm config edit\''));
       } else {
-        suggestions.push('Check npm installation and configuration');
-        suggestions.push('Try running npm commands manually to diagnose the issue');
+        suggestions.push(this.t('suggestion.npm.checkInstallationAndConfig', 'Check npm installation and configuration'));
+        suggestions.push(this.t('suggestion.npm.tryManualCommands', 'Try running npm commands manually to diagnose the issue'));
       }
     }
 
     // System proxy detection suggestions
     if (operations.some(op => op.toLowerCase().includes('system') || op.toLowerCase().includes('detect'))) {
-      suggestions.push('Manually enter proxy URL instead of auto-detection');
-      suggestions.push('Check system proxy settings in your OS');
+      suggestions.push(this.t('suggestion.proxy.configureManualInstead', 'Manually enter proxy URL instead of auto-detection'));
+      suggestions.push(this.t('suggestion.proxy.checkSystemSettings', 'Check system proxy settings in your OS'));
     }
 
     // Connection/network suggestions
-    if (errorMessages.some(err => 
-      err.toLowerCase().includes('connection') || 
+    if (errorMessages.some(err =>
+      err.toLowerCase().includes('connection') ||
       err.toLowerCase().includes('timeout') ||
       err.toLowerCase().includes('network')
     )) {
-      suggestions.push('Verify proxy URL is correct');
-      suggestions.push('Check network connectivity');
-      suggestions.push('Ensure proxy server is accessible');
+      suggestions.push(this.t('suggestion.verifyUrl', 'Verify proxy URL is correct'));
+      suggestions.push(this.t('suggestion.checkConnectivity', 'Check network connectivity'));
+      suggestions.push(this.t('suggestion.proxy.ensureServerAccessible', 'Ensure proxy server is accessible'));
     }
 
     // Permission suggestions
-    if (errorMessages.some(err => 
-      err.toLowerCase().includes('permission') || 
+    if (errorMessages.some(err =>
+      err.toLowerCase().includes('permission') ||
       err.toLowerCase().includes('access denied')
     )) {
-      suggestions.push('Check file and directory permissions');
-      suggestions.push('Try running VSCode with appropriate permissions');
+      suggestions.push(this.t('suggestion.permissions.checkFiles', 'Check file and directory permissions'));
+      suggestions.push(this.t('suggestion.vscode.runWithPermissions', 'Try running VS Code with appropriate permissions'));
     }
 
     // Default suggestion if no specific ones were added
     if (suggestions.length === 0) {
-      suggestions.push('Check the error details above for specific issues');
-      suggestions.push('Try the operation again');
-      suggestions.push('Restart VSCode if the problem persists');
+      suggestions.push(this.t('suggestion.generic.checkDetails', 'Check the error details above for specific issues'));
+      suggestions.push(this.t('suggestion.generic.tryAgain', 'Try the operation again'));
+      suggestions.push(this.t('suggestion.vscode.restartIfPersists', 'Restart VS Code if the problem persists'));
     }
 
-    return suggestions.map(s => `- ${s}`).join('\n');
+    return [...new Set(suggestions)];
+  }
+
+  private localizeOperation(operation: string): string {
+    try {
+      if (I18nManager.getInstance().getCurrentLocale() === 'en') {
+        return operation;
+      }
+    } catch {
+      return operation;
+    }
+
+    const operationKeys: Record<string, string> = {
+      'Git configuration': 'operation.gitConfiguration',
+      'VSCode configuration': 'operation.vscodeConfiguration',
+      'npm configuration': 'operation.npmConfiguration',
+      'Terminal environment': 'operation.terminalEnvironment'
+    };
+
+    const key = operationKeys[operation];
+    return key ? this.t(key, operation) : operation;
+  }
+
+  private localizeError(error: string): string {
+    const lower = error.toLowerCase();
+
+    if (lower.includes('git configuration is already being updated') ||
+      lower.includes('timed out acquiring git config mutex')) {
+      return this.t(
+        'error.gitConfigUpdateInProgress',
+        'Git configuration is already being updated by another VS Code/Cursor window. Please wait a few seconds and try again.'
+      );
+    }
+
+    return error;
+  }
+
+  private t(key: string, fallback: string, params?: Record<string, string>): string {
+    try {
+      const message = I18nManager.getInstance().t(key, params);
+      if (!message.startsWith('[missing:')) {
+        return message;
+      }
+    } catch {
+      // Unit tests may use ErrorAggregator without initializing the extension i18n manager.
+    }
+
+    return this.substituteParams(fallback, params);
+  }
+
+  private substituteParams(message: string, params?: Record<string, string>): string {
+    if (!params) {
+      return message;
+    }
+
+    let result = message;
+    for (const [key, value] of Object.entries(params)) {
+      result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+    }
+    return result;
   }
 }

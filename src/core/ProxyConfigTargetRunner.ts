@@ -1,17 +1,18 @@
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { Logger } from '../utils/Logger';
-import { ProxyConfigTarget } from './ProxyApplierTypes';
+import { ProxyConfigOperationOptions, ProxyConfigTarget } from './ProxyApplierTypes';
 
 export async function updateProxyConfigTarget(
     target: ProxyConfigTarget,
     enabled: boolean,
     proxyUrl: string,
-    errorAggregator: ErrorAggregator
+    errorAggregator: ErrorAggregator,
+    options?: ProxyConfigOperationOptions
 ): Promise<boolean> {
     try {
         const result = enabled
-            ? await target.manager.setProxy(proxyUrl)
-            : await target.manager.unsetProxy();
+            ? await target.manager.setProxy(proxyUrl, options)
+            : await target.manager.unsetProxy(options);
 
         if (!result.success) {
             Logger.error(`${target.name} failed:`, result.error, result.errorType);

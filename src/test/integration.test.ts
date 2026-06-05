@@ -8,6 +8,7 @@ import { NpmConfigManager } from '../config/NpmConfigManager';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { UserNotifier } from '../errors/UserNotifier';
+import { I18nManager } from '../i18n/I18nManager';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { ProxyMonitorState } from '../monitoring/ProxyMonitorState';
@@ -41,6 +42,7 @@ suite('Integration Tests', () => {
     });
 
     setup(() => {
+        I18nManager.getInstance().initialize('en');
         sandbox = sinon.createSandbox();
         validator = new ProxyUrlValidator();
         sanitizer = new InputSanitizer();
@@ -54,6 +56,7 @@ suite('Integration Tests', () => {
 
     teardown(() => {
         sandbox.restore();
+        I18nManager.getInstance().initialize('en');
     });
 
     /**

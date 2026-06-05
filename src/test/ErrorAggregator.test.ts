@@ -1,11 +1,17 @@
 import * as assert from 'assert';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
+import { I18nManager } from '../i18n/I18nManager';
 
 suite('ErrorAggregator Test Suite', () => {
     let aggregator: ErrorAggregator;
 
     setup(() => {
+        I18nManager.getInstance().initialize('en');
         aggregator = new ErrorAggregator();
+    });
+
+    teardown(() => {
+        I18nManager.getInstance().initialize('en');
     });
 
     suite('addError() and hasErrors()', () => {
@@ -73,8 +79,27 @@ suite('ErrorAggregator Test Suite', () => {
             aggregator.addError('Proxy test', 'Connection timeout');
             const formatted = aggregator.formatErrors();
             
-            assert.ok(formatted.includes('Verify proxy URL is correct'));
-            assert.ok(formatted.includes('Check network connectivity'));
+            assert.ok(formatted.includes('Verify the proxy URL is correct'));
+            assert.ok(formatted.includes('Check your network connectivity'));
+        });
+
+        test('should expose structured display parts without parsing formatted text', () => {
+            aggregator.addError('Git configuration', 'Git is not installed');
+            const parts = aggregator.getDisplayParts();
+
+            assert.ok(parts.message.includes('Operation failed: Git configuration'));
+            assert.ok(parts.message.includes('What happened:'));
+            assert.ok(parts.suggestions.includes('Install Git from https://git-scm.com'));
+        });
+
+        test('should localize Git mutex timeout for Japanese locale', () => {
+            I18nManager.getInstance().initialize('ja');
+            aggregator.addError('Git configuration', 'Git configuration is already being updated by another VS Code/Cursor window. Please wait a few seconds and try again.');
+            const parts = aggregator.getDisplayParts();
+
+            assert.ok(parts.message.includes('Git 設定に失敗しました'));
+            assert.ok(parts.message.includes('Git 設定は別の VS Code/Cursor ウィンドウで更新中です'));
+            assert.ok(parts.suggestions.some(s => s.includes('数秒待ってからもう一度実行してください')));
         });
 
         test('should include permission suggestions for permission errors', () => {

@@ -232,7 +232,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
         getNextMode: (mode) => proxyStateManager.getNextMode(mode),
-        applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled),
+        applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled, { showProgress: true }),
         updateStatusBar: (s) => statusBarManager.update(s),
         checkAndUpdateSystemProxy: async () => initializer.checkAndUpdateSystemProxy(),
         startSystemProxyMonitoring: () => initializer.startSystemProxyMonitoring(),

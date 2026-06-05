@@ -49,9 +49,7 @@ export class UserNotifier {
         // Check throttling
         const throttleKey = `error:${message}`;
         // Git config lock errors can spam during repeated retries; throttle them harder.
-        const isGitLockError =
-            translatedMessage.toLowerCase().includes('could not lock config file') ||
-            translatedMessage.toLowerCase().includes('git config file is locked');
+        const isGitLockError = this.isGitLockError(translatedMessage);
         const throttleMs = isGitLockError ? 60000 : undefined;
 
         if (!this.throttler.shouldShow(throttleKey, throttleMs)) {
@@ -112,6 +110,14 @@ export class UserNotifier {
         return messageOrKey;
     }
 
+    private isGitLockError(message: string): boolean {
+        const lower = message.toLowerCase();
+        return lower.includes('could not lock config file') ||
+            lower.includes('git config file is locked') ||
+            lower.includes('git configuration is already being updated') ||
+            lower.includes('git 設定は別の');
+    }
+
     /**
      * Shows an error message with detailed information logged to output channel
      * Includes a "Show Details" button to open the output channel
@@ -145,9 +151,7 @@ export class UserNotifier {
         
         // Check throttling
         const throttleKey = `error:${message}`;
-        const isGitLockError =
-            translatedMessage.toLowerCase().includes('could not lock config file') ||
-            translatedMessage.toLowerCase().includes('git config file is locked');
+        const isGitLockError = this.isGitLockError(translatedMessage);
         const throttleMs = isGitLockError ? 60000 : undefined;
 
         if (!this.throttler.shouldShow(throttleKey, throttleMs)) {

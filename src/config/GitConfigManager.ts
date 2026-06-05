@@ -7,6 +7,11 @@ import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 
 const execFileAsync = promisify(execFile);
+const GIT_CONFIG_LOCK_RETRY_DELAYS_MS = [50, 100, 200, 400] as const;
+
+interface GitConfigOperationOptions {
+    onStatus?: (messageKey: string) => void;
+}
 
 /**
  * Result of a Git configuration operation
@@ -34,8 +39,9 @@ export class GitConfigManager {
         await new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    private static async withWriteMutex<T>(fn: () => Promise<T>): Promise<T> {
+    private static async withWriteMutex<T>(fn: () => Promise<T>, options?: GitConfigOperationOptions): Promise<T> {
         const start = Date.now();
+        let waitingReported = false;
 
         while (true) {
             try {
@@ -56,6 +62,11 @@ export class GitConfigManager {
                     }
                 } catch {
                     // ignore and retry
+                }
+
+                if (!waitingReported) {
+                    options?.onStatus?.('progress.gitConfigWaiting');
+                    waitingReported = true;
                 }
 
                 if (Date.now() - start > GitConfigManager.MUTEX_TIMEOUT_MS) {
@@ -82,6 +93,10 @@ export class GitConfigManager {
         const stderr = getErrorStderr(error);
         const text = `${message}\n${stderr}`.toLowerCase();
         return text.includes('could not lock config file') || (text.includes('unable to create') && text.includes('.lock'));
+    }
+
+    private isGitConfigMutexTimeout(error: unknown): boolean {
+        return getErrorMessage(error).toLowerCase().includes('timed out acquiring git config mutex');
     }
 
     private normalizeConfigPathToFsPath(p: string): string {
@@ -136,11 +151,8 @@ export class GitConfigManager {
         return raw.replace(/^['"]/, '').replace(/['"]$/, '');
     }
 
-    private async execGitConfigWithRetry(args: string[]): Promise<void> {
-        const maxAttempts = 5;
-        let delayMs = 50;
-
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    private async execGitConfigWithRetry(args: string[], options?: GitConfigOperationOptions): Promise<void> {
+        for (let attempt = 0; ; attempt++) {
             try {
                 await execFileAsync('git', args, {
                     timeout: this.timeout,
@@ -153,18 +165,19 @@ export class GitConfigManager {
                 }
 
                 // If we hit a persistent stale lock file, try to remove it once.
-                if (attempt === 1) {
+                if (attempt === 0) {
                     this.tryRemoveStaleGitConfigLock(error);
                 }
 
-                if (attempt === maxAttempts) {
+                const delayMs = GIT_CONFIG_LOCK_RETRY_DELAYS_MS[attempt];
+                if (delayMs === undefined) {
                     throw error;
                 }
 
                 // Wait a bit and retry. Lock contention is typically transient when multiple processes
                 // try to update the global git config concurrently.
+                options?.onStatus?.('progress.gitConfigRetrying');
                 await GitConfigManager.sleep(delayMs);
-                delayMs = Math.min(1000, delayMs * 2);
             }
         }
     }
@@ -174,15 +187,15 @@ export class GitConfigManager {
      * @param url - Validated proxy URL
      * @returns Result with success status and any errors
      */
-    async setProxy(url: string): Promise<OperationResult> {
+    async setProxy(url: string, options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
             await GitConfigManager.withWriteMutex(async () => {
                 // Set http.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url]);
+                await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url], options);
 
                 // Set https.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url]);
-            });
+                await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url], options);
+            }, options);
 
             return { success: true };
         } catch (error) {
@@ -194,12 +207,12 @@ export class GitConfigManager {
      * Removes Git global proxy configuration
      * @returns Result with success status and any errors
      */
-    async unsetProxy(): Promise<OperationResult> {
+    async unsetProxy(options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
             await GitConfigManager.withWriteMutex(async () => {
                 // Unset http.proxy (git config --unset is idempotent - safe to call even if key doesn't exist)
                 try {
-                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'http.proxy']);
+                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'http.proxy'], options);
                 } catch (error) {
                     // Ignore error if key doesn't exist (exit code 5)
                     const code = getErrorCode(error);
@@ -210,7 +223,7 @@ export class GitConfigManager {
 
                 // Unset https.proxy
                 try {
-                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'https.proxy']);
+                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'https.proxy'], options);
                 } catch (error) {
                     // Ignore error if key doesn't exist (exit code 5)
                     const code = getErrorCode(error);
@@ -218,7 +231,7 @@ export class GitConfigManager {
                         throw error;
                     }
                 }
-            });
+            }, options);
 
             return { success: true };
         } catch (error) {
@@ -290,6 +303,11 @@ export class GitConfigManager {
         if (code === 'ENOENT' || errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
             errorType = 'NOT_INSTALLED';
             errorDescription = 'Git is not installed or not in PATH';
+        }
+        // Check for lock/contended config writes
+        else if (this.isGitConfigMutexTimeout(error)) {
+            errorType = 'LOCKED';
+            errorDescription = 'Git configuration is already being updated by another VS Code/Cursor window. Please wait a few seconds and try again.';
         }
         // Check for lock/contended config writes
         else if (this.isGitConfigLockError(error)) {
