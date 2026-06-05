@@ -51,10 +51,6 @@
 **目的**: 共通ユーティリティ
 **例**: `Logger.ts`, `ProxyUtils.ts`
 
-### モデル (`/src/models/`)
-**目的**: データモデル/値オブジェクト
-**例**: `ProxyUrl.ts`
-
 ### テスト (`/src/test/`)
 **目的**: テストコード
 **パターン**: ソースと同じ構造をミラーリング
@@ -63,7 +59,7 @@
 
 - **ファイル**: PascalCase (例: `GitConfigManager.ts`)
 - **クラス**: PascalCase (例: `class GitConfigManager`)
-- **インターフェース**: PascalCase, `I` プレフィックス任意 (例: `interface ProxyState`, `interface IProxyApplier`)
+- **インターフェース**: PascalCase, `I` プレフィックス任意 (例: `interface ProxyState`, `interface IProxyStateManager`)
 - **列挙型**: PascalCase (例: `enum ProxyMode`)
 - **テスト**: `{SourceName}.test.ts`, `{SourceName}.property.test.ts`
 
