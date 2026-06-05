@@ -1,5 +1,67 @@
 # Change Log
 
+## [2.2.16] - 2026-06-06
+
+### Changed
+- Refactored command, config, monitor, sync, UI, error, and extension modules into focused submodules with no user-visible behavior change
+
+## [2.2.15] - 2026-06-06
+
+### Added
+- Added progress feedback while applying or clearing VS Code, Git, npm, and integrated terminal proxy settings
+
+### Changed
+- Localized aggregated configuration errors and troubleshooting suggestions
+
+### Fixed
+- Improved Git config lock handling with cross-window wait/retry feedback, stale lock cleanup, and throttled lock notifications
+
+## [2.2.14] - 2026-06-05
+
+### Changed
+- Refactored extension initialization, proxy application, monitoring, sync, and proxy utility modules into focused submodules with no user-visible behavior change
+
+## [2.2.13] - 2026-06-05
+
+### Fixed
+- Started multi-instance sync before applying local startup state so an existing shared state wins on launch
+- Stopped clearing unrelated Git, VS Code, and npm proxy settings on startup when otak-proxy is Off
+- Tested manual fallback proxies before using them in Auto mode and left Auto mode as `OFF` when fallback is unreachable
+- Honored newly detected system proxy state when switching from Manual to Auto
+- Sent `Proxy-Authorization` headers during proxy connection tests and treated non-2xx CONNECT responses as failures
+- Rejected malformed URL-encoded proxy credentials during validation
+
+## [2.2.12] - 2026-06-05
+
+### Added
+- Added `otak: Configure Manual Proxy` to the Command Palette and localized extension descriptions across package NLS files
+
+### Changed
+- Localized manual proxy prompts, validation errors, troubleshooting suggestions, system-proxy warnings, and proxy test result messages
+- Showed warning messages as temporary status bar messages to reduce notification noise
+- Refined Vietnamese UI translations
+
+## [2.2.11] - 2026-06-05
+
+### Changed
+- Replaced sync file watching with stat polling for more reliable cross-instance changes
+- Changed `otakProxy.proxyUrl` to machine scope and raised the minimum VS Code version to 1.97.0
+- Hardened status bar and sync tooltips by writing dynamic values as text
+
+### Fixed
+- Stored proxy credentials only in secret storage or runtime state, while persisting sanitized URLs to settings, global state, sync files, and logs
+- Scrubbed legacy persisted proxy credentials and compared manual proxy URL changes by public URL
+- Blocked proxy apply and disable operations in untrusted workspaces
+- Fixed HTTPS proxy connection tests by using protocol-specific transports and default ports
+
+## [2.2.10] - 2026-04-25
+
+### Changed
+- Updated README copy to clarify Auto and Manual modes, integrated terminal environment behavior, and privacy handling
+
+### Fixed
+- Masked proxy passwords in status bar text, status bar tooltips, and fallback proxy notifications
+
 ## [2.2.9] - 2026-03-28
 
 ### Added
