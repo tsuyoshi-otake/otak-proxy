@@ -165,6 +165,25 @@ suite('SystemProxyUpdateService Tests', () => {
         assert.strictEqual(state.usingFallbackProxy, false);
     });
 
+    test('Auto + had detected proxy + detection now null + no fallback: clears and emits systemProxyRemoved', async () => {
+        // Covers the message.systemProxyRemoved branch in notifyAutoProxyChange.
+        // Prior state had an active autoProxyUrl, neither fallback nor manual
+        // can stand in, so the proxy must be cleared and the user notified.
+        state.mode = ProxyMode.Auto;
+        state.autoProxyUrl = 'http://detected.example:8080';
+        configValues.enableFallback = false;
+        detectStub.resolves(null);
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoProxyUrl, undefined);
+        assert.strictEqual(state.autoModeOff, true);
+        assert.strictEqual(state.usingFallbackProxy, false);
+        assert.strictEqual(state.fallbackProxyUrl, undefined);
+        sinon.assert.calledWith(applyProxyStub, '', true);
+        sinon.assert.calledWith(notifyStub, 'message.systemProxyRemoved');
+    });
+
     test('Auto + detection fails + no manualProxyUrl: enters autoModeOff', async () => {
         state.mode = ProxyMode.Auto;
         configValues.enableFallback = true;

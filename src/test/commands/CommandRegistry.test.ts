@@ -116,6 +116,86 @@ suite('CommandRegistry Smoke Tests', () => {
         }
     });
 
+    test('config-change callback: otakProxy.proxyUrl in Manual mode saves state, strips credentials, applies, refreshes', async () => {
+        // Simulates a user editing otakProxy.proxyUrl while in Manual mode.
+        // The callback should: persist state (full URL), write the credential-stripped
+        // URL back into the workspace config, re-apply proxy settings, and refresh
+        // the status bar.
+        let savedState: ProxyState | undefined;
+        let applyArgs: { url: string; enabled: boolean } | undefined;
+        let statusBarUpdates = 0;
+        const configUpdates: Array<{ key: string; value: unknown }> = [];
+
+        const config: CommandRegistryConfig = {
+            ...baseConfig,
+            getProxyState: async () =>
+                ({ mode: ProxyMode.Manual, manualProxyUrl: 'http://old.example:8080' } as ProxyState),
+            saveProxyState: async (_ctx, next) => { savedState = next; },
+            applyProxySettings: async (url, enabled) => {
+                applyArgs = { url, enabled };
+                return true;
+            },
+            updateStatusBar: () => { statusBarUpdates++; }
+        };
+
+        const getConfigStub = sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+            get: (key: string) =>
+                key === 'proxyUrl' ? 'http://user:pass@new.example:3128' : undefined,
+            update: async (key: string, value: unknown) => {
+                configUpdates.push({ key, value });
+            },
+            has: () => true,
+            inspect: () => undefined
+        } as unknown as vscode.WorkspaceConfiguration);
+
+        new CommandRegistry(config).registerAll();
+        const cb = configListenerStub.firstCall.args[0] as (
+            e: vscode.ConfigurationChangeEvent
+        ) => Promise<void>;
+
+        await cb({ affectsConfiguration: (k: string) => k === 'otakProxy.proxyUrl' } as
+            vscode.ConfigurationChangeEvent);
+
+        assert.strictEqual(savedState?.manualProxyUrl, 'http://user:pass@new.example:3128',
+            'state must keep the full URL with credentials');
+        assert.deepStrictEqual(applyArgs, { url: 'http://user:pass@new.example:3128', enabled: true },
+            'apply must receive the credentialed URL in Manual mode');
+        assert.strictEqual(statusBarUpdates, 1, 'status bar must refresh once');
+
+        const proxyUrlUpdate = configUpdates.find(u => u.key === 'proxyUrl');
+        assert.ok(proxyUrlUpdate, 'workspace config must be rewritten');
+        // removeProxyCredentials round-trips through URL, which appends a trailing slash.
+        assert.strictEqual(proxyUrlUpdate?.value, 'http://new.example:3128/',
+            'config must store the credential-stripped URL');
+
+        sinon.assert.calledWith(getConfigStub, 'otakProxy');
+    });
+
+    test('config-change callback: otakProxy.showProxyUrl refreshes the status bar', async () => {
+        let statusBarUpdates = 0;
+        const config: CommandRegistryConfig = {
+            ...baseConfig,
+            getProxyState: async () => ({ mode: ProxyMode.Off } as ProxyState),
+            updateStatusBar: () => { statusBarUpdates++; }
+        };
+        sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+            get: () => undefined,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        } as unknown as vscode.WorkspaceConfiguration);
+
+        new CommandRegistry(config).registerAll();
+        const cb = configListenerStub.firstCall.args[0] as (
+            e: vscode.ConfigurationChangeEvent
+        ) => Promise<void>;
+
+        await cb({ affectsConfiguration: (k: string) => k === 'otakProxy.showProxyUrl' } as
+            vscode.ConfigurationChangeEvent);
+
+        assert.strictEqual(statusBarUpdates, 1);
+    });
+
     test('package.json contributed commands list matches what is registered', () => {
         // Guard against drift between package.json contributes.commands and the registry.
         // If a new command is added to package.json, this test forces the maintainer to
