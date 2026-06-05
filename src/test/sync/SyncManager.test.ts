@@ -70,6 +70,31 @@ suite('SyncManager Unit Tests', () => {
             assert.strictEqual(result, true);
         });
 
+        test('should expose shared state loaded during start', async () => {
+            const syncDir = path.join(testDir, 'otak-proxy-sync');
+            fs.mkdirSync(syncDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(syncDir, 'sync-state.json'),
+                JSON.stringify({
+                    version: 2,
+                    lastModified: Date.now(),
+                    lastModifiedBy: 'other-window-id',
+                    proxyState: {
+                        mode: ProxyMode.Auto,
+                        autoProxyUrl: 'http://remote-proxy.example.com:8080'
+                    }
+                })
+            );
+
+            await syncManager.start();
+
+            const sharedState = syncManager.getCurrentSharedState();
+            assert.deepStrictEqual(sharedState, {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://remote-proxy.example.com:8080'
+            });
+        });
+
         test('should handle stop without start', async () => {
             // Should not throw
             await syncManager.stop();

@@ -12,6 +12,22 @@ import { ProxyApplier } from '../core/ProxyApplier';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 
+function overrideWorkspaceTrustForTest(value: boolean): () => void {
+    const descriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'isTrusted');
+    Object.defineProperty(vscode.workspace, 'isTrusted', {
+        configurable: true,
+        get: () => value
+    });
+
+    return () => {
+        if (descriptor) {
+            Object.defineProperty(vscode.workspace, 'isTrusted', descriptor);
+        } else {
+            delete (vscode.workspace as { isTrusted?: boolean }).isTrusted;
+        }
+    };
+}
+
 suite('ProxyApplier Unit Tests', () => {
     test('applyProxy with valid URL succeeds when all managers succeed', async () => {
         const mockGitManager = {
@@ -297,8 +313,7 @@ suite('ProxyApplier Unit Tests', () => {
     });
 
     test('applyProxy does not change settings in an untrusted workspace', async () => {
-        const originalIsTrusted = (vscode.workspace as any).isTrusted;
-        (vscode.workspace as any).isTrusted = false;
+        const restoreWorkspaceTrust = overrideWorkspaceTrustForTest(false);
 
         try {
             let setCalls = 0;
@@ -349,17 +364,12 @@ suite('ProxyApplier Unit Tests', () => {
             assert.strictEqual(setCalls, 0, 'No manager should be called in untrusted workspace');
             assert.strictEqual(warningShown, true, 'Warning should be shown in untrusted workspace');
         } finally {
-            if (originalIsTrusted === undefined) {
-                delete (vscode.workspace as any).isTrusted;
-            } else {
-                (vscode.workspace as any).isTrusted = originalIsTrusted;
-            }
+            restoreWorkspaceTrust();
         }
     });
 
     test('disableProxy does not change settings in an untrusted workspace', async () => {
-        const originalIsTrusted = (vscode.workspace as any).isTrusted;
-        (vscode.workspace as any).isTrusted = false;
+        const restoreWorkspaceTrust = overrideWorkspaceTrustForTest(false);
 
         try {
             let unsetCalls = 0;
@@ -408,11 +418,7 @@ suite('ProxyApplier Unit Tests', () => {
             assert.strictEqual(result, false, 'disableProxy should fail in untrusted workspace');
             assert.strictEqual(unsetCalls, 0, 'No manager should be called in untrusted workspace');
         } finally {
-            if (originalIsTrusted === undefined) {
-                delete (vscode.workspace as any).isTrusted;
-            } else {
-                (vscode.workspace as any).isTrusted = originalIsTrusted;
-            }
+            restoreWorkspaceTrust();
         }
     });
 });

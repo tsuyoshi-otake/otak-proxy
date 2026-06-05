@@ -203,6 +203,12 @@ suite('ProxyUrlValidator Test Suite', () => {
             assert.strictEqual(result.isValid, false);
             assert.ok(result.errors.some(e => e.includes('Username') || e.includes('Password')));
         });
+
+        test('should reject malformed percent encoding in credentials without throwing', () => {
+            const result = validator.validate('http://user%ZZ:pass@proxy.example.com:8080');
+            assert.strictEqual(result.isValid, false);
+            assert.ok(result.errors.some(e => e.includes('Invalid URL format')));
+        });
     });
 
     suite('Property-Based Tests', () => {

@@ -258,21 +258,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await performInitialSetup(context);
     state = await proxyStateManager.getState(); // Reload state after setup
 
+    // Phase 9.5: Start SyncManager before applying local settings.
+    // If a shared state already exists, it must win before this instance publishes
+    // or applies its local persisted state.
+    if (syncManager) {
+        try {
+            await syncManager.start();
+            Logger.log('SyncManager started successfully');
+
+            if (syncConfigManager?.isSyncEnabled()) {
+                const sharedState = syncManager.getCurrentSharedState();
+                if (sharedState) {
+                    await proxyStateManager.saveState(sharedState);
+                    state = await proxyStateManager.getState();
+                    statusBarManager.update(state);
+                }
+            }
+        } catch (error) {
+            Logger.warn('Failed to start SyncManager:', error);
+        }
+    }
+
     // Phase 10: Apply current proxy settings
     const activeUrl = proxyStateManager.getActiveProxyUrl(state);
     if (state.mode === ProxyMode.Off) {
-        // If proxy is OFF, ensure any lingering proxy settings are cleared.
-        // We only disable when something is actually configured to avoid unnecessary noise.
+        // If proxy is OFF, only clear settings that this extension still tracks as managed.
+        // Do not remove arbitrary user/global proxy settings discovered on startup.
         if (terminalEnvManager) {
             await terminalEnvManager.unsetProxy();
         }
-        const [gitProxy, vscodeProxy, npmProxy] = await Promise.all([
-            gitConfigManager.getProxy().catch(() => null),
-            vscodeConfigManager.getProxy().catch(() => null),
-            npmConfigManager.getProxy().catch(() => null)
-        ]);
-        if (gitProxy || vscodeProxy || npmProxy) {
-            await proxyApplier.disableProxy();
+        if (state.gitConfigured || state.vscodeConfigured || state.npmConfigured) {
+            await proxyApplier.disableProxy({ silent: true });
         }
     } else if (activeUrl) {
         await proxyApplier.applyProxy(activeUrl, true);
@@ -285,18 +301,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await initializer.stopSystemProxyMonitoring();
     }
 
-    // Phase 11.5: Start SyncManager (Feature: multi-instance-sync)
-    if (syncManager) {
+    // Phase 11.5: Publish the applied startup state to sync peers.
+    if (syncManager && syncConfigManager?.isSyncEnabled()) {
         try {
-            await syncManager.start();
-            Logger.log('SyncManager started successfully');
-
-            // Notify initial state to sync
-            if (syncConfigManager?.isSyncEnabled()) {
-                await syncManager.notifyChange(state);
-            }
+            await syncManager.notifyChange(state);
         } catch (error) {
-            Logger.warn('Failed to start SyncManager:', error);
+            Logger.warn('Failed to publish initial sync state:', error);
         }
     }
 

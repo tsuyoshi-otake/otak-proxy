@@ -6,10 +6,33 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import * as http from 'http';
+import * as vscode from 'vscode';
 
 suite('ProxyUtils Test Suite', () => {
     let proxyUtils: typeof import('../../utils/ProxyUtils');
     let sandbox: sinon.SinonSandbox;
+
+    async function listen(server: http.Server): Promise<number> {
+        return new Promise((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', () => {
+                server.removeListener('error', reject);
+                const address = server.address();
+                if (typeof address === 'object' && address !== null) {
+                    resolve(address.port);
+                    return;
+                }
+                reject(new Error('Unable to determine test proxy port'));
+            });
+        });
+    }
+
+    async function close(server: http.Server): Promise<void> {
+        await new Promise<void>((resolve, reject) => {
+            server.close(error => error ? reject(error) : resolve());
+        });
+    }
 
     suiteSetup(() => {
         proxyUtils = require('../../utils/ProxyUtils');
@@ -134,6 +157,31 @@ suite('ProxyUtils Test Suite', () => {
             assert.ok(result.testUrls.every(url => url.startsWith('https://')),
                 'Test URLs should be HTTPS');
         });
+
+        test('should fail when proxy CONNECT response is not successful', async function() {
+            this.timeout(5000);
+            const server = http.createServer();
+            server.on('connect', (_request, socket) => {
+                socket.write('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n');
+                socket.destroy();
+            });
+
+            const port = await listen(server);
+            try {
+                const result = await proxyUtils.testProxyConnection(
+                    `http://127.0.0.1:${port}`,
+                    { timeout: 1000, testUrls: ['https://example.com'] }
+                );
+
+                assert.strictEqual(result.success, false);
+                assert.ok(
+                    result.errors.some(error => error.message.includes('407')),
+                    `Expected CONNECT 407 error, got: ${JSON.stringify(result.errors)}`
+                );
+            } finally {
+                await close(server);
+            }
+        });
     });
 
     suite('detectSystemProxySettings', () => {
@@ -147,6 +195,38 @@ suite('ProxyUtils Test Suite', () => {
 
             assert.ok(result === null || typeof result === 'string',
                 'Result should be null or string');
+        });
+
+        test('should use latest detection priority from configuration', async () => {
+            let priority = ['invalid_source'];
+            const getConfigurationStub = sinon.stub(vscode.workspace, 'getConfiguration').returns({
+                get: (key: string, defaultValue?: unknown) => {
+                    if (key === 'detectionSourcePriority') {
+                        return priority;
+                    }
+                    if (key === 'proxy') {
+                        return 'http://vscode-proxy.example.com:8080';
+                    }
+                    return defaultValue;
+                },
+                update: () => Promise.resolve(),
+                has: () => true,
+                inspect: () => undefined
+            } as vscode.WorkspaceConfiguration);
+
+            try {
+                proxyUtils.resetInstances();
+
+                const invalidSourceResult = await proxyUtils.detectSystemProxySettings();
+                assert.strictEqual(invalidSourceResult, null);
+
+                priority = ['vscode', 'environment'];
+                const vscodeResult = await proxyUtils.detectSystemProxySettings();
+                assert.strictEqual(vscodeResult, 'http://vscode-proxy.example.com:8080');
+            } finally {
+                proxyUtils.resetInstances();
+                getConfigurationStub.restore();
+            }
         });
     });
 
@@ -235,6 +315,61 @@ suite('ProxyUtils Test Suite', () => {
 
             assert.ok(result.duration !== undefined, 'duration should be defined');
             assert.ok(result.duration >= 0, 'duration should be non-negative');
+        });
+
+        test('should send proxy basic authentication header when credentials are present', async function() {
+            this.timeout(5000);
+            const server = http.createServer();
+            let proxyAuthorization: string | undefined;
+
+            server.on('connect', (request, socket) => {
+                proxyAuthorization = request.headers['proxy-authorization'];
+                socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+                socket.destroy();
+            });
+
+            const port = await listen(server);
+            try {
+                const result = await proxyUtils.testProxyConnectionParallel(
+                    `http://user:pass@127.0.0.1:${port}`,
+                    ['https://example.com'],
+                    1000
+                );
+
+                assert.strictEqual(result.success, true);
+                assert.strictEqual(
+                    proxyAuthorization,
+                    `Basic ${Buffer.from('user:pass', 'utf8').toString('base64')}`
+                );
+            } finally {
+                await close(server);
+            }
+        });
+
+        test('should fail when parallel CONNECT response is not successful', async function() {
+            this.timeout(5000);
+            const server = http.createServer();
+            server.on('connect', (_request, socket) => {
+                socket.write('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n');
+                socket.destroy();
+            });
+
+            const port = await listen(server);
+            try {
+                const result = await proxyUtils.testProxyConnectionParallel(
+                    `http://127.0.0.1:${port}`,
+                    ['https://example.com'],
+                    1000
+                );
+
+                assert.strictEqual(result.success, false);
+                assert.ok(
+                    result.errors.some(error => error.message.includes('407')),
+                    `Expected CONNECT 407 error, got: ${JSON.stringify(result.errors)}`
+                );
+            } finally {
+                await close(server);
+            }
         });
     });
 });

@@ -86,6 +86,11 @@ export interface ISyncManager {
     getSyncStatus(): SyncStatus;
 
     /**
+     * Get the last shared proxy state loaded or written by this manager
+     */
+    getCurrentSharedState(): ProxyState | null;
+
+    /**
      * Check if sync is enabled
      */
     isEnabled(): boolean;
@@ -369,6 +374,16 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             lastError: this.lastError,
             isSyncing: this.isSyncing
         };
+    }
+
+    /**
+     * Get the last shared proxy state loaded or written by this manager.
+     *
+     * Used during extension startup to apply an existing shared state before
+     * publishing this instance's local state.
+     */
+    getCurrentSharedState(): ProxyState | null {
+        return this.currentState ? { ...this.currentState.state } : null;
     }
 
     /**

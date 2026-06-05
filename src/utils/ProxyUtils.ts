@@ -21,6 +21,7 @@ import * as https from 'https';
 let validator: ProxyUrlValidator | null = null;
 let sanitizer: InputSanitizer | null = null;
 let systemProxyDetector: SystemProxyDetector | null = null;
+let systemProxyDetectorPriorityKey: string | null = null;
 let userNotifier: UserNotifier | null = null;
 
 /**
@@ -47,10 +48,16 @@ function getSanitizer(): InputSanitizer {
  * Get or create the SystemProxyDetector instance
  */
 function getSystemProxyDetector(): SystemProxyDetector {
+    const config = vscode.workspace.getConfiguration('otakProxy');
+    const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
+    const priorityKey = JSON.stringify(detectionSourcePriority);
+
     if (!systemProxyDetector) {
-        const config = vscode.workspace.getConfiguration('otakProxy');
-        const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
         systemProxyDetector = new SystemProxyDetector(detectionSourcePriority);
+        systemProxyDetectorPriorityKey = priorityKey;
+    } else if (systemProxyDetectorPriorityKey !== priorityKey) {
+        systemProxyDetector.updateDetectionPriority(detectionSourcePriority);
+        systemProxyDetectorPriorityKey = priorityKey;
     }
     return systemProxyDetector;
 }
@@ -158,14 +165,46 @@ function createProxyConnectRequest(proxy: URL, requestOptions: http.RequestOptio
     return transport.request(requestOptions);
 }
 
+function decodeProxyCredential(value: string): string {
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        return value;
+    }
+}
+
+function buildProxyAuthorizationHeader(proxy: URL): string | undefined {
+    if (!proxy.username && !proxy.password) {
+        return undefined;
+    }
+
+    const username = decodeProxyCredential(proxy.username);
+    const password = decodeProxyCredential(proxy.password);
+    const credentials = Buffer.from(`${username}:${password}`, 'utf8').toString('base64');
+    return `Basic ${credentials}`;
+}
+
 function buildConnectRequestOptions(proxy: URL, target: URL, timeout: number): http.RequestOptions {
+    const proxyAuthorization = buildProxyAuthorizationHeader(proxy);
     return {
         hostname: proxy.hostname,
         port: parsePort(proxy.port, getDefaultProxyPort(proxy)),
         method: 'CONNECT',
         path: `${target.hostname}:${parsePort(target.port, DEFAULT_TARGET_PORT)}`,
-        timeout
+        timeout,
+        headers: proxyAuthorization ? { 'Proxy-Authorization': proxyAuthorization } : undefined
     };
+}
+
+function isConnectResponseSuccessful(response: http.IncomingMessage): boolean {
+    const statusCode = response.statusCode ?? 0;
+    return statusCode >= 200 && statusCode < 300;
+}
+
+function formatConnectFailure(response: http.IncomingMessage): string {
+    const statusCode = response.statusCode ?? 'unknown';
+    const statusMessage = response.statusMessage ? ` ${response.statusMessage}` : '';
+    return `Proxy CONNECT failed with status ${statusCode}${statusMessage}`;
 }
 
 /**
@@ -211,23 +250,41 @@ export async function testProxyConnection(
 
                 const isConnected = await new Promise<boolean>((resolve) => {
                     const req = createProxyConnectRequest(proxyParsed, requestOptions);
+                    let requestSettled = false;
 
-                    req.on('connect', () => {
-                        resolve(true);
+                    const finish = (success: boolean, error?: string) => {
+                        if (requestSettled) {
+                            return;
+                        }
+                        requestSettled = true;
+                        if (error) {
+                            errors.push({ url: testUrl, message: error });
+                        }
+                        resolve(success);
+                    };
+
+                    req.on('connect', (response, socket) => {
+                        try {
+                            socket.destroy();
+                        } catch {
+                            // Ignore destroy errors
+                        }
                         req.destroy();
+
+                        if (isConnectResponseSuccessful(response)) {
+                            finish(true);
+                        } else {
+                            finish(false, formatConnectFailure(response));
+                        }
                     });
 
                     req.on('error', (error: Error) => {
-                        // Collect error for this test URL
-                        errors.push({ url: testUrl, message: error.message || 'Connection failed' });
-                        resolve(false);
+                        finish(false, error.message || 'Connection failed');
                     });
 
                     req.on('timeout', () => {
-                        // Collect timeout error for this test URL
-                        errors.push({ url: testUrl, message: `Connection timeout (${timeout}ms)` });
                         req.destroy();
-                        resolve(false);
+                        finish(false, `Connection timeout (${timeout}ms)`);
                     });
 
                     req.end();
@@ -376,13 +433,19 @@ export async function testProxyConnectionParallel(
                     const req = createProxyConnectRequest(proxyParsed, requestOptions);
                     requests.push(req);
 
-                    req.on('connect', () => {
+                    req.on('connect', (response, socket) => {
                         try {
+                            socket.destroy();
                             req.destroy();
                         } catch {
                             // Ignore destroy errors
                         }
-                        onTestResult(testUrl, true);
+
+                        if (isConnectResponseSuccessful(response)) {
+                            onTestResult(testUrl, true);
+                        } else {
+                            onTestResult(testUrl, false, formatConnectFailure(response));
+                        }
                     });
 
                     req.on('error', (error: Error) => {
@@ -492,6 +555,7 @@ export async function detectSystemProxySettings(): Promise<string | null> {
 export function updateDetectionPriority(priority: string[]): void {
     const detector = getSystemProxyDetector();
     detector.updateDetectionPriority(priority);
+    systemProxyDetectorPriorityKey = JSON.stringify(priority);
 }
 
 /**
@@ -501,5 +565,6 @@ export function resetInstances(): void {
     validator = null;
     sanitizer = null;
     systemProxyDetector = null;
+    systemProxyDetectorPriorityKey = null;
     userNotifier = null;
 }

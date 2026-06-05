@@ -96,7 +96,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 
 ## Requirements
 
-- VS Code 1.9.0 or higher
+- VS Code 1.97.0 or higher
 - Git available on PATH
 
 ## Installation

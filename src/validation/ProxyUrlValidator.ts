@@ -123,8 +123,15 @@ export class ProxyUrlValidator {
         // Validate credentials if present
         if (parsed.username || parsed.password) {
             // Decode URL-encoded credentials for validation
-            const decodedUsername = parsed.username ? decodeURIComponent(parsed.username) : '';
-            const decodedPassword = parsed.password ? decodeURIComponent(parsed.password) : '';
+            let decodedUsername = '';
+            let decodedPassword = '';
+            try {
+                decodedUsername = parsed.username ? decodeURIComponent(parsed.username) : '';
+                decodedPassword = parsed.password ? decodeURIComponent(parsed.password) : '';
+            } catch {
+                errors.push('Invalid URL format');
+                return { isValid: false, errors };
+            }
             
             if (decodedUsername && !ProxyUrlValidator.CREDENTIAL_PATTERN.test(decodedUsername)) {
                 errors.push('Username contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)');
