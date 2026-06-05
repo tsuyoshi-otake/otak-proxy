@@ -91,6 +91,53 @@ export class ProxyApplier {
         }
     }
 
+    private validateProxyUrlForApply(proxyUrl: string): boolean {
+        const validationResult = this.validator.validate(proxyUrl);
+        if (validationResult.isValid) {
+            return true;
+        }
+
+        const suggestions = buildProxyValidationSuggestions(validationResult.errors);
+        this.userNotifier.showError('error.invalidProxyUrl', suggestions);
+        return false;
+    }
+
+    private areConfigResultsSuccessful(results: ProxyConfigResults): boolean {
+        return results.gitSuccess &&
+            results.vscodeSuccess &&
+            results.npmSuccess &&
+            results.terminalEnvSuccess;
+    }
+
+    private notifyApplyResult(
+        proxyUrl: string,
+        options: ProxyApplyOptions | undefined,
+        errorAggregator: ErrorAggregator
+    ): void {
+        if (errorAggregator.hasErrors()) {
+            showAggregatedErrors(errorAggregator, this.userNotifier);
+            return;
+        }
+
+        if (!options?.silent) {
+            showProxyConfigured(proxyUrl, this.sanitizer, this.userNotifier);
+        }
+    }
+
+    private notifyDisableResult(
+        options: ProxyApplyOptions | undefined,
+        errorAggregator: ErrorAggregator
+    ): void {
+        if (errorAggregator.hasErrors()) {
+            showAggregatedErrors(errorAggregator, this.userNotifier);
+            return;
+        }
+
+        if (!options?.silent) {
+            showProxyDisabled(this.userNotifier);
+        }
+    }
+
     /**
      * Apply proxy settings to all configuration targets
      * 
@@ -118,16 +165,8 @@ export class ProxyApplier {
         }
         
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
-        if (proxyUrl) {
-            const validationResult = this.validator.validate(proxyUrl);
-            if (!validationResult.isValid) {
-                // Display validation errors with specific details
-                const errorMessage = 'error.invalidProxyUrl';
-                const suggestions = buildProxyValidationSuggestions(validationResult.errors);
-                
-                this.userNotifier.showError(errorMessage, suggestions);
-                return false;
-            }
+        if (proxyUrl && !this.validateProxyUrlForApply(proxyUrl)) {
+            return false;
         }
         
         const results = await this.withOptionalProgress(
@@ -144,18 +183,10 @@ export class ProxyApplier {
         // Track configuration state if stateManager is provided
         await saveProxyConfigResults(this.stateManager, results, errorAggregator);
 
-        const success = results.gitSuccess &&
-            results.vscodeSuccess &&
-            results.npmSuccess &&
-            results.terminalEnvSuccess;
+        const success = this.areConfigResultsSuccessful(results);
         
         // Requirement 2.5: Use ErrorAggregator to display all errors together
-        if (errorAggregator.hasErrors()) {
-            showAggregatedErrors(errorAggregator, this.userNotifier);
-        } else if (proxyUrl && !options?.silent) {
-            // Requirement 1.5, 6.2: Update status bar with sanitized proxy URL
-            showProxyConfigured(proxyUrl, this.sanitizer, this.userNotifier);
-        }
+        this.notifyApplyResult(proxyUrl, options, errorAggregator);
 
         return success;
     }
@@ -188,18 +219,10 @@ export class ProxyApplier {
         // Track configuration state if stateManager is provided
         await saveProxyConfigResults(this.stateManager, results, errorAggregator);
 
-        const success = results.gitSuccess &&
-            results.vscodeSuccess &&
-            results.npmSuccess &&
-            results.terminalEnvSuccess;
+        const success = this.areConfigResultsSuccessful(results);
         
         // Use ErrorAggregator for any failures and UserNotifier for feedback
-        if (errorAggregator.hasErrors()) {
-            showAggregatedErrors(errorAggregator, this.userNotifier);
-        } else if (!options?.silent) {
-            // Update status bar to show proxy disabled
-            showProxyDisabled(this.userNotifier);
-        }
+        this.notifyDisableResult(options, errorAggregator);
 
         return success;
     }

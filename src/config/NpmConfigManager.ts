@@ -5,6 +5,17 @@ import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProce
 
 const execFileAsync = promisify(execFile);
 
+interface NpmErrorDetails {
+    errorMessage: string;
+    stderr: string;
+    code: unknown;
+    signal: unknown;
+    killed: boolean;
+}
+
+type NpmErrorClassification = Pick<OperationResult, 'errorType'> & { error: string };
+type NpmErrorClassifier = (details: NpmErrorDetails) => NpmErrorClassification | null;
+
 /**
  * Result of an npm configuration operation
  */
@@ -146,42 +157,72 @@ export class NpmConfigManager {
      * @returns OperationResult with error details
      */
     private handleError(error: unknown): OperationResult {
-        const errorMessage = getErrorMessage(error);
-        const stderr = getErrorStderr(error);
-        const code = getErrorCode(error);
-        const signal = getErrorSignal(error);
-        const killed = wasProcessKilled(error);
-
-        // Determine error type based on error details
-        let errorType: OperationResult['errorType'] = 'UNKNOWN';
-        let errorDescription = errorMessage;
-
-        // Check for npm not installed
-        if (code === 'ENOENT' || errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
-            errorType = 'NOT_INSTALLED';
-            errorDescription = 'npm is not installed or not in PATH';
-        }
-        // Check for permission errors
-        else if (code === 'EACCES' || errorMessage.includes('EACCES') ||
-                 stderr.includes('Permission denied') || stderr.includes('permission')) {
-            errorType = 'NO_PERMISSION';
-            errorDescription = 'Permission denied when accessing npm configuration';
-        }
-        // Check for timeout
-        else if (killed || errorMessage.includes('timeout') || signal === 'SIGTERM') {
-            errorType = 'TIMEOUT';
-            errorDescription = `npm command timed out after ${this.timeout}ms`;
-        }
-        // Check for config errors
-        else if (stderr.includes('config') || errorMessage.includes('config')) {
-            errorType = 'CONFIG_ERROR';
-            errorDescription = 'Failed to read/write npm configuration';
-        }
+        const details = this.getErrorDetails(error);
+        const classification = this.classifyNpmError(details);
 
         return {
             success: false,
-            error: errorDescription,
-            errorType
+            error: classification.error,
+            errorType: classification.errorType
         };
+    }
+
+    private getErrorDetails(error: unknown): NpmErrorDetails {
+        return {
+            errorMessage: getErrorMessage(error),
+            stderr: getErrorStderr(error),
+            code: getErrorCode(error),
+            signal: getErrorSignal(error),
+            killed: wasProcessKilled(error)
+        };
+    }
+
+    private classifyNpmError(details: NpmErrorDetails): NpmErrorClassification {
+        const classifiers: NpmErrorClassifier[] = [
+            data => this.classifyNpmMissing(data),
+            data => this.classifyNpmPermission(data),
+            data => this.classifyNpmTimeout(data),
+            data => this.classifyNpmConfig(data)
+        ];
+
+        for (const classifier of classifiers) {
+            const classification = classifier(details);
+            if (classification) {
+                return classification;
+            }
+        }
+
+        return { errorType: 'UNKNOWN', error: details.errorMessage };
+    }
+
+    private classifyNpmMissing(details: NpmErrorDetails): NpmErrorClassification | null {
+        return details.code === 'ENOENT' ||
+            details.errorMessage.includes('ENOENT') ||
+            details.errorMessage.includes('not found')
+            ? { errorType: 'NOT_INSTALLED', error: 'npm is not installed or not in PATH' }
+            : null;
+    }
+
+    private classifyNpmPermission(details: NpmErrorDetails): NpmErrorClassification | null {
+        return details.code === 'EACCES' ||
+            details.errorMessage.includes('EACCES') ||
+            details.stderr.includes('Permission denied') ||
+            details.stderr.includes('permission')
+            ? { errorType: 'NO_PERMISSION', error: 'Permission denied when accessing npm configuration' }
+            : null;
+    }
+
+    private classifyNpmTimeout(details: NpmErrorDetails): NpmErrorClassification | null {
+        return details.killed ||
+            details.errorMessage.includes('timeout') ||
+            details.signal === 'SIGTERM'
+            ? { errorType: 'TIMEOUT', error: `npm command timed out after ${this.timeout}ms` }
+            : null;
+    }
+
+    private classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | null {
+        return details.stderr.includes('config') || details.errorMessage.includes('config')
+            ? { errorType: 'CONFIG_ERROR', error: 'Failed to read/write npm configuration' }
+            : null;
     }
 }

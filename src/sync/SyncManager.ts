@@ -23,7 +23,8 @@ import { ISyncConfigManager } from './SyncConfigManager';
 import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
 import { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
 import { reconcileSharedState } from './SyncReconciler';
-import { CLEANUP_INTERVAL, HEARTBEAT_INTERVAL } from './SyncTiming';
+import { SyncManagerTimers } from './SyncManagerTimers';
+import { handleSyncConfigChange } from './SyncConfigChangeHandler';
 
 export type { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
 
@@ -42,6 +43,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private readonly fileWatcher: IFileWatcher;
     private readonly conflictResolver: ConflictResolver;
     private readonly configManager: ISyncConfigManager;
+    private readonly timers: SyncManagerTimers;
 
     private isStarted: boolean = false;
     private isSyncing: boolean = false;
@@ -49,9 +51,6 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private lastSyncTime: number | null = null;
     private lastError: string | null = null;
     private currentState: SyncableState | null = null;
-    private heartbeatTimer: NodeJS.Timeout | null = null;
-    private cleanupTimer: NodeJS.Timeout | null = null;
-    private syncTimer: NodeJS.Timeout | null = null;
     private remoteChangeInProgress: boolean = false;
 
     /**
@@ -76,6 +75,12 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         this.instanceRegistry = new InstanceRegistry(baseDir, windowId, extensionVersion);
         this.fileWatcher = new FileWatcher();
         this.conflictResolver = new ConflictResolver();
+        this.timers = new SyncManagerTimers(
+            this.instanceRegistry,
+            this.configManager,
+            () => void this.handleRemoteChange(),
+            () => void this.refreshActiveInstances()
+        );
 
         // Set up file change handler
         this.fileWatcher.on('change', () => void this.handleRemoteChange());
@@ -115,15 +120,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             const filePath = this.sharedStateFile.getFilePath();
             this.fileWatcher.start(filePath);
 
-            // Start heartbeat timer
-            this.heartbeatTimer = setInterval(() => {
-                this.instanceRegistry.updateHeartbeat();
-            }, HEARTBEAT_INTERVAL);
-
-            // Start cleanup timer
-            this.cleanupTimer = setInterval(() => {
-                this.instanceRegistry.cleanup();
-            }, CLEANUP_INTERVAL);
+            this.timers.startLifecycleTimers();
 
             // Load initial state
             await this.loadInitialState();
@@ -132,7 +129,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             await this.refreshActiveInstances();
 
             this.isStarted = true;
-            this.reschedulePeriodicSync();
+            this.timers.reschedulePeriodicSync();
             this.emitStatusChanged();
 
             Logger.log('SyncManager started successfully');
@@ -153,18 +150,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         }
 
         try {
-            // Stop timers
-            if (this.heartbeatTimer) {
-                clearInterval(this.heartbeatTimer);
-                this.heartbeatTimer = null;
-            }
-
-            if (this.cleanupTimer) {
-                clearInterval(this.cleanupTimer);
-                this.cleanupTimer = null;
-            }
-
-            this.stopPeriodicSync();
+            this.timers.stopAll();
 
             // Stop file watcher
             this.fileWatcher.stop();
@@ -361,20 +347,12 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * Handle configuration change
      */
     private handleConfigChange(key: string, value: unknown): void {
-        if (key === 'syncEnabled') {
-            if (value === false && this.isStarted) {
-                Logger.log('Sync disabled via configuration, stopping...');
-                void this.stop();
-            } else if (value === true && !this.isStarted) {
-                Logger.log('Sync enabled via configuration, starting...');
-                void this.start();
-            }
-            return;
-        }
-
-        if (key === 'syncInterval' && this.isStarted) {
-            this.reschedulePeriodicSync();
-        }
+        handleSyncConfigChange(key, value, {
+            isStarted: () => this.isStarted,
+            start: () => void this.start(),
+            stop: () => void this.stop(),
+            reschedulePeriodicSync: () => this.timers.reschedulePeriodicSync()
+        });
     }
 
     private async reconcileWithSharedFile(): Promise<{ conflictsResolved: number }> {
@@ -436,21 +414,4 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         }
     }
 
-    private stopPeriodicSync(): void {
-        if (this.syncTimer) {
-            clearInterval(this.syncTimer);
-            this.syncTimer = null;
-        }
-    }
-
-    private reschedulePeriodicSync(): void {
-        this.stopPeriodicSync();
-
-        // Polling provides a reliable fallback when fs.watch misses events.
-        const intervalMs = this.configManager.getSyncInterval();
-        this.syncTimer = setInterval(() => {
-            void this.handleRemoteChange();
-            void this.refreshActiveInstances();
-        }, intervalMs);
-    }
 }

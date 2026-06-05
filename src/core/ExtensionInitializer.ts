@@ -13,7 +13,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState, ProxyTestResult } from './types';
+import { ProxyMode, ProxyState } from './types';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
@@ -21,6 +21,12 @@ import { TestResult } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { InitialSetupFlow } from './InitialSetupFlow';
 import { SystemProxyUpdateService } from './SystemProxyUpdateService';
+import {
+    handleProxyChanged,
+    handleProxyStateChanged,
+    handleProxyTestComplete,
+    StartupTestState
+} from './ExtensionProxyEventHandlers';
 
 export type { InitializerContext } from './ExtensionInitializerTypes';
 
@@ -35,7 +41,7 @@ export class ExtensionInitializer {
     private initialSetupFlow: InitialSetupFlow;
     private systemProxyUpdateService: SystemProxyUpdateService;
     private systemProxyCheckInterval: NodeJS.Timeout | undefined;
-    private isStartupTestPending: boolean = false;
+    private startupTestState: StartupTestState = { isPending: false };
 
     private autoTestEnabled: boolean = true;
 
@@ -94,17 +100,17 @@ export class ExtensionInitializer {
 
         // Set up proxyChanged event handler
         this.proxyMonitor.on('proxyChanged', async (result: ProxyDetectionResult) => {
-            await this.handleProxyChanged(result);
+            await handleProxyChanged(this.context, result);
         });
 
         // Feature: auto-mode-proxy-testing - Handle test complete events
         this.proxyMonitor.on('proxyTestComplete', async (testResult: TestResult) => {
-            await this.handleProxyTestComplete(testResult);
+            await handleProxyTestComplete(this.context, this.startupTestState, testResult);
         });
 
         // Feature: auto-mode-proxy-testing - Handle state changes based on reachability
         this.proxyMonitor.on('proxyStateChanged', async (data: { proxyUrl: string; reachable: boolean; previousState: boolean }) => {
-            await this.handleProxyStateChanged(data);
+            await handleProxyStateChanged(this.context, data);
         });
 
         // Set up allRetriesFailed event handler
@@ -126,124 +132,6 @@ export class ExtensionInitializer {
     }
 
     /**
-     * Handle proxy changed event
-     * Feature: auto-mode-proxy-testing - Updated to consider proxy reachability
-     */
-    private async handleProxyChanged(result: ProxyDetectionResult): Promise<void> {
-        const state = await this.context.proxyStateManager.getState();
-        if (state.mode === ProxyMode.Auto) {
-            const previousProxy = state.autoProxyUrl;
-            state.autoProxyUrl = result.proxyUrl || undefined;
-
-            // Feature: auto-mode-proxy-testing - Update reachability state
-            if (result.testResult) {
-                state.lastTestResult = result.testResult as ProxyTestResult;
-                state.proxyReachable = result.proxyReachable;
-                state.lastTestTimestamp = Date.now();
-            }
-
-            if (previousProxy !== state.autoProxyUrl) {
-                await this.context.proxyStateManager.saveState(state);
-
-                // Feature: auto-mode-proxy-testing - Only apply proxy if it's reachable
-                const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
-                await this.context.proxyApplier.applyProxy(state.autoProxyUrl || '', shouldEnable);
-
-                if (state.autoProxyUrl && result.proxyReachable !== false) {
-                    this.context.userNotifier.showSuccess(
-                        'message.systemProxyChanged',
-                        { url: this.context.sanitizer.maskPassword(state.autoProxyUrl) }
-                    );
-                } else if (previousProxy && !state.autoProxyUrl) {
-                    this.context.userNotifier.showSuccess('message.systemProxyRemoved');
-                }
-            } else {
-                // Same proxy URL but need to save test result
-                await this.context.proxyStateManager.saveState(state);
-            }
-        }
-    }
-
-    /**
-     * Handle proxy test complete event
-     * Feature: auto-mode-proxy-testing
-     */
-    private async handleProxyTestComplete(testResult: TestResult): Promise<void> {
-        const state = await this.context.proxyStateManager.getState();
-
-        // Only process for Auto mode
-        if (state.mode !== ProxyMode.Auto) {
-            return;
-        }
-
-        // Update state with test result
-        state.lastTestResult = testResult as ProxyTestResult;
-        state.proxyReachable = testResult.success;
-        state.lastTestTimestamp = Date.now();
-
-        // Update autoModeOff based on test result
-        if (!testResult.success) {
-            // Test failed - set Auto Mode OFF
-            state.autoModeOff = true;
-            state.usingFallbackProxy = false;
-            state.fallbackProxyUrl = undefined;
-            Logger.info('Proxy test failed - Auto Mode OFF');
-        } else {
-            // Test succeeded - ensure Auto Mode is ON
-            state.autoModeOff = false;
-        }
-
-        await this.context.proxyStateManager.saveState(state);
-
-        // Update status bar
-        if (this.context.updateStatusBar) {
-            this.context.updateStatusBar(state);
-        }
-
-        // Clear startup test pending flag if applicable
-        if (this.isStartupTestPending) {
-            this.isStartupTestPending = false;
-            Logger.info(`Startup connection test completed: ${testResult.success ? 'success' : 'failed'}`);
-        }
-    }
-
-    /**
-     * Handle proxy state changed event (reachability change)
-     * Feature: auto-mode-proxy-testing
-     */
-    private async handleProxyStateChanged(data: { proxyUrl: string; reachable: boolean; previousState: boolean }): Promise<void> {
-        const state = await this.context.proxyStateManager.getState();
-
-        if (state.mode !== ProxyMode.Auto) {
-            return;
-        }
-
-        state.proxyReachable = data.reachable;
-
-        // Apply proxy settings based on new reachability state.
-        // Use silent mode because these are automatic monitor-driven transitions,
-        // not explicit user actions.
-        if (data.reachable && !data.previousState) {
-            // Proxy became reachable
-            state.autoModeOff = false;
-            await this.context.proxyApplier.applyProxy(data.proxyUrl, true, { silent: true });
-            Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
-        } else if (!data.reachable && data.previousState) {
-            // Proxy became unreachable - set Auto Mode OFF
-            state.autoModeOff = true;
-            state.usingFallbackProxy = false;
-            state.fallbackProxyUrl = undefined;
-            await this.context.proxyApplier.applyProxy(data.proxyUrl, false, { silent: true });
-            Logger.info(`Proxy ${data.proxyUrl} became unreachable, Auto Mode OFF`);
-        }
-
-        await this.context.proxyStateManager.saveState(state);
-        if (this.context.updateStatusBar) {
-            this.context.updateStatusBar(state);
-        }
-    }
-
-    /**
      * Start system proxy monitoring
      * Feature: auto-mode-proxy-testing - Runs startup connection test
      */
@@ -262,7 +150,7 @@ export class ExtensionInitializer {
         }
 
         // Feature: auto-mode-proxy-testing - Mark state as testing pending
-        this.isStartupTestPending = true;
+        this.startupTestState.isPending = true;
         state.proxyReachable = undefined; // Indeterminate until test completes
         await this.context.proxyStateManager.saveState(state);
 
@@ -304,7 +192,7 @@ export class ExtensionInitializer {
      * Feature: auto-mode-proxy-testing
      */
     isStartupTestStillPending(): boolean {
-        return this.isStartupTestPending;
+        return this.startupTestState.isPending;
     }
 
     /**

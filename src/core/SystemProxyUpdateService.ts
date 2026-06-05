@@ -18,10 +18,7 @@ export class SystemProxyUpdateService {
         const state = await this.context.proxyStateManager.getState();
 
         const now = Date.now();
-        if (state.mode !== ProxyMode.Auto &&
-            state.lastSystemProxyCheck &&
-            (now - state.lastSystemProxyCheck) < 300000 &&
-            state.autoProxyUrl) {
+        if (this.shouldSkipRecentNonAutoCheck(state, now)) {
             return;
         }
 
@@ -30,41 +27,75 @@ export class SystemProxyUpdateService {
         state.systemProxyDetected = !!detectedProxy;
 
         if (state.mode === ProxyMode.Auto) {
-            const previousProxy = state.autoProxyUrl;
-
-            if (detectedProxy) {
-                state.autoProxyUrl = detectedProxy;
-                state.autoModeOff = false;
-                state.usingFallbackProxy = false;
-                state.fallbackProxyUrl = undefined;
-            } else {
-                await this.applyFallbackProxyState(state);
-            }
-
-            if (previousProxy !== state.autoProxyUrl) {
-                await this.context.proxyStateManager.saveState(state);
-                await this.context.proxyApplier.applyProxy(state.autoProxyUrl || '', true);
-
-                if (state.autoProxyUrl && !state.usingFallbackProxy) {
-                    this.context.userNotifier.showSuccess(
-                        'message.systemProxyChanged',
-                        { url: this.context.sanitizer.maskPassword(state.autoProxyUrl) }
-                    );
-                } else if (state.usingFallbackProxy) {
-                    this.context.userNotifier.showSuccess(
-                        'fallback.usingManualProxy',
-                        { url: this.context.sanitizer.maskPassword(state.autoProxyUrl!) }
-                    );
-                } else if (previousProxy) {
-                    this.context.userNotifier.showSuccess('message.systemProxyRemoved');
-                }
-            } else {
-                await this.context.proxyStateManager.saveState(state);
-            }
-
+            await this.updateAutoProxyState(state, detectedProxy);
             return;
         }
 
+        await this.saveDetectedProxyForNonAutoMode(state, detectedProxy);
+    }
+
+    private shouldSkipRecentNonAutoCheck(state: ProxyState, now: number): boolean {
+        return Boolean(
+            state.mode !== ProxyMode.Auto &&
+            state.lastSystemProxyCheck &&
+            (now - state.lastSystemProxyCheck) < 300000 &&
+            state.autoProxyUrl
+        );
+    }
+
+    private async updateAutoProxyState(state: ProxyState, detectedProxy: string | null): Promise<void> {
+        const previousProxy = state.autoProxyUrl;
+
+        if (detectedProxy) {
+            this.applyDetectedProxyState(state, detectedProxy);
+        } else {
+            await this.applyFallbackProxyState(state);
+        }
+
+        if (previousProxy === state.autoProxyUrl) {
+            await this.context.proxyStateManager.saveState(state);
+            return;
+        }
+
+        await this.saveAndApplyAutoProxyState(state, previousProxy);
+    }
+
+    private applyDetectedProxyState(state: ProxyState, detectedProxy: string): void {
+        state.autoProxyUrl = detectedProxy;
+        state.autoModeOff = false;
+        state.usingFallbackProxy = false;
+        state.fallbackProxyUrl = undefined;
+    }
+
+    private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
+        await this.context.proxyStateManager.saveState(state);
+        await this.context.proxyApplier.applyProxy(state.autoProxyUrl || '', true);
+        this.notifyAutoProxyChange(state, previousProxy);
+    }
+
+    private notifyAutoProxyChange(state: ProxyState, previousProxy: string | undefined): void {
+        if (state.autoProxyUrl && !state.usingFallbackProxy) {
+            this.context.userNotifier.showSuccess(
+                'message.systemProxyChanged',
+                { url: this.context.sanitizer.maskPassword(state.autoProxyUrl) }
+            );
+            return;
+        }
+
+        if (state.usingFallbackProxy) {
+            this.context.userNotifier.showSuccess(
+                'fallback.usingManualProxy',
+                { url: this.context.sanitizer.maskPassword(state.autoProxyUrl!) }
+            );
+            return;
+        }
+
+        if (previousProxy) {
+            this.context.userNotifier.showSuccess('message.systemProxyRemoved');
+        }
+    }
+
+    private async saveDetectedProxyForNonAutoMode(state: ProxyState, detectedProxy: string | null): Promise<void> {
         state.autoProxyUrl = detectedProxy || undefined;
         await this.context.proxyStateManager.saveState(state);
     }

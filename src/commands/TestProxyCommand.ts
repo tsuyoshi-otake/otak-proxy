@@ -17,6 +17,83 @@ import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
+import { ProxyState } from '../core/types';
+import { TestResult } from '../utils/ProxyUtils';
+
+async function handleNoActiveProxy(state: ProxyState, i18n: I18nManager): Promise<void> {
+    const action = await vscode.window.showErrorMessage(
+        i18n.t('message.noProxyConfigured', { mode: state.mode.toUpperCase() }),
+        i18n.t('action.configureManual'),
+        i18n.t('action.importSystem'),
+        i18n.t('action.cancel')
+    );
+
+    if (action === i18n.t('action.configureManual')) {
+        await vscode.commands.executeCommand('otak-proxy.configureUrl');
+    } else if (action === i18n.t('action.importSystem')) {
+        await vscode.commands.executeCommand('otak-proxy.importProxy');
+    }
+}
+
+function buildTestFailureSuggestions(state: ProxyState, i18n: I18nManager): string[] {
+    return [
+        i18n.t('suggestion.verifyUrl'),
+        i18n.t('suggestion.checkServer'),
+        i18n.t('suggestion.checkNetwork'),
+        i18n.t('suggestion.checkFirewall'),
+        state.mode === ProxyMode.Manual
+            ? i18n.t('suggestion.reconfigureManual')
+            : i18n.t('suggestion.checkSystemSettings'),
+        i18n.t('suggestion.testDifferentApp')
+    ];
+}
+
+function logTestFailure(testResult: TestResult, sanitizedUrl: string, suggestions: string[], i18n: I18nManager): void {
+    const errorDetails = {
+        timestamp: new Date(),
+        errorMessage: i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
+        attemptedUrls: testResult.testUrls,
+        suggestions,
+        context: testResult.errors ? {
+            errors: testResult.errors.map(err => `${err.url}: ${err.message}`)
+        } : undefined
+    };
+    OutputChannelManager.getInstance().logError(
+        i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
+        errorDetails
+    );
+}
+
+async function handleTestFailureActions(ctx: CommandContext, sanitizedUrl: string, i18n: I18nManager): Promise<CommandResult | null> {
+    const action = await vscode.window.showErrorMessage(
+        i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
+        i18n.t('action.showDetails'),
+        i18n.t('action.retest'),
+        i18n.t('action.changeSettings')
+    );
+
+    if (action === i18n.t('action.showDetails')) {
+        OutputChannelManager.getInstance().show();
+    } else if (action === i18n.t('action.retest')) {
+        return await executeTestProxy(ctx);
+    } else if (action === i18n.t('action.changeSettings')) {
+        await vscode.commands.executeCommand('otak-proxy.configureUrl');
+    }
+
+    return null;
+}
+
+async function handleFailedTest(
+    ctx: CommandContext,
+    state: ProxyState,
+    testResult: TestResult,
+    sanitizedUrl: string,
+    i18n: I18nManager
+): Promise<CommandResult | null> {
+    const suggestions = buildTestFailureSuggestions(state, i18n);
+    logTestFailure(testResult, sanitizedUrl, suggestions, i18n);
+    return handleTestFailureActions(ctx, sanitizedUrl, i18n);
+}
 
 /**
  * Execute the test proxy command
@@ -32,19 +109,7 @@ export async function executeTestProxy(ctx: CommandContext): Promise<CommandResu
         const i18n = I18nManager.getInstance();
 
         if (!activeUrl) {
-            // Requirement 3.1, 3.2: Show error with action buttons
-            const action = await vscode.window.showErrorMessage(
-                i18n.t('message.noProxyConfigured', { mode: state.mode.toUpperCase() }),
-                i18n.t('action.configureManual'),
-                i18n.t('action.importSystem'),
-                i18n.t('action.cancel')
-            );
-
-            if (action === i18n.t('action.configureManual')) {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
-            } else if (action === i18n.t('action.importSystem')) {
-                await vscode.commands.executeCommand('otak-proxy.importProxy');
-            }
+            await handleNoActiveProxy(state, i18n);
             return { success: true };
         }
 
@@ -64,47 +129,9 @@ export async function executeTestProxy(ctx: CommandContext): Promise<CommandResu
                 url: sanitizedUrl
             });
         } else {
-            // Requirement 2.4: Provide troubleshooting suggestions
-            const suggestions = [
-                i18n.t('suggestion.verifyUrl'),
-                i18n.t('suggestion.checkServer'),
-                i18n.t('suggestion.checkNetwork'),
-                i18n.t('suggestion.checkFirewall'),
-                state.mode === ProxyMode.Manual
-                    ? i18n.t('suggestion.reconfigureManual')
-                    : i18n.t('suggestion.checkSystemSettings'),
-                i18n.t('suggestion.testDifferentApp')
-            ];
-
-            // Requirement 1.1, 3.3, 3.4: Log detailed information to output channel
-            const errorDetails = {
-                timestamp: new Date(),
-                errorMessage: i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
-                attemptedUrls: testResult.testUrls,
-                suggestions,
-                context: testResult.errors ? {
-                    errors: testResult.errors.map(err => `${err.url}: ${err.message}`)
-                } : undefined
-            };
-            OutputChannelManager.getInstance().logError(
-                i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
-                errorDetails
-            );
-
-            // Requirement 6.2: Single notification with all action buttons to avoid stacking
-            const action = await vscode.window.showErrorMessage(
-                i18n.t('error.proxyTestFailed', { url: sanitizedUrl }),
-                i18n.t('action.showDetails'),
-                i18n.t('action.retest'),
-                i18n.t('action.changeSettings')
-            );
-
-            if (action === i18n.t('action.showDetails')) {
-                OutputChannelManager.getInstance().show();
-            } else if (action === i18n.t('action.retest')) {
-                return await executeTestProxy(ctx);
-            } else if (action === i18n.t('action.changeSettings')) {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            const result = await handleFailedTest(ctx, state, testResult, sanitizedUrl, i18n);
+            if (result) {
+                return result;
             }
         }
 

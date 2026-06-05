@@ -14,10 +14,11 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState } from '../core/types';
+import { ProxyState } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
 import { InputSanitizer } from '../validation/InputSanitizer';
-import { Logger } from '../utils/Logger';
+import { getStatusBarDisplay } from './StatusBarDisplay';
+import { buildStatusBarTooltip } from './StatusBarTooltip';
 
 /**
  * Interface for monitoring state used in tooltip
@@ -93,12 +94,6 @@ export class StatusBarManager {
         this.sanitizer = new InputSanitizer();
     }
 
-    private appendKeyValue(tooltip: vscode.MarkdownString, label: string, value: unknown): void {
-        tooltip.appendMarkdown(`**${label}:** `);
-        tooltip.appendText(String(value));
-        tooltip.appendMarkdown('\n\n');
-    }
-
     /**
      * Set monitor providers for extended tooltip information
      */
@@ -118,177 +113,27 @@ export class StatusBarManager {
      */
     update(state: ProxyState): void {
         const i18n = I18nManager.getInstance();
-        const activeUrl = this.getActiveProxyUrl(state);
         const showUrl = vscode.workspace.getConfiguration('otakProxy').get<boolean>('showProxyUrl', true);
-        let text = '';
-        let statusText = '';
 
         // Get monitoring state and last check info
         const monitorState = this.monitorProvider?.getState() ?? null;
         const lastCheck = this.lastCheckProvider?.getLastCheck() ?? null;
+        const display = getStatusBarDisplay(state, showUrl, i18n, this.sanitizer);
 
-        // Set text and status based on mode
-        // Feature: auto-mode-fallback-improvements (Tasks 4.1, 4.4)
-        switch (state.mode) {
-            case ProxyMode.Auto:
-                // Task 4.1: Handle Auto Mode OFF state
-                if (state.autoModeOff) {
-                    text = `$(circle-slash) ${i18n.t('statusbar.autoOff')}`;
-                    statusText = i18n.t('statusbar.tooltip.autoOff');
-                }
-                // Task 4.1: Handle fallback proxy state
-                else if (state.usingFallbackProxy && state.fallbackProxyUrl) {
-                    const fallbackDisplay = showUrl
-                        ? this.sanitizer.maskPassword(state.fallbackProxyUrl)
-                        : i18n.t('statusbar.urlHidden');
-                    text = `$(plug) ${i18n.t('statusbar.autoFallback', { url: fallbackDisplay })}`;
-                    statusText = i18n.t('statusbar.tooltip.autoFallback', { url: fallbackDisplay });
-                }
-                else if (activeUrl) {
-                    const urlDisplay = showUrl
-                        ? this.sanitizer.maskPassword(activeUrl)
-                        : i18n.t('statusbar.urlHidden');
-                    text = `$(sync~spin) ${i18n.t('statusbar.autoWithUrl', { url: urlDisplay })}`;
-                    statusText = i18n.t('statusbar.tooltip.autoModeUsing', { url: urlDisplay });
-                } else {
-                    text = `$(sync~spin) ${i18n.t('statusbar.autoNoProxy')}`;
-                    statusText = i18n.t('statusbar.tooltip.autoModeNoProxy');
-                }
-                break;
-            case ProxyMode.Manual:
-                if (activeUrl) {
-                    const urlDisplay = showUrl
-                        ? this.sanitizer.maskPassword(activeUrl)
-                        : i18n.t('statusbar.urlHidden');
-                    text = `$(plug) ${i18n.t('statusbar.manualWithUrl', { url: urlDisplay })}`;
-                    statusText = i18n.t('statusbar.tooltip.manualModeUsing', { url: urlDisplay });
-                } else {
-                    text = `$(plug) ${i18n.t('statusbar.manualNotConfigured')}`;
-                    statusText = i18n.t('statusbar.tooltip.manualModeNotConfigured');
-                }
-                break;
-            case ProxyMode.Off:
-            default:
-                text = `$(circle-slash) ${i18n.t('statusbar.proxyOff')}`;
-                statusText = i18n.t('statusbar.tooltip.proxyDisabled');
-                break;
-        }
-
-        this.statusBarItem.text = text;
+        this.statusBarItem.text = display.text;
 
         // Build tooltip
-        const tooltip = this.buildTooltip(state, statusText, monitorState, lastCheck, i18n);
-        this.statusBarItem.tooltip = tooltip;
+        this.statusBarItem.tooltip = buildStatusBarTooltip({
+            state,
+            statusText: display.statusText,
+            monitorState,
+            lastCheck,
+            i18n,
+            sanitizer: this.sanitizer,
+            registeredCommands: this.registeredCommands,
+            showUrl
+        });
         this.statusBarItem.show();
-    }
-
-    /**
-     * Build markdown tooltip
-     */
-    private buildTooltip(
-        state: ProxyState,
-        statusText: string,
-        monitorState: MonitorState | null,
-        lastCheck: LastCheckInfo | null,
-        i18n: I18nManager
-    ): vscode.MarkdownString {
-        const tooltip = new vscode.MarkdownString();
-        tooltip.isTrusted = true;
-        tooltip.supportThemeIcons = true;
-
-        // Header
-        tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.title')}**\n\n`);
-        this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.currentMode'), state.mode.toUpperCase());
-        this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.status'), statusText);
-
-        // Auto mode specific information
-        if (state.mode === ProxyMode.Auto && lastCheck) {
-            const lastCheckTime = new Date(lastCheck.timestamp).toLocaleTimeString();
-            this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.lastCheck'), lastCheckTime);
-
-            if (lastCheck.source) {
-                this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.detectionSource'), lastCheck.source);
-            }
-
-            if (!lastCheck.success && lastCheck.error) {
-                tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.lastError')}:** $(warning) `);
-                tooltip.appendText(lastCheck.error);
-                tooltip.appendMarkdown('\n\n');
-            }
-        }
-
-        // Monitoring state for Auto mode
-        if (state.mode === ProxyMode.Auto && monitorState) {
-            if (monitorState.consecutiveFailures > 0) {
-                tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.consecutiveFailures')}:** $(warning) ${monitorState.consecutiveFailures}\n\n`);
-            }
-        }
-
-        // Proxy URLs (respect showProxyUrl privacy setting)
-        const showUrl = vscode.workspace.getConfiguration('otakProxy').get<boolean>('showProxyUrl', true);
-        if (state.manualProxyUrl) {
-            const display = showUrl ? this.sanitizer.maskPassword(state.manualProxyUrl) : i18n.t('statusbar.urlHidden');
-            this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.manualProxy'), display);
-        }
-        if (state.autoProxyUrl) {
-            const display = showUrl ? this.sanitizer.maskPassword(state.autoProxyUrl) : i18n.t('statusbar.urlHidden');
-            this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.systemProxy'), display);
-        }
-
-        tooltip.appendMarkdown(`---\n\n`);
-
-        // Command links
-        this.appendCommandLinks(tooltip, i18n);
-
-        return tooltip;
-    }
-
-    /**
-     * Append command links to tooltip
-     *
-     * Requirement 5.3: Validate command links
-     */
-    private appendCommandLinks(tooltip: vscode.MarkdownString, i18n: I18nManager): void {
-        const showUrl = vscode.workspace.getConfiguration('otakProxy').get<boolean>('showProxyUrl', true);
-        const toggleUrlIcon = showUrl ? '$(eye-closed)' : '$(eye)';
-        const toggleUrlLabel = showUrl
-            ? i18n.t('statusbar.link.hideProxyUrl')
-            : i18n.t('statusbar.link.showProxyUrl');
-
-        const commandLinks = [
-            { icon: '$(sync)', label: i18n.t('statusbar.link.toggleMode'), command: 'otak-proxy.toggleProxy' },
-            { icon: '$(gear)', label: i18n.t('statusbar.link.configureManual'), command: 'otak-proxy.configureUrl' },
-            { icon: '$(cloud-download)', label: i18n.t('statusbar.link.importSystem'), command: 'otak-proxy.importProxy' },
-            { icon: '$(debug-start)', label: i18n.t('statusbar.link.testProxy'), command: 'otak-proxy.testProxy' },
-            { icon: toggleUrlIcon, label: toggleUrlLabel, command: 'otak-proxy.toggleShowProxyUrl' }
-        ];
-
-        // Validate command links
-        for (const link of commandLinks) {
-            if (!this.registeredCommands.includes(link.command)) {
-                Logger.warn(`Command link references unregistered command: ${link.command}`);
-            }
-        }
-
-        // Build command links markdown
-        const linkMarkdown = commandLinks
-            .map(link => `${link.icon} [${link.label}](command:${link.command})`)
-            .join(' &nbsp;&nbsp; ');
-        tooltip.appendMarkdown(linkMarkdown);
-    }
-
-    /**
-     * Get active proxy URL based on mode
-     */
-    private getActiveProxyUrl(state: ProxyState): string {
-        switch (state.mode) {
-            case ProxyMode.Auto:
-                return state.autoProxyUrl || '';
-            case ProxyMode.Manual:
-                return state.manualProxyUrl || '';
-            default:
-                return '';
-        }
     }
 
     /**

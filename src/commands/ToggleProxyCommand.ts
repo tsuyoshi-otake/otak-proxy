@@ -20,6 +20,8 @@ import {
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
 
+type TogglePreparationResult = 'continue' | 'handled';
+
 function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
     target.autoProxyUrl = source.autoProxyUrl;
     target.lastSystemProxyCheck = source.lastSystemProxyCheck;
@@ -50,6 +52,176 @@ async function testFallbackProxy(proxyUrl: string): Promise<ProxyTestResult> {
     return testResult as ProxyTestResult;
 }
 
+async function promptForManualProxy(i18n: I18nManager): Promise<'configure' | 'skipToAuto' | 'cancel'> {
+    const answer = await vscode.window.showInformationMessage(
+        i18n.t('prompt.noManualProxy'),
+        i18n.t('action.configureManual'),
+        i18n.t('action.skipToAuto')
+    );
+
+    if (answer === i18n.t('action.configureManual')) {
+        return 'configure';
+    }
+
+    if (answer === i18n.t('action.skipToAuto')) {
+        return 'skipToAuto';
+    }
+
+    return 'cancel';
+}
+
+async function handleManualProxyMissing(
+    ctx: CommandContext,
+    state: ProxyState,
+    i18n: I18nManager
+): Promise<TogglePreparationResult> {
+    const answer = await promptForManualProxy(i18n);
+
+    if (answer === 'configure') {
+        await vscode.commands.executeCommand('otak-proxy.configureUrl');
+        return 'handled';
+    }
+
+    if (answer === 'skipToAuto') {
+        state.mode = ProxyMode.Auto;
+        return 'continue';
+    }
+
+    return 'handled';
+}
+
+async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyState, manualProxyUrl: string): Promise<void> {
+    state.mode = ProxyMode.Auto;
+    state.autoModeOff = false;
+    state.usingFallbackProxy = true;
+    state.fallbackProxyUrl = manualProxyUrl;
+    state.autoProxyUrl = manualProxyUrl;
+
+    const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
+    Logger.log(`Fallback to Manual Proxy: ${sanitizedManualProxyUrl}`);
+    ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: sanitizedManualProxyUrl });
+}
+
+async function tryApplyManualFallback(ctx: CommandContext, state: ProxyState): Promise<boolean> {
+    const config = vscode.workspace.getConfiguration('otakProxy');
+    const fallbackEnabled = config.get<boolean>('enableFallback', true);
+    const manualProxyUrl = state.manualProxyUrl;
+
+    if (!fallbackEnabled || !manualProxyUrl) {
+        return false;
+    }
+
+    const testResult = await testFallbackProxy(manualProxyUrl);
+    state.lastTestResult = testResult;
+    state.proxyReachable = testResult.success;
+    state.lastTestTimestamp = Date.now();
+
+    if (testResult.success) {
+        await applyReachableFallbackProxy(ctx, state, manualProxyUrl);
+        return true;
+    }
+
+    Logger.warn(`Fallback proxy is not reachable: ${ctx.sanitizer.maskPassword(manualProxyUrl)}`);
+    setAutoModeOff(state);
+    return false;
+}
+
+async function promptForSystemProxySetup(i18n: I18nManager): Promise<'configure' | 'import' | 'cancel'> {
+    const action = await vscode.window.showWarningMessage(
+        i18n.t('warning.noSystemProxyDetected'),
+        i18n.t('action.configureManual'),
+        i18n.t('action.importSystem')
+    );
+
+    if (action === i18n.t('action.configureManual')) {
+        return 'configure';
+    }
+
+    if (action === i18n.t('action.importSystem')) {
+        return 'import';
+    }
+
+    return 'cancel';
+}
+
+async function handleSystemProxySetupPrompt(ctx: CommandContext, state: ProxyState, i18n: I18nManager): Promise<TogglePreparationResult> {
+    const action = await promptForSystemProxySetup(i18n);
+
+    if (action === 'configure') {
+        await vscode.commands.executeCommand('otak-proxy.configureUrl');
+        return 'handled';
+    }
+
+    if (action === 'import') {
+        await vscode.commands.executeCommand('otak-proxy.importProxy');
+        return 'handled';
+    }
+
+    setAutoModeOff(state);
+    return 'continue';
+}
+
+function useDetectedAutoProxy(state: ProxyState, nextMode: ProxyMode): void {
+    state.mode = nextMode;
+    state.autoModeOff = false;
+    state.usingFallbackProxy = false;
+    state.fallbackProxyUrl = undefined;
+}
+
+async function handleAutoModeTransition(
+    ctx: CommandContext,
+    state: ProxyState,
+    nextMode: ProxyMode,
+    i18n: I18nManager
+): Promise<TogglePreparationResult> {
+    await ctx.checkAndUpdateSystemProxy();
+    const updatedState = await ctx.getProxyState();
+    copyDetectedProxyState(state, updatedState);
+
+    if (state.autoProxyUrl) {
+        useDetectedAutoProxy(state, nextMode);
+        return 'continue';
+    }
+
+    if (await tryApplyManualFallback(ctx, state)) {
+        return 'continue';
+    }
+
+    return handleSystemProxySetupPrompt(ctx, state, i18n);
+}
+
+async function prepareNextMode(
+    ctx: CommandContext,
+    state: ProxyState,
+    nextMode: ProxyMode,
+    i18n: I18nManager
+): Promise<TogglePreparationResult> {
+    if (nextMode === ProxyMode.Manual && !state.manualProxyUrl) {
+        return handleManualProxyMissing(ctx, state, i18n);
+    }
+
+    if (nextMode === ProxyMode.Auto && !state.autoProxyUrl) {
+        return handleAutoModeTransition(ctx, state, nextMode, i18n);
+    }
+
+    state.mode = nextMode;
+    return 'continue';
+}
+
+async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<void> {
+    await ctx.saveProxyState(state);
+    const newActiveUrl = ctx.getActiveProxyUrl(state);
+
+    ctx.updateStatusBar(state);
+    await ctx.applyProxySettings(newActiveUrl, state.mode !== ProxyMode.Off && Boolean(newActiveUrl));
+
+    if (state.mode === ProxyMode.Auto) {
+        await ctx.startSystemProxyMonitoring();
+    } else {
+        await ctx.stopSystemProxyMonitoring();
+    }
+}
+
 /**
  * Execute the toggle proxy command
  * Cycles through Off -> Manual -> Auto -> Off modes
@@ -62,105 +234,12 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
         const currentState = await ctx.getProxyState();
         const nextMode = ctx.getNextMode(currentState.mode);
         const i18n = I18nManager.getInstance();
-        const outputManager = OutputChannelManager.getInstance();
 
-        if (nextMode === ProxyMode.Manual && !currentState.manualProxyUrl) {
-            // Requirement 6.1: Show action buttons for manual setup
-            const answer = await vscode.window.showInformationMessage(
-                i18n.t('prompt.noManualProxy'),
-                i18n.t('action.configureManual'),
-                i18n.t('action.skipToAuto')
-            );
-
-            if (answer === i18n.t('action.configureManual')) {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
-                return { success: true };
-            } else if (answer === i18n.t('action.skipToAuto')) {
-                currentState.mode = ProxyMode.Auto;
-            } else {
-                return { success: true }; // User cancelled
-            }
-        } else if (nextMode === ProxyMode.Auto && !currentState.autoProxyUrl) {
-            // No system proxy detected, check now
-            await ctx.checkAndUpdateSystemProxy();
-            const updatedState = await ctx.getProxyState();
-            copyDetectedProxyState(currentState, updatedState);
-
-            if (!currentState.autoProxyUrl) {
-                // Check if fallback to manual proxy is available
-                const config = vscode.workspace.getConfiguration('otakProxy');
-                const fallbackEnabled = config.get<boolean>('enableFallback', true);
-                const manualProxyUrl = currentState.manualProxyUrl;
-                let shouldPromptForSetup = true;
-
-                if (fallbackEnabled && manualProxyUrl) {
-                    const testResult = await testFallbackProxy(manualProxyUrl);
-                    currentState.lastTestResult = testResult;
-                    currentState.proxyReachable = testResult.success;
-                    currentState.lastTestTimestamp = Date.now();
-
-                    if (testResult.success) {
-                        // Use manual proxy as fallback - Fallback mode (NOT Auto Mode OFF)
-                        currentState.mode = ProxyMode.Auto;
-                        currentState.autoModeOff = false;
-                        currentState.usingFallbackProxy = true;
-                        currentState.fallbackProxyUrl = manualProxyUrl;
-                        currentState.autoProxyUrl = manualProxyUrl; // Use fallback as active proxy
-
-                        const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
-                        Logger.log(`Fallback to Manual Proxy: ${sanitizedManualProxyUrl}`);
-                        ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: sanitizedManualProxyUrl });
-                        shouldPromptForSetup = false;
-                    } else {
-                        Logger.warn(`Fallback proxy is not reachable: ${ctx.sanitizer.maskPassword(manualProxyUrl)}`);
-                        setAutoModeOff(currentState);
-                    }
-                }
-
-                if (shouldPromptForSetup) {
-                    // Requirement 6.1: Show action buttons for system import
-                    const action = await vscode.window.showWarningMessage(
-                        i18n.t('warning.noSystemProxyDetected'),
-                        i18n.t('action.configureManual'),
-                        i18n.t('action.importSystem')
-                    );
-
-                    if (action === i18n.t('action.configureManual')) {
-                        await vscode.commands.executeCommand('otak-proxy.configureUrl');
-                        return { success: true };
-                    } else if (action === i18n.t('action.importSystem')) {
-                        await vscode.commands.executeCommand('otak-proxy.importProxy');
-                        return { success: true };
-                    }
-
-                    // No fallback available - set to Auto Mode OFF (not complete Off)
-                    setAutoModeOff(currentState);
-                }
-            } else {
-                currentState.mode = nextMode as ProxyMode;
-                currentState.autoModeOff = false;
-                currentState.usingFallbackProxy = false;
-                currentState.fallbackProxyUrl = undefined;
-            }
-        } else {
-            currentState.mode = nextMode as ProxyMode;
+        if (await prepareNextMode(ctx, currentState, nextMode, i18n) === 'handled') {
+            return { success: true };
         }
 
-        // Apply the new mode
-        await ctx.saveProxyState(currentState);
-        const newActiveUrl = ctx.getActiveProxyUrl(currentState);
-
-        // Update the status bar immediately to reflect the user's action,
-        // then apply settings in the background.
-        ctx.updateStatusBar(currentState);
-        await ctx.applyProxySettings(newActiveUrl, currentState.mode !== ProxyMode.Off && Boolean(newActiveUrl));
-
-        // Start or stop monitoring based on mode
-        if (currentState.mode === ProxyMode.Auto) {
-            await ctx.startSystemProxyMonitoring();
-        } else {
-            await ctx.stopSystemProxyMonitoring();
-        }
+        await applyPreparedState(ctx, currentState);
 
         return { success: true };
     } catch (error) {

@@ -15,6 +15,70 @@ import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
 import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { I18nManager } from '../i18n/I18nManager';
+import { ProxyState } from '../core/types';
+
+async function showInvalidProxyUrl(ctx: CommandContext, proxyUrl: string, i18n: I18nManager): Promise<void> {
+    const errorDetails = {
+        timestamp: new Date(),
+        errorMessage: i18n.t('error.invalidProxyUrl'),
+        context: {
+            providedUrl: ctx.sanitizer.maskPassword(proxyUrl)
+        }
+    };
+
+    await ctx.userNotifier.showErrorWithDetails(
+        'error.invalidProxyUrl',
+        errorDetails,
+        [
+            'suggestion.useFormat',
+            'suggestion.includeProtocol',
+            'suggestion.validHostname'
+        ]
+    );
+}
+
+async function saveManualProxyUrl(ctx: CommandContext, state: ProxyState, proxyUrl: string): Promise<void> {
+    state.manualProxyUrl = proxyUrl;
+    await ctx.saveProxyState(state);
+
+    await vscode.workspace.getConfiguration('otakProxy').update(
+        'proxyUrl',
+        removeProxyCredentials(proxyUrl) || proxyUrl,
+        vscode.ConfigurationTarget.Global
+    );
+}
+
+async function applyManualModeChange(ctx: CommandContext, state: ProxyState, proxyUrl: string): Promise<void> {
+    if (state.mode !== ProxyMode.Manual) {
+        return;
+    }
+
+    if (proxyUrl) {
+        await ctx.applyProxySettings(proxyUrl, true);
+    } else {
+        state.mode = ProxyMode.Off;
+        await ctx.saveProxyState(state);
+        await ctx.applyProxySettings('', false);
+    }
+
+    ctx.updateStatusBar(state);
+}
+
+async function handleProxyUrlInput(
+    ctx: CommandContext,
+    state: ProxyState,
+    proxyUrl: string,
+    i18n: I18nManager
+): Promise<CommandResult> {
+    if (proxyUrl && !validateProxyUrl(proxyUrl)) {
+        await showInvalidProxyUrl(ctx, proxyUrl, i18n);
+        return { success: false };
+    }
+
+    await saveManualProxyUrl(ctx, state, proxyUrl);
+    await applyManualModeChange(ctx, state, proxyUrl);
+    return { success: true };
+}
 
 /**
  * Execute the configure URL command
@@ -33,55 +97,11 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
             value: state.manualProxyUrl || ''
         });
 
-        if (proxyUrl !== undefined) {
-            if (proxyUrl && !validateProxyUrl(proxyUrl)) {
-                // Requirement 1.1, 3.3: Use showErrorWithDetails for concise notification with detailed logging
-                const errorDetails = {
-                    timestamp: new Date(),
-                    errorMessage: i18n.t('error.invalidProxyUrl'),
-                    context: {
-                        providedUrl: ctx.sanitizer.maskPassword(proxyUrl)
-                    }
-                };
-
-                await ctx.userNotifier.showErrorWithDetails(
-                    'error.invalidProxyUrl',
-                    errorDetails,
-                    [
-                        'suggestion.useFormat',
-                        'suggestion.includeProtocol',
-                        'suggestion.validHostname'
-                    ]
-                );
-                return { success: false };
-            }
-
-            // Save manual proxy URL
-            state.manualProxyUrl = proxyUrl;
-            await ctx.saveProxyState(state);
-
-            // Also save to config for backwards compatibility
-            await vscode.workspace.getConfiguration('otakProxy').update(
-                'proxyUrl',
-                removeProxyCredentials(proxyUrl) || proxyUrl,
-                vscode.ConfigurationTarget.Global
-            );
-
-            // If currently in manual mode, apply the new settings
-            if (state.mode === ProxyMode.Manual) {
-                if (proxyUrl) {
-                    await ctx.applyProxySettings(proxyUrl, true);
-                } else {
-                    // Manual proxy was removed, switch to Off
-                    state.mode = ProxyMode.Off;
-                    await ctx.saveProxyState(state);
-                    await ctx.applyProxySettings('', false);
-                }
-                ctx.updateStatusBar(state);
-            }
+        if (proxyUrl === undefined) {
+            return { success: true };
         }
 
-        return { success: true };
+        return handleProxyUrlInput(ctx, state, proxyUrl, i18n);
     } catch (error) {
         Logger.error('Configure URL command failed:', error);
         

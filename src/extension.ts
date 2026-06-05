@@ -8,7 +8,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode } from './core/types';
+import { ProxyMode, ProxyState } from './core/types';
 import { ProxyStateManager } from './core/ProxyStateManager';
 import { ProxyApplier } from './core/ProxyApplier';
 import { ExtensionInitializer } from './core/ExtensionInitializer';
@@ -53,6 +53,273 @@ function isEnvironmentVariableCollection(value: unknown): value is EnvironmentVa
         typeof value['delete'] === 'function';
 }
 
+interface CoreServices {
+    config: vscode.WorkspaceConfiguration;
+    sanitizer: InputSanitizer;
+    terminalEnvManager?: TerminalEnvConfigManager;
+    userNotifier: UserNotifier;
+    proxyChangeLogger: ProxyChangeLogger;
+    systemProxyDetector: SystemProxyDetector;
+}
+
+function initializeI18n(): void {
+    const i18n = I18nManager.getInstance();
+    i18n.initialize();
+    Logger.log(`I18n initialized with locale: ${i18n.getCurrentLocale()}`);
+}
+
+function createCoreServices(context: vscode.ExtensionContext): CoreServices {
+    const sanitizer = new InputSanitizer();
+    const envCollection = (context as unknown as Record<string, unknown>)['environmentVariableCollection'];
+    const terminalEnvManager = isEnvironmentVariableCollection(envCollection)
+        ? new TerminalEnvConfigManager(envCollection)
+        : undefined;
+    const config = vscode.workspace.getConfiguration('otakProxy');
+    const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
+
+    return {
+        config,
+        sanitizer,
+        terminalEnvManager,
+        userNotifier: new UserNotifier(),
+        proxyChangeLogger: new ProxyChangeLogger(sanitizer),
+        systemProxyDetector: new SystemProxyDetector(detectionSourcePriority)
+    };
+}
+
+function initializeCoreManagers(context: vscode.ExtensionContext, services: CoreServices): void {
+    proxyStateManager = new ProxyStateManager(context);
+    proxyApplier = new ProxyApplier(
+        new GitConfigManager(),
+        new VscodeConfigManager(),
+        new NpmConfigManager(),
+        new ProxyUrlValidator(),
+        services.sanitizer,
+        services.userNotifier,
+        proxyStateManager,
+        services.terminalEnvManager
+    );
+
+    initializer = new ExtensionInitializer({
+        extensionContext: context,
+        proxyStateManager,
+        proxyApplier,
+        systemProxyDetector: services.systemProxyDetector,
+        userNotifier: services.userNotifier,
+        sanitizer: services.sanitizer,
+        proxyChangeLogger: services.proxyChangeLogger
+    });
+
+    proxyMonitor = initializer.initializeProxyMonitor();
+}
+
+function initializeStatusBar(context: vscode.ExtensionContext, services: CoreServices): void {
+    statusBarManager = new StatusBarManager(context);
+    statusBarManager.setMonitorProviders(proxyMonitor, services.proxyChangeLogger);
+    initializer.setStatusBarUpdater((s) => statusBarManager.update(s));
+}
+
+async function applyRemoteSyncState(remoteState: ProxyState): Promise<void> {
+    Logger.log('Received remote state change from another instance');
+    await proxyStateManager.saveState(remoteState);
+    const localState = await proxyStateManager.getState();
+    const activeUrl = proxyStateManager.getActiveProxyUrl(localState);
+
+    if (localState.mode !== ProxyMode.Off && activeUrl) {
+        await proxyApplier.applyProxy(activeUrl, true, { silent: true });
+    } else if (localState.mode === ProxyMode.Off) {
+        await proxyApplier.disableProxy({ silent: true });
+    }
+
+    if (localState.mode === ProxyMode.Auto) {
+        await initializer.startSystemProxyMonitoring();
+    } else {
+        await initializer.stopSystemProxyMonitoring();
+    }
+
+    statusBarManager.update(localState);
+}
+
+function registerSyncEventHandlers(context: vscode.ExtensionContext): void {
+    syncManager!.on('remoteChange', async (remoteState) => {
+        await applyRemoteSyncState(remoteState);
+    });
+
+    syncManager!.on('conflictResolved', (conflictInfo) => {
+        Logger.log('Sync conflict resolved:', conflictInfo);
+        syncStatusProvider?.showConflictResolved();
+    });
+
+    syncManager!.on('syncStateChanged', (status) => {
+        syncStatusProvider?.update(status);
+    });
+
+    syncStatusProvider = new SyncStatusProvider(98);
+    registerSyncStatusCommand(context, syncStatusProvider);
+    context.subscriptions.push({ dispose: () => syncStatusProvider?.dispose() });
+}
+
+function initializeSync(context: vscode.ExtensionContext): void {
+    try {
+        syncConfigManager = new SyncConfigManager();
+
+        if (!context.globalStorageUri) {
+            return;
+        }
+
+        const extensionVersion = context.extension?.packageJSON?.version
+            ? String(context.extension.packageJSON.version)
+            : 'unknown';
+        syncManager = new SyncManager(
+            context.globalStorageUri.fsPath,
+            `window-${process.pid}`,
+            syncConfigManager,
+            extensionVersion
+        );
+        registerSyncEventHandlers(context);
+    } catch (error) {
+        Logger.warn('Failed to initialize SyncManager, running in standalone mode:', error);
+    }
+}
+
+async function migrateManualUrlFromConfig(
+    state: ProxyState,
+    config: vscode.WorkspaceConfiguration
+): Promise<ProxyState> {
+    const configProxyUrl = config.get<string>('proxyUrl', '');
+    if (configProxyUrl && !state.manualProxyUrl) {
+        state.manualProxyUrl = configProxyUrl;
+        await proxyStateManager.saveState(state);
+    }
+
+    return state;
+}
+
+function registerExtensionCommands(context: vscode.ExtensionContext, services: CoreServices): void {
+    createCommandRegistry({
+        context,
+        getProxyState: () => proxyStateManager.getState(),
+        saveProxyState: async (_ctx, s) => {
+            await proxyStateManager.saveState(s);
+            if (syncManager && syncConfigManager?.isSyncEnabled()) {
+                await syncManager.notifyChange(s);
+            }
+        },
+        getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
+        getNextMode: (mode) => proxyStateManager.getNextMode(mode),
+        applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled, { showProgress: true }),
+        updateStatusBar: (s) => statusBarManager.update(s),
+        checkAndUpdateSystemProxy: async () => initializer.checkAndUpdateSystemProxy(),
+        startSystemProxyMonitoring: () => initializer.startSystemProxyMonitoring(),
+        stopSystemProxyMonitoring: () => initializer.stopSystemProxyMonitoring(),
+        userNotifier: {
+            showSuccess: (key, params) => services.userNotifier.showSuccess(key, params),
+            showWarning: (key, params) => services.userNotifier.showWarning(key, params),
+            showError: (key, suggestions) => services.userNotifier.showError(key, suggestions),
+            showErrorWithDetails: (message, details, suggestions, params) =>
+                services.userNotifier.showErrorWithDetails(message, details, suggestions, params),
+            showProgressNotification: (title, task, cancellable) =>
+                services.userNotifier.showProgressNotification(title, task, cancellable)
+        },
+        sanitizer: services.sanitizer,
+        proxyMonitor,
+        systemProxyDetector: services.systemProxyDetector
+    });
+}
+
+async function startSyncAndLoadSharedState(state: ProxyState): Promise<ProxyState> {
+    if (!syncManager) {
+        return state;
+    }
+
+    try {
+        await syncManager.start();
+        Logger.log('SyncManager started successfully');
+        return await loadSharedStateIfEnabled(state);
+    } catch (error) {
+        Logger.warn('Failed to start SyncManager:', error);
+        return state;
+    }
+}
+
+async function loadSharedStateIfEnabled(state: ProxyState): Promise<ProxyState> {
+    if (!syncConfigManager?.isSyncEnabled()) {
+        return state;
+    }
+
+    const sharedState = syncManager?.getCurrentSharedState();
+    if (!sharedState) {
+        return state;
+    }
+
+    await proxyStateManager.saveState(sharedState);
+    const updatedState = await proxyStateManager.getState();
+    statusBarManager.update(updatedState);
+    return updatedState;
+}
+
+async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: TerminalEnvConfigManager): Promise<void> {
+    const activeUrl = proxyStateManager.getActiveProxyUrl(state);
+
+    if (state.mode === ProxyMode.Off) {
+        await clearManagedStartupProxyState(state, terminalEnvManager);
+        return;
+    }
+
+    if (activeUrl) {
+        await proxyApplier.applyProxy(activeUrl, true);
+    }
+}
+
+async function clearManagedStartupProxyState(
+    state: ProxyState,
+    terminalEnvManager?: TerminalEnvConfigManager
+): Promise<void> {
+    if (terminalEnvManager) {
+        await terminalEnvManager.unsetProxy();
+    }
+
+    if (state.gitConfigured || state.vscodeConfigured || state.npmConfigured) {
+        await proxyApplier.disableProxy({ silent: true });
+    }
+}
+
+async function updateMonitoringForState(state: ProxyState): Promise<void> {
+    if (state.mode === ProxyMode.Auto) {
+        await initializer.startSystemProxyMonitoring();
+    } else {
+        await initializer.stopSystemProxyMonitoring();
+    }
+}
+
+async function publishStartupSyncState(state: ProxyState): Promise<void> {
+    if (!syncManager || !syncConfigManager?.isSyncEnabled()) {
+        return;
+    }
+
+    try {
+        await syncManager.notifyChange(state);
+    } catch (error) {
+        Logger.warn('Failed to publish initial sync state:', error);
+    }
+}
+
+function registerAutoTestConfigListener(context: vscode.ExtensionContext): void {
+    const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('otakProxy.testInterval')) {
+            const newInterval = vscode.workspace.getConfiguration('otakProxy').get<number>('testInterval', 60);
+            initializer.handleConfigurationChange('testInterval', newInterval);
+        }
+
+        if (e.affectsConfiguration('otakProxy.autoTestEnabled')) {
+            const enabled = vscode.workspace.getConfiguration('otakProxy').get<boolean>('autoTestEnabled', true);
+            initializer.handleConfigurationChange('autoTestEnabled', enabled);
+        }
+    });
+
+    context.subscriptions.push(configChangeDisposable);
+}
+
 /**
  * Perform initial setup for the extension
  * This function handles the initial setup dialog and applies settings.
@@ -88,245 +355,25 @@ export async function performInitialSetup(context: vscode.ExtensionContext): Pro
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     Logger.log('Extension "otak-proxy" is now active.');
 
-    // Phase 0: Initialize I18n
-    const i18n = I18nManager.getInstance();
-    i18n.initialize();
-    Logger.log(`I18n initialized with locale: ${i18n.getCurrentLocale()}`);
+    initializeI18n();
+    const services = createCoreServices(context);
+    initializeCoreManagers(context, services);
+    initializeSync(context);
+    initializeStatusBar(context, services);
 
-    // Phase 1: Initialize core components
-    const validator = new ProxyUrlValidator();
-    const sanitizer = new InputSanitizer();
-    const gitConfigManager = new GitConfigManager();
-    const vscodeConfigManager = new VscodeConfigManager();
-    const npmConfigManager = new NpmConfigManager();
-
-    // Integrated terminal env support (best-effort; only if API is available)
-    const envCollection = (context as unknown as Record<string, unknown>)['environmentVariableCollection'];
-    const terminalEnvManager = isEnvironmentVariableCollection(envCollection)
-        ? new TerminalEnvConfigManager(envCollection)
-        : undefined;
-    const userNotifier = new UserNotifier();
-    const proxyChangeLogger = new ProxyChangeLogger(sanitizer);
-
-    // Initialize configuration from settings
-    const config = vscode.workspace.getConfiguration('otakProxy');
-    const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
-    const systemProxyDetector = new SystemProxyDetector(detectionSourcePriority);
-
-    // Phase 2: Initialize managers
-    proxyStateManager = new ProxyStateManager(context);
-    proxyApplier = new ProxyApplier(
-        gitConfigManager,
-        vscodeConfigManager,
-        npmConfigManager,
-        validator,
-        sanitizer,
-        userNotifier,
-        proxyStateManager,
-        terminalEnvManager
-    );
-
-    // Phase 3: Initialize ExtensionInitializer
-    initializer = new ExtensionInitializer({
-        extensionContext: context,
-        proxyStateManager,
-        proxyApplier,
-        systemProxyDetector,
-        userNotifier,
-        sanitizer,
-        proxyChangeLogger
-    });
-
-    // Phase 4: Initialize ProxyMonitor
-    proxyMonitor = initializer.initializeProxyMonitor();
-
-    // Phase 4.5: Initialize SyncManager (Feature: multi-instance-sync)
-    try {
-        syncConfigManager = new SyncConfigManager();
-
-        // Only initialize sync if globalStorageUri is available
-        if (context.globalStorageUri) {
-            const extensionVersion = context.extension?.packageJSON?.version
-                ? String(context.extension.packageJSON.version)
-                : 'unknown';
-            syncManager = new SyncManager(
-                context.globalStorageUri.fsPath,
-                `window-${process.pid}`,
-                syncConfigManager,
-                extensionVersion
-            );
-
-            // Set up event handlers for sync
-            syncManager.on('remoteChange', async (remoteState) => {
-                Logger.log('Received remote state change from another instance');
-                // Update local state with remote changes
-                await proxyStateManager.saveState(remoteState);
-                const localState = await proxyStateManager.getState();
-                const activeUrl = proxyStateManager.getActiveProxyUrl(localState);
-                // Suppress success notifications for sync-driven updates to avoid
-                // "Proxy configured" repeatedly flashing in the status bar.
-                if (localState.mode !== ProxyMode.Off && activeUrl) {
-                    await proxyApplier.applyProxy(activeUrl, true, { silent: true });
-                } else if (localState.mode === ProxyMode.Off) {
-                    await proxyApplier.disableProxy({ silent: true });
-                }
-                // Align monitoring with the resolved mode to avoid background polling when not needed.
-                if (localState.mode === ProxyMode.Auto) {
-                    await initializer.startSystemProxyMonitoring();
-                } else {
-                    await initializer.stopSystemProxyMonitoring();
-                }
-                // Reflect the remote state in the status bar
-                statusBarManager.update(localState);
-            });
-
-            syncManager.on('conflictResolved', (conflictInfo) => {
-                Logger.log('Sync conflict resolved:', conflictInfo);
-                if (syncStatusProvider) {
-                    syncStatusProvider.showConflictResolved();
-                }
-            });
-
-            syncManager.on('syncStateChanged', (status) => {
-                if (syncStatusProvider) {
-                    syncStatusProvider.update(status);
-                }
-            });
-
-            // Initialize sync status provider
-            syncStatusProvider = new SyncStatusProvider(98); // Priority just before proxy status bar
-            registerSyncStatusCommand(context, syncStatusProvider);
-            context.subscriptions.push({ dispose: () => syncStatusProvider?.dispose() });
-        }
-    } catch (error) {
-        Logger.warn('Failed to initialize SyncManager, running in standalone mode:', error);
-        // Continue without sync - graceful degradation
-    }
-
-    // Phase 5: Initialize StatusBar
-    statusBarManager = new StatusBarManager(context);
-    statusBarManager.setMonitorProviders(proxyMonitor, proxyChangeLogger);
-    initializer.setStatusBarUpdater((s) => statusBarManager.update(s));
-
-    // Phase 6: State initialization
     let state = await proxyStateManager.getState();
+    state = await migrateManualUrlFromConfig(state, services.config);
+    registerExtensionCommands(context, services);
 
-    // Migrate manual URL from config if needed
-    const configProxyUrl = config.get<string>('proxyUrl', '');
-    if (configProxyUrl && !state.manualProxyUrl) {
-        state.manualProxyUrl = configProxyUrl;
-        await proxyStateManager.saveState(state);
-    }
-
-    // Phase 7: Command registration (BEFORE status bar display)
-    // Requirement 1.1, 5.1: All commands must be registered before status bar displays command links
-    createCommandRegistry({
-        context,
-        getProxyState: (ctx) => proxyStateManager.getState(),
-        saveProxyState: async (ctx, s) => {
-            await proxyStateManager.saveState(s);
-            // Propagate state change to other instances (Feature: multi-instance-sync)
-            if (syncManager && syncConfigManager?.isSyncEnabled()) {
-                await syncManager.notifyChange(s);
-            }
-        },
-        getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
-        getNextMode: (mode) => proxyStateManager.getNextMode(mode),
-        applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled, { showProgress: true }),
-        updateStatusBar: (s) => statusBarManager.update(s),
-        checkAndUpdateSystemProxy: async () => initializer.checkAndUpdateSystemProxy(),
-        startSystemProxyMonitoring: () => initializer.startSystemProxyMonitoring(),
-        stopSystemProxyMonitoring: () => initializer.stopSystemProxyMonitoring(),
-        userNotifier: {
-            showSuccess: (key, params) => userNotifier.showSuccess(key, params),
-            showWarning: (key, params) => userNotifier.showWarning(key, params),
-            showError: (key, suggestions) => userNotifier.showError(key, suggestions),
-            showErrorWithDetails: (message, details, suggestions, params) => 
-                userNotifier.showErrorWithDetails(message, details, suggestions, params),
-            showProgressNotification: (title, task, cancellable) => 
-                userNotifier.showProgressNotification(title, task, cancellable)
-        },
-        sanitizer,
-        proxyMonitor,
-        systemProxyDetector
-    });
-
-    // Phase 8: UI initialization
     statusBarManager.update(state);
-
-    // Phase 9: Initial setup (after commands are registered)
     await performInitialSetup(context);
-    state = await proxyStateManager.getState(); // Reload state after setup
+    state = await proxyStateManager.getState();
+    state = await startSyncAndLoadSharedState(state);
 
-    // Phase 9.5: Start SyncManager before applying local settings.
-    // If a shared state already exists, it must win before this instance publishes
-    // or applies its local persisted state.
-    if (syncManager) {
-        try {
-            await syncManager.start();
-            Logger.log('SyncManager started successfully');
-
-            if (syncConfigManager?.isSyncEnabled()) {
-                const sharedState = syncManager.getCurrentSharedState();
-                if (sharedState) {
-                    await proxyStateManager.saveState(sharedState);
-                    state = await proxyStateManager.getState();
-                    statusBarManager.update(state);
-                }
-            }
-        } catch (error) {
-            Logger.warn('Failed to start SyncManager:', error);
-        }
-    }
-
-    // Phase 10: Apply current proxy settings
-    const activeUrl = proxyStateManager.getActiveProxyUrl(state);
-    if (state.mode === ProxyMode.Off) {
-        // If proxy is OFF, only clear settings that this extension still tracks as managed.
-        // Do not remove arbitrary user/global proxy settings discovered on startup.
-        if (terminalEnvManager) {
-            await terminalEnvManager.unsetProxy();
-        }
-        if (state.gitConfigured || state.vscodeConfigured || state.npmConfigured) {
-            await proxyApplier.disableProxy({ silent: true });
-        }
-    } else if (activeUrl) {
-        await proxyApplier.applyProxy(activeUrl, true);
-    }
-
-    // Phase 11: Start monitoring
-    if (state.mode === ProxyMode.Auto) {
-        await initializer.startSystemProxyMonitoring();
-    } else {
-        await initializer.stopSystemProxyMonitoring();
-    }
-
-    // Phase 11.5: Publish the applied startup state to sync peers.
-    if (syncManager && syncConfigManager?.isSyncEnabled()) {
-        try {
-            await syncManager.notifyChange(state);
-        } catch (error) {
-            Logger.warn('Failed to publish initial sync state:', error);
-        }
-    }
-
-    // Phase 12: Register configuration change listener (Task 7.2)
-    // Feature: auto-mode-proxy-testing
-    const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
-        // Check for testInterval change
-        if (e.affectsConfiguration('otakProxy.testInterval')) {
-            const newInterval = vscode.workspace.getConfiguration('otakProxy').get<number>('testInterval', 60);
-            initializer.handleConfigurationChange('testInterval', newInterval);
-        }
-
-        // Check for autoTestEnabled change
-        if (e.affectsConfiguration('otakProxy.autoTestEnabled')) {
-            const enabled = vscode.workspace.getConfiguration('otakProxy').get<boolean>('autoTestEnabled', true);
-            initializer.handleConfigurationChange('autoTestEnabled', enabled);
-        }
-    });
-
-    context.subscriptions.push(configChangeDisposable);
+    await applyStartupProxyState(state, services.terminalEnvManager);
+    await updateMonitoringForState(state);
+    await publishStartupSyncState(state);
+    registerAutoTestConfigListener(context);
 }
 
 /**

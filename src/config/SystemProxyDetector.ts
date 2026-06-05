@@ -3,6 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
+import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
 
 const execFileAsync = promisify(execFile);
 
@@ -102,78 +103,55 @@ export class SystemProxyDetector {
      */
     private async detectFromSource(source: string): Promise<ProxyDetectionWithSource> {
         try {
-            switch (source) {
-                case 'environment': {
-                    const envProxy = this.detectFromEnvironment();
-                    if (envProxy && this.validateDetectedProxy(envProxy)) {
-                        return { proxyUrl: envProxy, source: 'environment' };
-                    }
-                    if (envProxy) {
-                        Logger.warn('Environment proxy failed validation:', envProxy);
-                    }
-                    break;
-                }
-
-                case 'vscode': {
-                    const vscodeProxy = this.detectFromVSCode();
-                    if (vscodeProxy && this.validateDetectedProxy(vscodeProxy)) {
-                        return { proxyUrl: vscodeProxy, source: 'vscode' };
-                    }
-                    if (vscodeProxy) {
-                        Logger.warn('VSCode proxy failed validation:', vscodeProxy);
-                    }
-                    break;
-                }
-
-                case 'platform': {
-                    const platformResult = await this.detectFromPlatformWithSource();
-                    if (platformResult.proxyUrl && this.validateDetectedProxy(platformResult.proxyUrl)) {
-                        return platformResult;
-                    }
-                    if (platformResult.proxyUrl) {
-                        Logger.warn('Platform proxy failed validation:', platformResult.proxyUrl);
-                    }
-                    break;
-                }
-
-                default:
-                    Logger.warn(`Unknown detection source: ${source}`);
-            }
+            return await this.detectKnownSource(source);
         } catch (error) {
             Logger.warn(`Detection from source '${source}' failed:`, error);
+            return { proxyUrl: null, source: null };
+        }
+    }
+
+    private async detectKnownSource(source: string): Promise<ProxyDetectionWithSource> {
+        switch (source) {
+            case 'environment':
+                return this.validateSourceResult(this.detectFromEnvironment(), 'environment', 'Environment');
+            case 'vscode':
+                return this.validateSourceResult(this.detectFromVSCode(), 'vscode', 'VSCode');
+            case 'platform':
+                return this.validatePlatformResult(await detectPlatformProxyWithSource((command, args) => this.exec(command, args)));
+            default:
+                Logger.warn(`Unknown detection source: ${source}`);
+                return { proxyUrl: null, source: null };
+        }
+    }
+
+    private validateSourceResult(
+        proxyUrl: string | null,
+        source: Exclude<DetectionSource, 'windows' | 'macos' | 'linux' | null>,
+        label: string
+    ): ProxyDetectionWithSource {
+        if (!proxyUrl) {
+            return { proxyUrl: null, source: null };
         }
 
+        if (this.validateDetectedProxy(proxyUrl)) {
+            return { proxyUrl, source };
+        }
+
+        Logger.warn(`${label} proxy failed validation:`, proxyUrl);
         return { proxyUrl: null, source: null };
     }
 
-    /**
-     * Detects proxy using platform-specific methods with source information.
-     *
-     * @returns Promise<ProxyDetectionWithSource> - Detection result with platform source
-     */
-    private async detectFromPlatformWithSource(): Promise<ProxyDetectionWithSource> {
-        try {
-            switch (process.platform) {
-                case 'win32': {
-                    const proxy = await this.detectWindowsProxy();
-                    return { proxyUrl: proxy, source: proxy ? 'windows' : null };
-                }
-                case 'darwin': {
-                    const proxy = await this.detectMacOSProxy();
-                    return { proxyUrl: proxy, source: proxy ? 'macos' : null };
-                }
-                case 'linux': {
-                    const proxy = await this.detectLinuxProxy();
-                    return { proxyUrl: proxy, source: proxy ? 'linux' : null };
-                }
-                default:
-                    Logger.warn(`Unsupported platform for proxy detection: ${process.platform}`);
-                    return { proxyUrl: null, source: null };
-            }
-        } catch (error) {
-            Logger.error(`Platform-specific proxy detection failed for ${process.platform}:`, error);
+    private validatePlatformResult(result: ProxyDetectionWithSource): ProxyDetectionWithSource {
+        if (!result.proxyUrl) {
             return { proxyUrl: null, source: null };
         }
+
+        if (this.validateDetectedProxy(result.proxyUrl)) {
+            return result;
+        }
+
+        Logger.warn('Platform proxy failed validation:', result.proxyUrl);
+        return { proxyUrl: null, source: null };
     }
 
     /**
@@ -200,128 +178,6 @@ export class SystemProxyDetector {
             return vscodeProxy || null;
         } catch (error) {
             Logger.error('Failed to read VSCode proxy configuration:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Detects proxy on Windows using registry queries.
-     * 
-     * @returns Promise<string | null> - Windows proxy URL, or null
-     */
-    private async detectWindowsProxy(): Promise<string | null> {
-        try {
-            // First check if proxy is enabled
-            const { stdout: enabledOutput } = await this.exec('reg', [
-                'query',
-                'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-                '/v',
-                'ProxyEnable'
-            ]);
-            const enableMatch = enabledOutput.match(/ProxyEnable\s+REG_DWORD\s+0x(\d)/);
-
-            if (enableMatch && enableMatch[1] === '1') {
-                // Proxy is enabled, get the server
-                const { stdout } = await this.exec('reg', [
-                    'query',
-                    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-                    '/v',
-                    'ProxyServer'
-                ]);
-                const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/);
-                
-                if (match && match[1]) {
-                    const proxyValue = match[1].trim();
-                    return this.parseWindowsProxyValue(proxyValue);
-                }
-            }
-            
-            return null;
-        } catch (error) {
-            Logger.error('Windows registry query failed:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Parses Windows proxy value which may be in format "http=proxy:port;https=proxy:port"
-     * or simple "proxy:port".
-     * 
-     * @param proxyValue - Raw proxy value from Windows registry
-     * @returns string | null - Parsed proxy URL, or null
-     */
-    private parseWindowsProxyValue(proxyValue: string): string | null {
-        // Windows proxy format might be "http=proxy:port;https=proxy:port"
-        if (proxyValue.includes('=')) {
-            const parts = proxyValue.split(';');
-            for (const part of parts) {
-                if (part.startsWith('http=') || part.startsWith('https=')) {
-                    const url = part.split('=')[1];
-                    return url.startsWith('http') ? url : `http://${url}`;
-                }
-            }
-            return null;
-        } else {
-            // Simple format: "proxy:port"
-            return proxyValue.startsWith('http') ? proxyValue : `http://${proxyValue}`;
-        }
-    }
-
-    /**
-     * Detects proxy on macOS using networksetup command.
-     * Tries multiple network interfaces (Wi-Fi, Ethernet, Thunderbolt Ethernet).
-     * 
-     * @returns Promise<string | null> - macOS proxy URL, or null
-     */
-    private async detectMacOSProxy(): Promise<string | null> {
-        const interfaces = ['Wi-Fi', 'Ethernet', 'Thunderbolt Ethernet'];
-
-        for (const iface of interfaces) {
-            try {
-                const { stdout } = await this.exec('networksetup', ['-getwebproxy', iface]);
-                const enabledMatch = stdout.match(/Enabled:\s*(\w+)/);
-                const serverMatch = stdout.match(/Server:\s*(.+)/);
-                const portMatch = stdout.match(/Port:\s*(\d+)/);
-
-                if (enabledMatch && enabledMatch[1] === 'Yes' && serverMatch && portMatch) {
-                    const server = serverMatch[1].trim();
-                    const port = portMatch[1].trim();
-                    return `http://${server}:${port}`;
-                }
-            } catch (error) {
-                // This interface might not exist, try next
-                Logger.debug(`Interface ${iface} not available or failed:`, error);
-                continue;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Detects proxy on Linux using gsettings (GNOME).
-     * 
-     * @returns Promise<string | null> - Linux proxy URL, or null
-     */
-    private async detectLinuxProxy(): Promise<string | null> {
-        try {
-            const { stdout: mode } = await this.exec('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
-            
-            if (mode.includes('manual')) {
-                const { stdout: host } = await this.exec('gsettings', ['get', 'org.gnome.system.proxy.http', 'host']);
-                const { stdout: port } = await this.exec('gsettings', ['get', 'org.gnome.system.proxy.http', 'port']);
-
-                const cleanHost = host.replace(/'/g, '').trim();
-                const cleanPort = port.trim();
-
-                if (cleanHost && cleanPort !== '0') {
-                    return `http://${cleanHost}:${cleanPort}`;
-                }
-            }
-            
-            return null;
-        } catch (error) {
-            Logger.error('Linux gsettings query failed (gsettings not available or not GNOME):', error);
             return null;
         }
     }
