@@ -15,7 +15,6 @@ import { SystemProxyDetector } from '../../config/SystemProxyDetector';
 import { UserNotifier } from '../../errors/UserNotifier';
 import { InputSanitizer } from '../../validation/InputSanitizer';
 import { ProxyChangeLogger } from '../../monitoring/ProxyChangeLogger';
-import { TestResult } from '../../utils/ProxyUtils';
 
 suite('ExtensionInitializer Connection Testing Integration', function() {
     this.timeout(30000);

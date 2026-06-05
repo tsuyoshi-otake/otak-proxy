@@ -27,7 +27,7 @@ suite('Otak Proxy Extension Test Suite @smoke', () => {
                 return Promise.resolve();
             },
             keys: () => [],
-            setKeysForSync: (keys: readonly string[]) => {}
+            setKeysForSync: (_keys: readonly string[]) => {}
         };
 
         // ステータスバーアイテムのモック作成
@@ -69,7 +69,7 @@ suite('Otak Proxy Extension Test Suite @smoke', () => {
         sandbox.stub(vscode.window, 'showErrorMessage').resolves();
         sandbox.stub(vscode.window, 'showWarningMessage').resolves();
         sandbox.stub(vscode.window, 'showInputBox').resolves('http://test-proxy:8080');
-        sandbox.stub(vscode.window, 'withProgress').callsFake(async (options, task) => {
+        sandbox.stub(vscode.window, 'withProgress').callsFake(async (_options, task) => {
             return task({ report: () => {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) });
         });
 

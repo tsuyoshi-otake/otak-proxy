@@ -77,9 +77,6 @@ suite('I18n Integration Tests', () => {
         });
 
         test('should detect locale from vscode.env.language', () => {
-            // Mock vscode.env.language
-            const originalLanguage = vscode.env.language;
-            
             // Note: We can't actually change vscode.env.language in tests,
             // but we can test that initialize() without parameters uses it
             i18n.initialize();

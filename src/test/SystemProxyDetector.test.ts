@@ -7,7 +7,7 @@
  */
 
 import * as assert from 'assert';
-import { SystemProxyDetector, DetectionSource, ProxyDetectionWithSource } from '../config/SystemProxyDetector';
+import { SystemProxyDetector, DetectionSource } from '../config/SystemProxyDetector';
 
 suite('SystemProxyDetector Test Suite', () => {
     let detector: SystemProxyDetector;

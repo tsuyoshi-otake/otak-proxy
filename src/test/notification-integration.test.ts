@@ -260,7 +260,6 @@ suite('Notification Integration Tests', () => {
         });
 
         test('should show notification after throttle period expires', async () => {
-            const errorMessage = 'Network error';
             const throttleMs = 100; // Short throttle for testing
 
             // Create a custom throttler with short throttle period
@@ -374,7 +373,7 @@ suite('Notification Integration Tests', () => {
             // Track progress reports
             const progressReports: Array<{ message?: string; increment?: number }> = [];
             
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = {
                     report: (value: { message?: string; increment?: number }) => {
                         progressReports.push(value);
@@ -460,7 +459,7 @@ suite('Notification Integration Tests', () => {
             // Track progress reports
             const progressReports: Array<{ message?: string; increment?: number }> = [];
             
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = {
                     report: (value: { message?: string; increment?: number }) => {
                         progressReports.push(value);
@@ -569,9 +568,8 @@ suite('Notification Integration Tests', () => {
         test('should handle cancellable proxy test flow', async () => {
             // Mock VSCode APIs
             const withProgressStub = sandbox.stub(vscode.window, 'withProgress');
-            
-            let cancellationRequested = false;
-            withProgressStub.callsFake(async (options, task) => {
+
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = {
                     report: sandbox.stub()
                 };
@@ -580,7 +578,6 @@ suite('Notification Integration Tests', () => {
                     onCancellationRequested: (callback: () => void) => {
                         // Simulate user cancelling after 50ms
                         setTimeout(() => {
-                            cancellationRequested = true;
                             (mockCancellationToken as any).isCancellationRequested = true;
                             callback();
                         }, 50);
@@ -648,7 +645,7 @@ suite('Notification Integration Tests', () => {
             const withProgressStub = sandbox.stub(vscode.window, 'withProgress');
             
             // Simulate progress reporting
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = {
                     report: sandbox.stub()
                 };
@@ -706,7 +703,7 @@ suite('Notification Integration Tests', () => {
             const withProgressStub = sandbox.stub(vscode.window, 'withProgress');
             
             let cancellationCallback: (() => void) | null = null;
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = {
                     report: sandbox.stub()
                 };
@@ -765,7 +762,7 @@ suite('Notification Integration Tests', () => {
         test('should show result notification after progress completes', async () => {
             // Mock VSCode withProgress
             const withProgressStub = sandbox.stub(vscode.window, 'withProgress');
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = { report: sandbox.stub() };
                 return await task(mockProgress as any, {} as any);
             });
@@ -797,7 +794,7 @@ suite('Notification Integration Tests', () => {
         test('should handle progress notification errors gracefully', async () => {
             // Mock VSCode withProgress to simulate error
             const withProgressStub = sandbox.stub(vscode.window, 'withProgress');
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = { report: sandbox.stub() };
                 return await task(mockProgress as any, {} as any);
             });
@@ -851,7 +848,7 @@ suite('Notification Integration Tests', () => {
             
             showErrorStub.resolves('Show Details' as any);
             
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 const mockProgress = { report: sandbox.stub() };
                 return await task(mockProgress as any, {} as any);
             });
@@ -931,8 +928,8 @@ suite('Notification Integration Tests', () => {
             );
 
             // Step 5: Verify error details were logged
-            const logErrorSpy = sandbox.spy(outputManager, 'logError');
-            
+            sandbox.spy(outputManager, 'logError');
+
             // Try to show same error again (should be throttled)
             await userNotifier.showErrorWithDetails(
                 'Proxy test failed',

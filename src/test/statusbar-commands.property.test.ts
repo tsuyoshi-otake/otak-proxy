@@ -73,7 +73,7 @@ suite('StatusBar Commands Property Tests', () => {
         sandbox.stub(vscode.window, 'showErrorMessage').resolves();
         sandbox.stub(vscode.window, 'showWarningMessage').resolves();
         sandbox.stub(vscode.window, 'showInputBox').resolves('http://test-proxy:8080');
-        sandbox.stub(vscode.window, 'withProgress').callsFake(async (options, task) => {
+        sandbox.stub(vscode.window, 'withProgress').callsFake(async (_options, task) => {
             return task({ report: () => {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) });
         });
         sandbox.stub(vscode.commands, 'registerCommand').returns({ dispose: () => {} });
@@ -338,7 +338,7 @@ suite('StatusBar Commands Property Tests', () => {
         });
 
         fc.assert(
-            fc.property(proxyStateArb, (state) => {
+            fc.property(proxyStateArb, (_state) => {
                 // For any state, all command links should be valid
                 for (const link of commandLinks) {
                     assert.ok(

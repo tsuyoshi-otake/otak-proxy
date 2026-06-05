@@ -7,11 +7,9 @@ import { VscodeConfigManager } from '../config/VscodeConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
-import { UserNotifier } from '../errors/UserNotifier';
 import { I18nManager } from '../i18n/I18nManager';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
-import { ProxyMonitorState } from '../monitoring/ProxyMonitorState';
 import { isNpmAvailable } from './commandAvailability';
 
 /**
@@ -33,8 +31,6 @@ suite('Integration Tests', () => {
     let vscodeConfigManager: VscodeConfigManager;
     let npmConfigManager: NpmConfigManager;
     let systemProxyDetector: SystemProxyDetector;
-    let errorAggregator: ErrorAggregator;
-    let userNotifier: UserNotifier;
     let npmAvailable: boolean;
 
     suiteSetup(async () => {
@@ -50,8 +46,6 @@ suite('Integration Tests', () => {
         vscodeConfigManager = new VscodeConfigManager();
         npmConfigManager = new NpmConfigManager();
         systemProxyDetector = new SystemProxyDetector();
-        errorAggregator = new ErrorAggregator();
-        userNotifier = new UserNotifier();
     });
 
     teardown(() => {
@@ -337,7 +331,7 @@ suite('Integration Tests', () => {
             assert.strictEqual(gitResult.success, true, 'Git should succeed');
             
             // Step 2: VSCode configuration fails (mocked)
-            const vscodeSetStub = sandbox.stub(vscodeConfigManager, 'setProxy').resolves({
+            sandbox.stub(vscodeConfigManager, 'setProxy').resolves({
                 success: false,
                 error: 'Failed to write VSCode settings',
                 errorType: 'CONFIG_WRITE_FAILED' as const
@@ -435,7 +429,7 @@ suite('Integration Tests', () => {
             assert.strictEqual(gitSetResult.success, true, 'Git configuration should succeed');
             
             // Step 4: Configure VSCode (mocked)
-            const vscodeSetStub = sandbox.stub(vscodeConfigManager, 'setProxy').resolves({ success: true });
+            sandbox.stub(vscodeConfigManager, 'setProxy').resolves({ success: true });
             const vscodeSetResult = await vscodeConfigManager.setProxy(testUrl);
             if (!vscodeSetResult.success) {
                 errorAgg.addError('VSCode configuration', vscodeSetResult.error || 'Unknown error');
@@ -455,7 +449,7 @@ suite('Integration Tests', () => {
             const gitUnsetResult = await gitConfigManager.unsetProxy();
             assert.strictEqual(gitUnsetResult.success, true, 'Git unset should succeed');
             
-            const vscodeUnsetStub = sandbox.stub(vscodeConfigManager, 'unsetProxy').resolves({ success: true });
+            sandbox.stub(vscodeConfigManager, 'unsetProxy').resolves({ success: true });
             const vscodeUnsetResult = await vscodeConfigManager.unsetProxy();
             assert.strictEqual(vscodeUnsetResult.success, true, 'VSCode unset should succeed');
             
@@ -621,7 +615,7 @@ suite('Integration Tests', () => {
                     errorAgg.addError('Git configuration', gitResult.error || 'Unknown error');
                 }
 
-                const vscodeSetStub = sandbox.stub(vscodeConfigManager, 'setProxy').resolves({ success: true });
+                sandbox.stub(vscodeConfigManager, 'setProxy').resolves({ success: true });
                 const vscodeResult = await vscodeConfigManager.setProxy(testUrl);
                 if (!vscodeResult.success) {
                     errorAgg.addError('VSCode configuration', vscodeResult.error || 'Unknown error');
@@ -645,7 +639,7 @@ suite('Integration Tests', () => {
 
                 // Step 5: Disable all proxies
                 await gitConfigManager.unsetProxy();
-                const vscodeUnsetStub = sandbox.stub(vscodeConfigManager, 'unsetProxy').resolves({ success: true });
+                sandbox.stub(vscodeConfigManager, 'unsetProxy').resolves({ success: true });
                 await vscodeConfigManager.unsetProxy();
                 await npmConfigManager.unsetProxy();
 

@@ -10,7 +10,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { SyncManager, ISyncManager, SyncStatus } from '../../sync/SyncManager';
+import { SyncManager } from '../../sync/SyncManager';
 import { SharedStateFile, SharedState } from '../../sync/SharedStateFile';
 import { InstanceRegistry } from '../../sync/InstanceRegistry';
 import { ConflictResolver, SyncableState } from '../../sync/ConflictResolver';

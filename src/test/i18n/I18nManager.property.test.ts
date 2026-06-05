@@ -83,17 +83,7 @@ suite('I18nManager Property Tests', () => {
             fc.property(
                 paramKeyArb,
                 paramValueArb,
-                (paramKey, paramValue) => {
-                    // Use a message that has a placeholder
-                    const params: Record<string, string> = {};
-                    params[paramKey] = paramValue;
-
-                    // Create a test message with the placeholder
-                    const testMessage = `Test message with {${paramKey}} placeholder`;
-                    
-                    // Manually substitute to verify
-                    const expected = testMessage.replace(`{${paramKey}}`, paramValue);
-
+                (_paramKey, _paramValue) => {
                     // Test with actual translation that has placeholders
                     // Using 'message.proxyWorks' which has {mode} and {url}
                     const result = i18n.t('message.proxyWorks', { mode: 'Manual', url: 'http://test:8080' });

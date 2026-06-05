@@ -10,8 +10,6 @@ import {
     urlWithShellMetacharactersGenerator,
     urlWithCredentialsGenerator
 } from './generators';
-import { getPropertyTestRuns } from './helpers';
-
 // Helper functions for testing
 function hasValidProtocol(url: string): boolean {
     return url.startsWith('http://') || url.startsWith('https://');

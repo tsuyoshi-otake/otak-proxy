@@ -4,7 +4,7 @@
  */
 
 import * as assert from 'assert';
-import { ProxyMonitorState, MonitoringStatus } from '../monitoring/ProxyMonitorState';
+import { ProxyMonitorState } from '../monitoring/ProxyMonitorState';
 
 suite('ProxyMonitorState Test Suite', () => {
     let state: ProxyMonitorState;

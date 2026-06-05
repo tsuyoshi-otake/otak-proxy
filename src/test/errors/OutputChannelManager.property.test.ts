@@ -125,7 +125,7 @@ suite('OutputChannelManager Property Tests', () => {
                         );
                         
                         // Verify all URLs are logged (may be masked)
-                        details.attemptedUrls.forEach((url, index) => {
+                        details.attemptedUrls.forEach((_url, index) => {
                             const urlNumber = `${index + 1}.`;
                             assert.ok(
                                 loggedMessages.includes(urlNumber),
@@ -142,7 +142,7 @@ suite('OutputChannelManager Property Tests', () => {
                         );
                         
                         // Verify all suggestions are logged
-                        details.suggestions.forEach((suggestion, index) => {
+                        details.suggestions.forEach((_suggestion, index) => {
                             const suggestionNumber = `${index + 1}.`;
                             assert.ok(
                                 loggedMessages.includes(suggestionNumber),

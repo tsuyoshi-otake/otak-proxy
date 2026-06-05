@@ -6,7 +6,6 @@
  */
 
 import * as fc from 'fast-check';
-import * as assert from 'assert';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { getPropertyTestRuns } from './helpers';
 
@@ -221,7 +220,6 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                     // Property: Results should be consistent (same proxyUrl and source)
                     // Note: We check consistency within a single test run
                     // External factors could change proxy between test runs
-                    const firstResult = results[0];
                     for (let i = 1; i < results.length; i++) {
                         // In a stable environment, results should match
                         // We don't strictly enforce this as environment may change

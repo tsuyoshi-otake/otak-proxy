@@ -10,7 +10,6 @@ suite('UserNotifier Tests', () => {
     let i18n: I18nManager;
     let sandbox: sinon.SinonSandbox;
     let showErrorMessageStub: sinon.SinonStub;
-    let showInformationMessageStub: sinon.SinonStub;
     let showWarningMessageStub: sinon.SinonStub;
     let setStatusBarMessageStub: sinon.SinonStub;
     let withProgressStub: sinon.SinonStub;
@@ -26,7 +25,7 @@ suite('UserNotifier Tests', () => {
 
         // Stub VSCode window methods
         showErrorMessageStub = sandbox.stub(vscode.window, 'showErrorMessage');
-        showInformationMessageStub = sandbox.stub(vscode.window, 'showInformationMessage');
+        sandbox.stub(vscode.window, 'showInformationMessage');
         showWarningMessageStub = sandbox.stub(vscode.window, 'showWarningMessage');
         setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
         withProgressStub = sandbox.stub(vscode.window, 'withProgress');
@@ -244,7 +243,7 @@ suite('UserNotifier Tests', () => {
                 return 'result';
             };
             
-            withProgressStub.callsFake(async (options, task) => {
+            withProgressStub.callsFake(async (_options, task) => {
                 return await task({ report: () => {} }, {} as any);
             });
 

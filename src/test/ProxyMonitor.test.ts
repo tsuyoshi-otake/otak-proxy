@@ -8,7 +8,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { ProxyMonitor, ProxyMonitorConfig, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
-import { ProxyMonitorState } from '../monitoring/ProxyMonitorState';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';

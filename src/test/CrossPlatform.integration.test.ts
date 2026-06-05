@@ -7,7 +7,7 @@
  */
 
 import * as assert from 'assert';
-import { SystemProxyDetector, DetectionSource } from '../config/SystemProxyDetector';
+import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { GitConfigManager } from '../config/GitConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';

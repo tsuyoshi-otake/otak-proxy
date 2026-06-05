@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as sinon from 'sinon';
-import { SyncManager, SyncStatus, SyncResult, ISyncManager } from '../../sync/SyncManager';
+import { SyncManager, SyncStatus, ISyncManager } from '../../sync/SyncManager';
 import { ProxyMode, ProxyState } from '../../core/types';
 
 suite('SyncManager Unit Tests', () => {
@@ -294,10 +294,10 @@ suite('SyncManager Unit Tests', () => {
 
             const standaloneManager = new SyncManager(testDir, 'test-window', mockConfig as any);
 
-            const result = await standaloneManager.start();
+            await standaloneManager.start();
             // May return true or false depending on implementation
 
-            const status = standaloneManager.getSyncStatus();
+            standaloneManager.getSyncStatus();
             // In standalone mode, should still report status
 
             await standaloneManager.stop();

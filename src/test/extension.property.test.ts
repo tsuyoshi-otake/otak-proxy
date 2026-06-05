@@ -18,10 +18,8 @@ import { I18nManager } from '../i18n/I18nManager';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import {
-    validProxyUrlGenerator,
     validProxyUrlWithoutCredentialsGenerator,
     urlWithShellMetacharactersGenerator,
-    urlWithoutProtocolGenerator,
     urlWithInvalidPortGenerator,
     urlWithCredentialsGenerator
 } from './generators';

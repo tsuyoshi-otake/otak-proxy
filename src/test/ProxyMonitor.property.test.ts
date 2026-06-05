@@ -8,7 +8,7 @@
 
 import * as fc from 'fast-check';
 import * as sinon from 'sinon';
-import { ProxyMonitor, ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
+import { ProxyMonitor } from '../monitoring/ProxyMonitor';
 import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
@@ -761,7 +761,6 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     // Create a detector that fails specified number of times
                     class FailCountDetector {
                         private attemptCount: number = 0;
-                        private maxFailures: number = failureCount;
 
                         getAttemptCount(): number {
                             return this.attemptCount;
@@ -994,9 +993,6 @@ suite('ProxyMonitor Property-Based Tests', () => {
             fc.asyncProperty(
                 fc.integer({ min: -10000, max: 500000 }), // Any polling interval value including out of range
                 async (intervalMs) => {
-                    const MIN_POLLING_INTERVAL = 10000;  // 10 seconds
-                    const MAX_POLLING_INTERVAL = 300000; // 300 seconds
-
                     const monitor = new ProxyMonitor(
                         mockDetector as any,
                         logger,

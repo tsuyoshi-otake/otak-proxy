@@ -10,7 +10,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { InstanceRegistry, InstanceInfo, IInstanceRegistry } from '../../sync/InstanceRegistry';
+import { InstanceRegistry, IInstanceRegistry } from '../../sync/InstanceRegistry';
 
 suite('InstanceRegistry Unit Tests', () => {
     let testDir: string;
@@ -66,7 +66,7 @@ suite('InstanceRegistry Unit Tests', () => {
 
         test('should generate unique instance ID', async () => {
             await registry.register();
-            const instances1 = await registry.getActiveInstances();
+            await registry.getActiveInstances();
 
             // Create second registry instance
             const registry2 = new InstanceRegistry(testDir, 'test-window-id-2');

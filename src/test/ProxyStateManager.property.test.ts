@@ -20,8 +20,8 @@ suite('ProxyStateManager Property Tests', () => {
         // Create a mock extension context
         context = {
             globalState: {
-                get: (key: string, defaultValue?: any) => defaultValue,
-                update: async (key: string, value: any) => {
+                get: (_key: string, defaultValue?: any) => defaultValue,
+                update: async (_key: string, _value: any) => {
                     // Simulate successful update
                 },
                 keys: () => [],
@@ -78,7 +78,7 @@ suite('ProxyStateManager Property Tests', () => {
                         ...context,
                         globalState: {
                             ...context.globalState,
-                            update: async (key: string, value: any) => {
+                            update: async (_key: string, _value: any) => {
                                 throw new Error('Simulated storage failure');
                             }
                         }
@@ -137,7 +137,7 @@ suite('ProxyStateManager Property Tests', () => {
                                 }
                                 return defaultValue;
                             },
-                            update: async (key: string, value: any) => {
+                            update: async (_key: string, _value: any) => {
                                 // Simulate successful update
                             },
                             keys: () => [],

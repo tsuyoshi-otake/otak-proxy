@@ -16,11 +16,10 @@ import { ProxyMode, ProxyState } from '../../core/types';
 
 suite('SharedStateFile Property-Based Tests', () => {
     let testDir: string;
-    let sharedStateFile: SharedStateFile;
 
     setup(() => {
         testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-ssf-prop-test-'));
-        sharedStateFile = new SharedStateFile(testDir);
+        new SharedStateFile(testDir);
     });
 
     teardown(() => {

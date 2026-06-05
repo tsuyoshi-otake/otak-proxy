@@ -84,13 +84,12 @@ suite('StatusBar Commands Availability Tests', () => {
         sandbox.stub(vscode.window, 'showErrorMessage').resolves();
         sandbox.stub(vscode.window, 'showWarningMessage').resolves();
         sandbox.stub(vscode.window, 'showInputBox').resolves('http://test-proxy:8080');
-        sandbox.stub(vscode.window, 'withProgress').callsFake(async (options, task) => {
+        sandbox.stub(vscode.window, 'withProgress').callsFake(async (_options, task) => {
             return task({ report: () => {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) });
         });
 
         // Mock registerCommand to track order
-        const originalRegisterCommand = vscode.commands.registerCommand;
-        sandbox.stub(vscode.commands, 'registerCommand').callsFake((commandId: string, callback: any) => {
+        sandbox.stub(vscode.commands, 'registerCommand').callsFake((commandId: string, _callback: any) => {
             commandRegistrationOrder.push(`${commandId}@${callIndex++}`);
             // Return a disposable
             return { dispose: () => {} };
@@ -461,33 +460,22 @@ suite('StatusBar Commands Availability Tests', () => {
  */
 function setupMocks(
     sandbox: sinon.SinonSandbox,
-    globalState: Map<string, any>,
+    _globalState: Map<string, any>,
     mockStatusBarItem: vscode.StatusBarItem,
     commandRegistrationOrder: string[],
     getCallIndex: () => number
 ): void {
-    // Create mock memento
-    const mockMemento: vscode.Memento & { setKeysForSync(keys: readonly string[]): void } = {
-        get: <T>(key: string, defaultValue?: T): T => (globalState.get(key) ?? defaultValue) as T,
-        update: async (key: string, value: any) => {
-            globalState.set(key, value);
-            return Promise.resolve();
-        },
-        keys: () => [],
-        setKeysForSync: () => {}
-    };
-
     // Mock VSCode APIs
     sandbox.stub(vscode.window, 'createStatusBarItem').returns(mockStatusBarItem);
     sandbox.stub(vscode.window, 'showInformationMessage').resolves('Skip' as any);
     sandbox.stub(vscode.window, 'showErrorMessage').resolves();
     sandbox.stub(vscode.window, 'showWarningMessage').resolves();
-    sandbox.stub(vscode.window, 'withProgress').callsFake(async (options, task) => {
+    sandbox.stub(vscode.window, 'withProgress').callsFake(async (_options, task) => {
         return task({ report: () => {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) });
     });
 
     // Mock registerCommand to track order
-    sandbox.stub(vscode.commands, 'registerCommand').callsFake((commandId: string, callback: any) => {
+    sandbox.stub(vscode.commands, 'registerCommand').callsFake((commandId: string, _callback: any) => {
         commandRegistrationOrder.push(`${commandId}@${getCallIndex()}`);
         return { dispose: () => {} };
     });

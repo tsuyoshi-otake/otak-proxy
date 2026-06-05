@@ -68,7 +68,7 @@ suite('ProxyStateManager Unit Tests', () => {
         (vscode.workspace as any).getConfiguration = (section?: string) => {
             if (section === 'otakProxy') {
                 return {
-                    get: (key: string, defaultValue?: any) => defaultValue
+                    get: (_key: string, defaultValue?: any) => defaultValue
                 };
             }
             return originalGetConfiguration(section);

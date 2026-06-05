@@ -10,13 +10,8 @@
 import * as assert from 'assert';
 import * as fc from 'fast-check';
 import { ProxyApplier } from '../core/ProxyApplier';
-import { GitConfigManager } from '../config/GitConfigManager';
-import { VscodeConfigManager } from '../config/VscodeConfigManager';
-import { NpmConfigManager } from '../config/NpmConfigManager';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
-import { UserNotifier } from '../errors/UserNotifier';
-import { ProxyStateManager } from '../core/ProxyStateManager';
 import { I18nManager } from '../i18n/I18nManager';
 import { getPropertyTestRuns } from './helpers';
 
@@ -46,7 +41,7 @@ suite('ProxyApplier Property Tests', () => {
                     
                     // Create mock managers that track when they're called
                     const mockGitManager = {
-                        setProxy: async (url: string) => {
+                        setProxy: async (_url: string) => {
                             operationOrder.push('git-apply');
                             return { success: true };
                         },
@@ -57,7 +52,7 @@ suite('ProxyApplier Property Tests', () => {
                     } as any;
                     
                     const mockVscodeManager = {
-                        setProxy: async (url: string) => {
+                        setProxy: async (_url: string) => {
                             operationOrder.push('vscode-apply');
                             return { success: true };
                         },
@@ -68,7 +63,7 @@ suite('ProxyApplier Property Tests', () => {
                     } as any;
                     
                     const mockNpmManager = {
-                        setProxy: async (url: string) => {
+                        setProxy: async (_url: string) => {
                             operationOrder.push('npm-apply');
                             return { success: true };
                         },
@@ -80,7 +75,7 @@ suite('ProxyApplier Property Tests', () => {
                     
                     // Create a validator that tracks when it's called
                     const mockValidator = {
-                        validate: (url: string) => {
+                        validate: (_url: string) => {
                             operationOrder.push('validation');
                             return { isValid: true, errors: [] };
                         }
@@ -257,7 +252,7 @@ suite('ProxyApplier Property Tests', () => {
                     const mockSanitizer = new InputSanitizer();
                     const mockNotifier = {
                         showSuccess: () => {},
-                        showError: (msg: string, suggestions?: string[]) => {
+                        showError: (msg: string, _suggestions?: string[]) => {
                             errorShown = true;
                             errorMessage = msg;
                         },
