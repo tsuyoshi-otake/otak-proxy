@@ -20,6 +20,7 @@ import { InstanceRegistry, IInstanceRegistry } from './InstanceRegistry';
 import { FileWatcher, IFileWatcher } from './FileWatcher';
 import { ConflictResolver, SyncableState } from './ConflictResolver';
 import { ISyncConfigManager } from './SyncConfigManager';
+import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
 
 /**
  * Result of a sync operation
@@ -274,10 +275,11 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
             const now = Date.now();
             const version = this.currentState ? this.currentState.version + 1 : 1;
+            const sharedProxyState = sanitizeProxyStateForPersistence(state);
 
             // Create syncable state
             this.currentState = {
-                state,
+                state: sharedProxyState,
                 timestamp: now,
                 instanceId,
                 version
@@ -288,8 +290,8 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 version,
                 lastModified: now,
                 lastModifiedBy: instanceId,
-                proxyState: state,
-                testResult: state.lastTestResult
+                proxyState: sharedProxyState,
+                testResult: sharedProxyState.lastTestResult
             };
 
             await this.sharedStateFile.write(sharedState);

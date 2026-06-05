@@ -52,28 +52,19 @@ export interface IFileWatcher {
 const DEBOUNCE_DELAY = 100;
 
 /**
- * FileWatcher monitors a file for changes using fs.watch.
+ * FileWatcher monitors a file for changes using stat polling.
  *
  * Features:
  * - Debounces rapid changes to prevent excessive event firing
- * - Handles platform differences in fs.watch behavior
+ * - Handles file deletion and recreation during atomic writes
  * - Graceful error handling for missing/deleted files
  */
 export class FileWatcher implements IFileWatcher {
-    private watcher: fs.FSWatcher | null = null;
+    private watchedFilePath: string | null = null;
+    private watchFileListener: ((curr: fs.Stats, prev: fs.Stats) => void) | null = null;
     private listeners: Set<() => void> = new Set();
     private debounceTimer: NodeJS.Timeout | null = null;
     private watching: boolean = false;
-
-    private attachErrorHandler(): void {
-        if (!this.watcher) {
-            return;
-        }
-        this.watcher.on('error', (error) => {
-            Logger.warn('File watcher error:', error);
-            // Don't stop watching - the file might be recreated
-        });
-    }
 
     /**
      * Start watching a file for changes
@@ -82,42 +73,30 @@ export class FileWatcher implements IFileWatcher {
      */
     start(filePath: string): void {
         // Stop any existing watcher
-        if (this.watcher) {
+        if (this.watchedFilePath) {
             this.stop();
         }
 
         this.watching = true;
 
-        const dirPath = path.dirname(filePath);
-        const targetFile = path.basename(filePath);
-
         try {
-            this.watcher = fs.watch(filePath, { persistent: false }, () => {
-                this.handleChange();
-            });
-            this.attachErrorHandler();
-            Logger.debug(`Started watching file: ${filePath}`);
-            return;
-        } catch (error) {
-            // File might not exist yet - fall back to watching the directory.
-            Logger.debug(`Could not watch file directly, falling back to directory watch: ${filePath}`);
-        }
-
-        try {
-            this.watcher = fs.watch(dirPath, { persistent: false }, (_eventType, filename) => {
-                if (filename) {
-                    const name = Buffer.isBuffer(filename) ? filename.toString() : filename;
-                    if (name && name !== targetFile) {
-                        return;
-                    }
+            const resolvedFilePath = path.resolve(filePath);
+            this.watchFileListener = (curr, prev) => {
+                if (
+                    curr.mtimeMs === prev.mtimeMs &&
+                    curr.size === prev.size &&
+                    curr.ino === prev.ino
+                ) {
+                    return;
                 }
                 this.handleChange();
-            });
-            this.attachErrorHandler();
-            Logger.debug(`Started watching directory: ${dirPath} (target: ${targetFile})`);
+            };
+
+            fs.watchFile(resolvedFilePath, { interval: 50, persistent: false }, this.watchFileListener);
+            this.watchedFilePath = resolvedFilePath;
+            Logger.debug(`Started polling file: ${resolvedFilePath}`);
         } catch (error) {
-            // Watcher could not be started (directory missing, permissions, etc.). Keep watching=true but log.
-            Logger.warn(`Could not watch file or directory: ${filePath}`, error);
+            Logger.warn(`Could not watch file: ${filePath}`, error);
         }
     }
 
@@ -131,15 +110,16 @@ export class FileWatcher implements IFileWatcher {
             this.debounceTimer = null;
         }
 
-        // Close watcher
-        if (this.watcher) {
+        // Stop watcher
+        if (this.watchedFilePath && this.watchFileListener) {
             try {
-                this.watcher.close();
+                fs.unwatchFile(this.watchedFilePath, this.watchFileListener);
             } catch {
-                // Ignore close errors
+                // Ignore unwatch errors
             }
-            this.watcher = null;
         }
+        this.watchedFilePath = null;
+        this.watchFileListener = null;
 
         this.watching = false;
 

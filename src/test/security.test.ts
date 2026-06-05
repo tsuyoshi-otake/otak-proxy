@@ -3,6 +3,7 @@ import * as fc from 'fast-check';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { GitConfigManager } from '../config/GitConfigManager';
+import { Logger } from '../utils/Logger';
 
 /**
  * Security Testing Suite
@@ -377,6 +378,42 @@ suite('Security Test Suite', () => {
                     // If URL is malformed, that's fine - we're testing error messages
                 }
             }
+        });
+
+        test('Logger should mask credentials in non-http URL schemes', () => {
+            const originalWarn = console.warn;
+            const originalLogSilent = process.env.OTAK_PROXY_LOG_SILENT;
+            const originalTestSilent = process.env.OTAK_PROXY_TEST_SILENT;
+            const messages: unknown[][] = [];
+
+            console.warn = (...args: unknown[]) => {
+                messages.push(args);
+            };
+
+            try {
+                delete process.env.OTAK_PROXY_LOG_SILENT;
+                delete process.env.OTAK_PROXY_TEST_SILENT;
+                Logger.warn(
+                    'Environment proxy failed validation:',
+                    'socks://user:secret@proxy.example.com:1080'
+                );
+            } finally {
+                console.warn = originalWarn;
+                if (originalLogSilent === undefined) {
+                    delete process.env.OTAK_PROXY_LOG_SILENT;
+                } else {
+                    process.env.OTAK_PROXY_LOG_SILENT = originalLogSilent;
+                }
+                if (originalTestSilent === undefined) {
+                    delete process.env.OTAK_PROXY_TEST_SILENT;
+                } else {
+                    process.env.OTAK_PROXY_TEST_SILENT = originalTestSilent;
+                }
+            }
+
+            const output = messages.flat().map(String).join(' ');
+            assert.ok(!output.includes('secret'), `Log output should not include password: ${output}`);
+            assert.ok(output.includes('****'), `Log output should include masked password: ${output}`);
         });
 
         test('should mask credentials in property-based fuzzing', () => {

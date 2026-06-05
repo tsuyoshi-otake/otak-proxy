@@ -161,22 +161,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 Logger.log('Received remote state change from another instance');
                 // Update local state with remote changes
                 await proxyStateManager.saveState(remoteState);
-                const activeUrl = proxyStateManager.getActiveProxyUrl(remoteState);
+                const localState = await proxyStateManager.getState();
+                const activeUrl = proxyStateManager.getActiveProxyUrl(localState);
                 // Suppress success notifications for sync-driven updates to avoid
                 // "Proxy configured" repeatedly flashing in the status bar.
-                if (remoteState.mode !== ProxyMode.Off && activeUrl) {
+                if (localState.mode !== ProxyMode.Off && activeUrl) {
                     await proxyApplier.applyProxy(activeUrl, true, { silent: true });
-                } else if (remoteState.mode === ProxyMode.Off) {
+                } else if (localState.mode === ProxyMode.Off) {
                     await proxyApplier.disableProxy({ silent: true });
                 }
                 // Align monitoring with the resolved mode to avoid background polling when not needed.
-                if (remoteState.mode === ProxyMode.Auto) {
+                if (localState.mode === ProxyMode.Auto) {
                     await initializer.startSystemProxyMonitoring();
                 } else {
                     await initializer.stopSystemProxyMonitoring();
                 }
                 // Reflect the remote state in the status bar
-                statusBarManager.update(remoteState);
+                statusBarManager.update(localState);
             });
 
             syncManager.on('conflictResolved', (conflictInfo) => {

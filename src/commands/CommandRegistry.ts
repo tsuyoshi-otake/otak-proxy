@@ -18,6 +18,7 @@ import { executeTestProxy } from './TestProxyCommand';
 import { executeImportProxy } from './ImportProxyCommand';
 import { executeToggleShowProxyUrl } from './ToggleShowProxyUrlCommand';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
+import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 
 /**
  * Configuration for CommandRegistry
@@ -211,10 +212,21 @@ export class CommandRegistry {
     private async handleProxyUrlChange(): Promise<void> {
         const state = await this.commandContext.getProxyState();
         const newUrl = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
+        const newPublicUrl = removeProxyCredentials(newUrl) || newUrl;
+        const newComparableUrl = getProxyPublicUrl(newUrl) || newUrl;
+        const currentPublicUrl = getProxyPublicUrl(state.manualProxyUrl) || state.manualProxyUrl || '';
 
-        if (newUrl !== state.manualProxyUrl) {
+        if (newComparableUrl !== currentPublicUrl || (newUrl && hasProxyCredentials(newUrl))) {
             state.manualProxyUrl = newUrl;
             await this.commandContext.saveProxyState(state);
+
+            if (newUrl !== newPublicUrl) {
+                await vscode.workspace.getConfiguration('otakProxy').update(
+                    'proxyUrl',
+                    newPublicUrl,
+                    vscode.ConfigurationTarget.Global
+                );
+            }
 
             if (state.mode === ProxyMode.Manual) {
                 await this.commandContext.applyProxySettings(newUrl, !!newUrl);

@@ -17,6 +17,10 @@ import * as path from 'path';
 import { ProxyState, ProxyTestResult } from '../core/types';
 import { Logger } from '../utils/Logger';
 import { getErrorCode } from '../utils/ErrorUtils';
+import {
+    sanitizeProxyStateForPersistence,
+    sanitizeProxyTestResultForPersistence
+} from '../utils/ProxyStateSanitizer';
 
 /**
  * Shared state structure stored in JSON file
@@ -139,7 +143,7 @@ export class SharedStateFile implements ISharedStateFile {
                 return null;
             }
 
-            return state;
+            return this.sanitizeSharedState(state);
         } catch (error) {
             if (error instanceof SyntaxError) {
                 Logger.error('Failed to parse shared state file:', error);
@@ -169,7 +173,7 @@ export class SharedStateFile implements ISharedStateFile {
             await this.ensureSyncDir();
 
             // Serialize state
-            const content = JSON.stringify(state, null, 2);
+            const content = JSON.stringify(this.sanitizeSharedState(state), null, 2);
 
             // Write to temp file first
             fs.writeFileSync(tempPath, content, 'utf-8');
@@ -318,5 +322,13 @@ export class SharedStateFile implements ISharedStateFile {
         }
 
         return true;
+    }
+
+    private sanitizeSharedState(state: SharedState): SharedState {
+        return {
+            ...state,
+            proxyState: sanitizeProxyStateForPersistence(state.proxyState),
+            testResult: sanitizeProxyTestResultForPersistence(state.testResult)
+        };
     }
 }

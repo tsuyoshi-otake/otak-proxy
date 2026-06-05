@@ -55,8 +55,9 @@ export class Logger {
             return String(message);
         }
 
-        const urlPattern = /https?:\/\/[^\s]+/g;
-        return message.replace(urlPattern, (url) => this.sanitizer.maskPassword(url));
+        const urlPattern = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s]+/g;
+        const sanitizedUrls = message.replace(urlPattern, (url) => this.sanitizer.maskPassword(url));
+        return this.sanitizer.maskPassword(sanitizedUrls);
     }
 
     /**

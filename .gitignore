@@ -2,10 +2,12 @@ out
 dist
 node_modules
 .vscode-test/
-.env.local
+.env*
+!.env.example
+*.vsix
+*.tgz
 npm-test.log
 mvp*.log
 unit-parallel.log
-*.vsix
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md

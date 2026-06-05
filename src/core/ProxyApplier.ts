@@ -31,6 +31,23 @@ export class ProxyApplier {
         private terminalEnvManager?: TerminalEnvConfigManager
     ) {}
 
+    private isWorkspaceTrusted(): boolean {
+        return vscode.workspace.isTrusted !== false;
+    }
+
+    private blockIfUntrustedWorkspace(options?: { silent?: boolean }): boolean {
+        if (this.isWorkspaceTrusted()) {
+            return false;
+        }
+
+        const message = 'Proxy settings were not changed because the workspace is untrusted.';
+        Logger.warn(message);
+        if (!options?.silent) {
+            this.userNotifier.showWarning(message);
+        }
+        return true;
+    }
+
     /**
      * Apply proxy settings to all configuration targets
      * 
@@ -51,6 +68,10 @@ export class ProxyApplier {
         // If disabling, use the dedicated disable function
         if (!enabled) {
             return await this.disableProxy(options);
+        }
+
+        if (this.blockIfUntrustedWorkspace(options)) {
+            return false;
         }
         
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
@@ -159,6 +180,10 @@ export class ProxyApplier {
      */
     async disableProxy(options?: { silent?: boolean }): Promise<boolean> {
         const errorAggregator = new ErrorAggregator();
+
+        if (this.blockIfUntrustedWorkspace(options)) {
+            return false;
+        }
         
         let gitSuccess = false;
         let vscodeSuccess = false;

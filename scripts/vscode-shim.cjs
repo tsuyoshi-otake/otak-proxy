@@ -53,6 +53,16 @@ const vscodeStub = {
     Left: 1,
     Right: 2,
   },
+  ConfigurationTarget: {
+    Global: 1,
+    Workspace: 2,
+    WorkspaceFolder: 3,
+  },
+  ExtensionMode: {
+    Production: 1,
+    Development: 2,
+    Test: 3,
+  },
   ThemeColor: function ThemeColor(id) {
     this.id = String(id);
   },

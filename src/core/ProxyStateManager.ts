@@ -13,6 +13,13 @@ import * as vscode from 'vscode';
 import { ProxyMode, ProxyState, IProxyStateManager } from './types';
 import { Logger } from '../utils/Logger';
 import { I18nManager } from '../i18n/I18nManager';
+import {
+    getProxyPublicUrl,
+    hasProxyCredentials,
+    sanitizeProxyStateForPersistence
+} from '../utils/ProxyStateSanitizer';
+
+const MANUAL_PROXY_SECRET_KEY = 'otakProxy.manualProxyUrl';
 
 /**
  * ProxyStateManager handles all proxy state operations
@@ -37,7 +44,7 @@ export class ProxyStateManager implements IProxyStateManager {
     async getState(): Promise<ProxyState> {
         // If we have an in-memory fallback state, use it
         if (this.inMemoryState) {
-            return this.inMemoryState;
+            return await this.hydrateStateForRuntime(this.inMemoryState);
         }
 
         const state = this.context.globalState.get<ProxyState>('proxyState');
@@ -45,7 +52,9 @@ export class ProxyStateManager implements IProxyStateManager {
             // Migrate from old settings
             return await this.migrateOldSettings();
         }
-        return state;
+        const hydratedState = await this.hydrateStateForRuntime(state);
+        await this.scrubPersistedStateIfNeeded(state);
+        return hydratedState;
     }
 
     /**
@@ -57,9 +66,10 @@ export class ProxyStateManager implements IProxyStateManager {
      */
     async saveState(state: ProxyState): Promise<void> {
         try {
-            await this.context.globalState.update('proxyState', state);
-            // Clear in-memory fallback on successful write
-            this.inMemoryState = null;
+            await this.persistManualProxySecret(state.manualProxyUrl);
+            await this.context.globalState.update('proxyState', sanitizeProxyStateForPersistence(state));
+            // Keep the full state only in memory for the current session. Persistent state is sanitized.
+            this.inMemoryState = { ...state };
         } catch (error) {
             // Requirement 3.2: Log error and continue with in-memory state
             Logger.error('Failed to write proxy state to global storage:', error);
@@ -126,7 +136,7 @@ export class ProxyStateManager implements IProxyStateManager {
     private async migrateOldSettings(): Promise<ProxyState> {
         const oldEnabled = this.context.globalState.get<boolean>('proxyEnabled', false);
         const config = vscode.workspace.getConfiguration('otakProxy');
-        const manualUrl = config.get<string>('proxyUrl', '');
+        const manualUrl = await this.normalizeConfiguredManualProxyUrl(config.get<string>('proxyUrl', ''));
 
         return {
             mode: oldEnabled && manualUrl ? ProxyMode.Manual : ProxyMode.Off,
@@ -139,5 +149,127 @@ export class ProxyStateManager implements IProxyStateManager {
             systemProxyDetected: undefined,
             lastError: undefined
         };
+    }
+
+    private async hydrateStateForRuntime(state: ProxyState): Promise<ProxyState> {
+        const config = vscode.workspace.getConfiguration('otakProxy');
+        const configuredManualUrl = await this.normalizeConfiguredManualProxyUrl(config.get<string>('proxyUrl', ''));
+        const secretManualUrl = await this.getManualProxySecret();
+
+        const configuredPublicUrl = getProxyPublicUrl(configuredManualUrl);
+        const secretPublicUrl = getProxyPublicUrl(secretManualUrl);
+        const statePublicUrl = getProxyPublicUrl(state.manualProxyUrl);
+
+        if (secretManualUrl && statePublicUrl && secretPublicUrl === statePublicUrl) {
+            return {
+                ...state,
+                manualProxyUrl: secretManualUrl
+            };
+        }
+
+        if (configuredManualUrl && (!state.manualProxyUrl || state.manualProxyUrl === configuredPublicUrl)) {
+            return {
+                ...state,
+                manualProxyUrl: secretManualUrl && secretPublicUrl === configuredPublicUrl
+                    ? secretManualUrl
+                    : configuredManualUrl
+            };
+        }
+
+        return state;
+    }
+
+    private async scrubPersistedStateIfNeeded(state: ProxyState): Promise<void> {
+        const sanitizedState = sanitizeProxyStateForPersistence(state);
+        if (JSON.stringify(sanitizedState) === JSON.stringify(state)) {
+            return;
+        }
+
+        try {
+            await this.persistManualProxySecret(state.manualProxyUrl);
+            await this.context.globalState.update('proxyState', sanitizedState);
+        } catch (error) {
+            Logger.warn('Failed to scrub proxy credentials from persisted state:', error);
+        }
+    }
+
+    private async normalizeConfiguredManualProxyUrl(configuredManualUrl: string): Promise<string> {
+        if (!configuredManualUrl) {
+            return '';
+        }
+
+        if (!hasProxyCredentials(configuredManualUrl)) {
+            return configuredManualUrl;
+        }
+
+        await this.storeManualProxySecret(configuredManualUrl);
+        const publicUrl = getProxyPublicUrl(configuredManualUrl) || configuredManualUrl;
+
+        try {
+            await vscode.workspace.getConfiguration('otakProxy').update(
+                'proxyUrl',
+                publicUrl,
+                vscode.ConfigurationTarget.Global
+            );
+        } catch (error) {
+            Logger.warn('Failed to remove proxy credentials from configuration:', error);
+        }
+
+        return configuredManualUrl;
+    }
+
+    private async persistManualProxySecret(manualProxyUrl: string | undefined): Promise<void> {
+        if (!manualProxyUrl) {
+            await this.deleteManualProxySecret();
+            return;
+        }
+
+        if (hasProxyCredentials(manualProxyUrl)) {
+            await this.storeManualProxySecret(manualProxyUrl);
+            return;
+        }
+
+        const existing = await this.getManualProxySecret();
+        if (existing && getProxyPublicUrl(existing) !== getProxyPublicUrl(manualProxyUrl)) {
+            await this.deleteManualProxySecret();
+        }
+    }
+
+    private async getManualProxySecret(): Promise<string | undefined> {
+        const secrets = this.context.secrets;
+        if (!secrets || typeof secrets.get !== 'function') {
+            return undefined;
+        }
+        try {
+            return await secrets.get(MANUAL_PROXY_SECRET_KEY);
+        } catch (error) {
+            Logger.warn('Failed to read proxy credentials from secret storage:', error);
+            return undefined;
+        }
+    }
+
+    private async storeManualProxySecret(manualProxyUrl: string): Promise<void> {
+        const secrets = this.context.secrets;
+        if (!secrets || typeof secrets.store !== 'function') {
+            Logger.warn('Secret storage is not available; proxy credentials cannot be stored securely.');
+            return;
+        }
+        try {
+            await secrets.store(MANUAL_PROXY_SECRET_KEY, manualProxyUrl);
+        } catch (error) {
+            Logger.warn('Failed to store proxy credentials in secret storage:', error);
+        }
+    }
+
+    private async deleteManualProxySecret(): Promise<void> {
+        const secrets = this.context.secrets;
+        if (!secrets || typeof secrets.delete !== 'function') {
+            return;
+        }
+        try {
+            await secrets.delete(MANUAL_PROXY_SECRET_KEY);
+        } catch (error) {
+            Logger.warn('Failed to delete proxy credentials from secret storage:', error);
+        }
     }
 }

@@ -236,7 +236,9 @@ export class SyncStatusProvider implements ISyncStatusProvider {
         if (status.isSyncing) {
             tooltip.appendMarkdown(`$(loading~spin) ${this.i18n.t('sync.status.syncing')}\n\n`);
         } else if (status.lastError) {
-            tooltip.appendMarkdown(`$(warning) ${this.i18n.t('sync.status.error')}: ${status.lastError}\n\n`);
+            tooltip.appendMarkdown(`$(warning) ${this.i18n.t('sync.status.error')}: `);
+            tooltip.appendText(status.lastError);
+            tooltip.appendMarkdown('\n\n');
         } else {
             tooltip.appendMarkdown(`$(check) ${this.i18n.t('sync.status.synced')}\n\n`);
         }

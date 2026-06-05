@@ -13,9 +13,11 @@ suite('ProxyStateManager Unit Tests', () => {
     let context: vscode.ExtensionContext;
     let stateManager: ProxyStateManager;
     let storedState: ProxyState | undefined;
+    let secrets: Map<string, string>;
 
     setup(() => {
         storedState = undefined;
+        secrets = new Map();
 
         // Create a mock extension context
         context = {
@@ -47,7 +49,12 @@ suite('ProxyStateManager Unit Tests', () => {
             logUri: vscode.Uri.file(''),
             asAbsolutePath: (relativePath: string) => relativePath,
             workspaceState: {} as any,
-            secrets: {} as any,
+            secrets: {
+                get: async (key: string) => secrets.get(key),
+                store: async (key: string, value: string) => { secrets.set(key, value); },
+                delete: async (key: string) => { secrets.delete(key); },
+                onDidChange: () => ({ dispose: () => {} })
+            } as any,
             extension: {} as any,
             languageModelAccessInformation: {} as any
         } as unknown as vscode.ExtensionContext;
@@ -95,6 +102,148 @@ suite('ProxyStateManager Unit Tests', () => {
 
         // Verify state was stored
         assert.deepStrictEqual(storedState, testState);
+    });
+
+    test('saveState should remove proxy credentials from persisted state', async () => {
+        const testState: ProxyState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://user:secret@proxy.example.com:8080',
+            autoProxyUrl: 'http://auto:secret@auto.example.com:8080',
+            fallbackProxyUrl: 'http://fallback:secret@fallback.example.com:8080',
+            lastSystemProxyUrl: 'http://system:secret@system.example.com:8080',
+            lastTestResult: {
+                success: false,
+                testUrls: ['https://example.com'],
+                errors: [
+                    {
+                        url: 'http://probe:secret@test.example.com:8080',
+                        message: 'Failed via http://user:secret@proxy.example.com:8080'
+                    }
+                ],
+                proxyUrl: 'http://user:secret@proxy.example.com:8080',
+                timestamp: Date.now(),
+                duration: 150
+            }
+        };
+
+        await stateManager.saveState(testState);
+
+        assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), testState.manualProxyUrl);
+        assert.strictEqual(storedState!.manualProxyUrl, 'http://proxy.example.com:8080/');
+        assert.strictEqual(storedState!.autoProxyUrl, 'http://auto.example.com:8080/');
+        assert.strictEqual(storedState!.fallbackProxyUrl, 'http://fallback.example.com:8080/');
+        assert.strictEqual(storedState!.lastSystemProxyUrl, 'http://system.example.com:8080/');
+        assert.strictEqual(storedState!.lastTestResult!.proxyUrl, 'http://proxy.example.com:8080/');
+        assert.strictEqual(storedState!.lastTestResult!.errors[0].url, 'http://test.example.com:8080/');
+        assert.ok(!JSON.stringify(storedState).includes('secret'));
+
+        const runtimeState = await stateManager.getState();
+        assert.strictEqual(runtimeState.manualProxyUrl, testState.manualProxyUrl);
+    });
+
+    test('getState should hydrate persisted manual proxy credentials from configuration', async () => {
+        const originalGetConfiguration = vscode.workspace.getConfiguration;
+        let updatedProxyUrl: string | undefined;
+        (vscode.workspace as any).getConfiguration = (section?: string) => {
+            if (section === 'otakProxy') {
+                return {
+                    get: (key: string, defaultValue?: any) => {
+                        if (key === 'proxyUrl') {
+                            return 'http://user:secret@proxy.example.com:8080';
+                        }
+                        return defaultValue;
+                    },
+                    update: async (key: string, value: string) => {
+                        if (key === 'proxyUrl') {
+                            updatedProxyUrl = value;
+                        }
+                    }
+                };
+            }
+            return originalGetConfiguration(section);
+        };
+
+        try {
+            storedState = {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: 'http://proxy.example.com:8080/'
+            };
+
+            const state = await stateManager.getState();
+
+            assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
+            assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), 'http://user:secret@proxy.example.com:8080');
+            assert.strictEqual(updatedProxyUrl, 'http://proxy.example.com:8080/');
+            assert.strictEqual(
+                stateManager.getActiveProxyUrl(state),
+                'http://user:secret@proxy.example.com:8080'
+            );
+        } finally {
+            (vscode.workspace as any).getConfiguration = originalGetConfiguration;
+        }
+    });
+
+    test('getState should hydrate manual proxy credentials from secret storage', async () => {
+        const originalGetConfiguration = vscode.workspace.getConfiguration;
+        secrets.set('otakProxy.manualProxyUrl', 'http://user:secret@proxy.example.com:8080');
+
+        (vscode.workspace as any).getConfiguration = (section?: string) => {
+            if (section === 'otakProxy') {
+                return {
+                    get: (key: string, defaultValue?: any) => {
+                        if (key === 'proxyUrl') {
+                            return 'http://proxy.example.com:8080/';
+                        }
+                        return defaultValue;
+                    },
+                    update: async () => {}
+                };
+            }
+            return originalGetConfiguration(section);
+        };
+
+        try {
+            storedState = {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: 'http://proxy.example.com:8080/'
+            };
+
+            const state = await stateManager.getState();
+
+            assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
+        } finally {
+            (vscode.workspace as any).getConfiguration = originalGetConfiguration;
+        }
+    });
+
+    test('getState should scrub legacy persisted proxy credentials', async () => {
+        storedState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://user:secret@proxy.example.com:8080',
+            autoProxyUrl: 'http://auto:secret@auto.example.com:8080',
+            lastTestResult: {
+                success: false,
+                testUrls: ['https://example.com'],
+                errors: [
+                    {
+                        url: 'http://probe:secret@test.example.com:8080',
+                        message: 'Failed via http://user:secret@proxy.example.com:8080'
+                    }
+                ],
+                proxyUrl: 'http://user:secret@proxy.example.com:8080',
+                timestamp: Date.now(),
+                duration: 150
+            }
+        };
+
+        const state = await stateManager.getState();
+
+        assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
+        assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), 'http://user:secret@proxy.example.com:8080');
+        assert.strictEqual(storedState!.manualProxyUrl, 'http://proxy.example.com:8080/');
+        assert.strictEqual(storedState!.autoProxyUrl, 'http://auto.example.com:8080/');
+        assert.strictEqual(storedState!.lastTestResult!.proxyUrl, 'http://proxy.example.com:8080/');
+        assert.ok(!JSON.stringify(storedState).includes('secret'));
     });
 
     test('getState should return saved state', async () => {

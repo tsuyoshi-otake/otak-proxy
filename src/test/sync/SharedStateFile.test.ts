@@ -136,6 +136,52 @@ suite('SharedStateFile Unit Tests', () => {
             assert.strictEqual(readState!.testResult!.success, true);
             assert.strictEqual(readState!.testResult!.testUrls.length, 1);
         });
+
+        test('should remove proxy credentials before writing shared state', async () => {
+            const state: SharedState = {
+                version: 1,
+                lastModified: Date.now(),
+                lastModifiedBy: 'instance-1',
+                proxyState: {
+                    mode: ProxyMode.Manual,
+                    manualProxyUrl: 'http://user:secret@proxy.example.com:8080',
+                    autoProxyUrl: 'http://auto:secret@auto.example.com:8080',
+                    lastTestResult: {
+                        success: false,
+                        testUrls: ['https://example.com'],
+                        errors: [
+                            {
+                                url: 'http://probe:secret@test.example.com:8080',
+                                message: 'Failed via http://user:secret@proxy.example.com:8080'
+                            }
+                        ],
+                        proxyUrl: 'http://user:secret@proxy.example.com:8080',
+                        timestamp: Date.now(),
+                        duration: 150
+                    }
+                },
+                testResult: {
+                    success: false,
+                    testUrls: ['https://example.com'],
+                    errors: [],
+                    proxyUrl: 'http://user:secret@proxy.example.com:8080',
+                    timestamp: Date.now(),
+                    duration: 150
+                }
+            };
+
+            await sharedStateFile.write(state);
+
+            const filePath = path.join(testDir, 'otak-proxy-sync', 'sync-state.json');
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const readState = await sharedStateFile.read();
+
+            assert.ok(!content.includes('secret'));
+            assert.strictEqual(readState!.proxyState.manualProxyUrl, 'http://proxy.example.com:8080/');
+            assert.strictEqual(readState!.proxyState.autoProxyUrl, 'http://auto.example.com:8080/');
+            assert.strictEqual(readState!.proxyState.lastTestResult!.proxyUrl, 'http://proxy.example.com:8080/');
+            assert.strictEqual(readState!.testResult!.proxyUrl, 'http://proxy.example.com:8080/');
+        });
     });
 
     /**

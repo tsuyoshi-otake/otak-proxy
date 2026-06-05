@@ -97,6 +97,39 @@ suite('SyncManager Unit Tests', () => {
             assert.ok(result.success || result.error === undefined);
         });
 
+        test('should remove proxy credentials from shared state', async () => {
+            await syncManager.start();
+
+            const state: ProxyState = {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: 'http://user:secret@proxy.example.com:8080',
+                lastTestResult: {
+                    success: false,
+                    testUrls: ['https://example.com'],
+                    errors: [
+                        {
+                            url: 'http://probe:secret@test.example.com:8080',
+                            message: 'Failed via http://user:secret@proxy.example.com:8080'
+                        }
+                    ],
+                    proxyUrl: 'http://user:secret@proxy.example.com:8080',
+                    timestamp: Date.now(),
+                    duration: 150
+                }
+            };
+
+            await syncManager.notifyChange(state);
+
+            const stateFile = path.join(testDir, 'otak-proxy-sync', 'sync-state.json');
+            const content = fs.readFileSync(stateFile, 'utf-8');
+            const sharedState = JSON.parse(content);
+
+            assert.ok(!content.includes('secret'));
+            assert.strictEqual(sharedState.proxyState.manualProxyUrl, 'http://proxy.example.com:8080/');
+            assert.strictEqual(sharedState.proxyState.lastTestResult.proxyUrl, 'http://proxy.example.com:8080/');
+            assert.strictEqual(sharedState.testResult.proxyUrl, 'http://proxy.example.com:8080/');
+        });
+
         test('should update timestamp on change', async () => {
             await syncManager.start();
 

@@ -25,6 +25,7 @@ import { InputSanitizer } from '../validation/InputSanitizer';
 import { Logger } from '../utils/Logger';
 import { I18nManager } from '../i18n/I18nManager';
 import { validateProxyUrl, detectSystemProxySettings, TestResult } from '../utils/ProxyUtils';
+import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 
 /**
  * Context for extension initialization
@@ -526,7 +527,7 @@ export class ExtensionInitializer {
             // Also save to config for backwards compatibility
             await vscode.workspace.getConfiguration('otakProxy').update(
                 'proxyUrl',
-                manualProxyUrl,
+                removeProxyCredentials(manualProxyUrl) || manualProxyUrl,
                 vscode.ConfigurationTarget.Global
             );
 

@@ -13,6 +13,7 @@ import { validateProxyUrl } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
+import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 
 /**
  * Execute the configure URL command
@@ -60,7 +61,7 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
             // Also save to config for backwards compatibility
             await vscode.workspace.getConfiguration('otakProxy').update(
                 'proxyUrl',
-                proxyUrl,
+                removeProxyCredentials(proxyUrl) || proxyUrl,
                 vscode.ConfigurationTarget.Global
             );
 

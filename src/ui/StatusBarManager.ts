@@ -93,6 +93,12 @@ export class StatusBarManager {
         this.sanitizer = new InputSanitizer();
     }
 
+    private appendKeyValue(tooltip: vscode.MarkdownString, label: string, value: unknown): void {
+        tooltip.appendMarkdown(`**${label}:** `);
+        tooltip.appendText(String(value));
+        tooltip.appendMarkdown('\n\n');
+    }
+
     /**
      * Set monitor providers for extended tooltip information
      */
@@ -192,20 +198,22 @@ export class StatusBarManager {
 
         // Header
         tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.title')}**\n\n`);
-        tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.currentMode')}:** ${state.mode.toUpperCase()}\n\n`);
-        tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.status')}:** ${statusText}\n\n`);
+        this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.currentMode'), state.mode.toUpperCase());
+        this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.status'), statusText);
 
         // Auto mode specific information
         if (state.mode === ProxyMode.Auto && lastCheck) {
             const lastCheckTime = new Date(lastCheck.timestamp).toLocaleTimeString();
-            tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.lastCheck')}:** ${lastCheckTime}\n\n`);
+            this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.lastCheck'), lastCheckTime);
 
             if (lastCheck.source) {
-                tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.detectionSource')}:** ${lastCheck.source}\n\n`);
+                this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.detectionSource'), lastCheck.source);
             }
 
             if (!lastCheck.success && lastCheck.error) {
-                tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.lastError')}:** $(warning) ${lastCheck.error}\n\n`);
+                tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.lastError')}:** $(warning) `);
+                tooltip.appendText(lastCheck.error);
+                tooltip.appendMarkdown('\n\n');
             }
         }
 
@@ -220,11 +228,11 @@ export class StatusBarManager {
         const showUrl = vscode.workspace.getConfiguration('otakProxy').get<boolean>('showProxyUrl', true);
         if (state.manualProxyUrl) {
             const display = showUrl ? this.sanitizer.maskPassword(state.manualProxyUrl) : i18n.t('statusbar.urlHidden');
-            tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.manualProxy')}:** ${display}\n\n`);
+            this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.manualProxy'), display);
         }
         if (state.autoProxyUrl) {
             const display = showUrl ? this.sanitizer.maskPassword(state.autoProxyUrl) : i18n.t('statusbar.urlHidden');
-            tooltip.appendMarkdown(`**${i18n.t('statusbar.tooltip.systemProxy')}:** ${display}\n\n`);
+            this.appendKeyValue(tooltip, i18n.t('statusbar.tooltip.systemProxy'), display);
         }
 
         tooltip.appendMarkdown(`---\n\n`);
