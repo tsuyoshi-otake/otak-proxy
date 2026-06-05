@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/*.mjs",
+    ".vscode-test.mjs"
+  ],
+  "project": ["src/**/*.ts"],
+  "mocha": {
+    "entry": ["src/test/**/*.test.ts"]
+  },
+  "ignoreDependencies": [
+    "@dotenvx/dotenvx",
+    "@vscode/test-electron",
+    "cross-env",
+    "eslint"
+  ],
+  "ignoreBinaries": [
+    "Proxy",
+    "tsc",
+    "eslint",
+    "vscode-test",
+    "cross-env",
+    "dotenvx"
+  ]
+}
