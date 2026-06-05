@@ -71,7 +71,6 @@ async function promptForManualProxy(i18n: I18nManager): Promise<'configure' | 's
 }
 
 async function handleManualProxyMissing(
-    ctx: CommandContext,
     state: ProxyState,
     i18n: I18nManager
 ): Promise<TogglePreparationResult> {
@@ -144,7 +143,7 @@ async function promptForSystemProxySetup(i18n: I18nManager): Promise<'configure'
     return 'cancel';
 }
 
-async function handleSystemProxySetupPrompt(ctx: CommandContext, state: ProxyState, i18n: I18nManager): Promise<TogglePreparationResult> {
+async function handleSystemProxySetupPrompt(state: ProxyState, i18n: I18nManager): Promise<TogglePreparationResult> {
     const action = await promptForSystemProxySetup(i18n);
 
     if (action === 'configure') {
@@ -187,7 +186,7 @@ async function handleAutoModeTransition(
         return 'continue';
     }
 
-    return handleSystemProxySetupPrompt(ctx, state, i18n);
+    return handleSystemProxySetupPrompt(state, i18n);
 }
 
 async function prepareNextMode(
@@ -197,7 +196,7 @@ async function prepareNextMode(
     i18n: I18nManager
 ): Promise<TogglePreparationResult> {
     if (nextMode === ProxyMode.Manual && !state.manualProxyUrl) {
-        return handleManualProxyMissing(ctx, state, i18n);
+        return handleManualProxyMissing(state, i18n);
     }
 
     if (nextMode === ProxyMode.Auto && !state.autoProxyUrl) {
