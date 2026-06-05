@@ -37,12 +37,15 @@ const vscodeStub = {
       { report: () => {} },
       { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) }
     ),
+    onDidChangeWindowState: () => ({ dispose: () => {} }),
+    state: { focused: true },
   },
   workspace: {
     getConfiguration: () => ({
       get: () => undefined,
       update: async () => undefined,
     }),
+    onDidChangeConfiguration: () => ({ dispose: () => {} }),
   },
   commands: {
     executeCommand: async () => undefined,
