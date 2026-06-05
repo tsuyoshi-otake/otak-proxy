@@ -1,6 +1,6 @@
 import { I18nManager } from '../i18n/I18nManager';
 
-export function translateProxyValidationError(error: string): string {
+function translateProxyValidationError(error: string): string {
     const i18n = I18nManager.getInstance();
     const keyByMessage: Record<string, string> = {
         'Proxy URL cannot be empty': 'validation.proxyUrl.empty',

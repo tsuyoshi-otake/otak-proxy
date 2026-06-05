@@ -1,12 +1,6 @@
 /**
  * Validation interfaces and types
  */
-export interface ValidationError {
-    field: 'protocol' | 'hostname' | 'port' | 'credentials' | 'security';
-    message: string;
-    suggestion?: string;
-}
-
 export interface ValidationResult {
     isValid: boolean;
     errors: string[];

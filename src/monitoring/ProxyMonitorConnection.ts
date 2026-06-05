@@ -31,7 +31,7 @@ export function createProxyMonitorConnectionState(
     };
 }
 
-export function shouldUseConnectionScheduler(
+function shouldUseConnectionScheduler(
     state: ProxyMonitorConnectionState,
     config: ProxyMonitorConfig
 ): boolean {

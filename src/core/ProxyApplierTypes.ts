@@ -9,13 +9,13 @@ export interface ProxyConfigOperationOptions {
     onStatus?: ProxyConfigStatusReporter;
 }
 
-export interface ProxyConfigOperationResult {
+interface ProxyConfigOperationResult {
     success: boolean;
     error?: string;
     errorType?: string;
 }
 
-export interface ProxyConfigManagerLike {
+interface ProxyConfigManagerLike {
     setProxy(url: string, options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
     unsetProxy(options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
 }
