@@ -32,6 +32,11 @@ const vscodeStub = {
     showInformationMessage: async () => undefined,
     showWarningMessage: async () => undefined,
     showErrorMessage: async () => undefined,
+    setStatusBarMessage: () => ({ dispose: () => {} }),
+    withProgress: async (_options, task) => task(
+      { report: () => {} },
+      { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) }
+    ),
   },
   workspace: {
     getConfiguration: () => ({
@@ -52,6 +57,9 @@ const vscodeStub = {
   StatusBarAlignment: {
     Left: 1,
     Right: 2,
+  },
+  ProgressLocation: {
+    Notification: 15,
   },
   ConfigurationTarget: {
     Global: 1,

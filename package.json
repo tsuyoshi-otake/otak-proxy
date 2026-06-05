@@ -1,7 +1,7 @@
 {
   "name": "otak-proxy",
   "displayName": "otak-proxy",
-  "description": "One-click proxy management for VSCode, Git, npm, and integrated terminals.",
+  "description": "%extension.description%",
   "publisher": "odangoo",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.2.11",
+  "version": "2.2.12",
   "files": [
     "out/extension.js",
     "out/commands/**/*.js",
@@ -59,6 +59,10 @@
       {
         "command": "otak-proxy.importProxy",
         "title": "%command.importProxy%"
+      },
+      {
+        "command": "otak-proxy.configureUrl",
+        "title": "%command.configureUrl%"
       },
       {
         "command": "otak-proxy.toggleShowProxyUrl",

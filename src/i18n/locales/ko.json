@@ -1,7 +1,10 @@
 {
+  "extension.description": "VS Code, Git, npm 및 통합 터미널의 프록시를 한 번의 클릭으로 관리합니다.",
+
   "command.toggleProxy": "otak: 프록시 전환",
   "command.testProxy": "otak: 프록시 테스트",
   "command.importProxy": "otak: 시스템 프록시 가져오기",
+  "command.configureUrl": "otak: 수동 프록시 설정",
   "command.toggleShowProxyUrl": "otak: 프록시 URL 표시 전환",
 
   "config.proxyUrl": "VS Code, Git, npm 및 통합 터미널 프록시 설정에 사용할 프록시 서버 URL(예: http://proxy.example.com:8080)",
@@ -33,6 +36,8 @@
   "action.skipToAuto": "자동으로 이동",
   "action.autoSystem": "자동 (시스템)",
   "action.manualSetup": "수동 설정",
+
+  "label.suggestions": "확인할 사항:",
 
   "prompt.proxyUrl": "프록시 URL을 입력하세요(예: http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
@@ -72,7 +77,18 @@
   "error.configureUrlFailed": "프록시 URL 설정에 실패했습니다",
   "error.testProxyFailed": "프록시 연결 테스트에 실패했습니다",
   "error.importProxyFailed": "시스템 프록시 가져오기에 실패했습니다",
+  "error.connectionFailed": "연결에 실패했습니다",
   "error.attemptedUrls": "시도한 테스트 URL:",
+
+  "validation.proxyUrl.empty": "프록시 URL은 비워둘 수 없습니다",
+  "validation.proxyUrl.shellMetacharacters": "프록시 URL에 위험한 셸 메타 문자가 포함되어 있습니다",
+  "validation.proxyUrl.hostnameInvalid": "호스트 이름에 사용할 수 없는 문자가 포함되어 있습니다(영문/숫자, 점, 하이픈만 허용)",
+  "validation.proxyUrl.invalidFormat": "URL 형식이 올바르지 않습니다",
+  "validation.proxyUrl.protocol": "프로토콜은 http:// 또는 https:// 여야 합니다",
+  "validation.proxyUrl.hostnameRequired": "호스트 이름이 필요합니다",
+  "validation.proxyUrl.portRange": "포트는 1에서 65535 사이여야 합니다",
+  "validation.proxyUrl.usernameInvalid": "사용자 이름에 사용할 수 없는 문자가 포함되어 있습니다(영문/숫자, 하이픈, 밑줄, @만 허용)",
+  "validation.proxyUrl.passwordInvalid": "비밀번호에 사용할 수 없는 문자가 포함되어 있습니다(영문/숫자, 하이픈, 밑줄, @만 허용)",
 
   "suggestion.verifyUrl": "프록시 URL이 올바른지 확인하세요",
   "suggestion.checkServer": "프록시 서버가 실행 중이며 접근 가능한지 확인하세요",
@@ -141,7 +157,9 @@
 
   "connectionTest.testing": "프록시 연결 테스트 중...",
   "connectionTest.success": "프록시 연결 테스트 성공: {url}",
+  "connectionTest.successWithDuration": "프록시 연결 테스트 성공: {url} ({duration}ms)",
   "connectionTest.failed": "프록시 연결 테스트 실패: {url}",
+  "connectionTest.failedWithReason": "프록시 연결 테스트 실패: {url} - {reason}",
   "connectionTest.enabled": "프록시 활성화됨(연결 확인됨): {url}",
   "connectionTest.disabled": "프록시 비활성화됨(연결 실패)",
   "connectionTest.autoTesting": "프록시 자동 테스트 중: {url}",
@@ -175,5 +193,6 @@
   "sync.tooltip.syncing": "동기화 진행 중...",
   "sync.tooltip.error": "동기화 오류: {error}",
   "sync.tooltip.lastSync": "마지막 동기화: {time}",
+  "sync.tooltip.clickForDetails": "클릭하여 자세히 보기",
   "sync.notification.conflictResolved": "설정 충돌이 해결되었습니다. 최신 변경이 적용되었습니다."
 }

@@ -118,7 +118,7 @@ export class ExtensionInitializer {
         this.proxyMonitor.on('allRetriesFailed', (data: { error: string; trigger: string }) => {
             Logger.error(`All proxy detection retries failed: ${data.error}`);
             this.context.userNotifier.showWarning(
-                'System proxy detection failed after multiple retries. Check your system/browser proxy settings.'
+                'warning.detectionFailedRetries'
             );
         });
 

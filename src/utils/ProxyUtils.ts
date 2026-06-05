@@ -465,7 +465,8 @@ export async function detectSystemProxySettings(): Promise<string | null> {
             Logger.warn('Validation errors:', validationResult.errors.join(', '));
 
             notifier.showWarning(
-                `Detected system proxy has invalid format: ${urlSanitizer.maskPassword(detectedProxy)}`
+                'warning.invalidFormat',
+                { url: urlSanitizer.maskPassword(detectedProxy) }
             );
 
             return null;
@@ -477,7 +478,7 @@ export async function detectSystemProxySettings(): Promise<string | null> {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         Logger.error('System proxy detection failed:', errorMsg);
 
-        notifier.showWarning('System proxy detection failed. You can configure a proxy manually.');
+        notifier.showWarning('warning.detectionFailed');
 
         return null;
     }

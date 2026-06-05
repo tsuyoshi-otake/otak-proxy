@@ -14,6 +14,7 @@ import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
 import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { I18nManager } from '../i18n/I18nManager';
 
 /**
  * Execute the configure URL command
@@ -25,9 +26,10 @@ import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandResult> {
     try {
         const state = await ctx.getProxyState();
+        const i18n = I18nManager.getInstance();
         const proxyUrl = await vscode.window.showInputBox({
-            prompt: 'Enter proxy URL (e.g., http://proxy.example.com:8080)',
-            placeHolder: 'http://proxy.example.com:8080',
+            prompt: i18n.t('prompt.proxyUrl'),
+            placeHolder: i18n.t('prompt.proxyUrlPlaceholder'),
             value: state.manualProxyUrl || ''
         });
 
@@ -36,19 +38,19 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
                 // Requirement 1.1, 3.3: Use showErrorWithDetails for concise notification with detailed logging
                 const errorDetails = {
                     timestamp: new Date(),
-                    errorMessage: 'Invalid proxy URL format',
+                    errorMessage: i18n.t('error.invalidProxyUrl'),
                     context: {
                         providedUrl: ctx.sanitizer.maskPassword(proxyUrl)
                     }
                 };
 
                 await ctx.userNotifier.showErrorWithDetails(
-                    'Invalid proxy URL format',
+                    'error.invalidProxyUrl',
                     errorDetails,
                     [
-                        'Use format: http://proxy.example.com:8080',
-                        'Include protocol (http:// or https://)',
-                        'Ensure hostname contains only alphanumeric characters, dots, and hyphens'
+                        'suggestion.useFormat',
+                        'suggestion.includeProtocol',
+                        'suggestion.validHostname'
                     ]
                 );
                 return { success: false };
@@ -92,8 +94,8 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
         });
         
         ctx.userNotifier.showError(
-            'Failed to configure proxy URL',
-            ['Check the output log for details', 'Try reloading the window']
+            'error.configureUrlFailed',
+            ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
         );
         return { success: false, error: error as Error };
     }

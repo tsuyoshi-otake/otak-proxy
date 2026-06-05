@@ -94,7 +94,7 @@ export class UserNotifier {
      */
     showWarning(message: string, params?: Record<string, string>): void {
         const translatedMessage = this.translateIfKey(message, params);
-        this.showNotificationWithTimeout('warning', translatedMessage, 10000);
+        vscode.window.setStatusBarMessage(`$(warning) ${translatedMessage}`, 10000);
     }
 
     /**
@@ -188,49 +188,6 @@ export class UserNotifier {
     }
 
     /**
-     * Shows a notification with automatic timeout
-     * @param type - The notification type
-     * @param message - The message to display
-     * @param timeoutMs - Time in milliseconds before auto-closing (undefined = no auto-close)
-     * @param actions - Optional action buttons
-     * @returns Promise that resolves with the selected action or undefined
-     */
-    private async showNotificationWithTimeout(
-        type: 'info' | 'warning' | 'error',
-        message: string,
-        timeoutMs?: number,
-        actions?: string[]
-    ): Promise<string | undefined> {
-        let showMethod: (message: string, ...items: string[]) => Thenable<string | undefined>;
-        
-        switch (type) {
-            case 'error':
-                showMethod = vscode.window.showErrorMessage;
-                break;
-            case 'warning':
-                showMethod = vscode.window.showWarningMessage;
-                break;
-            case 'info':
-            default:
-                showMethod = vscode.window.showInformationMessage;
-                break;
-        }
-        
-        const actionItems = actions || [];
-        const resultPromise = showMethod.call(vscode.window, message, ...actionItems);
-        
-        // If timeout is specified, auto-close by showing a new notification
-        if (timeoutMs !== undefined) {
-            setTimeout(() => {
-                // VSCode doesn't provide a direct way to close notifications
-                // The notification will be replaced when a new one appears or user closes it
-            }, timeoutMs);
-        }
-        
-        return resultPromise;
-    }
-
-    /**
      * Formats a message with troubleshooting suggestions
      * @param message - The main message
      * @param suggestions - Optional array of suggestions
@@ -241,8 +198,8 @@ export class UserNotifier {
             return message;
         }
 
-        // Format: [Message]\n\nSuggestions:\n- [Suggestion 1]\n- [Suggestion 2]
+        // Format: [Message]\n\n[Suggestions label]\n- [Suggestion 1]\n- [Suggestion 2]
         const suggestionText = suggestions.map(s => `• ${s}`).join('\n');
-        return `${message}\n\nSuggestions:\n${suggestionText}`;
+        return `${message}\n\n${this.i18n.t('label.suggestions')}\n${suggestionText}`;
     }
 }

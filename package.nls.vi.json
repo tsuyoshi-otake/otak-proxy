@@ -1,4 +1,5 @@
 {
+  "command.configureUrl": "otak: Cấu hình Proxy thủ công",
   "command.importProxy": "otak: Nhập Proxy hệ thống",
   "command.testProxy": "otak: Kiểm tra Proxy",
   "command.toggleProxy": "otak: Bật/tắt Proxy",
@@ -12,5 +13,6 @@
   "config.showProxyUrl": "Hiển thị URL proxy trên thanh trạng thái",
   "config.syncEnabled": "Bật đồng bộ giữa nhiều phiên VSCode/Cursor. Khi bật, cài đặt proxy sẽ được chia sẻ giữa tất cả các phiên.",
   "config.syncInterval": "Chu kỳ kiểm tra đồng bộ (mili giây, 100-5000). Tần suất kiểm tra thay đổi từ các phiên khác.",
-  "config.testInterval": "Khoảng thời gian kiểm tra kết nối proxy (giây, chỉ chế độ Tự động). Phạm vi: 30-600 giây. Mặc định: 60 giây."
+  "config.testInterval": "Khoảng thời gian kiểm tra kết nối proxy (giây, chỉ chế độ Tự động). Phạm vi: 30-600 giây. Mặc định: 60 giây.",
+  "extension.description": "Quản lý proxy cho VS Code, Git, npm và terminal tích hợp chỉ với một thao tác."
 }

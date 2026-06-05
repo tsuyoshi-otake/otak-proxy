@@ -259,7 +259,7 @@ export class SyncStatusProvider implements ISyncStatusProvider {
 
         // Click action hint
         tooltip.appendMarkdown(`---\n\n`);
-        tooltip.appendMarkdown(`$(info) Click for more details`);
+        tooltip.appendMarkdown(`$(info) ${this.i18n.t('sync.tooltip.clickForDetails')}`);
 
         return tooltip;
     }

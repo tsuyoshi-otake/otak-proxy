@@ -1,7 +1,10 @@
 {
+  "extension.description": "一鍵管理 VS Code、Git、npm 和整合式終端機的代理設定。",
+
   "command.toggleProxy": "otak: 切換代理",
   "command.testProxy": "otak: 測試代理",
   "command.importProxy": "otak: 匯入系統代理",
+  "command.configureUrl": "otak: 設定手動代理",
   "command.toggleShowProxyUrl": "otak: 切換代理 URL 顯示",
 
   "config.proxyUrl": "用於 VS Code、Git、npm 以及整合式終端機代理設定的代理伺服器 URL（例如：http://proxy.example.com:8080）",
@@ -33,6 +36,8 @@
   "action.skipToAuto": "跳到自動模式",
   "action.autoSystem": "自動（系統）",
   "action.manualSetup": "手動設定",
+
+  "label.suggestions": "建議：",
 
   "prompt.proxyUrl": "輸入代理 URL（例如：http://proxy.example.com:8080）",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
@@ -72,7 +77,18 @@
   "error.configureUrlFailed": "設定代理 URL 失敗",
   "error.testProxyFailed": "測試代理連線失敗",
   "error.importProxyFailed": "匯入系統代理失敗",
+  "error.connectionFailed": "連線失敗",
   "error.attemptedUrls": "已嘗試的測試 URL：",
+
+  "validation.proxyUrl.empty": "代理 URL 不能為空",
+  "validation.proxyUrl.shellMetacharacters": "代理 URL 包含危險的 shell 中繼字元",
+  "validation.proxyUrl.hostnameInvalid": "主機名稱包含無效字元（僅允許英數字、點與連字號）",
+  "validation.proxyUrl.invalidFormat": "URL 格式無效",
+  "validation.proxyUrl.protocol": "協定必須是 http:// 或 https://",
+  "validation.proxyUrl.hostnameRequired": "必須提供主機名稱",
+  "validation.proxyUrl.portRange": "連接埠必須介於 1 到 65535",
+  "validation.proxyUrl.usernameInvalid": "使用者名稱包含無效字元（僅允許英數字、連字號、底線與 @）",
+  "validation.proxyUrl.passwordInvalid": "密碼包含無效字元（僅允許英數字、連字號、底線與 @）",
 
   "suggestion.verifyUrl": "確認代理 URL 是否正確",
   "suggestion.checkServer": "確認代理伺服器是否正在執行且可存取",
@@ -141,7 +157,9 @@
 
   "connectionTest.testing": "正在測試代理連線...",
   "connectionTest.success": "代理連線測試成功：{url}",
+  "connectionTest.successWithDuration": "代理連線測試成功：{url}（{duration}ms）",
   "connectionTest.failed": "代理連線測試失敗：{url}",
+  "connectionTest.failedWithReason": "代理連線測試失敗：{url} - {reason}",
   "connectionTest.enabled": "代理已啟用（已驗證連線）：{url}",
   "connectionTest.disabled": "代理已停用（連線失敗）",
   "connectionTest.autoTesting": "正在自動測試代理：{url}",
@@ -175,5 +193,6 @@
   "sync.tooltip.syncing": "同步處理中...",
   "sync.tooltip.error": "同步錯誤：{error}",
   "sync.tooltip.lastSync": "上次同步：{time}",
+  "sync.tooltip.clickForDetails": "按一下查看詳細資訊",
   "sync.notification.conflictResolved": "設定衝突已解決。已套用最新變更。"
 }

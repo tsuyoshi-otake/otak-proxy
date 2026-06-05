@@ -1,7 +1,10 @@
 {
+  "extension.description": "VSCode、Git、npm、統合ターミナルのProxyをワンクリックで管理します。",
+
   "command.toggleProxy": "otak: Proxyを切り替え",
   "command.testProxy": "otak: Proxyをテスト",
   "command.importProxy": "otak: システムProxyをインポート",
+  "command.configureUrl": "otak: 手動Proxyを設定",
   "command.toggleShowProxyUrl": "otak: Proxy URL表示を切り替え",
 
   "config.proxyUrl": "VSCode・Git・npm・統合ターミナルのproxy設定用のProxyサーバーURL（例: http://proxy.example.com:8080）",
@@ -33,6 +36,8 @@
   "action.skipToAuto": "Autoにスキップ",
   "action.autoSystem": "Auto (システム)",
   "action.manualSetup": "手動セットアップ",
+
+  "label.suggestions": "確認事項:",
 
   "prompt.proxyUrl": "Proxy URLを入力してください（例: http://proxy.example.com:8080）",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
@@ -72,7 +77,18 @@
   "error.configureUrlFailed": "Proxy URLの設定に失敗しました",
   "error.testProxyFailed": "Proxy接続のテストに失敗しました",
   "error.importProxyFailed": "システムProxyのインポートに失敗しました",
+  "error.connectionFailed": "接続に失敗しました",
   "error.attemptedUrls": "試行したテストURL:",
+
+  "validation.proxyUrl.empty": "Proxy URLを空にすることはできません",
+  "validation.proxyUrl.shellMetacharacters": "Proxy URLに危険なシェルメタ文字が含まれています",
+  "validation.proxyUrl.hostnameInvalid": "ホスト名に使用できない文字が含まれています（英数字、ドット、ハイフンのみ使用できます）",
+  "validation.proxyUrl.invalidFormat": "URL形式が無効です",
+  "validation.proxyUrl.protocol": "プロトコルは http:// または https:// にしてください",
+  "validation.proxyUrl.hostnameRequired": "ホスト名が必要です",
+  "validation.proxyUrl.portRange": "ポートは1から65535の範囲で指定してください",
+  "validation.proxyUrl.usernameInvalid": "ユーザー名に使用できない文字が含まれています（英数字、ハイフン、アンダースコア、@ のみ使用できます）",
+  "validation.proxyUrl.passwordInvalid": "パスワードに使用できない文字が含まれています（英数字、ハイフン、アンダースコア、@ のみ使用できます）",
 
   "suggestion.verifyUrl": "Proxy URLが正しいか確認してください",
   "suggestion.checkServer": "Proxyサーバーが実行中でアクセス可能か確認してください",
@@ -141,7 +157,9 @@
 
   "connectionTest.testing": "Proxy接続をテスト中...",
   "connectionTest.success": "Proxy接続テスト成功: {url}",
+  "connectionTest.successWithDuration": "Proxy接続テスト成功: {url} ({duration}ms)",
   "connectionTest.failed": "Proxy接続テスト失敗: {url}",
+  "connectionTest.failedWithReason": "Proxy接続テスト失敗: {url} - {reason}",
   "connectionTest.enabled": "Proxyが有効化されました（接続確認済み）: {url}",
   "connectionTest.disabled": "Proxyが無効化されました（接続失敗）",
   "connectionTest.autoTesting": "Proxyを自動テスト中: {url}",
@@ -175,5 +193,6 @@
   "sync.tooltip.syncing": "同期処理中...",
   "sync.tooltip.error": "同期エラー: {error}",
   "sync.tooltip.lastSync": "最終同期: {time}",
+  "sync.tooltip.clickForDetails": "クリックして詳細を表示",
   "sync.notification.conflictResolved": "設定の競合が解決されました。最新の変更が適用されました。"
 }

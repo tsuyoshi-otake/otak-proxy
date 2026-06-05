@@ -1,4 +1,5 @@
 {
+  "command.configureUrl": "otak: Configure Manual Proxy",
   "command.importProxy": "otak: Import System Proxy",
   "command.testProxy": "otak: Test Proxy",
   "command.toggleProxy": "otak: Toggle Proxy",
@@ -12,5 +13,6 @@
   "config.showProxyUrl": "Show proxy URL in the status bar",
   "config.syncEnabled": "Enable synchronization between multiple VSCode/Cursor instances. When enabled, proxy settings are shared across all instances.",
   "config.syncInterval": "Synchronization check interval in milliseconds (100-5000). How often to check for changes from other instances.",
-  "config.testInterval": "Proxy connection test interval in seconds (Auto mode only). Range: 30-600 seconds. Default: 60 seconds."
+  "config.testInterval": "Proxy connection test interval in seconds (Auto mode only). Range: 30-600 seconds. Default: 60 seconds.",
+  "extension.description": "One-click proxy management for VSCode, Git, npm, and integrated terminals."
 }

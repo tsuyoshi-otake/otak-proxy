@@ -1,7 +1,10 @@
 {
+  "extension.description": "One-click proxy management for VSCode, Git, npm, and integrated terminals.",
+
   "command.toggleProxy": "otak: Toggle Proxy",
   "command.testProxy": "otak: Test Proxy",
   "command.importProxy": "otak: Import System Proxy",
+  "command.configureUrl": "otak: Configure Manual Proxy",
   "command.toggleShowProxyUrl": "otak: Toggle Proxy URL Visibility",
 
   "config.proxyUrl": "Proxy server URL (e.g., http://proxy.example.com:8080) for VSCode, Git, npm, and integrated terminal proxy settings",
@@ -33,6 +36,8 @@
   "action.skipToAuto": "Skip to Auto",
   "action.autoSystem": "Auto (System)",
   "action.manualSetup": "Manual Setup",
+
+  "label.suggestions": "Suggestions:",
 
   "prompt.proxyUrl": "Enter proxy URL (e.g., http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
@@ -72,7 +77,18 @@
   "error.configureUrlFailed": "Failed to configure proxy URL",
   "error.testProxyFailed": "Failed to test proxy connection",
   "error.importProxyFailed": "Failed to import system proxy",
+  "error.connectionFailed": "Connection failed",
   "error.attemptedUrls": "Attempted test URLs:",
+
+  "validation.proxyUrl.empty": "Proxy URL cannot be empty",
+  "validation.proxyUrl.shellMetacharacters": "Proxy URL contains dangerous shell metacharacters",
+  "validation.proxyUrl.hostnameInvalid": "Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)",
+  "validation.proxyUrl.invalidFormat": "Invalid URL format",
+  "validation.proxyUrl.protocol": "Protocol must be http:// or https://",
+  "validation.proxyUrl.hostnameRequired": "Hostname is required",
+  "validation.proxyUrl.portRange": "Port must be between 1 and 65535",
+  "validation.proxyUrl.usernameInvalid": "Username contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)",
+  "validation.proxyUrl.passwordInvalid": "Password contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)",
 
   "suggestion.verifyUrl": "Verify the proxy URL is correct",
   "suggestion.checkServer": "Check if the proxy server is running and accessible",
@@ -141,7 +157,9 @@
 
   "connectionTest.testing": "Testing proxy connection...",
   "connectionTest.success": "Proxy connection test successful: {url}",
+  "connectionTest.successWithDuration": "Proxy connection test successful: {url} ({duration}ms)",
   "connectionTest.failed": "Proxy connection test failed: {url}",
+  "connectionTest.failedWithReason": "Proxy connection test failed: {url} - {reason}",
   "connectionTest.enabled": "Proxy enabled (connection verified): {url}",
   "connectionTest.disabled": "Proxy disabled (connection failed)",
   "connectionTest.autoTesting": "Auto-testing proxy: {url}",
@@ -175,5 +193,6 @@
   "sync.tooltip.syncing": "Sync in progress...",
   "sync.tooltip.error": "Sync error: {error}",
   "sync.tooltip.lastSync": "Last sync: {time}",
+  "sync.tooltip.clickForDetails": "Click for more details",
   "sync.notification.conflictResolved": "Settings conflict resolved. Latest change has been applied."
 }

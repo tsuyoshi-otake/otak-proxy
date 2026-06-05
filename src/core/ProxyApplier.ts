@@ -9,6 +9,7 @@ import { UserNotifier } from '../errors/UserNotifier';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { Logger } from '../utils/Logger';
 import { ProxyStateManager } from './ProxyStateManager';
+import { I18nManager } from '../i18n/I18nManager';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -48,6 +49,24 @@ export class ProxyApplier {
         return true;
     }
 
+    private translateValidationError(error: string): string {
+        const i18n = I18nManager.getInstance();
+        const keyByMessage: Record<string, string> = {
+            'Proxy URL cannot be empty': 'validation.proxyUrl.empty',
+            'Proxy URL contains dangerous shell metacharacters': 'validation.proxyUrl.shellMetacharacters',
+            'Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)': 'validation.proxyUrl.hostnameInvalid',
+            'Invalid URL format': 'validation.proxyUrl.invalidFormat',
+            'Protocol must be http:// or https://': 'validation.proxyUrl.protocol',
+            'Hostname is required': 'validation.proxyUrl.hostnameRequired',
+            'Port must be between 1 and 65535': 'validation.proxyUrl.portRange',
+            'Username contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)': 'validation.proxyUrl.usernameInvalid',
+            'Password contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)': 'validation.proxyUrl.passwordInvalid'
+        };
+
+        const key = keyByMessage[error];
+        return key ? i18n.t(key) : error;
+    }
+
     /**
      * Apply proxy settings to all configuration targets
      * 
@@ -79,11 +98,11 @@ export class ProxyApplier {
             const validationResult = this.validator.validate(proxyUrl);
             if (!validationResult.isValid) {
                 // Display validation errors with specific details
-                const errorMessage = 'Invalid proxy URL format';
-                const suggestions = validationResult.errors.map(err => err);
-                suggestions.push('Use format: http://proxy.example.com:8080');
-                suggestions.push('Include protocol (http:// or https://)');
-                suggestions.push('Ensure hostname contains only alphanumeric characters, dots, and hyphens');
+                const errorMessage = 'error.invalidProxyUrl';
+                const suggestions = validationResult.errors.map(err => this.translateValidationError(err));
+                suggestions.push('suggestion.useFormat');
+                suggestions.push('suggestion.includeProtocol');
+                suggestions.push('suggestion.validHostname');
                 
                 this.userNotifier.showError(errorMessage, suggestions);
                 return false;

@@ -62,9 +62,11 @@ suite('UserNotifier Tests', () => {
     test('showWarning should display translated message for English', () => {
         userNotifier.showWarning('warning.noSystemProxyDetected');
 
-        assert.ok(showWarningMessageStub.calledOnce);
-        const message = showWarningMessageStub.firstCall.args[0];
-        assert.strictEqual(message, 'No system proxy detected. Switching to Off mode.');
+        assert.ok(setStatusBarMessageStub.calledOnce);
+        const message = setStatusBarMessageStub.firstCall.args[0] as string;
+        assert.ok(message.includes('No system proxy detected. Switching to Off mode.'));
+        assert.strictEqual(setStatusBarMessageStub.firstCall.args[1], 10000);
+        assert.strictEqual(showWarningMessageStub.callCount, 0);
     });
 
     test('showError should display translated message for English', () => {
@@ -101,9 +103,11 @@ suite('UserNotifier Tests', () => {
     test('showWarning should work with direct text for backward compatibility', () => {
         userNotifier.showWarning('Direct warning message');
 
-        assert.ok(showWarningMessageStub.calledOnce);
-        const message = showWarningMessageStub.firstCall.args[0];
-        assert.strictEqual(message, 'Direct warning message');
+        assert.ok(setStatusBarMessageStub.calledOnce);
+        const message = setStatusBarMessageStub.firstCall.args[0] as string;
+        assert.ok(message.includes('Direct warning message'));
+        assert.strictEqual(setStatusBarMessageStub.firstCall.args[1], 10000);
+        assert.strictEqual(showWarningMessageStub.callCount, 0);
     });
 
     test('showError should work with direct text for backward compatibility', () => {

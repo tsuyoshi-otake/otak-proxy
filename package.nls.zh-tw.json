@@ -1,4 +1,5 @@
 {
+  "command.configureUrl": "otak: 設定手動代理",
   "command.importProxy": "otak: 匯入系統代理",
   "command.testProxy": "otak: 測試代理",
   "command.toggleProxy": "otak: 切換代理",
@@ -12,5 +13,6 @@
   "config.showProxyUrl": "在狀態列中顯示代理 URL",
   "config.syncEnabled": "啟用多個 VSCode/Cursor 執行個體之間的同步。啟用後，代理設定會在所有執行個體間共用。",
   "config.syncInterval": "同步檢查間隔（毫秒，100-5000）。檢查其他執行個體變更的頻率。",
-  "config.testInterval": "代理連線測試間隔（秒，僅自動模式）。範圍：30-600 秒。預設：60 秒。"
+  "config.testInterval": "代理連線測試間隔（秒，僅自動模式）。範圍：30-600 秒。預設：60 秒。",
+  "extension.description": "一鍵管理 VS Code、Git、npm 和整合式終端機的代理設定。"
 }

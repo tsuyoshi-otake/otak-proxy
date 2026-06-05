@@ -9,6 +9,7 @@
 
 import { UserNotifier } from '../errors/UserNotifier';
 import { Logger } from '../utils/Logger';
+import { I18nManager } from '../i18n/I18nManager';
 import {
     TestResult,
     testProxyConnectionParallel,
@@ -146,14 +147,18 @@ export class ProxyConnectionTester {
             // Detailed notification for manual tests
             if (result.success) {
                 this.userNotifier.showSuccess(
-                    `Proxy connection successful: ${sanitizedUrl} (${result.duration}ms)`
+                    'connectionTest.successWithDuration',
+                    { url: sanitizedUrl, duration: String(result.duration) }
                 );
             } else {
-                const errorSummary = result.errors.length > 0
-                    ? result.errors[0].message
-                    : 'Connection failed';
+                const i18n = I18nManager.getInstance();
+                const firstErrorMessage = result.errors[0]?.message;
+                const errorSummary = firstErrorMessage
+                    ? (firstErrorMessage === 'Connection failed' ? i18n.t('error.connectionFailed') : firstErrorMessage)
+                    : i18n.t('error.connectionFailed');
                 this.userNotifier.showWarning(
-                    `Proxy connection failed: ${sanitizedUrl} - ${errorSummary}`
+                    'connectionTest.failedWithReason',
+                    { url: sanitizedUrl, reason: errorSummary }
                 );
             }
         }

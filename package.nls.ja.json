@@ -1,4 +1,5 @@
 {
+  "command.configureUrl": "otak: 手動Proxyを設定",
   "command.importProxy": "otak: システムProxyをインポート",
   "command.testProxy": "otak: Proxyをテスト",
   "command.toggleProxy": "otak: Proxyを切り替え",
@@ -12,5 +13,6 @@
   "config.showProxyUrl": "ステータスバーにProxy URLを表示する",
   "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
   "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
-  "config.testInterval": "Proxy接続テストの間隔（秒単位、Autoモード専用）。範囲: 30-600秒。デフォルト: 60秒。"
+  "config.testInterval": "Proxy接続テストの間隔（秒単位、Autoモード専用）。範囲: 30-600秒。デフォルト: 60秒。",
+  "extension.description": "VSCode、Git、npm、統合ターミナルのProxyをワンクリックで管理します。"
 }

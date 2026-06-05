@@ -1,7 +1,10 @@
 {
+  "extension.description": "一键管理 VS Code、Git、npm 和集成终端的代理设置。",
+
   "command.toggleProxy": "otak: 切换代理",
   "command.testProxy": "otak: 测试代理",
   "command.importProxy": "otak: 导入系统代理",
+  "command.configureUrl": "otak: 配置手动代理",
   "command.toggleShowProxyUrl": "otak: 切换代理 URL 显示",
 
   "config.proxyUrl": "用于 VS Code、Git、npm 以及集成终端代理设置的代理服务器 URL（例如：http://proxy.example.com:8080）",
@@ -33,6 +36,8 @@
   "action.skipToAuto": "跳到自动模式",
   "action.autoSystem": "自动（系统）",
   "action.manualSetup": "手动设置",
+
+  "label.suggestions": "建议：",
 
   "prompt.proxyUrl": "输入代理 URL（例如：http://proxy.example.com:8080）",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
@@ -72,7 +77,18 @@
   "error.configureUrlFailed": "配置代理 URL 失败",
   "error.testProxyFailed": "测试代理连接失败",
   "error.importProxyFailed": "导入系统代理失败",
+  "error.connectionFailed": "连接失败",
   "error.attemptedUrls": "已尝试的测试 URL：",
+
+  "validation.proxyUrl.empty": "代理 URL 不能为空",
+  "validation.proxyUrl.shellMetacharacters": "代理 URL 包含危险的 shell 元字符",
+  "validation.proxyUrl.hostnameInvalid": "主机名包含无效字符（仅允许字母数字、点和连字符）",
+  "validation.proxyUrl.invalidFormat": "URL 格式无效",
+  "validation.proxyUrl.protocol": "协议必须是 http:// 或 https://",
+  "validation.proxyUrl.hostnameRequired": "必须提供主机名",
+  "validation.proxyUrl.portRange": "端口必须在 1 到 65535 之间",
+  "validation.proxyUrl.usernameInvalid": "用户名包含无效字符（仅允许字母数字、连字符、下划线和 @）",
+  "validation.proxyUrl.passwordInvalid": "密码包含无效字符（仅允许字母数字、连字符、下划线和 @）",
 
   "suggestion.verifyUrl": "确认代理 URL 是否正确",
   "suggestion.checkServer": "检查代理服务器是否正在运行且可访问",
@@ -141,7 +157,9 @@
 
   "connectionTest.testing": "正在测试代理连接...",
   "connectionTest.success": "代理连接测试成功：{url}",
+  "connectionTest.successWithDuration": "代理连接测试成功：{url}（{duration}ms）",
   "connectionTest.failed": "代理连接测试失败：{url}",
+  "connectionTest.failedWithReason": "代理连接测试失败：{url} - {reason}",
   "connectionTest.enabled": "代理已启用（已验证连接）：{url}",
   "connectionTest.disabled": "代理已禁用（连接失败）",
   "connectionTest.autoTesting": "正在自动测试代理：{url}",
@@ -175,5 +193,6 @@
   "sync.tooltip.syncing": "正在同步...",
   "sync.tooltip.error": "同步错误：{error}",
   "sync.tooltip.lastSync": "上次同步：{time}",
+  "sync.tooltip.clickForDetails": "点击查看详细信息",
   "sync.notification.conflictResolved": "设置冲突已解决。已应用最新更改。"
 }

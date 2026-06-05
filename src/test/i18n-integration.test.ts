@@ -61,7 +61,7 @@ suite('I18n Integration Tests', () => {
             
             // Verify English translations are loaded
             const message = i18n.t('command.toggleProxy');
-            assert.strictEqual(message, 'Toggle Proxy', 'Should be in English');
+            assert.ok(message.includes('Toggle Proxy'), 'Should be in English');
         });
 
         test('should fallback to English for unsupported locale', () => {
@@ -73,7 +73,7 @@ suite('I18n Integration Tests', () => {
             
             // Verify English translations are loaded
             const message = i18n.t('command.toggleProxy');
-            assert.strictEqual(message, 'Toggle Proxy', 'Should be in English');
+            assert.ok(message.includes('Toggle Proxy'), 'Should be in English');
         });
 
         test('should detect locale from vscode.env.language', () => {
@@ -241,10 +241,12 @@ suite('I18n Integration Tests', () => {
             const toggleProxy = i18n.t('command.toggleProxy');
             const testProxy = i18n.t('command.testProxy');
             const importProxy = i18n.t('command.importProxy');
+            const configureUrl = i18n.t('command.configureUrl');
             
             assert.ok(toggleProxy.length > 0, 'Should have toggleProxy translation');
             assert.ok(testProxy.length > 0, 'Should have testProxy translation');
             assert.ok(importProxy.length > 0, 'Should have importProxy translation');
+            assert.ok(configureUrl.length > 0, 'Should have configureUrl translation');
         });
 
         test('should translate command titles in Japanese', () => {
@@ -254,10 +256,12 @@ suite('I18n Integration Tests', () => {
             const toggleProxy = i18n.t('command.toggleProxy');
             const testProxy = i18n.t('command.testProxy');
             const importProxy = i18n.t('command.importProxy');
+            const configureUrl = i18n.t('command.configureUrl');
             
             assert.ok(toggleProxy.includes('Proxy'), 'Should contain "Proxy"');
             assert.ok(testProxy.includes('Proxy'), 'Should contain "Proxy"');
             assert.ok(importProxy.includes('Proxy'), 'Should contain "Proxy"');
+            assert.ok(configureUrl.includes('Proxy'), 'Should contain "Proxy"');
         });
 
         test('should translate command titles in English', () => {
@@ -267,10 +271,12 @@ suite('I18n Integration Tests', () => {
             const toggleProxy = i18n.t('command.toggleProxy');
             const testProxy = i18n.t('command.testProxy');
             const importProxy = i18n.t('command.importProxy');
+            const configureUrl = i18n.t('command.configureUrl');
             
-            assert.strictEqual(toggleProxy, 'Toggle Proxy', 'Should be "Toggle Proxy"');
-            assert.strictEqual(testProxy, 'Test Proxy', 'Should be "Test Proxy"');
-            assert.strictEqual(importProxy, 'Import System Proxy', 'Should be "Import System Proxy"');
+            assert.ok(toggleProxy.includes('Toggle Proxy'), 'Should include "Toggle Proxy"');
+            assert.ok(testProxy.includes('Test Proxy'), 'Should include "Test Proxy"');
+            assert.ok(importProxy.includes('Import System Proxy'), 'Should include "Import System Proxy"');
+            assert.ok(configureUrl.includes('Configure Manual Proxy'), 'Should include "Configure Manual Proxy"');
         });
     });
 
@@ -315,14 +321,16 @@ suite('I18n Integration Tests', () => {
         test('should show translated warning messages', () => {
             i18n.initialize('en');
             
-            // Mock vscode.window.showWarningMessage
-            const showWarningStub = sandbox.stub(vscode.window, 'showWarningMessage');
+            // showWarning uses setStatusBarMessage for reliable auto-dismiss.
+            const setStatusBarMessageStub = sandbox.stub(vscode.window, 'setStatusBarMessage').returns({ dispose: () => {} } as any);
             
             // Show warning with message key
             userNotifier.showWarning('warning.noManualProxy');
             
             // Verify the message was translated
-            assert.strictEqual(showWarningStub.calledOnce, true, 'Should call showWarningMessage once');
+            assert.strictEqual(setStatusBarMessageStub.calledOnce, true, 'Should call setStatusBarMessage once');
+            const warningArgs = setStatusBarMessageStub.firstCall.args as unknown as [string, number];
+            assert.strictEqual(warningArgs[1], 10000, 'Warning should auto-dismiss after 10 seconds');
         });
 
         test('should support backward compatibility with direct messages', () => {
@@ -381,7 +389,7 @@ suite('I18n Integration Tests', () => {
             const statusbar = i18n.t('statusbar.autoWithProxy', { url: 'http://proxy:8080' });
             
             // Step 3: Verify all translations are in English
-            assert.strictEqual(command, 'Toggle Proxy', 'Should translate command');
+            assert.ok(command.includes('Toggle Proxy'), 'Should translate command');
             assert.ok(action.includes('Manual'), 'Should translate action');
             assert.ok(message.includes('http://proxy:8080'), 'Should translate message with params');
             assert.ok(statusbar.includes('Auto'), 'Should translate statusbar');
@@ -391,17 +399,17 @@ suite('I18n Integration Tests', () => {
             // Step 1: Start with English
             i18n.initialize('en');
             const englishMessage = i18n.t('command.toggleProxy');
-            assert.strictEqual(englishMessage, 'Toggle Proxy', 'Should be in English');
+            assert.ok(englishMessage.includes('Toggle Proxy'), 'Should be in English');
             
             // Step 2: Switch to Japanese
             i18n.initialize('ja');
             const japaneseMessage = i18n.t('command.toggleProxy');
-            assert.ok(japaneseMessage.includes('切り替え') || japaneseMessage === 'Proxyを切り替え', 'Should be in Japanese');
+            assert.ok(japaneseMessage.includes('切り替え'), 'Should be in Japanese');
             
             // Step 3: Switch back to English
             i18n.initialize('en');
             const englishAgain = i18n.t('command.toggleProxy');
-            assert.strictEqual(englishAgain, 'Toggle Proxy', 'Should be in English again');
+            assert.ok(englishAgain.includes('Toggle Proxy'), 'Should be in English again');
         });
     });
 });
