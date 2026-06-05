@@ -66,21 +66,6 @@ suite('Core Types Test Suite', () => {
         });
     });
 
-    suite('CommandContext interface', () => {
-        test('CommandContext type should be exported', () => {
-            // This test validates that the CommandContext interface is properly exported
-            // We can't directly test an interface existence at runtime,
-            // but we can verify it compiles correctly
-
-            // The fact that this test file compiles with the import validates the export
-            const hasCommandContext = 'CommandContext' in types ||
-                typeof (types as any).CommandContext !== 'undefined';
-
-            // Note: TypeScript interfaces are erased at runtime, so we just verify the module loads
-            assert.ok(types, 'Types module should load successfully with all type definitions');
-        });
-    });
-
     suite('Type compatibility', () => {
         test('ProxyState should be compatible with extension.ts usage', () => {
             // Create a state object that matches the extension.ts usage pattern

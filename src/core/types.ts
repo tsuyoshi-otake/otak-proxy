@@ -9,8 +9,6 @@
  * - Clear folder hierarchy (Requirement 1.5)
  */
 
-import * as vscode from 'vscode';
-
 /**
  * Proxy operation modes
  *
@@ -81,36 +79,9 @@ export interface ProxyState {
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
 }
 
-// Forward declarations for manager types to avoid circular dependencies
-// These will be properly typed when the respective modules are created
 export interface IProxyStateManager {
     getState(): Promise<ProxyState>;
     saveState(state: ProxyState): Promise<void>;
     getActiveProxyUrl(state: ProxyState): string;
     getNextMode(currentMode: ProxyMode): ProxyMode;
-}
-
-export interface IProxyApplier {
-    applyProxy(proxyUrl: string, enabled: boolean): Promise<boolean>;
-    disableProxy(): Promise<boolean>;
-}
-
-export interface IStatusBarManager {
-    update(state: ProxyState): void;
-}
-
-/**
- * Command execution context providing access to all required components
- *
- * @interface CommandContext
- * @property {vscode.ExtensionContext} extensionContext - VSCode extension context
- * @property {IProxyStateManager} stateManager - Proxy state manager instance
- * @property {IProxyApplier} proxyApplier - Proxy applier instance
- * @property {IStatusBarManager} statusBarManager - Status bar manager instance
- */
-export interface CommandContext {
-    extensionContext: vscode.ExtensionContext;
-    stateManager: IProxyStateManager;
-    proxyApplier: IProxyApplier;
-    statusBarManager: IStatusBarManager;
 }
