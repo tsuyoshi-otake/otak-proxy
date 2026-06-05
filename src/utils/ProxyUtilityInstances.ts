@@ -59,17 +59,6 @@ export function getUserNotifier(): UserNotifier {
 }
 
 /**
- * Updates the detection priority for system proxy detection.
- *
- * @param priority - Array of detection sources in priority order
- */
-export function updateDetectionPriority(priority: string[]): void {
-    const detector = getSystemProxyDetector();
-    detector.updateDetectionPriority(priority);
-    systemProxyDetectorPriorityKey = JSON.stringify(priority);
-}
-
-/**
  * Resets module-level instances.
  */
 export function resetInstances(): void {

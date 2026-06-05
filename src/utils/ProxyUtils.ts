@@ -11,6 +11,6 @@ export {
     testProxyConnection,
     testProxyConnectionParallel
 } from './ProxyConnectionTest';
-export { resetInstances, updateDetectionPriority } from './ProxyUtilityInstances';
+export { resetInstances } from './ProxyUtilityInstances';
 export { sanitizeProxyUrl, validateProxyUrl } from './ProxyUrlUtils';
-export { TestOptions, TestResult, TestUrlError } from './ProxyTestTypes';
+export { TestResult } from './ProxyTestTypes';
