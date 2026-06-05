@@ -14,32 +14,15 @@
 
 import * as vscode from 'vscode';
 import { ProxyMode, ProxyState, ProxyTestResult } from './types';
-import { ProxyStateManager } from './ProxyStateManager';
-import { ProxyApplier } from './ProxyApplier';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
-import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
-import { SystemProxyDetector } from '../config/SystemProxyDetector';
-import { UserNotifier } from '../errors/UserNotifier';
-import { InputSanitizer } from '../validation/InputSanitizer';
 import { Logger } from '../utils/Logger';
-import { I18nManager } from '../i18n/I18nManager';
-import { validateProxyUrl, detectSystemProxySettings, TestResult } from '../utils/ProxyUtils';
-import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { TestResult } from '../utils/ProxyUtils';
+import { InitializerContext } from './ExtensionInitializerTypes';
+import { InitialSetupFlow } from './InitialSetupFlow';
+import { SystemProxyUpdateService } from './SystemProxyUpdateService';
 
-/**
- * Context for extension initialization
- */
-export interface InitializerContext {
-    extensionContext: vscode.ExtensionContext;
-    proxyStateManager: ProxyStateManager;
-    proxyApplier: ProxyApplier;
-    systemProxyDetector: SystemProxyDetector;
-    userNotifier: UserNotifier;
-    sanitizer: InputSanitizer;
-    proxyChangeLogger: ProxyChangeLogger;
-    updateStatusBar?: (state: ProxyState) => void;
-}
+export type { InitializerContext } from './ExtensionInitializerTypes';
 
 /**
  * ExtensionInitializer handles initialization logic
@@ -49,6 +32,8 @@ export class ExtensionInitializer {
     private context: InitializerContext;
     private proxyMonitor: ProxyMonitor | null = null;
     private connectionTester: ProxyConnectionTester | null = null;
+    private initialSetupFlow: InitialSetupFlow;
+    private systemProxyUpdateService: SystemProxyUpdateService;
     private systemProxyCheckInterval: NodeJS.Timeout | undefined;
     private isStartupTestPending: boolean = false;
 
@@ -58,6 +43,14 @@ export class ExtensionInitializer {
         this.context = context;
         // Initialize connection tester for startup and Auto mode testing
         this.connectionTester = new ProxyConnectionTester(this.context.userNotifier);
+        this.initialSetupFlow = new InitialSetupFlow(
+            this.context,
+            () => this.startSystemProxyMonitoring()
+        );
+        this.systemProxyUpdateService = new SystemProxyUpdateService(
+            this.context,
+            () => this.connectionTester
+        );
     }
 
     /**
@@ -343,200 +336,14 @@ export class ExtensionInitializer {
      * Check and update system proxy
      */
     async checkAndUpdateSystemProxy(): Promise<void> {
-        const state = await this.context.proxyStateManager.getState();
-
-        // Only check if in Auto mode or if it's been more than 5 minutes since last check
-        const now = Date.now();
-        if (state.mode !== ProxyMode.Auto &&
-            state.lastSystemProxyCheck &&
-            (now - state.lastSystemProxyCheck) < 300000 &&
-            state.autoProxyUrl) {
-            return;
-        }
-
-        const detectedProxy = await detectSystemProxySettings();
-        state.lastSystemProxyCheck = now;
-        
-        // Track system proxy detection success/failure
-        state.systemProxyDetected = !!detectedProxy;
-
-        if (state.mode === ProxyMode.Auto) {
-            const previousProxy = state.autoProxyUrl;
-
-            if (detectedProxy) {
-                // System proxy detected - use it
-                state.autoProxyUrl = detectedProxy;
-                state.autoModeOff = false;
-                state.usingFallbackProxy = false;
-                state.fallbackProxyUrl = undefined;
-            } else {
-                // No system proxy detected - try fallback
-                const config = vscode.workspace.getConfiguration('otakProxy');
-                const fallbackEnabled = config.get<boolean>('enableFallback', true);
-
-                if (fallbackEnabled && state.manualProxyUrl) {
-                    // Test fallback proxy before using it
-                    let fallbackReachable = false;
-                    if (this.connectionTester) {
-                        Logger.log(`Testing fallback proxy: ${state.manualProxyUrl}`);
-                        const testResult = await this.connectionTester.testProxyAuto(state.manualProxyUrl);
-                        fallbackReachable = testResult.success;
-                    }
-
-                    if (fallbackReachable) {
-                        // Fallback proxy is working - use it
-                        state.autoProxyUrl = state.manualProxyUrl;
-                        state.autoModeOff = false;
-                        state.usingFallbackProxy = true;
-                        state.fallbackProxyUrl = state.manualProxyUrl;
-                        Logger.log(`Using fallback proxy: ${state.manualProxyUrl}`);
-                    } else {
-                        // Fallback proxy is also not reachable - Auto Mode OFF
-                        state.autoProxyUrl = undefined;
-                        state.autoModeOff = true;
-                        state.usingFallbackProxy = false;
-                        state.fallbackProxyUrl = undefined;
-                        Logger.log('Fallback proxy not reachable - Auto Mode OFF');
-                    }
-                } else {
-                    // No fallback available - Auto Mode OFF
-                    state.autoProxyUrl = undefined;
-                    state.autoModeOff = true;
-                    state.usingFallbackProxy = false;
-                    state.fallbackProxyUrl = undefined;
-                }
-            }
-
-            if (previousProxy !== state.autoProxyUrl) {
-                // Proxy changed, update everything
-                await this.context.proxyStateManager.saveState(state);
-                await this.context.proxyApplier.applyProxy(state.autoProxyUrl || '', true);
-
-                if (state.autoProxyUrl && !state.usingFallbackProxy) {
-                    this.context.userNotifier.showSuccess(
-                        'message.systemProxyChanged',
-                        { url: this.context.sanitizer.maskPassword(state.autoProxyUrl) }
-                    );
-                } else if (state.usingFallbackProxy) {
-                    this.context.userNotifier.showSuccess(
-                        'fallback.usingManualProxy',
-                        { url: this.context.sanitizer.maskPassword(state.autoProxyUrl!) }
-                    );
-                } else if (previousProxy) {
-                    this.context.userNotifier.showSuccess('message.systemProxyRemoved');
-                }
-            } else {
-                // Even if proxy didn't change, save the updated fallback state
-                await this.context.proxyStateManager.saveState(state);
-            }
-
-        } else {
-            // Just save the detected proxy for later use
-            state.autoProxyUrl = detectedProxy || undefined;
-            await this.context.proxyStateManager.saveState(state);
-        }
+        await this.systemProxyUpdateService.checkAndUpdateSystemProxy();
     }
 
     /**
      * Ask for initial setup
      */
     async askForInitialSetup(): Promise<void> {
-        const state = await this.context.proxyStateManager.getState();
-        const i18n = I18nManager.getInstance();
-
-        // First, ask what mode to use
-        const modeAnswer = await vscode.window.showInformationMessage(
-            i18n.t('prompt.initialSetup'),
-            i18n.t('action.autoSystem'),
-            i18n.t('action.manualSetup'),
-            i18n.t('action.skip')
-        );
-
-        if (modeAnswer === i18n.t('action.autoSystem')) {
-            await this.handleAutoSetup(state, i18n);
-        } else if (modeAnswer === i18n.t('action.manualSetup')) {
-            await this.handleManualSetup(state, i18n);
-        }
-
-        // Start monitoring if in auto mode
-        if (state.mode === ProxyMode.Auto) {
-            await this.startSystemProxyMonitoring();
-        }
-    }
-
-    /**
-     * Handle auto setup
-     */
-    private async handleAutoSetup(state: ProxyState, i18n: I18nManager): Promise<void> {
-        // Try to detect system proxy settings
-        const detectedProxy = await detectSystemProxySettings();
-
-        if (detectedProxy && validateProxyUrl(detectedProxy)) {
-            state.autoProxyUrl = detectedProxy;
-            state.mode = ProxyMode.Auto;
-            await this.context.proxyStateManager.saveState(state);
-            await this.context.proxyApplier.applyProxy(detectedProxy, true);
-            this.context.userNotifier.showSuccess(
-                'message.usingSystemProxy',
-                { url: this.context.sanitizer.maskPassword(detectedProxy) }
-            );
-        } else {
-            const fallback = await vscode.window.showInformationMessage(
-                i18n.t('prompt.couldNotDetect'),
-                i18n.t('action.yes'),
-                i18n.t('action.no')
-            );
-
-            if (fallback === i18n.t('action.yes')) {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
-                const updatedState = await this.context.proxyStateManager.getState();
-                if (updatedState.manualProxyUrl) {
-                    updatedState.mode = ProxyMode.Manual;
-                    await this.context.proxyStateManager.saveState(updatedState);
-                    await this.context.proxyApplier.applyProxy(updatedState.manualProxyUrl, true);
-                }
-            }
-        }
-    }
-
-    /**
-     * Handle manual setup
-     */
-    private async handleManualSetup(state: ProxyState, i18n: I18nManager): Promise<void> {
-        const manualProxyUrl = await vscode.window.showInputBox({
-            prompt: i18n.t('prompt.proxyUrl'),
-            placeHolder: i18n.t('prompt.proxyUrlPlaceholder')
-        });
-
-        if (manualProxyUrl) {
-            if (!validateProxyUrl(manualProxyUrl)) {
-                this.context.userNotifier.showError(
-                    'error.invalidProxyUrl',
-                    [
-                        'suggestion.useFormat',
-                        'suggestion.includeProtocol',
-                        'suggestion.validHostname'
-                    ]
-                );
-                return;
-            }
-            state.manualProxyUrl = manualProxyUrl;
-            state.mode = ProxyMode.Manual;
-            await this.context.proxyStateManager.saveState(state);
-
-            // Also save to config for backwards compatibility
-            await vscode.workspace.getConfiguration('otakProxy').update(
-                'proxyUrl',
-                removeProxyCredentials(manualProxyUrl) || manualProxyUrl,
-                vscode.ConfigurationTarget.Global
-            );
-
-            await this.context.proxyApplier.applyProxy(manualProxyUrl, true);
-            this.context.userNotifier.showSuccess(
-                'message.manualProxyConfigured',
-                { url: this.context.sanitizer.maskPassword(manualProxyUrl) }
-            );
-        }
+        await this.initialSetupFlow.askForInitialSetup();
     }
 
     /**

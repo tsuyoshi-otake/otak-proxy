@@ -12,130 +12,13 @@
  * - Periodic existence verification via heartbeat (1.4)
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import { Logger } from '../utils/Logger';
-import { getErrorCode } from '../utils/ErrorUtils';
+import { HEARTBEAT_TIMEOUT } from './InstanceRegistryConstants';
+import { generateInstanceId } from './InstanceId';
+import { InstanceRegistryStore } from './InstanceRegistryStore';
+import { IInstanceRegistry, InstanceInfo } from './InstanceRegistryTypes';
 
-/**
- * Information about a registered instance
- */
-export interface InstanceInfo {
-    /** Unique instance identifier (UUID) */
-    id: string;
-    /** Process ID */
-    pid: number;
-    /** VSCode window ID */
-    windowId: string;
-    /** Registration timestamp (Unix ms) */
-    registeredAt: number;
-    /** Last heartbeat timestamp (Unix ms) */
-    lastHeartbeat: number;
-    /** Extension version */
-    extensionVersion: string;
-}
-
-/**
- * Interface for InstanceRegistry as defined in design.md
- */
-export interface IInstanceRegistry {
-    /**
-     * Register the current instance
-     * @returns True if registration succeeded
-     */
-    register(): Promise<boolean>;
-
-    /**
-     * Unregister the current instance
-     */
-    unregister(): Promise<void>;
-
-    /**
-     * Get list of active instances
-     */
-    getActiveInstances(): Promise<InstanceInfo[]>;
-
-    /**
-     * Check if other instances exist
-     */
-    hasOtherInstances(): Promise<boolean>;
-
-    /**
-     * Cleanup inactive instances
-     * @returns Number of instances cleaned up
-     */
-    cleanup(): Promise<number>;
-
-    /**
-     * Update heartbeat for current instance
-     */
-    updateHeartbeat(): Promise<void>;
-
-    /**
-     * Get the current instance ID (available after successful register()).
-     */
-    getInstanceId(): string | null;
-}
-
-/**
- * Lock file structure
- */
-interface InstancesLockFile {
-    schemaVersion: number;
-    instances: InstanceInfo[];
-}
-
-/**
- * Current schema version
- */
-const SCHEMA_VERSION = 1;
-
-/**
- * Sync directory name
- */
-const SYNC_DIR_NAME = 'otak-proxy-sync';
-
-/**
- * Lock file name
- */
-const LOCK_FILE_NAME = 'instances.lock';
-
-/**
- * Heartbeat timeout in milliseconds (30 seconds)
- */
-const HEARTBEAT_TIMEOUT = 30000;
-
-/**
- * Mutex acquisition timeout for updating the lock file.
- *
- * This protects against concurrent writers across VS Code windows/processes.
- */
-const MUTEX_TIMEOUT_MS = 5000;
-
-/**
- * If a mutex file is older than this, assume it is stale and remove it.
- */
-const MUTEX_STALE_MS = 30000;
-
-/**
- * Delay between mutex acquisition attempts.
- */
-const MUTEX_RETRY_DELAY_MS = 25;
-
-/**
- * Generate a UUID v4
- */
-function generateUUID(): string {
-    if (typeof crypto.randomUUID === 'function') {
-        return crypto.randomUUID();
-    }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
-}
+export type { IInstanceRegistry, InstanceInfo } from './InstanceRegistryTypes';
 
 /**
  * InstanceRegistry manages the registration of active otak-proxy instances.
@@ -144,9 +27,7 @@ function generateUUID(): string {
  * Zombie instances (crashed without cleanup) are detected via heartbeat timeout.
  */
 export class InstanceRegistry implements IInstanceRegistry {
-    private readonly syncDir: string;
-    private readonly lockFilePath: string;
-    private readonly mutexFilePath: string;
+    private readonly store: InstanceRegistryStore;
     private instanceId: string | null = null;
     private readonly windowId: string;
     private readonly pid: number;
@@ -160,12 +41,10 @@ export class InstanceRegistry implements IInstanceRegistry {
      * @param extensionVersion Extension version string (for diagnostics)
      */
     constructor(baseDir: string, windowId: string, extensionVersion: string = 'unknown') {
-        this.syncDir = path.join(baseDir, SYNC_DIR_NAME);
-        this.lockFilePath = path.join(this.syncDir, LOCK_FILE_NAME);
-        this.mutexFilePath = `${this.lockFilePath}.mutex`;
         this.windowId = windowId;
         this.pid = process.pid;
         this.extensionVersion = extensionVersion;
+        this.store = new InstanceRegistryStore(baseDir, this.pid);
     }
 
     /**
@@ -176,7 +55,7 @@ export class InstanceRegistry implements IInstanceRegistry {
     async register(): Promise<boolean> {
         try {
             // Generate instance ID
-            this.instanceId = generateUUID();
+            this.instanceId = generateInstanceId();
 
             const now = Date.now();
             const instanceInfo: InstanceInfo = {
@@ -188,15 +67,15 @@ export class InstanceRegistry implements IInstanceRegistry {
                 extensionVersion: this.extensionVersion
             };
 
-            await this.withLock(async () => {
+            await this.store.withLock(async () => {
                 // Read existing lock file
-                const lockFile = await this.readLockFile();
+                const lockFile = await this.store.readLockFile();
 
                 // Add this instance
                 lockFile.instances.push(instanceInfo);
 
                 // Write updated lock file
-                await this.writeLockFile(lockFile);
+                await this.store.writeLockFile(lockFile);
             });
 
             Logger.log(`Registered instance: ${this.instanceId}`);
@@ -217,8 +96,8 @@ export class InstanceRegistry implements IInstanceRegistry {
         }
 
         try {
-            await this.withLock(async () => {
-                const lockFile = await this.readLockFile();
+            await this.store.withLock(async () => {
+                const lockFile = await this.store.readLockFile();
 
                 // Remove this instance
                 lockFile.instances = lockFile.instances.filter(
@@ -226,7 +105,7 @@ export class InstanceRegistry implements IInstanceRegistry {
                 );
 
                 // Write updated lock file
-                await this.writeLockFile(lockFile);
+                await this.store.writeLockFile(lockFile);
             });
 
             Logger.log(`Unregistered instance: ${this.instanceId}`);
@@ -241,7 +120,7 @@ export class InstanceRegistry implements IInstanceRegistry {
      */
     async getActiveInstances(): Promise<InstanceInfo[]> {
         try {
-            const lockFile = await this.readLockFile();
+            const lockFile = await this.store.readLockFile();
             return lockFile.instances;
         } catch (error) {
             Logger.error('Failed to get active instances:', error);
@@ -264,8 +143,8 @@ export class InstanceRegistry implements IInstanceRegistry {
      */
     async cleanup(): Promise<number> {
         try {
-            return await this.withLock(async () => {
-                const lockFile = await this.readLockFile();
+            return await this.store.withLock(async () => {
+                const lockFile = await this.store.readLockFile();
                 const now = Date.now();
                 let cleanedCount = 0;
 
@@ -290,7 +169,7 @@ export class InstanceRegistry implements IInstanceRegistry {
                 });
 
                 if (cleanedCount > 0) {
-                    await this.writeLockFile(lockFile);
+                    await this.store.writeLockFile(lockFile);
                 }
 
                 return cleanedCount;
@@ -310,8 +189,8 @@ export class InstanceRegistry implements IInstanceRegistry {
         }
 
         try {
-            await this.withLock(async () => {
-                const lockFile = await this.readLockFile();
+            await this.store.withLock(async () => {
+                const lockFile = await this.store.readLockFile();
 
                 // Find and update this instance's heartbeat
                 for (const instance of lockFile.instances) {
@@ -321,7 +200,7 @@ export class InstanceRegistry implements IInstanceRegistry {
                     }
                 }
 
-                await this.writeLockFile(lockFile);
+                await this.store.writeLockFile(lockFile);
             });
         } catch (error) {
             Logger.error('Failed to update heartbeat:', error);
@@ -333,119 +212,6 @@ export class InstanceRegistry implements IInstanceRegistry {
      */
     getInstanceId(): string | null {
         return this.instanceId;
-    }
-
-    /**
-     * Ensure the sync directory exists
-     */
-    private async ensureSyncDir(): Promise<void> {
-        if (!fs.existsSync(this.syncDir)) {
-            fs.mkdirSync(this.syncDir, { recursive: true });
-        }
-    }
-
-    /**
-     * Read the lock file
-     */
-    private async readLockFile(): Promise<InstancesLockFile> {
-        try {
-            if (!fs.existsSync(this.lockFilePath)) {
-                return { schemaVersion: SCHEMA_VERSION, instances: [] };
-            }
-
-            const content = fs.readFileSync(this.lockFilePath, 'utf-8');
-            if (!content || content.trim() === '') {
-                return { schemaVersion: SCHEMA_VERSION, instances: [] };
-            }
-
-            return JSON.parse(content) as InstancesLockFile;
-        } catch (error) {
-            Logger.warn('Failed to read lock file, creating new one:', error);
-            return { schemaVersion: SCHEMA_VERSION, instances: [] };
-        }
-    }
-
-    /**
-     * Write the lock file atomically
-     */
-    private async writeLockFile(lockFile: InstancesLockFile): Promise<void> {
-        const tempPath = `${this.lockFilePath}.${this.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
-        const content = JSON.stringify(lockFile, null, 2);
-
-        // Write to temp file first
-        fs.writeFileSync(tempPath, content, 'utf-8');
-
-        // Atomic rename with small retry to reduce Windows EPERM flakiness.
-        try {
-            const attempts = 5;
-            for (let i = 0; i < attempts; i++) {
-                try {
-                    fs.renameSync(tempPath, this.lockFilePath);
-                    return;
-                } catch (error) {
-                    const code = getErrorCode(error);
-                    if ((code === 'EPERM' || code === 'EACCES') && i < attempts - 1) {
-                        await new Promise(resolve => setTimeout(resolve, MUTEX_RETRY_DELAY_MS));
-                        continue;
-                    }
-                    throw error;
-                }
-            }
-        } finally {
-            // Best-effort cleanup if the rename did not happen.
-            try {
-                if (fs.existsSync(tempPath)) {
-                    fs.unlinkSync(tempPath);
-                }
-            } catch {
-                // ignore
-            }
-        }
-    }
-
-    private async withLock<T>(fn: () => Promise<T>): Promise<T> {
-        await this.ensureSyncDir();
-
-        const start = Date.now();
-        while (true) {
-            try {
-                // Use exclusive create as a cross-process mutex.
-                const fd = fs.openSync(this.mutexFilePath, 'wx');
-                fs.closeSync(fd);
-                break;
-            } catch (error) {
-                if (getErrorCode(error) !== 'EEXIST') {
-                    throw error;
-                }
-
-                // If the mutex is stale (e.g., previous process crashed), remove it.
-                try {
-                    const stat = fs.statSync(this.mutexFilePath);
-                    if (Date.now() - stat.mtimeMs > MUTEX_STALE_MS) {
-                        fs.unlinkSync(this.mutexFilePath);
-                        continue;
-                    }
-                } catch {
-                    // If stat/unlink fails, just fall through to retry.
-                }
-
-                if (Date.now() - start > MUTEX_TIMEOUT_MS) {
-                    throw new Error('Timed out acquiring instance registry mutex');
-                }
-
-                await new Promise(resolve => setTimeout(resolve, MUTEX_RETRY_DELAY_MS));
-            }
-        }
-
-        try {
-            return await fn();
-        } finally {
-            try {
-                fs.unlinkSync(this.mutexFilePath);
-            } catch {
-                // ignore
-            }
-        }
     }
 
     /**

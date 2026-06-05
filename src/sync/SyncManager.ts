@@ -21,90 +21,11 @@ import { FileWatcher, IFileWatcher } from './FileWatcher';
 import { ConflictResolver, SyncableState } from './ConflictResolver';
 import { ISyncConfigManager } from './SyncConfigManager';
 import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
+import { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
+import { reconcileSharedState } from './SyncReconciler';
+import { CLEANUP_INTERVAL, HEARTBEAT_INTERVAL } from './SyncTiming';
 
-/**
- * Result of a sync operation
- */
-export interface SyncResult {
-    /** Whether sync succeeded */
-    success: boolean;
-    /** Number of instances notified */
-    instancesNotified: number;
-    /** Number of conflicts resolved */
-    conflictsResolved: number;
-    /** Number of inactive instances removed from the registry (best-effort) */
-    instancesCleaned?: number;
-    /** Error message if failed */
-    error?: string;
-}
-
-/**
- * Current sync status
- */
-export interface SyncStatus {
-    /** Whether sync is enabled */
-    enabled: boolean;
-    /** Number of active instances */
-    activeInstances: number;
-    /** Last successful sync timestamp */
-    lastSyncTime: number | null;
-    /** Last error message */
-    lastError: string | null;
-    /** Whether currently syncing */
-    isSyncing: boolean;
-}
-
-/**
- * Interface for SyncManager as defined in design.md
- */
-export interface ISyncManager {
-    /**
-     * Start the sync service
-     * @returns True if started successfully
-     */
-    start(): Promise<boolean>;
-
-    /**
-     * Stop the sync service
-     */
-    stop(): Promise<void>;
-
-    /**
-     * Notify other instances of a state change
-     * @param state The new proxy state
-     */
-    notifyChange(state: ProxyState): Promise<void>;
-
-    /**
-     * Manually trigger a sync
-     */
-    triggerSync(): Promise<SyncResult>;
-
-    /**
-     * Get current sync status
-     */
-    getSyncStatus(): SyncStatus;
-
-    /**
-     * Get the last shared proxy state loaded or written by this manager
-     */
-    getCurrentSharedState(): ProxyState | null;
-
-    /**
-     * Check if sync is enabled
-     */
-    isEnabled(): boolean;
-}
-
-/**
- * Heartbeat interval in milliseconds (10 seconds)
- */
-const HEARTBEAT_INTERVAL = 10000;
-
-/**
- * Cleanup interval in milliseconds (30 seconds)
- */
-const CLEANUP_INTERVAL = 30000;
+export type { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
 
 /**
  * SyncManager coordinates synchronization between multiple otak-proxy instances.
@@ -456,98 +377,42 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         }
     }
 
-    private isSameProxyState(a: ProxyState, b: ProxyState): boolean {
-        try {
-            return JSON.stringify(a) === JSON.stringify(b);
-        } catch {
-            return false;
-        }
-    }
-
     private async reconcileWithSharedFile(): Promise<{ conflictsResolved: number }> {
         const sharedState = await this.sharedStateFile.read();
-        if (!sharedState) {
-            return { conflictsResolved: 0 };
-        }
-
         const localInstanceId = this.instanceRegistry.getInstanceId();
-        if (!localInstanceId) {
-            return { conflictsResolved: 0 };
+        const result = reconcileSharedState(
+            sharedState,
+            localInstanceId,
+            this.currentState,
+            this.conflictResolver
+        );
+
+        this.currentState = result.currentState;
+
+        if (result.remoteChange) {
+            this.emit('remoteChange', result.remoteChange);
         }
 
-        const fileState: SyncableState = {
-            state: sharedState.proxyState,
-            timestamp: sharedState.lastModified,
-            instanceId: sharedState.lastModifiedBy,
-            version: sharedState.version
-        };
-
-        // If the file reflects our own write, make sure we have a baseline local state and exit.
-        if (sharedState.lastModifiedBy === localInstanceId) {
-            if (!this.currentState) {
-                this.currentState = fileState;
-            }
-            return { conflictsResolved: 0 };
+        if (result.conflictDetails) {
+            this.emit('conflictResolved', result.conflictDetails);
         }
 
-        // Already processed this exact version — skip to avoid re-emitting remoteChange
-        // on every polling tick for a state we've already applied.
-        if (this.currentState &&
-            fileState.version === this.currentState.version &&
-            fileState.timestamp === this.currentState.timestamp &&
-            this.isSameProxyState(this.currentState.state, fileState.state)) {
-            return { conflictsResolved: 0 };
+        if (result.conflictLog) {
+            Logger.log(result.conflictLog);
         }
 
-        // No local state yet - accept remote state.
-        if (!this.currentState) {
-            this.currentState = fileState;
-            this.emit('remoteChange', sharedState.proxyState);
+        if (result.reassertLocalState) {
+            await this.notifyChange(result.reassertLocalState);
+            return { conflictsResolved: result.conflictsResolved };
+        }
+
+        if (result.markSynced) {
             this.lastSyncTime = Date.now();
             this.lastError = null;
             this.emitStatusChanged();
-            return { conflictsResolved: 0 };
         }
 
-        const resolution = this.conflictResolver.resolve(this.currentState, fileState);
-
-        // States are identical — nothing to do.
-        if (resolution.winner === 'none') {
-            return { conflictsResolved: 0 };
-        }
-
-        const conflictsResolved = resolution.conflictDetails ? 1 : 0;
-
-        if (resolution.winner === 'remote') {
-            this.currentState = resolution.resolvedState;
-            this.emit('remoteChange', sharedState.proxyState);
-
-            if (resolution.conflictDetails) {
-                this.emit('conflictResolved', resolution.conflictDetails);
-                Logger.log('Conflict resolved: remote state applied');
-            }
-
-            this.lastSyncTime = Date.now();
-            this.lastError = null;
-            this.emitStatusChanged();
-            return { conflictsResolved };
-        }
-
-        // Local wins. If the file contains a different state, reassert local state so other instances converge.
-        if (resolution.conflictDetails) {
-            this.emit('conflictResolved', resolution.conflictDetails);
-            Logger.log('Conflict resolved: local state retained');
-        }
-
-        if (!this.isSameProxyState(this.currentState.state, fileState.state)) {
-            await this.notifyChange(this.currentState.state);
-            return { conflictsResolved };
-        }
-
-        this.lastSyncTime = Date.now();
-        this.lastError = null;
-        this.emitStatusChanged();
-        return { conflictsResolved };
+        return { conflictsResolved: result.conflictsResolved };
     }
 
     /**

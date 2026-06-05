@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "2.2.13",
+  "version": "2.2.14",
   "files": [
     "out/extension.js",
     "out/commands/**/*.js",

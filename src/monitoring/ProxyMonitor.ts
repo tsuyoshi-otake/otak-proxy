@@ -5,53 +5,16 @@ import { Logger } from '../utils/Logger';
 import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { ProxyTestScheduler } from './ProxyTestScheduler';
 import { TestResult } from '../utils/ProxyUtils';
+import {
+    ISystemProxyDetector,
+    ProxyCheckTrigger,
+    ProxyDetectionResult,
+    ProxyMonitorConfig
+} from './ProxyMonitorTypes';
+import { DEFAULT_PROXY_MONITOR_CONFIG, normalizeProxyMonitorConfig } from './ProxyMonitorConfig';
+import { detectProxyWithRetry } from './ProxyMonitorDetection';
 
-/**
- * Configuration options for ProxyMonitor
- */
-export interface ProxyMonitorConfig {
-    pollingInterval: number;        // Polling interval in milliseconds
-    debounceDelay: number;          // Debounce delay in milliseconds
-    maxRetries: number;             // Maximum retry attempts
-    retryBackoffBase: number;       // Base for exponential backoff in seconds
-    detectionSourcePriority: string[]; // Priority order for detection sources
-    enableConnectionTest: boolean;  // Enable connection testing in Auto mode
-    connectionTestInterval: number; // Connection test interval in milliseconds (default 60s)
-}
-
-/**
- * Result of a proxy detection operation
- */
-export interface ProxyDetectionResult {
-    proxyUrl: string | null;
-    source: 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | null;
-    timestamp: number;
-    success: boolean;
-    error?: string;
-    testResult?: TestResult;        // Connection test result (if enabled)
-    proxyReachable?: boolean;       // Whether the proxy is actually reachable
-}
-
-/**
- * Interface for SystemProxyDetector to allow mocking
- */
-interface ISystemProxyDetector {
-    detectSystemProxy(): Promise<string | null>;
-    detectSystemProxyWithSource?(): Promise<{ proxyUrl: string | null; source: string | null }>;
-}
-
-const DEFAULT_CONFIG: ProxyMonitorConfig = {
-    pollingInterval: 30000,     // 30 seconds
-    debounceDelay: 1000,        // 1 second
-    maxRetries: 3,
-    retryBackoffBase: 1,        // 1 second base
-    detectionSourcePriority: ['environment', 'vscode', 'platform'],
-    enableConnectionTest: true, // Enable connection testing by default
-    connectionTestInterval: 60000 // 60 seconds
-};
-
-const MIN_POLLING_INTERVAL = 10000;  // 10 seconds
-const MAX_POLLING_INTERVAL = 300000; // 300 seconds (5 minutes)
+export type { ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
 
 /**
  * ProxyMonitor - Manages proxy detection with polling, debouncing, and retry logic
@@ -94,7 +57,7 @@ export class ProxyMonitor extends EventEmitter {
         this.detector = detector;
         this.logger = logger;
         this.state = new ProxyMonitorState();
-        this.config = { ...DEFAULT_CONFIG, ...config };
+        this.config = { ...DEFAULT_PROXY_MONITOR_CONFIG, ...config };
         this.validateConfig();
 
         // Set up connection testing if tester provided. Whether we actually run tests is controlled by config.
@@ -160,7 +123,7 @@ export class ProxyMonitor extends EventEmitter {
      *
      * @param source - The trigger source ('polling', 'focus', 'config', 'network')
      */
-    triggerCheck(source: 'polling' | 'focus' | 'config' | 'network'): void {
+    triggerCheck(source: ProxyCheckTrigger): void {
         if (!this.state.getStatus().isActive) {
             return;
         }
@@ -247,7 +210,7 @@ export class ProxyMonitor extends EventEmitter {
      *
      * @param trigger - The trigger source
      */
-    private async executeCheck(trigger: 'polling' | 'focus' | 'config' | 'network'): Promise<ProxyDetectionResult> {
+    private async executeCheck(trigger: ProxyCheckTrigger): Promise<ProxyDetectionResult> {
         if (this.isCheckInProgress) {
             return {
                 proxyUrl: this.lastProxyUrl,
@@ -376,60 +339,23 @@ export class ProxyMonitor extends EventEmitter {
      * @param trigger - The trigger source
      * @returns Detection result
      */
-    private async detectWithRetry(trigger: 'polling' | 'focus' | 'config' | 'network'): Promise<ProxyDetectionResult> {
-        let lastError: string | undefined;
-
-        for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
-            try {
-                // Wait for backoff if retrying
-                if (attempt > 0) {
-                    const backoffMs = this.config.retryBackoffBase * Math.pow(2, attempt - 1) * 1000;
-                    await this.sleep(backoffMs);
-                    Logger.info(`Retry attempt ${attempt} after ${backoffMs}ms backoff`);
-                }
-
-                const detection = await this.detectProxy();
-
-                return {
-                    proxyUrl: detection.proxyUrl,
-                    source: detection.source as ProxyDetectionResult['source'],
-                    timestamp: Date.now(),
-                    success: true
-                };
-
-            } catch (error) {
-                lastError = error instanceof Error ? error.message : String(error);
-                Logger.warn(`Proxy detection attempt ${attempt + 1} failed: ${lastError}`);
-
-                if (attempt === this.config.maxRetries) {
-                    // All retries exhausted
-                    this.emit('allRetriesFailed', { error: lastError, trigger });
-                }
-            }
-        }
-
-        return {
-            proxyUrl: null,
-            source: null,
-            timestamp: Date.now(),
-            success: false,
-            error: lastError
-        };
+    private async detectWithRetry(trigger: ProxyCheckTrigger): Promise<ProxyDetectionResult> {
+        return detectProxyWithRetry({
+            detector: this.detector,
+            config: this.config,
+            trigger,
+            sleep: (ms) => this.sleep(ms),
+            onAllRetriesFailed: (data) => this.emit('allRetriesFailed', data)
+        });
     }
 
     /**
-     * Detects proxy using the detector
+     * Helper function to sleep.
      *
-     * @returns Detection result with source
+     * @param ms - Milliseconds to sleep
      */
-    private async detectProxy(): Promise<{ proxyUrl: string | null; source: string | null }> {
-        if (this.detector.detectSystemProxyWithSource) {
-            return await this.detector.detectSystemProxyWithSource();
-        }
-
-        // Fallback if detectSystemProxyWithSource is not available
-        const proxyUrl = await this.detector.detectSystemProxy();
-        return { proxyUrl, source: null };
+    private sleep(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     /**
@@ -466,34 +392,7 @@ export class ProxyMonitor extends EventEmitter {
      * Validates and constrains configuration values
      */
     private validateConfig(): void {
-        // Clamp polling interval to valid range
-        if (this.config.pollingInterval < MIN_POLLING_INTERVAL) {
-            Logger.warn(`Polling interval ${this.config.pollingInterval}ms is below minimum, using ${MIN_POLLING_INTERVAL}ms`);
-            this.config.pollingInterval = MIN_POLLING_INTERVAL;
-        }
-        if (this.config.pollingInterval > MAX_POLLING_INTERVAL) {
-            Logger.warn(`Polling interval ${this.config.pollingInterval}ms is above maximum, using ${MAX_POLLING_INTERVAL}ms`);
-            this.config.pollingInterval = MAX_POLLING_INTERVAL;
-        }
-
-        // Ensure maxRetries is non-negative
-        if (this.config.maxRetries < 0) {
-            this.config.maxRetries = 0;
-        }
-
-        // Ensure retryBackoffBase is positive
-        if (this.config.retryBackoffBase <= 0) {
-            this.config.retryBackoffBase = 1;
-        }
-    }
-
-    /**
-     * Helper function to sleep
-     *
-     * @param ms - Milliseconds to sleep
-     */
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        this.config = normalizeProxyMonitorConfig(this.config);
     }
 
     /**

@@ -9,7 +9,15 @@ import { UserNotifier } from '../errors/UserNotifier';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { Logger } from '../utils/Logger';
 import { ProxyStateManager } from './ProxyStateManager';
-import { I18nManager } from '../i18n/I18nManager';
+import { ProxyApplyOptions, ProxyConfigResults, ProxyConfigTarget } from './ProxyApplierTypes';
+import { updateProxyConfigTarget } from './ProxyConfigTargetRunner';
+import { saveProxyConfigResults } from './ProxyConfigStateTracker';
+import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
+import {
+    showAggregatedErrors,
+    showProxyConfigured,
+    showProxyDisabled
+} from './ProxyApplierNotifications';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -49,24 +57,6 @@ export class ProxyApplier {
         return true;
     }
 
-    private translateValidationError(error: string): string {
-        const i18n = I18nManager.getInstance();
-        const keyByMessage: Record<string, string> = {
-            'Proxy URL cannot be empty': 'validation.proxyUrl.empty',
-            'Proxy URL contains dangerous shell metacharacters': 'validation.proxyUrl.shellMetacharacters',
-            'Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)': 'validation.proxyUrl.hostnameInvalid',
-            'Invalid URL format': 'validation.proxyUrl.invalidFormat',
-            'Protocol must be http:// or https://': 'validation.proxyUrl.protocol',
-            'Hostname is required': 'validation.proxyUrl.hostnameRequired',
-            'Port must be between 1 and 65535': 'validation.proxyUrl.portRange',
-            'Username contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)': 'validation.proxyUrl.usernameInvalid',
-            'Password contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)': 'validation.proxyUrl.passwordInvalid'
-        };
-
-        const key = keyByMessage[error];
-        return key ? i18n.t(key) : error;
-    }
-
     /**
      * Apply proxy settings to all configuration targets
      * 
@@ -76,7 +66,7 @@ export class ProxyApplier {
      *                  (useful for background sync or monitor-driven updates)
      * @returns Promise<boolean> - True if all operations succeeded
      */
-    async applyProxy(proxyUrl: string, enabled: boolean, options?: { silent?: boolean }): Promise<boolean> {
+    async applyProxy(proxyUrl: string, enabled: boolean, options?: ProxyApplyOptions): Promise<boolean> {
         const errorAggregator = new ErrorAggregator();
         
         // Edge Case 1: Handle empty URL as disable proxy (Requirement 4.1)
@@ -99,92 +89,34 @@ export class ProxyApplier {
             if (!validationResult.isValid) {
                 // Display validation errors with specific details
                 const errorMessage = 'error.invalidProxyUrl';
-                const suggestions = validationResult.errors.map(err => this.translateValidationError(err));
-                suggestions.push('suggestion.useFormat');
-                suggestions.push('suggestion.includeProtocol');
-                suggestions.push('suggestion.validHostname');
+                const suggestions = buildProxyValidationSuggestions(validationResult.errors);
                 
                 this.userNotifier.showError(errorMessage, suggestions);
                 return false;
             }
         }
         
-        let gitSuccess = false;
-        let vscodeSuccess = false;
-        let npmSuccess = false;
-        let terminalEnvSuccess = true;
-
-        // Requirement 2.2: Try VSCode configuration, continue on failure
-        vscodeSuccess = await this.updateManager(
-            this.vscodeManager,
-            'VSCode configuration',
-            enabled,
+        const results = await this.updateTargets(
+            this.getApplyTargets(),
+            true,
             proxyUrl,
             errorAggregator
         );
-
-        // Try Git configuration
-        gitSuccess = await this.updateManager(
-            this.gitManager,
-            'Git configuration',
-            enabled,
-            proxyUrl,
-            errorAggregator
-        );
-
-        // Try npm configuration
-        npmSuccess = await this.updateManager(
-            this.npmManager,
-            'npm configuration',
-            enabled,
-            proxyUrl,
-            errorAggregator
-        );
-
-        // Try VSCode integrated terminal environment variables (best-effort)
-        if (this.terminalEnvManager) {
-            terminalEnvSuccess = await this.updateManager(
-                this.terminalEnvManager,
-                'Terminal environment',
-                enabled,
-                proxyUrl,
-                errorAggregator
-            );
-        }
 
         // Track configuration state if stateManager is provided
-        if (this.stateManager) {
-            try {
-                const state = await this.stateManager.getState();
-                state.gitConfigured = gitSuccess;
-                state.vscodeConfigured = vscodeSuccess;
-                state.npmConfigured = npmSuccess;
-                state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
-                await this.stateManager.saveState(state);
-            } catch (error) {
-                // Requirement 4.4: If we can't save state, log but don't fail the operation
-                Logger.error('Failed to update configuration state tracking:', error);
-            }
-        }
+        await saveProxyConfigResults(this.stateManager, results, errorAggregator);
 
-        const success = gitSuccess && vscodeSuccess && npmSuccess && terminalEnvSuccess;
+        const success = results.gitSuccess &&
+            results.vscodeSuccess &&
+            results.npmSuccess &&
+            results.terminalEnvSuccess;
         
         // Requirement 2.5: Use ErrorAggregator to display all errors together
         if (errorAggregator.hasErrors()) {
-            const formattedErrors = errorAggregator.formatErrors();
-            // Parse the formatted error message to extract suggestions
-            const lines = formattedErrors.split('\n');
-            const suggestionStartIndex = lines.findIndex(line => line.includes('Suggestions:'));
-            const suggestions = suggestionStartIndex >= 0 
-                ? lines.slice(suggestionStartIndex + 1).filter(line => line.trim().startsWith('-')).map(line => line.trim().substring(2))
-                : [];
-            
-            const errorMessage = lines.slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length).join('\n');
-            this.userNotifier.showError(errorMessage, suggestions);
+            showAggregatedErrors(errorAggregator, this.userNotifier);
         } else if (proxyUrl && !options?.silent) {
             // Requirement 1.5, 6.2: Update status bar with sanitized proxy URL
-            const sanitizedUrl = this.sanitizer.maskPassword(proxyUrl);
-            this.userNotifier.showSuccess('message.proxyConfigured', { url: sanitizedUrl });
+            showProxyConfigured(proxyUrl, this.sanitizer, this.userNotifier);
         }
 
         return success;
@@ -197,150 +129,100 @@ export class ProxyApplier {
      * @param options - Optional flags; set `silent` to suppress success notifications
      * @returns Promise<boolean> - True if all operations succeeded
      */
-    async disableProxy(options?: { silent?: boolean }): Promise<boolean> {
+    async disableProxy(options?: ProxyApplyOptions): Promise<boolean> {
         const errorAggregator = new ErrorAggregator();
 
         if (this.blockIfUntrustedWorkspace(options)) {
             return false;
         }
         
-        let gitSuccess = false;
-        let vscodeSuccess = false;
-        let npmSuccess = false;
-        let terminalEnvSuccess = true;
-
-        // Use GitConfigManager.unsetProxy()
-        try {
-            const result = await this.gitManager.unsetProxy();
-            if (!result.success) {
-                errorAggregator.addError('Git configuration', result.error || 'Failed to unset Git proxy');
-            } else {
-                gitSuccess = true;
-            }
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            errorAggregator.addError('Git configuration', errorMsg);
-        }
-
-        // Use VscodeConfigManager.unsetProxy()
-        try {
-            const result = await this.vscodeManager.unsetProxy();
-            if (!result.success) {
-                errorAggregator.addError('VSCode configuration', result.error || 'Failed to unset VSCode proxy');
-            } else {
-                vscodeSuccess = true;
-            }
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            errorAggregator.addError('VSCode configuration', errorMsg);
-        }
-
-        // Use NpmConfigManager.unsetProxy()
-        try {
-            const result = await this.npmManager.unsetProxy();
-            if (!result.success) {
-                errorAggregator.addError('npm configuration', result.error || 'Failed to unset npm proxy');
-            } else {
-                npmSuccess = true;
-            }
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            errorAggregator.addError('npm configuration', errorMsg);
-        }
-
-        // Use TerminalEnvConfigManager.unsetProxy() (best-effort)
-        if (this.terminalEnvManager) {
-            try {
-                const result = await this.terminalEnvManager.unsetProxy();
-                if (!result.success) {
-                    errorAggregator.addError('Terminal environment', result.error || 'Failed to unset terminal proxy env');
-                    terminalEnvSuccess = false;
-                } else {
-                    terminalEnvSuccess = true;
-                }
-            } catch (error) {
-                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-                errorAggregator.addError('Terminal environment', errorMsg);
-                terminalEnvSuccess = false;
-            }
-        }
+        const results = await this.updateTargets(
+            this.getDisableTargets(),
+            false,
+            '',
+            errorAggregator
+        );
 
         // Track configuration state if stateManager is provided
-        if (this.stateManager) {
-            try {
-                const state = await this.stateManager.getState();
-                state.gitConfigured = false;
-                state.vscodeConfigured = false;
-                state.npmConfigured = false;
-                state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
-                await this.stateManager.saveState(state);
-            } catch (error) {
-                Logger.error('Failed to update configuration state tracking:', error);
-            }
-        }
+        await saveProxyConfigResults(this.stateManager, results, errorAggregator);
 
-        const success = gitSuccess && vscodeSuccess && npmSuccess && terminalEnvSuccess;
+        const success = results.gitSuccess &&
+            results.vscodeSuccess &&
+            results.npmSuccess &&
+            results.terminalEnvSuccess;
         
         // Use ErrorAggregator for any failures and UserNotifier for feedback
         if (errorAggregator.hasErrors()) {
-            const formattedErrors = errorAggregator.formatErrors();
-            const lines = formattedErrors.split('\n');
-            const suggestionStartIndex = lines.findIndex(line => line.includes('Suggestions:'));
-            const suggestions = suggestionStartIndex >= 0 
-                ? lines.slice(suggestionStartIndex + 1).filter(line => line.trim().startsWith('-')).map(line => line.trim().substring(2))
-                : [];
-            
-            const errorMessage = lines.slice(0, suggestionStartIndex >= 0 ? suggestionStartIndex : lines.length).join('\n');
-            this.userNotifier.showError(errorMessage, suggestions);
+            showAggregatedErrors(errorAggregator, this.userNotifier);
         } else if (!options?.silent) {
             // Update status bar to show proxy disabled
-            this.userNotifier.showSuccess('message.proxyDisabled');
+            showProxyDisabled(this.userNotifier);
         }
 
         return success;
     }
 
-    /**
-     * Update a single ConfigManager with error handling
-     * 
-     * @param manager - The ConfigManager to update
-     * @param name - The name of the manager for error reporting
-     * @param enabled - Whether to enable or disable the proxy
-     * @param proxyUrl - The proxy URL to apply
-     * @param errorAggregator - The ErrorAggregator to collect errors
-     * @returns Promise<boolean> - True if the operation succeeded
-     */
-    private async updateManager(
-        manager: GitConfigManager | VscodeConfigManager | NpmConfigManager | TerminalEnvConfigManager,
-        name: string,
+    private async updateTargets(
+        targets: ProxyConfigTarget[],
         enabled: boolean,
         proxyUrl: string,
         errorAggregator: ErrorAggregator
-    ): Promise<boolean> {
-        try {
-            let result;
-            
-            if (enabled) {
-                result = await manager.setProxy(proxyUrl);
-            } else {
-                result = await manager.unsetProxy();
-            }
+    ): Promise<ProxyConfigResults> {
+        const results: ProxyConfigResults = {
+            gitSuccess: false,
+            vscodeSuccess: false,
+            npmSuccess: false,
+            terminalEnvSuccess: true
+        };
 
-            if (!result.success) {
-                // Log the error with details
-                Logger.error(`${name} failed:`, result.error, result.errorType);
-                
-                // Add to error aggregator
-                errorAggregator.addError(name, result.error || `Failed to update ${name}`);
-                return false;
+        for (const target of targets) {
+            const success = await updateProxyConfigTarget(target, enabled, proxyUrl, errorAggregator);
+            switch (target.name) {
+                case 'Git configuration':
+                    results.gitSuccess = success;
+                    break;
+                case 'VSCode configuration':
+                    results.vscodeSuccess = success;
+                    break;
+                case 'npm configuration':
+                    results.npmSuccess = success;
+                    break;
+                case 'Terminal environment':
+                    results.terminalEnvSuccess = success;
+                    break;
+                default:
+                    break;
             }
-
-            return true;
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            Logger.error(`${name} error:`, error);
-            errorAggregator.addError(name, errorMsg);
-            return false;
         }
+
+        return results;
+    }
+
+    private getApplyTargets(): ProxyConfigTarget[] {
+        const targets: ProxyConfigTarget[] = [
+            { name: 'VSCode configuration', manager: this.vscodeManager },
+            { name: 'Git configuration', manager: this.gitManager },
+            { name: 'npm configuration', manager: this.npmManager }
+        ];
+
+        if (this.terminalEnvManager) {
+            targets.push({ name: 'Terminal environment', manager: this.terminalEnvManager });
+        }
+
+        return targets;
+    }
+
+    private getDisableTargets(): ProxyConfigTarget[] {
+        const targets: ProxyConfigTarget[] = [
+            { name: 'Git configuration', manager: this.gitManager },
+            { name: 'VSCode configuration', manager: this.vscodeManager },
+            { name: 'npm configuration', manager: this.npmManager }
+        ];
+
+        if (this.terminalEnvManager) {
+            targets.push({ name: 'Terminal environment', manager: this.terminalEnvManager });
+        }
+
+        return targets;
     }
 }
