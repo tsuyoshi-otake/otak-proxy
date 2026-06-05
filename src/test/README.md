@@ -9,16 +9,22 @@
 参照してください。
 
 - **VS Code 拡張ホストテスト** (`vscode-test`)
-  - `.vscode-test.mjs` から起動。VS Code API が必要なテストはこちらで
-    実行される。
+  - `.vscode-test.mjs` から起動。VS Code API が必要なテスト、`extension.*`
+    系、`/integration/` 配下、`*.integration.*`、`VscodeConfigManager` を
+    取り込むテストはこちらで実行される。
   - ハーメティック化: 各実行ごとに一意の `--user-data-dir` /
     `--extensions-dir` を作成し、`GIT_CONFIG_GLOBAL` と
     `NPM_CONFIG_USERCONFIG` でグローバル設定を sandbox に隔離する。
 - **純粋 Node ユニットテスト** (`scripts/run-unit-tests.mjs`)
-  - VS Code API に依存しないテストを Mocha 直叩きで実行。
+  - 上記いずれにも該当しないテストを Mocha 直叩きで実行。
   - 必要なら `scripts/vscode-shim.cjs` が最小限の `vscode` モジュールを
     供給する。
   - `npm run test:unit:parallel` で並列実行。
+
+二つのランナーは補集合関係になるよう揃えてあり、すべての `*.test.ts`
+ファイルは少なくとも一つのランナーで実行されます。両方のフィルタを変える
+場合は片側だけ動かさないこと(片方からも片方からも漏れるテストファイル
+が生まれます)。
 
 ## テスト種別と命名規則
 

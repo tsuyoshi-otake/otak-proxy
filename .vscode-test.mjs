@@ -64,11 +64,22 @@ function walk(dir) {
 
 function isVscodeDependentTestFile(filePath) {
 	const src = readFileSync(filePath, 'utf8');
+	const base = filePath.split(/[\\/]/).pop() ?? '';
+	// Keep in sync with scripts/run-unit-tests.mjs exclusion logic so the
+	// union of (unit runner) + (vscode-test runner) covers every test file.
+	// Without this alignment, files that the unit runner excludes (extension.*,
+	// integration tests, VscodeConfigManager consumers) would silently be
+	// excluded from both lanes unless OTAK_PROXY_VSCODE_TEST_ALL=1 is set.
 	return (
 		src.includes("require('vscode')") ||
 		src.includes('require(\"vscode\")') ||
 		src.includes("from 'vscode'") ||
-		src.includes('from \"vscode\"')
+		src.includes('from \"vscode\"') ||
+		src.includes('VscodeConfigManager') ||
+		src.includes('../config/VscodeConfigManager') ||
+		base.startsWith('extension.') ||
+		/[\\/]integration[\\/]/.test(filePath) ||
+		filePath.includes('.integration.')
 	);
 }
 
