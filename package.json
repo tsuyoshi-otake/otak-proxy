@@ -22,7 +22,6 @@
     "out/errors/**/*.js",
     "out/i18n/**/*.js",
     "out/i18n/locales/*.json",
-    "out/models/**/*.js",
     "out/monitoring/**/*.js",
     "out/sync/**/*.js",
     "out/ui/**/*.js",
