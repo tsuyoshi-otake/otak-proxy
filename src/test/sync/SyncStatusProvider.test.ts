@@ -8,7 +8,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { SyncStatusProvider, ISyncStatusProvider } from '../../sync/SyncStatusProvider';
+import { SyncStatusProvider } from '../../sync/SyncStatusProvider';
 import { SyncStatus } from '../../sync/SyncManager';
 
 suite('SyncStatusProvider Unit Tests', () => {

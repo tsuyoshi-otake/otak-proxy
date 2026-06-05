@@ -31,31 +31,6 @@ export interface SyncDisplayState {
 }
 
 /**
- * Interface for SyncStatusProvider
- */
-export interface ISyncStatusProvider {
-    /**
-     * Update the display with current sync status
-     */
-    update(status: SyncStatus): void;
-
-    /**
-     * Show the sync status indicator
-     */
-    show(): void;
-
-    /**
-     * Hide the sync status indicator
-     */
-    hide(): void;
-
-    /**
-     * Dispose of resources
-     */
-    dispose(): void;
-}
-
-/**
  * Icons for different sync states
  */
 const SYNC_ICONS = {
@@ -78,7 +53,7 @@ const SYNC_ICONS = {
  * - Shows warning on sync errors
  * - Displays detailed tooltip with connection info
  */
-export class SyncStatusProvider implements ISyncStatusProvider {
+export class SyncStatusProvider {
     private statusBarItem: vscode.StatusBarItem;
     private i18n: I18nManager;
     private currentStatus: SyncStatus | null = null;
@@ -112,7 +87,7 @@ export class SyncStatusProvider implements ISyncStatusProvider {
 
         // Update status bar item
         this.statusBarItem.text = displayState.icon;
-        this.statusBarItem.tooltip = this.buildTooltip(status, displayState);
+        this.statusBarItem.tooltip = this.buildTooltip(status);
 
         if (displayState.backgroundColor) {
             this.statusBarItem.backgroundColor = displayState.backgroundColor;
@@ -225,7 +200,7 @@ export class SyncStatusProvider implements ISyncStatusProvider {
     /**
      * Build detailed tooltip content
      */
-    private buildTooltip(status: SyncStatus, displayState: SyncDisplayState): vscode.MarkdownString {
+    private buildTooltip(status: SyncStatus): vscode.MarkdownString {
         const tooltip = new vscode.MarkdownString();
         tooltip.isTrusted = true;
 
