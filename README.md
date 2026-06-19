@@ -34,7 +34,7 @@ In both modes, otak-proxy updates proxy settings for VS Code, Git, and npm. It a
 - **Connection test** — Checks whether a proxy can be reached before enabling it.
 - **Integrated terminals** — Sets `HTTP_PROXY` and `HTTPS_PROXY` for new VS Code terminals.
 - **URL display setting** — Hide the proxy URL in the status bar when needed.
-- **UI languages** — English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, and Vietnamese.
+- **UI languages** — 16 languages covering all G20 countries: English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, Vietnamese, Spanish, Portuguese (Brazil), French, German, Hindi, Indonesian, Italian, Russian, Arabic, and Turkish.
 
 UI language follows your VS Code display language.
 

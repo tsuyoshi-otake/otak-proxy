@@ -37,6 +37,17 @@ const targets = [
   { locale: 'vi', inFile: 'vi.json', outFile: 'package.nls.vi.json' },
   { locale: 'zh-cn', inFile: 'zh-cn.json', outFile: 'package.nls.zh-cn.json' },
   { locale: 'zh-tw', inFile: 'zh-tw.json', outFile: 'package.nls.zh-tw.json' },
+  // G20 country languages
+  { locale: 'es', inFile: 'es.json', outFile: 'package.nls.es.json' },
+  { locale: 'pt-br', inFile: 'pt-br.json', outFile: 'package.nls.pt-br.json' },
+  { locale: 'fr', inFile: 'fr.json', outFile: 'package.nls.fr.json' },
+  { locale: 'de', inFile: 'de.json', outFile: 'package.nls.de.json' },
+  { locale: 'hi', inFile: 'hi.json', outFile: 'package.nls.hi.json' },
+  { locale: 'id', inFile: 'id.json', outFile: 'package.nls.id.json' },
+  { locale: 'it', inFile: 'it.json', outFile: 'package.nls.it.json' },
+  { locale: 'ru', inFile: 'ru.json', outFile: 'package.nls.ru.json' },
+  { locale: 'ar', inFile: 'ar.json', outFile: 'package.nls.ar.json' },
+  { locale: 'tr', inFile: 'tr.json', outFile: 'package.nls.tr.json' },
 ];
 
 for (const t of targets) {

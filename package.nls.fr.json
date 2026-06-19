@@ -1,0 +1,18 @@
+{
+  "command.configureUrl": "otak: Configurer le proxy manuel",
+  "command.importProxy": "otak: Importer le proxy système",
+  "command.testProxy": "otak: Tester le proxy",
+  "command.toggleProxy": "otak: Activer/désactiver le proxy",
+  "command.toggleShowProxyUrl": "otak: Afficher/masquer l'URL du proxy",
+  "config.autoTestEnabled": "Activer le test automatique de connexion du proxy en mode Auto. Lorsque cette option est activée, la connectivité du proxy est testée régulièrement.",
+  "config.detectionSourcePriority": "Ordre de priorité des sources de détection du proxy. Les sources sont essayées dans l'ordre jusqu'à ce que l'une réussisse.",
+  "config.enableFallback": "Activer le repli vers le proxy manuel lorsqu'aucun proxy système n'est détecté (mode Auto uniquement). Lorsque cette option est activée, si aucun proxy système n'est détecté, l'extension tente d'utiliser le proxy configuré manuellement comme solution de repli.",
+  "config.maxRetries": "Nombre maximal de tentatives de détection du proxy en cas d'échec.",
+  "config.pollingInterval": "Intervalle d'interrogation du mode Auto en secondes (10-300). Fréquence de vérification des changements de proxy système.",
+  "config.proxyUrl": "URL du serveur proxy (par ex. http://proxy.example.com:8080) pour les paramètres de proxy de VSCode, Git, npm et du terminal intégré",
+  "config.showProxyUrl": "Afficher l'URL du proxy dans la barre d'état",
+  "config.syncEnabled": "Activer la synchronisation entre plusieurs instances de VSCode/Cursor. Lorsque cette option est activée, les paramètres du proxy sont partagés entre toutes les instances.",
+  "config.syncInterval": "Intervalle de vérification de la synchronisation en millisecondes (100-5000). Fréquence de vérification des changements provenant des autres instances.",
+  "config.testInterval": "Intervalle de test de connexion du proxy en secondes (mode Auto uniquement). Plage : 30-600 secondes. Par défaut : 60 secondes.",
+  "extension.description": "Gestion du proxy en un clic pour VSCode, Git, npm et les terminaux intégrés."
+}

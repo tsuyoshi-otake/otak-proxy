@@ -1,0 +1,18 @@
+{
+  "command.configureUrl": "otak: मैनुअल Proxy कॉन्फ़िगर करें",
+  "command.importProxy": "otak: सिस्टम Proxy आयात करें",
+  "command.testProxy": "otak: Proxy परीक्षण करें",
+  "command.toggleProxy": "otak: Proxy टॉगल करें",
+  "command.toggleShowProxyUrl": "otak: Proxy URL दृश्यता टॉगल करें",
+  "config.autoTestEnabled": "ऑटो मोड में स्वचालित proxy कनेक्शन परीक्षण सक्षम करें। सक्षम होने पर, proxy कनेक्टिविटी का समय-समय पर परीक्षण किया जाता है।",
+  "config.detectionSourcePriority": "Proxy डिटेक्शन स्रोतों के लिए प्राथमिकता क्रम। स्रोतों को क्रम में आज़माया जाता है जब तक कोई सफल न हो।",
+  "config.enableFallback": "जब सिस्टम proxy का पता न चले तो मैनुअल proxy पर फ़ॉलबैक सक्षम करें (केवल ऑटो मोड)। सक्षम होने पर, यदि कोई सिस्टम proxy नहीं मिलता, तो एक्सटेंशन फ़ॉलबैक के रूप में मैन्युअल रूप से कॉन्फ़िगर किए गए proxy का उपयोग करने का प्रयास करेगा।",
+  "config.maxRetries": "विफल होने पर proxy डिटेक्शन के लिए पुनः प्रयासों की अधिकतम संख्या।",
+  "config.pollingInterval": "ऑटो मोड पोलिंग अंतराल सेकंड में (10-300)। सिस्टम proxy परिवर्तनों की जाँच कितनी बार करनी है।",
+  "config.proxyUrl": "VSCode, Git, npm और इंटीग्रेटेड टर्मिनल की proxy सेटिंग्स के लिए proxy सर्वर URL (उदा., http://proxy.example.com:8080)",
+  "config.showProxyUrl": "स्टेटस बार में proxy URL दिखाएँ",
+  "config.syncEnabled": "एकाधिक VSCode/Cursor इंस्टेंस के बीच सिंक्रनाइज़ेशन सक्षम करें। सक्षम होने पर, proxy सेटिंग्स सभी इंस्टेंस में साझा की जाती हैं।",
+  "config.syncInterval": "सिंक्रनाइज़ेशन जाँच अंतराल मिलीसेकंड में (100-5000)। अन्य इंस्टेंस से परिवर्तनों की जाँच कितनी बार करनी है।",
+  "config.testInterval": "Proxy कनेक्शन परीक्षण अंतराल सेकंड में (केवल ऑटो मोड)। सीमा: 30-600 सेकंड। डिफ़ॉल्ट: 60 सेकंड।",
+  "extension.description": "VSCode, Git, npm और इंटीग्रेटेड टर्मिनल के लिए एक-क्लिक proxy प्रबंधन।"
+}

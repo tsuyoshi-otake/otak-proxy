@@ -88,7 +88,17 @@ src/
 │       ├── ko.json             # Korean
 │       ├── vi.json             # Vietnamese
 │       ├── zh-cn.json          # Simplified Chinese
-│       └── zh-tw.json          # Traditional Chinese
+│       ├── zh-tw.json          # Traditional Chinese
+│       ├── es.json             # Spanish (Argentina, Mexico)
+│       ├── pt-br.json          # Portuguese (Brazil)
+│       ├── fr.json             # French (France, Canada)
+│       ├── de.json             # German (Germany)
+│       ├── hi.json             # Hindi (India)
+│       ├── id.json             # Indonesian (Indonesia)
+│       ├── it.json             # Italian (Italy)
+│       ├── ru.json             # Russian (Russia)
+│       ├── ar.json             # Arabic (Saudi Arabia)
+│       └── tr.json             # Turkish (Turkey)
 │
 ├── utils/               # Shared utilities
 │   ├── Logger.ts               # Centralized logging (auto credential masking)
@@ -643,7 +653,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   - `t()`: Get translation by key
   - `getCurrentLocale()`: Get current locale
   - Automatic detection from VS Code language pack
-- **Supported languages**: English, Japanese, Korean, Vietnamese, Simplified Chinese, Traditional Chinese
+- **Supported languages** (16, covering all G20 countries): English, Japanese, Korean, Vietnamese, Simplified Chinese, Traditional Chinese, Spanish, Portuguese (Brazil), French, German, Hindi, Indonesian, Italian, Russian, Arabic, Turkish
 
 ## Testing Strategy
 

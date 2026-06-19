@@ -20,7 +20,11 @@ export class I18nManager {
      private constructor() {
         this.config = {
             defaultLocale: 'en',
-            supportedLocales: ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'],
+            supportedLocales: [
+                'en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi',
+                // G20 country languages
+                'es', 'pt-br', 'fr', 'de', 'hi', 'id', 'it', 'ru', 'ar', 'tr'
+            ],
             fallbackLocale: 'en'
         };
         this.currentLocale = this.config.defaultLocale;
@@ -93,6 +97,12 @@ export class I18nManager {
         const base = locale.split('-')[0];
         if (this.isSupportedLocale(base)) {
             return base as SupportedLocale;
+        }
+
+        // Portuguese: only Brazilian Portuguese (pt-br) is shipped, so map any
+        // Portuguese variant (pt, pt-pt, pt-br, ...) to pt-br.
+        if (base === 'pt' && this.isSupportedLocale('pt-br')) {
+            return 'pt-br';
         }
 
         // Chinese: prefer zh-tw for Traditional, else zh-cn.

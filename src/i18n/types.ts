@@ -1,7 +1,24 @@
 /**
  * Supported locales for the extension
  */
-export type SupportedLocale = 'en' | 'ja' | 'zh-cn' | 'zh-tw' | 'ko' | 'vi';
+export type SupportedLocale =
+    | 'en'
+    | 'ja'
+    | 'zh-cn'
+    | 'zh-tw'
+    | 'ko'
+    | 'vi'
+    // G20 country languages
+    | 'es'    // Spanish (Argentina, Mexico)
+    | 'pt-br' // Portuguese (Brazil)
+    | 'fr'    // French (France, Canada)
+    | 'de'    // German (Germany)
+    | 'hi'    // Hindi (India)
+    | 'id'    // Indonesian (Indonesia)
+    | 'it'    // Italian (Italy)
+    | 'ru'    // Russian (Russia)
+    | 'ar'    // Arabic (Saudi Arabia)
+    | 'tr';   // Turkish (Turkey)
 
 /**
  * Translation messages structure

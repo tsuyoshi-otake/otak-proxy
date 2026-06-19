@@ -19,7 +19,11 @@ suite('I18nManager Property Tests', () => {
      * Validates: Requirements 1.4
      */
     test('Property 1: Unsupported locales should fallback to English', () => {
-        const supportedLocales = new Set(['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi']);
+        const supportedLocales = new Set([
+            'en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi',
+            // G20 country languages
+            'es', 'pt-br', 'fr', 'de', 'hi', 'id', 'it', 'ru', 'ar', 'tr'
+        ]);
         const resolvesToSupported = (raw: string): boolean => {
             const normalized = (raw || '').trim().replace(/_/g, '-').toLowerCase();
             if (supportedLocales.has(normalized)) {
@@ -29,6 +33,11 @@ suite('I18nManager Property Tests', () => {
             const base = normalized.split('-')[0];
             if (supportedLocales.has(base)) {
                 return true; // en-US, ja-JP, ko-KR, etc.
+            }
+
+            // Portuguese variants map to supported pt-br.
+            if (base === 'pt') {
+                return true;
             }
 
             // Chinese variants map to supported zh-cn/zh-tw.
@@ -158,7 +167,10 @@ suite('I18nManager Unit Tests', () => {
         const fs = require('fs');
         const path = require('path');
 
-        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'] as const;
+        const locales = [
+            'en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi',
+            'es', 'pt-br', 'fr', 'de', 'hi', 'id', 'it', 'ru', 'ar', 'tr'
+        ] as const;
 
         // Load translation files from the compiled output folder (out/i18n/locales).
         const loadLocale = (locale: string) => {
@@ -201,7 +213,10 @@ suite('I18nManager Unit Tests', () => {
         const fs = require('fs');
         const path = require('path');
 
-        const locales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi'];
+        const locales = [
+            'en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi',
+            'es', 'pt-br', 'fr', 'de', 'hi', 'id', 'it', 'ru', 'ar', 'tr'
+        ];
         const parsed: Record<string, unknown> = {};
 
         for (const locale of locales) {
@@ -241,6 +256,16 @@ suite('I18nManager Unit Tests', () => {
             'package.nls.zh-tw.json',
             'package.nls.ko.json',
             'package.nls.vi.json',
+            'package.nls.es.json',
+            'package.nls.pt-br.json',
+            'package.nls.fr.json',
+            'package.nls.de.json',
+            'package.nls.hi.json',
+            'package.nls.id.json',
+            'package.nls.it.json',
+            'package.nls.ru.json',
+            'package.nls.ar.json',
+            'package.nls.tr.json',
         ];
 
         const load = (fileName: string) => {

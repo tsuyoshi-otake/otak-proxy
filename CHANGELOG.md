@@ -1,5 +1,14 @@
 # Change Log
 
+## [2.3.0] - 2026-06-19
+
+### Added
+- UI language support for all G20 countries, adding 10 new locales (16 total): Spanish (`es`), Brazilian Portuguese (`pt-br`), French (`fr`), German (`de`), Hindi (`hi`), Indonesian (`id`), Italian (`it`), Russian (`ru`), Arabic (`ar`), and Turkish (`tr`). The UI language continues to follow the VS Code display language.
+
+### Changed
+- Locale resolution now maps any Portuguese variant (`pt`, `pt-pt`, `pt-br`) to the shipped Brazilian Portuguese translations
+- `package.nls.*.json` files for the new locales are generated from `src/i18n/locales/*.json` via `npm run gen:nls`
+
 ## [2.2.17] - 2026-06-06
 
 ### Changed

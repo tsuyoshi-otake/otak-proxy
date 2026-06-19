@@ -1,0 +1,18 @@
+{
+  "command.configureUrl": "otak: Configurar proxy manual",
+  "command.importProxy": "otak: Importar proxy del sistema",
+  "command.testProxy": "otak: Probar proxy",
+  "command.toggleProxy": "otak: Alternar proxy",
+  "command.toggleShowProxyUrl": "otak: Alternar visibilidad de la URL del proxy",
+  "config.autoTestEnabled": "Habilitar la prueba automática de conexión del proxy en modo automático. Cuando está habilitada, la conectividad del proxy se prueba periódicamente.",
+  "config.detectionSourcePriority": "Orden de prioridad de las fuentes de detección de proxy. Las fuentes se prueban en orden hasta que una tenga éxito.",
+  "config.enableFallback": "Habilitar el uso del proxy manual como respaldo cuando no se detecta el proxy del sistema (solo modo automático). Cuando está habilitado, si no se detecta ningún proxy del sistema, la extensión intentará usar el proxy configurado manualmente como respaldo.",
+  "config.maxRetries": "Número máximo de reintentos para la detección del proxy cuando falla.",
+  "config.pollingInterval": "Intervalo de sondeo del modo automático en segundos (10-300). Con qué frecuencia se comprueban los cambios del proxy del sistema.",
+  "config.proxyUrl": "URL del servidor proxy (por ejemplo, http://proxy.example.com:8080) para la configuración de proxy de VSCode, Git, npm y la terminal integrada",
+  "config.showProxyUrl": "Mostrar la URL del proxy en la barra de estado",
+  "config.syncEnabled": "Habilitar la sincronización entre varias instancias de VSCode/Cursor. Cuando está habilitada, la configuración del proxy se comparte entre todas las instancias.",
+  "config.syncInterval": "Intervalo de comprobación de sincronización en milisegundos (100-5000). Con qué frecuencia se comprueban los cambios de otras instancias.",
+  "config.testInterval": "Intervalo de prueba de conexión del proxy en segundos (solo modo automático). Rango: 30-600 segundos. Predeterminado: 60 segundos.",
+  "extension.description": "Gestión de proxy con un solo clic para VSCode, Git, npm y terminales integradas."
+}

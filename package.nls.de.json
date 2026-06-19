@@ -1,0 +1,18 @@
+{
+  "command.configureUrl": "otak: Manuellen Proxy konfigurieren",
+  "command.importProxy": "otak: System-Proxy importieren",
+  "command.testProxy": "otak: Proxy testen",
+  "command.toggleProxy": "otak: Proxy umschalten",
+  "command.toggleShowProxyUrl": "otak: Sichtbarkeit der Proxy-URL umschalten",
+  "config.autoTestEnabled": "Automatischen Proxy-Verbindungstest im Auto-Modus aktivieren. Wenn aktiviert, wird die Proxy-Konnektivität regelmäßig getestet.",
+  "config.detectionSourcePriority": "Prioritätsreihenfolge der Proxy-Erkennungsquellen. Die Quellen werden der Reihe nach versucht, bis eine erfolgreich ist.",
+  "config.enableFallback": "Fallback auf manuellen Proxy aktivieren, wenn kein System-Proxy erkannt wird (nur im Auto-Modus). Wenn aktiviert und kein System-Proxy erkannt wird, versucht die Erweiterung, den manuell konfigurierten Proxy als Fallback zu verwenden.",
+  "config.maxRetries": "Maximale Anzahl an Wiederholungsversuchen für die Proxy-Erkennung bei Fehlschlag.",
+  "config.pollingInterval": "Abfrageintervall im Auto-Modus in Sekunden (10-300). Legt fest, wie oft auf Änderungen des System-Proxys geprüft wird.",
+  "config.proxyUrl": "URL des Proxy-Servers (z. B. http://proxy.example.com:8080) für die Proxy-Einstellungen von VSCode, Git, npm und integriertem Terminal",
+  "config.showProxyUrl": "Proxy-URL in der Statusleiste anzeigen",
+  "config.syncEnabled": "Synchronisierung zwischen mehreren VSCode/Cursor-Instanzen aktivieren. Wenn aktiviert, werden die Proxy-Einstellungen über alle Instanzen hinweg geteilt.",
+  "config.syncInterval": "Prüfintervall der Synchronisierung in Millisekunden (100-5000). Legt fest, wie oft auf Änderungen anderer Instanzen geprüft wird.",
+  "config.testInterval": "Intervall für den Proxy-Verbindungstest in Sekunden (nur im Auto-Modus). Bereich: 30-600 Sekunden. Standard: 60 Sekunden.",
+  "extension.description": "Proxy-Verwaltung per Klick für VSCode, Git, npm und integrierte Terminals."
+}
