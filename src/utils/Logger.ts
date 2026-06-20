@@ -96,10 +96,10 @@ export class Logger {
      * @param args - Messages to log
      */
     static log(...args: unknown[]): void {
-        const sanitized = this.sanitizeArgs(...args);
         if (this.isSilent()) {
             return;
         }
+        const sanitized = this.sanitizeArgs(...args);
         console.log(...sanitized);
         
         // Also log to output channel
@@ -117,10 +117,10 @@ export class Logger {
      * @param args - Error messages to log
      */
     static error(...args: unknown[]): void {
-        const sanitized = this.sanitizeArgs(...args);
         if (this.isSilent()) {
             return;
         }
+        const sanitized = this.sanitizeArgs(...args);
         console.error(...sanitized);
         
         // Also log to output channel with error details
@@ -157,10 +157,10 @@ export class Logger {
      * @param args - Warning messages to log
      */
     static warn(...args: unknown[]): void {
-        const sanitized = this.sanitizeArgs(...args);
         if (this.isSilent()) {
             return;
         }
+        const sanitized = this.sanitizeArgs(...args);
         console.warn(...sanitized);
         
         // Also log to output channel
@@ -179,10 +179,10 @@ export class Logger {
      * @param args - Messages to log
      */
     static info(...args: unknown[]): void {
-        const sanitized = this.sanitizeArgs(...args);
         if (this.isSilent()) {
             return;
         }
+        const sanitized = this.sanitizeArgs(...args);
         console.info(...sanitized);
         
         // Also log to output channel
@@ -199,10 +199,10 @@ export class Logger {
      * Intentionally does not write to the output channel to avoid noise.
      */
     static debug(...args: unknown[]): void {
-        const sanitized = this.sanitizeArgs(...args);
         if (this.isSilent()) {
             return;
         }
+        const sanitized = this.sanitizeArgs(...args);
         console.debug(...sanitized);
     }
 }

@@ -32,6 +32,8 @@ In both modes, otak-proxy updates proxy settings for VS Code, Git, and npm. It a
 - **Manual mode** — Uses the proxy URL you enter.
 - **Status bar control** — Switch modes from the VS Code status bar.
 - **Connection test** — Checks whether a proxy can be reached before enabling it.
+- **Automatic connection testing** — In Auto mode, periodically verifies that the active proxy is still reachable.
+- **Multi-instance sync** — Shares proxy settings across all open VS Code/Cursor windows so they stay in step.
 - **Integrated terminals** — Sets `HTTP_PROXY` and `HTTPS_PROXY` for new VS Code terminals.
 - **URL display setting** — Hide the proxy URL in the status bar when needed.
 - **UI languages** — 16 languages covering all G20 countries: English, Japanese, Chinese (Simplified), Chinese (Traditional, Taiwan), Korean, Vietnamese, Spanish, Portuguese (Brazil), French, German, Hindi, Indonesian, Italian, Russian, Arabic, and Turkish.
@@ -74,7 +76,13 @@ Existing terminals keep their current environment. Open a new terminal for the u
   "otakProxy.proxyUrl": "http://proxy.example.com:8080",
   "otakProxy.pollingInterval": 30,
   "otakProxy.enableFallback": true,
-  "otakProxy.showProxyUrl": true
+  "otakProxy.showProxyUrl": true,
+  "otakProxy.autoTestEnabled": true,
+  "otakProxy.testInterval": 60,
+  "otakProxy.syncEnabled": true,
+  "otakProxy.syncInterval": 1000,
+  "otakProxy.detectionSourcePriority": ["environment", "vscode", "platform"],
+  "otakProxy.maxRetries": 3
 }
 ```
 
@@ -84,6 +92,12 @@ Existing terminals keep their current environment. Open a new terminal for the u
 - **`otakProxy.pollingInterval`**: System proxy check interval, in seconds (default: `30`)
 - **`otakProxy.enableFallback`**: Fall back to the manual proxy when the system proxy is unavailable (default: `true`)
 - **`otakProxy.showProxyUrl`**: Show the proxy URL in the status bar (default: `true`). Set this to `false` to display `Configured` instead of the actual URL.
+- **`otakProxy.autoTestEnabled`**: Periodically test proxy connectivity in Auto mode (default: `true`)
+- **`otakProxy.testInterval`**: Automatic connection test interval, in seconds (Auto mode only; range `30`–`600`, default: `60`)
+- **`otakProxy.syncEnabled`**: Synchronize proxy settings across multiple VS Code/Cursor instances (default: `true`)
+- **`otakProxy.syncInterval`**: Sync check interval, in milliseconds (range `100`–`5000`, default: `1000`)
+- **`otakProxy.detectionSourcePriority`**: Order in which proxy detection sources are tried (default: `["environment", "vscode", "platform"]`)
+- **`otakProxy.maxRetries`**: Maximum retries for proxy detection when it fails (default: `3`)
 
 ## Commands
 
@@ -92,6 +106,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 - `otak: Toggle Proxy`
 - `otak: Test Proxy`
 - `otak: Import System Proxy`
+- `otak: Configure Manual Proxy`
 - `otak: Toggle Proxy URL Visibility`
 
 ## Requirements

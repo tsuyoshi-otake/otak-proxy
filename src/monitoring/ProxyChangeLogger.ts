@@ -93,11 +93,12 @@ export class ProxyChangeLogger {
      * @returns Copy of change history array
      */
     getChangeHistory(limit?: number): ProxyChangeEvent[] {
-        const history = [...this.changeHistory];
+        // slice() already returns a fresh array, so it doubles as the defensive
+        // copy — no need to spread the full history first when a limit is given.
         if (limit !== undefined && limit > 0) {
-            return history.slice(-limit);
+            return this.changeHistory.slice(-limit);
         }
-        return history;
+        return this.changeHistory.slice();
     }
 
     /**
@@ -107,11 +108,10 @@ export class ProxyChangeLogger {
      * @returns Copy of check history array
      */
     getCheckHistory(limit?: number): ProxyCheckEvent[] {
-        const history = [...this.checkHistory];
         if (limit !== undefined && limit > 0) {
-            return history.slice(-limit);
+            return this.checkHistory.slice(-limit);
         }
-        return history;
+        return this.checkHistory.slice();
     }
 
     /**

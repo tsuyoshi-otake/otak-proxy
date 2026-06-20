@@ -1,5 +1,15 @@
 # Change Log
 
+## [2.3.1] - 2026-06-20
+
+### Changed
+- Bounded `NotificationThrottler` memory: the notification history is now capped (LRU eviction) so it no longer grows with session length when many distinct error messages are surfaced (O(N) retained entries → O(1))
+- Skipped log argument sanitization when logging is silenced, avoiding unnecessary serialization/allocation on the hot path
+- Avoided a redundant array copy in `ProxyChangeLogger` history getters
+
+### Documentation
+- Updated README to cover the `otak: Configure Manual Proxy` command, the automatic connection testing and multi-instance sync features, and the previously undocumented settings (`autoTestEnabled`, `testInterval`, `syncEnabled`, `syncInterval`, `detectionSourcePriority`, `maxRetries`)
+
 ## [2.3.0] - 2026-06-19
 
 ### Added
