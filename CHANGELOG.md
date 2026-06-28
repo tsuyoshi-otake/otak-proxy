@@ -1,5 +1,13 @@
 # Change Log
 
+## [2.3.2] - 2026-06-28
+
+### Changed
+- Replaced the marketplace icon with the new otak-proxy branding (dark badge with the proxy plug glyph), shipped at 48/128/256/512 px plus SVG
+
+### Documentation
+- Rewrote the README using the otak-paste layout: centered header with status badges, capability list, settings table, language support, and a Related Extensions table
+
 ## [2.3.1] - 2026-06-20
 
 ### Changed
