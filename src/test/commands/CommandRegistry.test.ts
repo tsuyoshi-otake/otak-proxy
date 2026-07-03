@@ -14,7 +14,8 @@ const EXPECTED_COMMANDS = [
     'otak-proxy.testProxy',
     'otak-proxy.importProxy',
     'otak-proxy.toggleShowProxyUrl',
-    'otak-proxy.diagnoseProxy'
+    'otak-proxy.diagnoseProxy',
+    'otak-proxy.resetWinHttpProxy'
 ];
 
 suite('CommandRegistry Smoke Tests', () => {
@@ -99,7 +100,7 @@ suite('CommandRegistry Smoke Tests', () => {
         const registry = new CommandRegistry(baseConfig);
         registry.registerAll();
 
-        // 5 commands + 1 config-change listener + 1 window-state listener
+        // Contributed commands + 1 config-change listener + 1 window-state listener
         assert.strictEqual(
             extensionContext.subscriptions.length,
             EXPECTED_COMMANDS.length + 2,

@@ -3,6 +3,7 @@ import { I18nManager } from '../i18n/I18nManager';
 import { detectSystemProxySettings, validateProxyUrl } from '../utils/ProxyUtils';
 import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { InitializerContext } from './ExtensionInitializerTypes';
+import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState } from './types';
 
 export class InitialSetupFlow {
@@ -43,7 +44,7 @@ export class InitialSetupFlow {
             state.autoProxyUrl = detectedProxy;
             state.mode = ProxyMode.Auto;
             await this.context.proxyStateManager.saveState(state);
-            await this.context.proxyApplier.applyProxy(detectedProxy, true);
+            await applyProxyThroughContext(this.context, detectedProxy, true);
             this.context.userNotifier.showSuccess(
                 'message.usingSystemProxy',
                 { url: this.context.sanitizer.maskPassword(detectedProxy) }
@@ -63,7 +64,7 @@ export class InitialSetupFlow {
             if (updatedState.manualProxyUrl) {
                 updatedState.mode = ProxyMode.Manual;
                 await this.context.proxyStateManager.saveState(updatedState);
-                await this.context.proxyApplier.applyProxy(updatedState.manualProxyUrl, true);
+                await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
             }
         }
     }
@@ -100,7 +101,7 @@ export class InitialSetupFlow {
             vscode.ConfigurationTarget.Global
         );
 
-        await this.context.proxyApplier.applyProxy(manualProxyUrl, true);
+        await applyProxyThroughContext(this.context, manualProxyUrl, true);
         this.context.userNotifier.showSuccess(
             'message.manualProxyConfigured',
             { url: this.context.sanitizer.maskPassword(manualProxyUrl) }

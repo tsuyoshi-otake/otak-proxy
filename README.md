@@ -52,6 +52,9 @@ In both modes, otak-proxy updates proxy settings for VS Code, Git, and npm, and 
 - **Status-bar control**: switch modes without leaving your editor.
 - **Connection test**: checks whether a proxy can be reached before enabling it.
 - **Automatic connection testing**: in Auto mode, periodically verifies that the active proxy is still reachable.
+- **Diagnostics and safe remediation**: records sanitized diagnostics, retries eligible apply failures once, and suppresses repair loops when another tool keeps rewriting settings.
+- **Credential-aware storage**: stores proxy credentials in VS Code SecretStorage where available and keeps sync/global state sanitized.
+- **Windows diagnostics**: reads WinINET/WinHTTP/PAC/WPAD state without mutating Windows settings; WinHTTP reset is available only as a user-approved command.
 - **Multi-instance sync**: shares proxy settings across all open VS Code/Cursor windows so they stay in step.
 - **Integrated terminals**: sets `HTTP_PROXY` and `HTTPS_PROXY` for new VS Code terminals.
 - **URL display setting**: hide the proxy URL in the status bar when needed.
@@ -82,9 +85,9 @@ When `otakProxy.showProxyUrl` is `false`, the URL is replaced with `Configured` 
 When the proxy is enabled, otak-proxy sets these variables for **newly created** VS Code integrated terminals:
 
 - `HTTP_PROXY` / `HTTPS_PROXY`
-- `http_proxy` / `https_proxy`
+- `http_proxy` / `https_proxy` on non-Windows hosts
 
-Existing terminals keep their current environment. Open a new terminal for the updated values to take effect.
+Existing terminals keep their current environment. Open a new terminal for the updated values to take effect. When `otakProxy.terminalOffMaskingEnabled` is enabled and proxy mode is Off, otak-proxy masks inherited proxy variables for new terminals by replacing them with empty values; this avoids VS Code-launched tools accidentally continuing to use a proxy inherited from the editor process.
 
 ## Settings
 
@@ -99,7 +102,12 @@ Existing terminals keep their current environment. Open a new terminal for the u
   "otakProxy.syncEnabled": true,
   "otakProxy.syncInterval": 1000,
   "otakProxy.detectionSourcePriority": ["environment", "vscode", "platform"],
-  "otakProxy.maxRetries": 3
+  "otakProxy.maxRetries": 3,
+  "otakProxy.diagnosticsEnabled": true,
+  "otakProxy.automaticRemediationEnabled": true,
+  "otakProxy.notificationLevel": "warnings",
+  "otakProxy.credentialTargetPolicy": "ask",
+  "otakProxy.windowsActionsEnabled": false
 }
 ```
 
@@ -115,6 +123,20 @@ Existing terminals keep their current environment. Open a new terminal for the u
 | `otakProxy.syncInterval` | `1000` | Sync check interval, in milliseconds (range `100`–`5000`) |
 | `otakProxy.detectionSourcePriority` | `["environment", "vscode", "platform"]` | Order in which proxy detection sources are tried |
 | `otakProxy.maxRetries` | `3` | Maximum retries for proxy detection when it fails |
+| `otakProxy.diagnosticsEnabled` | `true` | Run sanitized diagnostics after proxy state changes and from the diagnose command |
+| `otakProxy.automaticRemediationEnabled` | `true` | Enable safe automatic remediation such as bounded delayed retry and loop suppression |
+| `otakProxy.hostUserLockEnabled` | `true` | Use cross-window locks before writing Git, npm, VS Code, or terminal proxy targets |
+| `otakProxy.automaticRetryEnabled` | `true` | Retry one eligible apply failure after `otakProxy.remediationDelayedRetryMs` |
+| `otakProxy.remediationFlapWindowMs` | `600000` | Time window for detecting repeated non-converging repairs for the same issue |
+| `otakProxy.remediationFlapMaxAttempts` | `2` | Maximum automatic attempts per issue fingerprint within the flap window |
+| `otakProxy.remediationFlapCooldownMs` | `600000` | Cooldown after repeated remediation failures |
+| `otakProxy.notificationCooldownMs` | `600000` | Minimum interval before repeating a notification for the same issue |
+| `otakProxy.slowDiagnosticsTtlMs` | `300000` | Cache TTL for slow diagnostics that spawn Git, npm, or Windows commands |
+| `otakProxy.terminalOffMaskingEnabled` | `true` | Mask inherited proxy env vars for new terminals when proxy mode is Off |
+| `otakProxy.notificationLevel` | `"warnings"` | Notification level: `off`, `important`, `warnings`, or `all` |
+| `otakProxy.windowsActionsEnabled` | `false` | Allow user-approved Windows proxy actions such as WinHTTP reset |
+| `otakProxy.credentialTargetPolicy` | `"ask"` | Control authenticated proxy writes to plaintext target files: `ask`, `allowPlaintextTargets`, or `blockPlaintextTargets` |
+| `otakProxy.legacyEnvFirstAutoDetection` | `true` | Keep v2-compatible Auto detection order with process env before platform settings |
 
 ## Commands
 
@@ -125,6 +147,8 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 - `otak: Import System Proxy`
 - `otak: Configure Manual Proxy`
 - `otak: Toggle Proxy URL Visibility`
+- `otak: Diagnose Proxy State`
+- `otak: Reset WinHTTP Proxy`
 
 ## Security & Privacy
 
@@ -136,8 +160,9 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 ### Credentials
 
 - No account or API key is required.
-- If your proxy requires credentials, include them in the URL you provide.
-- Passwords are masked when proxy URLs are shown in the UI or logs.
+- If your proxy requires credentials, include them in the URL you provide. otak-proxy stores the credential part in VS Code SecretStorage when possible and stores only the public URL in global state and sync payloads.
+- Applying an authenticated proxy to VS Code, Git, or npm can still write credentials to plaintext target files (`settings.json`, `.gitconfig`, `.npmrc`) because those tools read their own config files. With `otakProxy.credentialTargetPolicy: "ask"` this requires local consent; use `"blockPlaintextTargets"` in stricter environments.
+- Passwords, authorization headers, npm tokens, Git extra headers, command output, copied diagnostics, control characters, and sync payloads are redacted before they are logged or displayed.
 
 ### Network Activity
 
@@ -168,7 +193,7 @@ ext install odangoo.otak-proxy
 ```bash
 npm install
 npm run package
-code --install-extension otak-proxy-2.3.2.vsix
+code --install-extension otak-proxy-3.0.0.vsix
 ```
 
 Reload VS Code afterwards.
@@ -178,8 +203,10 @@ Reload VS Code afterwards.
 ## Troubleshooting
 
 - **Proxy not working**: make sure the URL starts with `http://` or `https://`, then run `Test Proxy`.
+- **Settings appear correct but tools still use the old proxy**: run `otak: Diagnose Proxy State`. Existing terminals and some VS Code process-level proxy flags require a new terminal, window reload, or full VS Code restart.
 - **Git not detected**: make sure Git is installed and available on `PATH` (`git --version`).
 - **Auto mode does not detect changes**: check your system proxy settings and adjust `otakProxy.pollingInterval`.
+- **Remote/WSL/Container windows**: Windows registry and WinHTTP actions are only available when the extension host is local Windows. Remote hosts are diagnosed as remote/workspace targets and unsupported Windows actions are skipped.
 
 ## Related Extensions
 

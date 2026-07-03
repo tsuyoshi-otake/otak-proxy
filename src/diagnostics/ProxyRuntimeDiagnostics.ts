@@ -12,6 +12,7 @@ import { ExecutionContextDetector } from './ExecutionContextDetector';
 import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostics';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { splitProxyUrl } from '../security/ProxyCredentialStore';
+import { readV3Settings } from '../core/V3Settings';
 
 const execFileAsync = promisify(execFile);
 const PROXY_ENV_NAMES = [
@@ -43,6 +44,18 @@ export interface ProxyDiagnosticReport {
 
 export interface ProxyRuntimeDiagnosticsOptions {
     commandRunner?: CommandRunner;
+}
+
+type DiagnosticPart = { observation: Record<string, unknown>; issues: ProxyIssue[] };
+
+interface SlowDiagnosticsCache {
+    expiresAt: number;
+    canUseChildProcess: boolean;
+    canReadWindowsRegistry: boolean;
+    workspaceHostKind: string;
+    git?: DiagnosticPart;
+    npm?: DiagnosticPart;
+    windows?: { observation: unknown; issues: ProxyIssue[] };
 }
 
 const defaultCommandRunner: CommandRunner = async (command, args) => execFileAsync(command, args, {
@@ -77,6 +90,7 @@ export class ProxyRuntimeDiagnostics {
     private readonly redactor = new ProxySecretRedactor();
     private readonly commandRunner: CommandRunner;
     private readonly windowsDiagnostics: WindowsProxyDiagnostics;
+    private slowCache: SlowDiagnosticsCache | undefined;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -102,11 +116,10 @@ export class ProxyRuntimeDiagnostics {
         observations.terminal = terminalDiagnostics.observation;
         issues.push(...terminalDiagnostics.issues);
 
-        if (executionContext.canUseChildProcess) {
-            const [git, npm] = await Promise.all([
-                this.collectGitDiagnostics(),
-                this.collectNpmDiagnostics()
-            ]);
+        const slowDiagnostics = await this.collectSlowDiagnostics(executionContext);
+        if (slowDiagnostics.git && slowDiagnostics.npm) {
+            const git = slowDiagnostics.git;
+            const npm = slowDiagnostics.npm;
             observations.git = git.observation;
             observations.npm = npm.observation;
             issues.push(...git.issues, ...npm.issues);
@@ -118,10 +131,9 @@ export class ProxyRuntimeDiagnostics {
             }));
         }
 
-        if (executionContext.canReadWindowsRegistry) {
-            const windowsObservation = await this.windowsDiagnostics.observe();
-            observations.windows = windowsObservation;
-            issues.push(...this.windowsDiagnostics.toIssues(windowsObservation));
+        if (slowDiagnostics.windows) {
+            observations.windows = slowDiagnostics.windows.observation;
+            issues.push(...slowDiagnostics.windows.issues);
         } else if (executionContext.workspaceHostKind !== 'localWindows') {
             issues.push(this.issue('windows.diagnostics.unavailable', 'capabilityUnavailable', 'informational', 'windows', 'unavailable', {
                 source: 'executionContext',
@@ -173,6 +185,45 @@ export class ProxyRuntimeDiagnostics {
             }
         }
         return secrets;
+    }
+
+    private async collectSlowDiagnostics(executionContext: ExecutionContext): Promise<SlowDiagnosticsCache> {
+        const settings = readV3Settings();
+        const now = Date.now();
+        if (this.slowCache &&
+            this.slowCache.expiresAt > now &&
+            this.slowCache.canUseChildProcess === executionContext.canUseChildProcess &&
+            this.slowCache.canReadWindowsRegistry === executionContext.canReadWindowsRegistry &&
+            this.slowCache.workspaceHostKind === executionContext.workspaceHostKind) {
+            return this.slowCache;
+        }
+
+        const cache: SlowDiagnosticsCache = {
+            expiresAt: now + settings.slowDiagnosticsTtlMs,
+            canUseChildProcess: executionContext.canUseChildProcess,
+            canReadWindowsRegistry: executionContext.canReadWindowsRegistry,
+            workspaceHostKind: executionContext.workspaceHostKind
+        };
+
+        if (executionContext.canUseChildProcess) {
+            const [git, npm] = await Promise.all([
+                this.collectGitDiagnostics(),
+                this.collectNpmDiagnostics()
+            ]);
+            cache.git = git;
+            cache.npm = npm;
+        }
+
+        if (executionContext.canReadWindowsRegistry) {
+            const observation = await this.windowsDiagnostics.observe();
+            cache.windows = {
+                observation,
+                issues: this.windowsDiagnostics.toIssues(observation)
+            };
+        }
+
+        this.slowCache = cache;
+        return cache;
     }
 
     private collectVSCodeDiagnostics(): { observation: Record<string, unknown>; issues: ProxyIssue[] } {

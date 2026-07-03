@@ -1,13 +1,11 @@
 {
   "extension.description": "一鍵管理 VS Code、Git、npm 和整合式終端機的代理設定。",
-
   "command.toggleProxy": "otak: 切換代理",
   "command.testProxy": "otak: 測試代理",
   "command.importProxy": "otak: 匯入系統代理",
   "command.configureUrl": "otak: 設定手動代理",
   "command.toggleShowProxyUrl": "otak: 切換代理 URL 顯示",
   "command.diagnoseProxy": "otak: Diagnose Proxy State",
-
   "config.proxyUrl": "用於 VS Code、Git、npm 以及整合式終端機代理設定的代理伺服器 URL（例如：http://proxy.example.com:8080）",
   "config.pollingInterval": "自動模式輪詢間隔（秒，10-300）。檢查系統代理變更的頻率。",
   "config.detectionSourcePriority": "代理偵測來源的優先順序。依序嘗試，直到成功為止。",
@@ -19,7 +17,6 @@
   "config.showProxyUrl": "在狀態列中顯示代理 URL",
   "config.syncEnabled": "啟用多個 VSCode/Cursor 執行個體之間的同步。啟用後，代理設定會在所有執行個體間共用。",
   "config.syncInterval": "同步檢查間隔（毫秒，100-5000）。檢查其他執行個體變更的頻率。",
-
   "action.yes": "是",
   "action.no": "否",
   "action.skip": "略過",
@@ -37,9 +34,7 @@
   "action.skipToAuto": "跳到自動模式",
   "action.autoSystem": "自動（系統）",
   "action.manualSetup": "手動設定",
-
   "label.suggestions": "建議：",
-
   "prompt.proxyUrl": "輸入代理 URL（例如：http://proxy.example.com:8080）",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "你想如何配置代理設定？",
@@ -47,7 +42,6 @@
   "prompt.couldNotDetect": "無法偵測到系統代理。要手動設定嗎？",
   "prompt.foundSystemProxy": "已找到系統代理：{url}",
   "prompt.proxyWorks": "代理可用！你想如何使用它？",
-
   "message.detectingSystemProxy": "正在偵測系統代理...",
   "message.testingProxy": "正在測試{mode}代理：{url}...",
   "message.testingProxyGeneric": "正在測試代理...",
@@ -61,7 +55,6 @@
   "message.manualProxyConfigured": "手動代理已設定：{url}",
   "message.switchedToAutoMode": "已切換到自動模式：{url}",
   "message.savedAsManualProxy": "已儲存為手動代理：{url}",
-
   "warning.noManualProxy": "尚未設定手動代理",
   "warning.noSystemProxyDetected": "未偵測到系統代理。正在切換到關閉模式。",
   "warning.noSystemProxyCheck": "未偵測到系統代理。請檢查系統/瀏覽器代理設定。",
@@ -69,7 +62,6 @@
   "warning.detectionFailed": "系統代理偵測失敗。你可以手動設定代理。",
   "warning.detectionFailedRetries": "多次重試後系統代理仍偵測失敗。請檢查系統/瀏覽器代理設定。",
   "warning.invalidFormat": "偵測到的系統代理格式無效：{url}",
-
   "error.invalidProxyUrl": "代理 URL 格式無效",
   "error.invalidProxyUrlDetected": "偵測到的代理 URL 格式無效",
   "error.proxyTestFailed": "代理連線測試失敗：{url}",
@@ -80,7 +72,6 @@
   "error.importProxyFailed": "匯入系統代理失敗",
   "error.connectionFailed": "連線失敗",
   "error.attemptedUrls": "已嘗試的測試 URL：",
-
   "validation.proxyUrl.empty": "代理 URL 不能為空",
   "validation.proxyUrl.shellMetacharacters": "代理 URL 包含危險的 shell 中繼字元",
   "validation.proxyUrl.hostnameInvalid": "主機名稱包含無效字元（僅允許英數字、點與連字號）",
@@ -90,7 +81,6 @@
   "validation.proxyUrl.portRange": "連接埠必須介於 1 到 65535",
   "validation.proxyUrl.usernameInvalid": "使用者名稱包含無效字元（僅允許英數字、連字號、底線與 @）",
   "validation.proxyUrl.passwordInvalid": "密碼包含無效字元（僅允許英數字、連字號、底線與 @）",
-
   "suggestion.verifyUrl": "確認代理 URL 是否正確",
   "suggestion.checkServer": "確認代理伺服器是否正在執行且可存取",
   "suggestion.checkNetwork": "確保網路允許代理連線",
@@ -108,7 +98,6 @@
   "suggestion.verifyServerRunning": "確認代理伺服器正在執行",
   "suggestion.checkConnectivity": "檢查網路連線",
   "suggestion.tryDifferentConfig": "嘗試不同的代理設定",
-
   "statusbar.off": "代理：關閉",
   "statusbar.proxyOff": "代理：關閉",
   "statusbar.autoWithProxy": "自動：{url}",
@@ -147,7 +136,6 @@
   "statusbar.link.testProxy": "測試代理",
   "statusbar.link.showProxyUrl": "顯示 URL",
   "statusbar.link.hideProxyUrl": "隱藏 URL",
-
   "progress.testingProxy": "正在測試代理 {current}/{total}...",
   "progress.testingProxyUrl": "正在測試代理 {current}/{total}：{url}",
   "progress.detectingSystemProxy": "正在偵測系統代理...",
@@ -166,7 +154,6 @@
   "progress.title.testingProxy": "測試代理連線",
   "progress.title.detectingProxy": "偵測系統代理",
   "progress.title.applyingSettings": "套用代理設定",
-
   "connectionTest.testing": "正在測試代理連線...",
   "connectionTest.success": "代理連線測試成功：{url}",
   "connectionTest.successWithDuration": "代理連線測試成功：{url}（{duration}ms）",
@@ -180,16 +167,13 @@
   "connectionTest.schedulerStarted": "已開始週期性代理測試",
   "connectionTest.schedulerStopped": "已停止週期性代理測試",
   "connectionTest.intervalUpdated": "測試間隔已更新為 {seconds} 秒",
-
   "fallback.usingManualProxy": "未偵測到系統代理，正在使用手動代理：{url}",
   "fallback.manualProxyFailed": "手動代理也不可用",
   "fallback.switchedToSystem": "已切回系統代理",
   "fallback.autoModeOff": "自動模式已關閉（等待代理）",
-
   "log.fallbackToManual": "回退到手動代理",
   "log.autoModeOff": "自動模式已關閉（等待代理）",
   "log.switchedToSystem": "已切回系統代理",
-
   "sync.enabled": "同步已啟用",
   "sync.disabled": "同步已停用",
   "sync.status.syncing": "同步中...",
@@ -207,7 +191,6 @@
   "sync.tooltip.lastSync": "上次同步：{time}",
   "sync.tooltip.clickForDetails": "按一下查看詳細資訊",
   "sync.notification.conflictResolved": "設定衝突已解決。已套用最新變更。",
-
   "errorAggregator.singleFailure": "操作失敗: {operation}",
   "errorAggregator.multipleFailure": "{count} 個操作失敗",
   "errorAggregator.whatHappened": "發生了什麼:",
@@ -247,5 +230,34 @@
   "suggestion.proxy.ensureServerAccessible": "確認 Proxy 伺服器可存取",
   "suggestion.permissions.checkFiles": "檢查檔案與目錄權限",
   "suggestion.generic.checkDetails": "檢查上方的錯誤詳細資訊",
-  "suggestion.generic.tryAgain": "再次嘗試該操作"
+  "suggestion.generic.tryAgain": "再次嘗試該操作",
+  "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
+  "config.automaticRemediationEnabled": "Enable safe automatic proxy remediation such as bounded delayed retry and drift detection. Disruptive actions still require confirmation.",
+  "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.automaticRetryEnabled": "Allow one bounded delayed retry when a proxy apply operation fails and the failure is eligible for automatic remediation.",
+  "config.remediationDelayedRetryMs": "Delay before an automatic remediation retry in milliseconds.",
+  "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
+  "config.remediationFlapMaxAttempts": "Maximum automatic remediation attempts allowed for one issue fingerprint within the flap detection window.",
+  "config.remediationFlapCooldownMs": "Cooldown applied after repeated remediation failures for the same issue fingerprint.",
+  "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",
+  "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.notificationLevel": "Controls how aggressively otak-proxy shows diagnostic notifications. Details are always available from the diagnose command.",
+  "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
+  "config.credentialTargetPolicy": "Controls whether otak-proxy may write authenticated proxy URLs to plaintext target config files. Secrets are still stored in VS Code SecretStorage where possible.",
+  "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
+  "action.openNewTerminal": "Open New Terminal",
+  "action.reloadWindow": "Reload Window",
+  "remediation.notification.applyFailed": "Proxy settings did not fully apply. otak-proxy recorded sanitized diagnostics.",
+  "remediation.notification.issueDetected": "Proxy diagnostics found a setting that may require your attention.",
+  "remediation.notification.lockSkipped": "Another otak-proxy window is already applying proxy settings. This window skipped the write.",
+  "action.allowPlaintextWrite": "Allow Plaintext Write",
+  "remediation.notification.credentialConsentRequired": "This proxy URL contains credentials. Applying it may write credentials to plaintext target config files such as settings.json, .gitconfig, or .npmrc.",
+  "command.resetWinHttpProxy": "otak: Reset WinHTTP Proxy",
+  "action.resetWinHttpProxy": "Reset WinHTTP Proxy",
+  "windowsAction.notWindows": "Windows proxy actions are only available on a local Windows extension host.",
+  "windowsAction.disabled": "Windows proxy actions are disabled. Enable otakProxy.windowsActionsEnabled to use this command.",
+  "windowsAction.resetWinHttpConfirm": "Reset the WinHTTP proxy for this Windows user context? This may affect tools that use WinHTTP.",
+  "windowsAction.resetWinHttpSuccess": "WinHTTP proxy was reset.",
+  "windowsAction.resetWinHttpFailed": "Failed to reset WinHTTP proxy: {error}"
 }

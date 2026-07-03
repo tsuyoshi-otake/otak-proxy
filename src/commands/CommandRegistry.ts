@@ -18,6 +18,7 @@ import { executeTestProxy } from './TestProxyCommand';
 import { executeImportProxy } from './ImportProxyCommand';
 import { executeToggleShowProxyUrl } from './ToggleShowProxyUrlCommand';
 import { executeDiagnoseProxy } from './DiagnoseProxyCommand';
+import { executeResetWinHttpProxy } from '../remediation/WindowsProxyActionService';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 
@@ -119,6 +120,7 @@ export class CommandRegistry {
         this.registerImportProxy(context);
         this.registerToggleShowProxyUrl(context);
         this.registerDiagnoseProxy(context);
+        this.registerResetWinHttpProxy(context);
 
         // Register listeners
         this.registerConfigChangeListener(context);
@@ -184,6 +186,14 @@ export class CommandRegistry {
         const disposable = vscode.commands.registerCommand(
             'otak-proxy.diagnoseProxy',
             async () => executeDiagnoseProxy(context, () => this.config.getProxyState(context))
+        );
+        context.subscriptions.push(disposable);
+    }
+
+    private registerResetWinHttpProxy(context: vscode.ExtensionContext): void {
+        const disposable = vscode.commands.registerCommand(
+            'otak-proxy.resetWinHttpProxy',
+            async () => executeResetWinHttpProxy()
         );
         context.subscriptions.push(disposable);
     }

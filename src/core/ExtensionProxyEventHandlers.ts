@@ -2,6 +2,7 @@ import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { Logger } from '../utils/Logger';
 import { TestResult } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
+import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState, ProxyTestResult } from './types';
 
 export interface StartupTestState {
@@ -85,7 +86,7 @@ async function saveAndApplyProxyChange(
     await context.proxyStateManager.saveState(state);
 
     const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
-    await context.proxyApplier.applyProxy(state.autoProxyUrl || '', shouldEnable);
+    await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
     notifyProxyChange(context, state, result, previousProxy);
 }
 
@@ -136,7 +137,7 @@ async function applyReachabilityChange(
 ): Promise<void> {
     if (data.reachable && !data.previousState) {
         state.autoModeOff = false;
-        await context.proxyApplier.applyProxy(data.proxyUrl, true, { silent: true });
+        await applyProxyThroughContext(context, data.proxyUrl, true, { silent: true });
         Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
         return;
     }
@@ -145,7 +146,7 @@ async function applyReachabilityChange(
         state.autoModeOff = true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
-        await context.proxyApplier.applyProxy(data.proxyUrl, false, { silent: true });
+        await applyProxyThroughContext(context, data.proxyUrl, false, { silent: true });
         Logger.info(`Proxy ${data.proxyUrl} became unreachable, Auto Mode OFF`);
     }
 }

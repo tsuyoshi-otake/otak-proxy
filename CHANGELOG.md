@@ -1,5 +1,22 @@
 # Change Log
 
+## [3.0.0] - 2026-07-04
+
+### Added
+- Added the v3 diagnostics and safe remediation foundation with sanitized issue reports, execution-context detection, slow diagnostic TTL caching, and the `otak: Diagnose Proxy State` command.
+- Added cross-window host/user apply locks plus bounded delayed retry and flap suppression so repeated external rewrites do not create infinite repair loops.
+- Added credential-aware SecretStorage migration and local consent controls for authenticated proxy URLs that would be written to plaintext target config files.
+- Added terminal environment masking options for proxy Off mode and Windows-aware terminal env handling.
+- Added the user-approved `otak: Reset WinHTTP Proxy` command, gated by `otakProxy.windowsActionsEnabled`.
+
+### Changed
+- Routed startup, sync, Auto mode, and manual proxy application through the same safe apply path while preserving the existing `ProxyApplier.applyProxy()` boolean API.
+- Expanded settings for diagnostics, remediation, notification level, flap thresholds, slow diagnostic TTL, credential target policy, Windows actions, and legacy Auto detection compatibility.
+
+### Security
+- Redaction now covers authenticated URLs, authorization headers, Basic auth payloads, npm tokens, Git extra headers, command output, copied diagnostics, control characters, and sync/diagnostic payloads.
+- Synchronized/global state continues to store sanitized public proxy data only; local ownership and credential consent are machine-local.
+
 ## [2.3.2] - 2026-06-28
 
 ### Changed

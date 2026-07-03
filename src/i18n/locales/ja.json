@@ -1,13 +1,11 @@
 {
   "extension.description": "VSCode、Git、npm、統合ターミナルのProxyをワンクリックで管理します。",
-
   "command.toggleProxy": "otak: Proxyを切り替え",
   "command.testProxy": "otak: Proxyをテスト",
   "command.importProxy": "otak: システムProxyをインポート",
   "command.configureUrl": "otak: 手動Proxyを設定",
   "command.toggleShowProxyUrl": "otak: Proxy URL表示を切り替え",
   "command.diagnoseProxy": "otak: Proxy状態を診断",
-
   "config.proxyUrl": "VSCode・Git・npm・統合ターミナルのproxy設定用のProxyサーバーURL（例: http://proxy.example.com:8080）",
   "config.pollingInterval": "Autoモードのポーリング間隔（秒単位、10-300）。システムproxyの変更をチェックする頻度。",
   "config.detectionSourcePriority": "Proxy検出ソースの優先順位。指定された順序で試行され、最初に成功したものが使用されます。",
@@ -19,7 +17,6 @@
   "config.showProxyUrl": "ステータスバーにProxy URLを表示する",
   "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
   "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
-
   "action.yes": "はい",
   "action.no": "いいえ",
   "action.skip": "スキップ",
@@ -37,9 +34,7 @@
   "action.skipToAuto": "Autoにスキップ",
   "action.autoSystem": "Auto (システム)",
   "action.manualSetup": "手動セットアップ",
-
   "label.suggestions": "確認事項:",
-
   "prompt.proxyUrl": "Proxy URLを入力してください（例: http://proxy.example.com:8080）",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "Proxy設定をどのように構成しますか？",
@@ -47,7 +42,6 @@
   "prompt.couldNotDetect": "システムProxyを検出できませんでした。手動で設定しますか？",
   "prompt.foundSystemProxy": "システムProxyが見つかりました: {url}",
   "prompt.proxyWorks": "Proxyは動作しています！どのように使用しますか？",
-
   "message.detectingSystemProxy": "システムProxyを検出中...",
   "message.testingProxy": "{mode} proxyをテスト中: {url}...",
   "message.testingProxyGeneric": "Proxyをテスト中...",
@@ -61,7 +55,6 @@
   "message.manualProxyConfigured": "手動Proxyが設定されました: {url}",
   "message.switchedToAutoMode": "Autoモードに切り替えました: {url}",
   "message.savedAsManualProxy": "手動Proxyとして保存しました: {url}",
-
   "warning.noManualProxy": "手動Proxyが設定されていません",
   "warning.noSystemProxyDetected": "システムProxyが検出されませんでした。Offモードに切り替えます。",
   "warning.noSystemProxyCheck": "システムProxyが検出されませんでした。システム/ブラウザのProxy設定を確認してください。",
@@ -69,7 +62,6 @@
   "warning.detectionFailed": "システムProxyの検出に失敗しました。手動でProxyを設定できます。",
   "warning.detectionFailedRetries": "複数回の再試行後、システムProxyの検出に失敗しました。システム/ブラウザのProxy設定を確認してください。",
   "warning.invalidFormat": "検出されたシステムProxyの形式が無効です: {url}",
-
   "error.invalidProxyUrl": "Proxy URLの形式が無効です",
   "error.invalidProxyUrlDetected": "検出されたProxy URLの形式が無効です",
   "error.proxyTestFailed": "Proxy接続テストが失敗しました: {url}",
@@ -80,7 +72,6 @@
   "error.importProxyFailed": "システムProxyのインポートに失敗しました",
   "error.connectionFailed": "接続に失敗しました",
   "error.attemptedUrls": "試行したテストURL:",
-
   "validation.proxyUrl.empty": "Proxy URLを空にすることはできません",
   "validation.proxyUrl.shellMetacharacters": "Proxy URLに危険なシェルメタ文字が含まれています",
   "validation.proxyUrl.hostnameInvalid": "ホスト名に使用できない文字が含まれています（英数字、ドット、ハイフンのみ使用できます）",
@@ -90,7 +81,6 @@
   "validation.proxyUrl.portRange": "ポートは1から65535の範囲で指定してください",
   "validation.proxyUrl.usernameInvalid": "ユーザー名に使用できない文字が含まれています（英数字、ハイフン、アンダースコア、@ のみ使用できます）",
   "validation.proxyUrl.passwordInvalid": "パスワードに使用できない文字が含まれています（英数字、ハイフン、アンダースコア、@ のみ使用できます）",
-
   "suggestion.verifyUrl": "Proxy URLが正しいか確認してください",
   "suggestion.checkServer": "Proxyサーバーが実行中でアクセス可能か確認してください",
   "suggestion.checkNetwork": "ネットワークがProxy接続を許可しているか確認してください",
@@ -108,7 +98,6 @@
   "suggestion.verifyServerRunning": "Proxyサーバーが実行中か確認してください",
   "suggestion.checkConnectivity": "ネットワーク接続を確認してください",
   "suggestion.tryDifferentConfig": "別のProxy設定を試してください",
-
   "statusbar.off": "Proxy: Off",
   "statusbar.proxyOff": "Proxy: Off",
   "statusbar.autoWithProxy": "Auto: {url}",
@@ -147,7 +136,6 @@
   "statusbar.link.testProxy": "Proxyをテスト",
   "statusbar.link.showProxyUrl": "URLを表示",
   "statusbar.link.hideProxyUrl": "URLを非表示",
-
   "progress.testingProxy": "Proxyをテスト中 {current}/{total}...",
   "progress.testingProxyUrl": "Proxyをテスト中 {current}/{total}: {url}",
   "progress.detectingSystemProxy": "システムProxyを検出中...",
@@ -166,7 +154,6 @@
   "progress.title.testingProxy": "Proxy接続をテスト中",
   "progress.title.detectingProxy": "システムProxyを検出中",
   "progress.title.applyingSettings": "Proxy設定を適用中",
-
   "connectionTest.testing": "Proxy接続をテスト中...",
   "connectionTest.success": "Proxy接続テスト成功: {url}",
   "connectionTest.successWithDuration": "Proxy接続テスト成功: {url} ({duration}ms)",
@@ -180,16 +167,13 @@
   "connectionTest.schedulerStarted": "定期的なProxyテストを開始しました",
   "connectionTest.schedulerStopped": "定期的なProxyテストを停止しました",
   "connectionTest.intervalUpdated": "テスト間隔を{seconds}秒に更新しました",
-
   "fallback.usingManualProxy": "システムProxyが検出されないため、手動Proxyを使用しています: {url}",
   "fallback.manualProxyFailed": "手動Proxyも利用できません",
   "fallback.switchedToSystem": "システムProxyに切り替えました",
   "fallback.autoModeOff": "Auto Mode OFF (Proxy待機中)",
-
   "log.fallbackToManual": "手動Proxyへフォールバック",
   "log.autoModeOff": "Auto Mode OFF (Proxy待機中)",
   "log.switchedToSystem": "システムProxyに切り替え",
-
   "sync.enabled": "同期が有効",
   "sync.disabled": "同期が無効",
   "sync.status.syncing": "同期中...",
@@ -207,7 +191,6 @@
   "sync.tooltip.lastSync": "最終同期: {time}",
   "sync.tooltip.clickForDetails": "クリックして詳細を表示",
   "sync.notification.conflictResolved": "設定の競合が解決されました。最新の変更が適用されました。",
-
   "errorAggregator.singleFailure": "{operation}に失敗しました",
   "errorAggregator.multipleFailure": "{count}件の設定に失敗しました",
   "errorAggregator.whatHappened": "発生した内容:",
@@ -247,5 +230,34 @@
   "suggestion.proxy.ensureServerAccessible": "Proxy サーバーにアクセスできるか確認してください",
   "suggestion.permissions.checkFiles": "ファイルとディレクトリの権限を確認してください",
   "suggestion.generic.checkDetails": "上記のエラー詳細を確認してください",
-  "suggestion.generic.tryAgain": "もう一度実行してください"
+  "suggestion.generic.tryAgain": "もう一度実行してください",
+  "config.diagnosticsEnabled": "状態変更後と診断コマンド実行時に、読み取り専用のProxy診断を有効にします。",
+  "config.automaticRemediationEnabled": "遅延リトライやドリフト検出など、安全なProxy自動修復を有効にします。中断を伴う操作は引き続き確認が必要です。",
+  "config.hostUserLockEnabled": "Git、npm、VS Code、ターミナル環境変数などのホスト/ユーザー単位ターゲットを書き込む前に、複数ウィンドウ間ロックを使用します。",
+  "config.automaticRetryEnabled": "Proxy適用が失敗し、自動修復可能な場合に、上限付きの遅延リトライを1回許可します。",
+  "config.remediationDelayedRetryMs": "自動修復リトライまでの遅延時間（ミリ秒）。",
+  "config.remediationFlapWindowMs": "同一issue fingerprintでProxy修復失敗が繰り返されているか判定する時間枠。",
+  "config.remediationFlapMaxAttempts": "フラップ検出時間枠内で、同一issue fingerprintに許可する自動修復試行回数の上限。",
+  "config.remediationFlapCooldownMs": "同一issue fingerprintで修復失敗が繰り返された後に適用するクールダウン時間。",
+  "config.notificationCooldownMs": "同一Proxy診断issueについて次の通知を表示するまでの最小間隔。",
+  "config.slowDiagnosticsTtlMs": "Git、npm、Windowsコマンドなど、遅いProxy診断結果のTTL。",
+  "config.terminalOffMaskingEnabled": "ProxyモードがOffの場合、新しく作成される統合ターミナル向けに、継承されたProxy環境変数を空値でマスクします。",
+  "config.notificationLevel": "otak-proxyが診断通知をどの程度表示するかを制御します。詳細は常に診断コマンドで確認できます。",
+  "config.windowsActionsEnabled": "ユーザー承認済みのWindows Proxy操作を許可します。読み取り専用のWindows診断には不要です。",
+  "config.credentialTargetPolicy": "認証付きProxy URLを平文の設定ファイルへ書き込めるかを制御します。可能な限りSecretStorageには引き続き保存されます。",
+  "config.legacyEnvFirstAutoDetection": "process環境変数のProxyを現在のプラットフォーム設定より先に見る、v2互換のAuto検出順を維持します。",
+  "action.openNewTerminal": "新しいターミナルを開く",
+  "action.reloadWindow": "ウィンドウをリロード",
+  "remediation.notification.applyFailed": "Proxy設定を完全には適用できませんでした。otak-proxyはサニタイズ済み診断を記録しました。",
+  "remediation.notification.issueDetected": "Proxy診断で確認が必要な可能性のある設定が見つかりました。",
+  "remediation.notification.lockSkipped": "別のotak-proxyウィンドウがProxy設定を適用中です。このウィンドウでは書き込みをスキップしました。",
+  "action.allowPlaintextWrite": "平文書き込みを許可",
+  "remediation.notification.credentialConsentRequired": "このProxy URLには認証情報が含まれています。適用すると settings.json、.gitconfig、.npmrc などの平文設定ファイルへ認証情報を書き込む可能性があります。",
+  "command.resetWinHttpProxy": "otak: WinHTTP Proxyをリセット",
+  "action.resetWinHttpProxy": "WinHTTP Proxyをリセット",
+  "windowsAction.notWindows": "Windows Proxy操作はローカルWindowsの拡張ホストでのみ利用できます。",
+  "windowsAction.disabled": "Windows Proxy操作は無効です。このコマンドを使うには otakProxy.windowsActionsEnabled を有効にしてください。",
+  "windowsAction.resetWinHttpConfirm": "このWindowsユーザーコンテキストのWinHTTP Proxyをリセットしますか？WinHTTPを使うツールに影響する可能性があります。",
+  "windowsAction.resetWinHttpSuccess": "WinHTTP Proxyをリセットしました。",
+  "windowsAction.resetWinHttpFailed": "WinHTTP Proxyのリセットに失敗しました: {error}"
 }

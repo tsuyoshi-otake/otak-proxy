@@ -1,13 +1,11 @@
 {
   "extension.description": "Quản lý proxy cho VS Code, Git, npm và terminal tích hợp chỉ với một thao tác.",
-
   "command.toggleProxy": "otak: Bật/tắt Proxy",
   "command.testProxy": "otak: Kiểm tra Proxy",
   "command.importProxy": "otak: Nhập Proxy hệ thống",
   "command.configureUrl": "otak: Cấu hình Proxy thủ công",
   "command.toggleShowProxyUrl": "otak: Bật/tắt hiển thị URL Proxy",
   "command.diagnoseProxy": "otak: Diagnose Proxy State",
-
   "config.proxyUrl": "URL máy chủ proxy (ví dụ: http://proxy.example.com:8080) dùng cho cài đặt proxy của VS Code, Git, npm và terminal tích hợp",
   "config.pollingInterval": "Khoảng thời gian thăm dò ở chế độ Tự động (giây, 10-300). Tần suất kiểm tra thay đổi proxy hệ thống.",
   "config.detectionSourcePriority": "Thứ tự ưu tiên nguồn phát hiện proxy. Các nguồn sẽ được thử theo thứ tự cho đến khi một nguồn thành công.",
@@ -19,7 +17,6 @@
   "config.showProxyUrl": "Hiển thị URL proxy trên thanh trạng thái",
   "config.syncEnabled": "Bật đồng bộ giữa nhiều phiên VSCode/Cursor. Khi bật, cài đặt proxy sẽ được chia sẻ giữa tất cả các phiên.",
   "config.syncInterval": "Chu kỳ kiểm tra đồng bộ (mili giây, 100-5000). Tần suất kiểm tra thay đổi từ các phiên khác.",
-
   "action.yes": "Có",
   "action.no": "Không",
   "action.skip": "Bỏ qua",
@@ -37,9 +34,7 @@
   "action.skipToAuto": "Chuyển sang Tự động",
   "action.autoSystem": "Tự động (Hệ thống)",
   "action.manualSetup": "Thiết lập thủ công",
-
   "label.suggestions": "Gợi ý:",
-
   "prompt.proxyUrl": "Nhập URL proxy (ví dụ: http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "Bạn muốn cấu hình proxy như thế nào?",
@@ -47,7 +42,6 @@
   "prompt.couldNotDetect": "Không thể phát hiện proxy hệ thống. Thiết lập thủ công?",
   "prompt.foundSystemProxy": "Đã tìm thấy proxy hệ thống: {url}",
   "prompt.proxyWorks": "Proxy hoạt động. Bạn muốn sử dụng như thế nào?",
-
   "message.detectingSystemProxy": "Đang phát hiện proxy hệ thống...",
   "message.testingProxy": "Đang kiểm tra proxy {mode}: {url}...",
   "message.testingProxyGeneric": "Đang kiểm tra proxy...",
@@ -61,7 +55,6 @@
   "message.manualProxyConfigured": "Đã cấu hình proxy thủ công: {url}",
   "message.switchedToAutoMode": "Đã chuyển sang chế độ Tự động: {url}",
   "message.savedAsManualProxy": "Đã lưu làm proxy thủ công: {url}",
-
   "warning.noManualProxy": "Chưa cấu hình proxy thủ công",
   "warning.noSystemProxyDetected": "Không phát hiện proxy hệ thống. Đang chuyển sang chế độ Tắt.",
   "warning.noSystemProxyCheck": "Không phát hiện proxy hệ thống. Hãy kiểm tra cài đặt proxy hệ thống/trình duyệt.",
@@ -69,7 +62,6 @@
   "warning.detectionFailed": "Phát hiện proxy hệ thống thất bại. Bạn có thể cấu hình proxy thủ công.",
   "warning.detectionFailedRetries": "Phát hiện proxy hệ thống thất bại sau nhiều lần thử lại. Hãy kiểm tra cài đặt proxy hệ thống/trình duyệt.",
   "warning.invalidFormat": "Proxy hệ thống phát hiện được không đúng định dạng: {url}",
-
   "error.invalidProxyUrl": "Định dạng URL proxy không hợp lệ",
   "error.invalidProxyUrlDetected": "Phát hiện URL proxy có định dạng không hợp lệ",
   "error.proxyTestFailed": "Kiểm tra kết nối proxy thất bại: {url}",
@@ -80,7 +72,6 @@
   "error.importProxyFailed": "Không thể nhập proxy hệ thống",
   "error.connectionFailed": "Kết nối thất bại",
   "error.attemptedUrls": "URL kiểm tra đã thử:",
-
   "validation.proxyUrl.empty": "URL proxy không được để trống",
   "validation.proxyUrl.shellMetacharacters": "URL proxy chứa ký tự shell nguy hiểm",
   "validation.proxyUrl.hostnameInvalid": "Hostname chứa ký tự không hợp lệ (chỉ cho phép chữ, số, dấu chấm và dấu gạch nối)",
@@ -90,7 +81,6 @@
   "validation.proxyUrl.portRange": "Port phải nằm trong khoảng 1 đến 65535",
   "validation.proxyUrl.usernameInvalid": "Username chứa ký tự không hợp lệ (chỉ cho phép chữ, số, dấu gạch nối, gạch dưới và @)",
   "validation.proxyUrl.passwordInvalid": "Password chứa ký tự không hợp lệ (chỉ cho phép chữ, số, dấu gạch nối, gạch dưới và @)",
-
   "suggestion.verifyUrl": "Kiểm tra URL proxy có đúng không",
   "suggestion.checkServer": "Kiểm tra máy chủ proxy có đang chạy và có thể truy cập không",
   "suggestion.checkNetwork": "Đảm bảo mạng của bạn cho phép kết nối qua proxy",
@@ -108,7 +98,6 @@
   "suggestion.verifyServerRunning": "Xác nhận máy chủ proxy đang chạy",
   "suggestion.checkConnectivity": "Kiểm tra kết nối mạng",
   "suggestion.tryDifferentConfig": "Thử cấu hình proxy khác",
-
   "statusbar.off": "Proxy: Off",
   "statusbar.proxyOff": "Proxy: Off",
   "statusbar.autoWithProxy": "Auto: {url}",
@@ -147,7 +136,6 @@
   "statusbar.link.testProxy": "Kiểm tra Proxy",
   "statusbar.link.showProxyUrl": "Hiện URL",
   "statusbar.link.hideProxyUrl": "Ẩn URL",
-
   "progress.testingProxy": "Đang kiểm tra proxy {current}/{total}...",
   "progress.testingProxyUrl": "Đang kiểm tra proxy {current}/{total}: {url}",
   "progress.detectingSystemProxy": "Đang phát hiện proxy hệ thống...",
@@ -166,7 +154,6 @@
   "progress.title.testingProxy": "Đang kiểm tra kết nối Proxy",
   "progress.title.detectingProxy": "Đang phát hiện Proxy hệ thống",
   "progress.title.applyingSettings": "Đang áp dụng cài đặt Proxy",
-
   "connectionTest.testing": "Đang kiểm tra kết nối proxy...",
   "connectionTest.success": "Kiểm tra kết nối proxy thành công: {url}",
   "connectionTest.successWithDuration": "Kiểm tra kết nối proxy thành công: {url} ({duration}ms)",
@@ -180,16 +167,13 @@
   "connectionTest.schedulerStarted": "Đã bắt đầu kiểm tra proxy định kỳ",
   "connectionTest.schedulerStopped": "Đã dừng kiểm tra proxy định kỳ",
   "connectionTest.intervalUpdated": "Đã cập nhật khoảng kiểm tra thành {seconds} giây",
-
   "fallback.usingManualProxy": "Không phát hiện proxy hệ thống, đang dùng proxy thủ công: {url}",
   "fallback.manualProxyFailed": "Proxy thủ công cũng không khả dụng",
   "fallback.switchedToSystem": "Đã chuyển lại sang proxy hệ thống",
   "fallback.autoModeOff": "Auto Mode OFF (đang chờ proxy)",
-
   "log.fallbackToManual": "Dự phòng sang Manual Proxy",
   "log.autoModeOff": "Auto Mode OFF (đang chờ proxy)",
   "log.switchedToSystem": "Đã chuyển lại sang System Proxy",
-
   "sync.enabled": "Đồng bộ đã bật",
   "sync.disabled": "Đồng bộ đã tắt",
   "sync.status.syncing": "Đang đồng bộ...",
@@ -207,7 +191,6 @@
   "sync.tooltip.lastSync": "Đồng bộ gần nhất: {time}",
   "sync.tooltip.clickForDetails": "Nhấp để xem chi tiết",
   "sync.notification.conflictResolved": "Xung đột cài đặt đã được giải quyết. Thay đổi mới nhất đã được áp dụng.",
-
   "errorAggregator.singleFailure": "Thao tác không thành công: {operation}",
   "errorAggregator.multipleFailure": "{count} thao tác không thành công",
   "errorAggregator.whatHappened": "Điều đã xảy ra:",
@@ -247,5 +230,34 @@
   "suggestion.proxy.ensureServerAccessible": "Xác nhận máy chủ Proxy có thể truy cập được",
   "suggestion.permissions.checkFiles": "Kiểm tra quyền của tệp và thư mục",
   "suggestion.generic.checkDetails": "Kiểm tra chi tiết lỗi ở trên",
-  "suggestion.generic.tryAgain": "Thử lại thao tác"
+  "suggestion.generic.tryAgain": "Thử lại thao tác",
+  "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
+  "config.automaticRemediationEnabled": "Enable safe automatic proxy remediation such as bounded delayed retry and drift detection. Disruptive actions still require confirmation.",
+  "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.automaticRetryEnabled": "Allow one bounded delayed retry when a proxy apply operation fails and the failure is eligible for automatic remediation.",
+  "config.remediationDelayedRetryMs": "Delay before an automatic remediation retry in milliseconds.",
+  "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
+  "config.remediationFlapMaxAttempts": "Maximum automatic remediation attempts allowed for one issue fingerprint within the flap detection window.",
+  "config.remediationFlapCooldownMs": "Cooldown applied after repeated remediation failures for the same issue fingerprint.",
+  "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",
+  "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.notificationLevel": "Controls how aggressively otak-proxy shows diagnostic notifications. Details are always available from the diagnose command.",
+  "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
+  "config.credentialTargetPolicy": "Controls whether otak-proxy may write authenticated proxy URLs to plaintext target config files. Secrets are still stored in VS Code SecretStorage where possible.",
+  "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
+  "action.openNewTerminal": "Open New Terminal",
+  "action.reloadWindow": "Reload Window",
+  "remediation.notification.applyFailed": "Proxy settings did not fully apply. otak-proxy recorded sanitized diagnostics.",
+  "remediation.notification.issueDetected": "Proxy diagnostics found a setting that may require your attention.",
+  "remediation.notification.lockSkipped": "Another otak-proxy window is already applying proxy settings. This window skipped the write.",
+  "action.allowPlaintextWrite": "Allow Plaintext Write",
+  "remediation.notification.credentialConsentRequired": "This proxy URL contains credentials. Applying it may write credentials to plaintext target config files such as settings.json, .gitconfig, or .npmrc.",
+  "command.resetWinHttpProxy": "otak: Reset WinHTTP Proxy",
+  "action.resetWinHttpProxy": "Reset WinHTTP Proxy",
+  "windowsAction.notWindows": "Windows proxy actions are only available on a local Windows extension host.",
+  "windowsAction.disabled": "Windows proxy actions are disabled. Enable otakProxy.windowsActionsEnabled to use this command.",
+  "windowsAction.resetWinHttpConfirm": "Reset the WinHTTP proxy for this Windows user context? This may affect tools that use WinHTTP.",
+  "windowsAction.resetWinHttpSuccess": "WinHTTP proxy was reset.",
+  "windowsAction.resetWinHttpFailed": "Failed to reset WinHTTP proxy: {error}"
 }

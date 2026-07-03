@@ -3,6 +3,7 @@ import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
 import { detectSystemProxySettings } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
+import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState } from './types';
 
 export class SystemProxyUpdateService {
@@ -69,7 +70,7 @@ export class SystemProxyUpdateService {
 
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
         await this.context.proxyStateManager.saveState(state);
-        await this.context.proxyApplier.applyProxy(state.autoProxyUrl || '', true);
+        await applyProxyThroughContext(this.context, state.autoProxyUrl || '', true);
         this.notifyAutoProxyChange(state, previousProxy);
     }
 

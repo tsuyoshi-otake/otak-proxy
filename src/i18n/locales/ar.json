@@ -1,13 +1,11 @@
 {
   "extension.description": "إدارة الوكيل بنقرة واحدة لـ VSCode وGit وnpm والأطراف الطرفية المدمجة.",
-
   "command.toggleProxy": "otak: تبديل الوكيل",
   "command.testProxy": "otak: اختبار الوكيل",
   "command.importProxy": "otak: استيراد وكيل النظام",
   "command.configureUrl": "otak: تكوين وكيل يدوي",
   "command.toggleShowProxyUrl": "otak: تبديل إظهار عنوان الوكيل",
   "command.diagnoseProxy": "otak: Diagnose Proxy State",
-
   "config.proxyUrl": "عنوان خادم الوكيل (مثال: http://proxy.example.com:8080) لإعدادات الوكيل في VSCode وGit وnpm والطرفية المدمجة",
   "config.pollingInterval": "فاصل الاستقصاء في الوضع التلقائي بالثواني (10-300). عدد مرات التحقق من تغييرات وكيل النظام.",
   "config.detectionSourcePriority": "ترتيب أولوية مصادر اكتشاف الوكيل. تُجرّب المصادر بالترتيب حتى ينجح أحدها.",
@@ -19,7 +17,6 @@
   "config.showProxyUrl": "إظهار عنوان الوكيل في شريط الحالة",
   "config.syncEnabled": "تمكين المزامنة بين عدة نسخ من VSCode/Cursor. عند التمكين، تُشارك إعدادات الوكيل عبر جميع النسخ.",
   "config.syncInterval": "فاصل التحقق من المزامنة بالميلي ثانية (100-5000). عدد مرات التحقق من التغييرات من النسخ الأخرى.",
-
   "action.yes": "نعم",
   "action.no": "لا",
   "action.skip": "تخطّي",
@@ -37,9 +34,7 @@
   "action.skipToAuto": "تخطّي إلى التلقائي",
   "action.autoSystem": "تلقائي (النظام)",
   "action.manualSetup": "إعداد يدوي",
-
   "label.suggestions": "اقتراحات:",
-
   "prompt.proxyUrl": "أدخل عنوان الوكيل (مثال: http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "كيف تريد تكوين إعدادات الوكيل؟",
@@ -47,7 +42,6 @@
   "prompt.couldNotDetect": "تعذّر اكتشاف وكيل النظام. هل تريد الإعداد يدويًا؟",
   "prompt.foundSystemProxy": "تم العثور على وكيل النظام: {url}",
   "prompt.proxyWorks": "الوكيل يعمل! كيف تريد استخدامه؟",
-
   "message.detectingSystemProxy": "جارٍ اكتشاف وكيل النظام...",
   "message.testingProxy": "جارٍ اختبار وكيل {mode}: {url}...",
   "message.testingProxyGeneric": "جارٍ اختبار الوكيل...",
@@ -61,7 +55,6 @@
   "message.manualProxyConfigured": "تم تكوين الوكيل اليدوي: {url}",
   "message.switchedToAutoMode": "تم التبديل إلى الوضع التلقائي: {url}",
   "message.savedAsManualProxy": "تم الحفظ كوكيل يدوي: {url}",
-
   "warning.noManualProxy": "لا يوجد وكيل يدوي مُكوَّن",
   "warning.noSystemProxyDetected": "لم يُكتشف وكيل نظام. جارٍ التبديل إلى وضع الإيقاف.",
   "warning.noSystemProxyCheck": "لم يُكتشف وكيل نظام. تحقق من إعدادات وكيل النظام/المتصفح لديك.",
@@ -69,7 +62,6 @@
   "warning.detectionFailed": "فشل اكتشاف وكيل النظام. يمكنك تكوين وكيل يدويًا.",
   "warning.detectionFailedRetries": "فشل اكتشاف وكيل النظام بعد عدة محاولات. تحقق من إعدادات وكيل النظام/المتصفح لديك.",
   "warning.invalidFormat": "وكيل النظام المُكتشف ذو تنسيق غير صالح: {url}",
-
   "error.invalidProxyUrl": "تنسيق عنوان الوكيل غير صالح",
   "error.invalidProxyUrlDetected": "تم اكتشاف تنسيق عنوان وكيل غير صالح",
   "error.proxyTestFailed": "فشل اختبار اتصال الوكيل لـ: {url}",
@@ -80,7 +72,6 @@
   "error.importProxyFailed": "فشل استيراد وكيل النظام",
   "error.connectionFailed": "فشل الاتصال",
   "error.attemptedUrls": "عناوين الاختبار التي جُرّبت:",
-
   "validation.proxyUrl.empty": "لا يمكن أن يكون عنوان الوكيل فارغًا",
   "validation.proxyUrl.shellMetacharacters": "يحتوي عنوان الوكيل على رموز shell خطيرة",
   "validation.proxyUrl.hostnameInvalid": "يحتوي اسم المضيف على أحرف غير صالحة (يُسمح بالأحرف الأبجدية الرقمية والنقاط والشرطات فقط)",
@@ -90,7 +81,6 @@
   "validation.proxyUrl.portRange": "يجب أن يكون المنفذ بين 1 and 65535",
   "validation.proxyUrl.usernameInvalid": "يحتوي اسم المستخدم على أحرف غير صالحة (يُسمح بالأحرف الأبجدية الرقمية والشرطات والشرطات السفلية و@ فقط)",
   "validation.proxyUrl.passwordInvalid": "تحتوي كلمة المرور على أحرف غير صالحة (يُسمح بالأحرف الأبجدية الرقمية والشرطات والشرطات السفلية و@ فقط)",
-
   "suggestion.verifyUrl": "تحقق من أن عنوان الوكيل صحيح",
   "suggestion.checkServer": "تحقق مما إذا كان خادم الوكيل قيد التشغيل ويمكن الوصول إليه",
   "suggestion.checkNetwork": "تأكد من أن شبكتك تسمح باتصالات الوكيل",
@@ -108,7 +98,6 @@
   "suggestion.verifyServerRunning": "تحقق من أن خادم الوكيل قيد التشغيل",
   "suggestion.checkConnectivity": "تحقق من اتصال شبكتك",
   "suggestion.tryDifferentConfig": "جرّب تكوين وكيل مختلف",
-
   "statusbar.off": "الوكيل: متوقف",
   "statusbar.proxyOff": "الوكيل: متوقف",
   "statusbar.autoWithProxy": "تلقائي: {url}",
@@ -147,7 +136,6 @@
   "statusbar.link.testProxy": "اختبار الوكيل",
   "statusbar.link.showProxyUrl": "إظهار العنوان",
   "statusbar.link.hideProxyUrl": "إخفاء العنوان",
-
   "progress.testingProxy": "جارٍ اختبار الوكيل {current} من {total}...",
   "progress.testingProxyUrl": "جارٍ اختبار الوكيل {current} من {total}: {url}",
   "progress.detectingSystemProxy": "جارٍ اكتشاف وكيل النظام...",
@@ -166,7 +154,6 @@
   "progress.title.testingProxy": "اختبار اتصال الوكيل",
   "progress.title.detectingProxy": "اكتشاف وكيل النظام",
   "progress.title.applyingSettings": "تطبيق إعدادات الوكيل",
-
   "connectionTest.testing": "جارٍ اختبار اتصال الوكيل...",
   "connectionTest.success": "نجح اختبار اتصال الوكيل: {url}",
   "connectionTest.successWithDuration": "نجح اختبار اتصال الوكيل: {url} ({duration}ms)",
@@ -180,16 +167,13 @@
   "connectionTest.schedulerStarted": "بدأ الاختبار الدوري للوكيل",
   "connectionTest.schedulerStopped": "توقف الاختبار الدوري للوكيل",
   "connectionTest.intervalUpdated": "تم تحديث فاصل الاختبار إلى {seconds} ثانية",
-
   "fallback.usingManualProxy": "لم يُكتشف وكيل نظام، يُستخدم الوكيل اليدوي: {url}",
   "fallback.manualProxyFailed": "الوكيل اليدوي غير متوفر أيضًا",
   "fallback.switchedToSystem": "تمت العودة إلى وكيل النظام",
   "fallback.autoModeOff": "الوضع التلقائي متوقف (في انتظار الوكيل)",
-
   "log.fallbackToManual": "العودة إلى الوكيل اليدوي",
   "log.autoModeOff": "الوضع التلقائي متوقف (في انتظار الوكيل)",
   "log.switchedToSystem": "تمت العودة إلى وكيل النظام",
-
   "sync.enabled": "تم تمكين المزامنة",
   "sync.disabled": "تم تعطيل المزامنة",
   "sync.status.syncing": "جارٍ المزامنة...",
@@ -207,7 +191,6 @@
   "sync.tooltip.lastSync": "آخر مزامنة: {time}",
   "sync.tooltip.clickForDetails": "انقر لمزيد من التفاصيل",
   "sync.notification.conflictResolved": "تم حل تعارض الإعدادات. تم تطبيق آخر تغيير.",
-
   "errorAggregator.singleFailure": "فشلت العملية: {operation}",
   "errorAggregator.multipleFailure": "فشلت عدة عمليات ({count} أخطاء)",
   "errorAggregator.whatHappened": "ما الذي حدث:",
@@ -247,5 +230,34 @@
   "suggestion.proxy.ensureServerAccessible": "تأكد من إمكانية الوصول إلى خادم الوكيل",
   "suggestion.permissions.checkFiles": "تحقق من أذونات الملفات والمجلدات",
   "suggestion.generic.checkDetails": "تحقق من تفاصيل الخطأ أعلاه لمعرفة المشكلات المحددة",
-  "suggestion.generic.tryAgain": "حاول العملية مرة أخرى"
+  "suggestion.generic.tryAgain": "حاول العملية مرة أخرى",
+  "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
+  "config.automaticRemediationEnabled": "Enable safe automatic proxy remediation such as bounded delayed retry and drift detection. Disruptive actions still require confirmation.",
+  "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.automaticRetryEnabled": "Allow one bounded delayed retry when a proxy apply operation fails and the failure is eligible for automatic remediation.",
+  "config.remediationDelayedRetryMs": "Delay before an automatic remediation retry in milliseconds.",
+  "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
+  "config.remediationFlapMaxAttempts": "Maximum automatic remediation attempts allowed for one issue fingerprint within the flap detection window.",
+  "config.remediationFlapCooldownMs": "Cooldown applied after repeated remediation failures for the same issue fingerprint.",
+  "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",
+  "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.notificationLevel": "Controls how aggressively otak-proxy shows diagnostic notifications. Details are always available from the diagnose command.",
+  "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
+  "config.credentialTargetPolicy": "Controls whether otak-proxy may write authenticated proxy URLs to plaintext target config files. Secrets are still stored in VS Code SecretStorage where possible.",
+  "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
+  "action.openNewTerminal": "Open New Terminal",
+  "action.reloadWindow": "Reload Window",
+  "remediation.notification.applyFailed": "Proxy settings did not fully apply. otak-proxy recorded sanitized diagnostics.",
+  "remediation.notification.issueDetected": "Proxy diagnostics found a setting that may require your attention.",
+  "remediation.notification.lockSkipped": "Another otak-proxy window is already applying proxy settings. This window skipped the write.",
+  "action.allowPlaintextWrite": "Allow Plaintext Write",
+  "remediation.notification.credentialConsentRequired": "This proxy URL contains credentials. Applying it may write credentials to plaintext target config files such as settings.json, .gitconfig, or .npmrc.",
+  "command.resetWinHttpProxy": "otak: Reset WinHTTP Proxy",
+  "action.resetWinHttpProxy": "Reset WinHTTP Proxy",
+  "windowsAction.notWindows": "Windows proxy actions are only available on a local Windows extension host.",
+  "windowsAction.disabled": "Windows proxy actions are disabled. Enable otakProxy.windowsActionsEnabled to use this command.",
+  "windowsAction.resetWinHttpConfirm": "Reset the WinHTTP proxy for this Windows user context? This may affect tools that use WinHTTP.",
+  "windowsAction.resetWinHttpSuccess": "WinHTTP proxy was reset.",
+  "windowsAction.resetWinHttpFailed": "Failed to reset WinHTTP proxy: {error}"
 }

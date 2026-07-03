@@ -27,6 +27,9 @@ import { I18nManager } from './i18n/I18nManager';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { createCommandRegistry } from './commands/CommandRegistry';
 import { SyncManager, SyncConfigManager, SyncStatusProvider, registerSyncStatusCommand } from './sync';
+import { ProxyRemediationService, ProxyApplyTrigger } from './remediation/ProxyRemediationService';
+import { ProxyApplyOptions } from './core/ProxyApplierTypes';
+import { readV3Settings } from './core/V3Settings';
 
 // Module-level instances
 let proxyStateManager: ProxyStateManager;
@@ -37,6 +40,7 @@ let proxyMonitor: ProxyMonitor;
 let syncManager: SyncManager | null = null;
 let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
+let proxyRemediationService: ProxyRemediationService;
 
 type EnvironmentVariableCollectionLike = {
     replace(name: string, value: string): void;
@@ -70,11 +74,16 @@ function initializeI18n(): void {
 
 function createCoreServices(context: vscode.ExtensionContext): CoreServices {
     const sanitizer = new InputSanitizer();
+    const config = vscode.workspace.getConfiguration('otakProxy');
+    const v3Settings = readV3Settings(config);
     const envCollection = (context as unknown as Record<string, unknown>)['environmentVariableCollection'];
     const terminalEnvManager = isEnvironmentVariableCollection(envCollection)
-        ? new TerminalEnvConfigManager(envCollection)
+        ? new TerminalEnvConfigManager(envCollection, {
+            includeLowercase: process.platform !== 'win32',
+            maskOnUnset: v3Settings.terminalOffMaskingEnabled,
+            description: 'Managed by otak-proxy for newly created terminals.'
+        })
         : undefined;
-    const config = vscode.workspace.getConfiguration('otakProxy');
     const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
 
     return {
@@ -99,11 +108,16 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         proxyStateManager,
         services.terminalEnvManager
     );
+    proxyRemediationService = new ProxyRemediationService(
+        context,
+        () => proxyStateManager.getState()
+    );
 
     initializer = new ExtensionInitializer({
         extensionContext: context,
         proxyStateManager,
         proxyApplier,
+        applyProxySettings: (url, enabled, options) => applyProxySafely(url, enabled, 'autoDetection', options),
         systemProxyDetector: services.systemProxyDetector,
         userNotifier: services.userNotifier,
         sanitizer: services.sanitizer,
@@ -111,6 +125,28 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
     });
 
     proxyMonitor = initializer.initializeProxyMonitor();
+}
+
+async function applyProxySafely(
+    url: string,
+    enabled: boolean,
+    trigger: ProxyApplyTrigger,
+    options?: ProxyApplyOptions
+): Promise<boolean> {
+    if (!proxyRemediationService) {
+        return await proxyApplier.applyProxy(url, enabled, options);
+    }
+
+    const result = await proxyRemediationService.applyWithSafety(
+        url,
+        enabled,
+        {
+            ...options,
+            trigger
+        },
+        (proxyUrl, shouldEnable, applyOptions) => proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions)
+    );
+    return result.success;
 }
 
 function initializeStatusBar(context: vscode.ExtensionContext, services: CoreServices): void {
@@ -126,9 +162,9 @@ async function applyRemoteSyncState(remoteState: ProxyState): Promise<void> {
     const activeUrl = proxyStateManager.getActiveProxyUrl(localState);
 
     if (localState.mode !== ProxyMode.Off && activeUrl) {
-        await proxyApplier.applyProxy(activeUrl, true, { silent: true });
+        await applyProxySafely(activeUrl, true, 'sync', { silent: true });
     } else if (localState.mode === ProxyMode.Off) {
-        await proxyApplier.disableProxy({ silent: true });
+        await applyProxySafely('', false, 'sync', { silent: true });
     }
 
     if (localState.mode === ProxyMode.Auto) {
@@ -207,7 +243,7 @@ function registerExtensionCommands(context: vscode.ExtensionContext, services: C
         },
         getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
         getNextMode: (mode) => proxyStateManager.getNextMode(mode),
-        applyProxySettings: (url, enabled) => proxyApplier.applyProxy(url, enabled, { showProgress: true }),
+        applyProxySettings: (url, enabled) => applyProxySafely(url, enabled, 'manual', { showProgress: true }),
         updateStatusBar: (s) => statusBarManager.update(s),
         checkAndUpdateSystemProxy: async () => initializer.checkAndUpdateSystemProxy(),
         startSystemProxyMonitoring: () => initializer.startSystemProxyMonitoring(),
@@ -267,7 +303,7 @@ async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: Te
     }
 
     if (activeUrl) {
-        await proxyApplier.applyProxy(activeUrl, true);
+        await applyProxySafely(activeUrl, true, 'startup');
     }
 }
 
@@ -280,7 +316,7 @@ async function clearManagedStartupProxyState(
     }
 
     if (state.gitConfigured || state.vscodeConfigured || state.npmConfigured) {
-        await proxyApplier.disableProxy({ silent: true });
+        await applyProxySafely('', false, 'startup', { silent: true });
     }
 }
 

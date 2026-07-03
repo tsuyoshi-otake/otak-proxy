@@ -258,4 +258,36 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             restoreConfig();
         }
     });
+
+    test('ProxyRuntimeDiagnostics caches slow command diagnostics within the configured TTL', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', undefined, 'on');
+        let commandCalls = 0;
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({ mode: ProxyMode.Manual, manualProxyUrl: 'http://proxy.example.com:8080' }),
+                {
+                    commandRunner: async (_command, args) => {
+                        commandCalls += 1;
+                        if (args.includes('registry')) {
+                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            await diagnostics.run();
+            const callsAfterFirstRun = commandCalls;
+            await diagnostics.run();
+
+            assert.ok(callsAfterFirstRun > 0);
+            assert.strictEqual(commandCalls, callsAfterFirstRun);
+        } finally {
+            restoreConfig();
+        }
+    });
 });

@@ -1,13 +1,11 @@
 {
   "extension.description": "Proxy-Verwaltung per Klick für VSCode, Git, npm und integrierte Terminals.",
-
   "command.toggleProxy": "otak: Proxy umschalten",
   "command.testProxy": "otak: Proxy testen",
   "command.importProxy": "otak: System-Proxy importieren",
   "command.configureUrl": "otak: Manuellen Proxy konfigurieren",
   "command.toggleShowProxyUrl": "otak: Sichtbarkeit der Proxy-URL umschalten",
   "command.diagnoseProxy": "otak: Diagnose Proxy State",
-
   "config.proxyUrl": "URL des Proxy-Servers (z. B. http://proxy.example.com:8080) für die Proxy-Einstellungen von VSCode, Git, npm und integriertem Terminal",
   "config.pollingInterval": "Abfrageintervall im Auto-Modus in Sekunden (10-300). Legt fest, wie oft auf Änderungen des System-Proxys geprüft wird.",
   "config.detectionSourcePriority": "Prioritätsreihenfolge der Proxy-Erkennungsquellen. Die Quellen werden der Reihe nach versucht, bis eine erfolgreich ist.",
@@ -19,7 +17,6 @@
   "config.showProxyUrl": "Proxy-URL in der Statusleiste anzeigen",
   "config.syncEnabled": "Synchronisierung zwischen mehreren VSCode/Cursor-Instanzen aktivieren. Wenn aktiviert, werden die Proxy-Einstellungen über alle Instanzen hinweg geteilt.",
   "config.syncInterval": "Prüfintervall der Synchronisierung in Millisekunden (100-5000). Legt fest, wie oft auf Änderungen anderer Instanzen geprüft wird.",
-
   "action.yes": "Ja",
   "action.no": "Nein",
   "action.skip": "Überspringen",
@@ -37,9 +34,7 @@
   "action.skipToAuto": "Zu Auto überspringen",
   "action.autoSystem": "Auto (System)",
   "action.manualSetup": "Manuelle Einrichtung",
-
   "label.suggestions": "Vorschläge:",
-
   "prompt.proxyUrl": "Proxy-URL eingeben (z. B. http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "Wie möchten Sie die Proxy-Einstellungen konfigurieren?",
@@ -47,7 +42,6 @@
   "prompt.couldNotDetect": "System-Proxy konnte nicht erkannt werden. Manuell einrichten?",
   "prompt.foundSystemProxy": "System-Proxy gefunden: {url}",
   "prompt.proxyWorks": "Proxy funktioniert! Wie möchten Sie ihn verwenden?",
-
   "message.detectingSystemProxy": "System-Proxy wird erkannt...",
   "message.testingProxy": "{mode}-Proxy wird getestet: {url}...",
   "message.testingProxyGeneric": "Proxy wird getestet...",
@@ -61,7 +55,6 @@
   "message.manualProxyConfigured": "Manueller Proxy konfiguriert: {url}",
   "message.switchedToAutoMode": "In den Auto-Modus gewechselt: {url}",
   "message.savedAsManualProxy": "Als manueller Proxy gespeichert: {url}",
-
   "warning.noManualProxy": "Kein manueller Proxy konfiguriert",
   "warning.noSystemProxyDetected": "Kein System-Proxy erkannt. Wechsel in den Aus-Modus.",
   "warning.noSystemProxyCheck": "Kein System-Proxy erkannt. Überprüfen Sie Ihre System-/Browser-Proxy-Einstellungen.",
@@ -69,7 +62,6 @@
   "warning.detectionFailed": "Erkennung des System-Proxys fehlgeschlagen. Sie können einen Proxy manuell konfigurieren.",
   "warning.detectionFailedRetries": "Erkennung des System-Proxys nach mehreren Wiederholungsversuchen fehlgeschlagen. Überprüfen Sie Ihre System-/Browser-Proxy-Einstellungen.",
   "warning.invalidFormat": "Der erkannte System-Proxy hat ein ungültiges Format: {url}",
-
   "error.invalidProxyUrl": "Ungültiges Format der Proxy-URL",
   "error.invalidProxyUrlDetected": "Ungültiges Format der Proxy-URL erkannt",
   "error.proxyTestFailed": "Proxy-Verbindungstest fehlgeschlagen für: {url}",
@@ -80,7 +72,6 @@
   "error.importProxyFailed": "System-Proxy konnte nicht importiert werden",
   "error.connectionFailed": "Verbindung fehlgeschlagen",
   "error.attemptedUrls": "Versuchte Test-URLs:",
-
   "validation.proxyUrl.empty": "Proxy-URL darf nicht leer sein",
   "validation.proxyUrl.shellMetacharacters": "Proxy-URL enthält gefährliche Shell-Metazeichen",
   "validation.proxyUrl.hostnameInvalid": "Hostname enthält ungültige Zeichen (nur Buchstaben, Ziffern, Punkte und Bindestriche erlaubt)",
@@ -90,7 +81,6 @@
   "validation.proxyUrl.portRange": "Port muss zwischen 1 and 65535 liegen",
   "validation.proxyUrl.usernameInvalid": "Benutzername enthält ungültige Zeichen (nur Buchstaben, Ziffern, Bindestriche, Unterstriche und @ erlaubt)",
   "validation.proxyUrl.passwordInvalid": "Passwort enthält ungültige Zeichen (nur Buchstaben, Ziffern, Bindestriche, Unterstriche und @ erlaubt)",
-
   "suggestion.verifyUrl": "Überprüfen Sie, ob die Proxy-URL korrekt ist",
   "suggestion.checkServer": "Prüfen Sie, ob der Proxy-Server läuft und erreichbar ist",
   "suggestion.checkNetwork": "Stellen Sie sicher, dass Ihr Netzwerk Proxy-Verbindungen zulässt",
@@ -108,7 +98,6 @@
   "suggestion.verifyServerRunning": "Überprüfen Sie, ob der Proxy-Server läuft",
   "suggestion.checkConnectivity": "Überprüfen Sie Ihre Netzwerkverbindung",
   "suggestion.tryDifferentConfig": "Versuchen Sie eine andere Proxy-Konfiguration",
-
   "statusbar.off": "Proxy: Aus",
   "statusbar.proxyOff": "Proxy: Aus",
   "statusbar.autoWithProxy": "Auto: {url}",
@@ -147,7 +136,6 @@
   "statusbar.link.testProxy": "Proxy testen",
   "statusbar.link.showProxyUrl": "URL anzeigen",
   "statusbar.link.hideProxyUrl": "URL ausblenden",
-
   "progress.testingProxy": "Proxy {current} von {total} wird getestet...",
   "progress.testingProxyUrl": "Proxy {current} von {total} wird getestet: {url}",
   "progress.detectingSystemProxy": "System-Proxy wird erkannt...",
@@ -166,7 +154,6 @@
   "progress.title.testingProxy": "Proxy-Verbindung wird getestet",
   "progress.title.detectingProxy": "System-Proxy wird erkannt",
   "progress.title.applyingSettings": "Proxy-Einstellungen werden angewendet",
-
   "connectionTest.testing": "Proxy-Verbindung wird getestet...",
   "connectionTest.success": "Proxy-Verbindungstest erfolgreich: {url}",
   "connectionTest.successWithDuration": "Proxy-Verbindungstest erfolgreich: {url} ({duration}ms)",
@@ -180,16 +167,13 @@
   "connectionTest.schedulerStarted": "Regelmäßiger Proxy-Test gestartet",
   "connectionTest.schedulerStopped": "Regelmäßiger Proxy-Test gestoppt",
   "connectionTest.intervalUpdated": "Testintervall auf {seconds} Sekunden aktualisiert",
-
   "fallback.usingManualProxy": "System-Proxy nicht erkannt, manueller Proxy wird verwendet: {url}",
   "fallback.manualProxyFailed": "Manueller Proxy ist ebenfalls nicht verfügbar",
   "fallback.switchedToSystem": "Zurück zum System-Proxy gewechselt",
   "fallback.autoModeOff": "Auto-Modus AUS (warten auf Proxy)",
-
   "log.fallbackToManual": "Fallback auf manuellen Proxy",
   "log.autoModeOff": "Auto-Modus AUS (warten auf Proxy)",
   "log.switchedToSystem": "Zurück zum System-Proxy gewechselt",
-
   "sync.enabled": "Synchronisierung aktiviert",
   "sync.disabled": "Synchronisierung deaktiviert",
   "sync.status.syncing": "Wird synchronisiert...",
@@ -207,7 +191,6 @@
   "sync.tooltip.lastSync": "Letzte Synchronisierung: {time}",
   "sync.tooltip.clickForDetails": "Klicken für weitere Details",
   "sync.notification.conflictResolved": "Einstellungskonflikt gelöst. Die letzte Änderung wurde angewendet.",
-
   "errorAggregator.singleFailure": "Vorgang fehlgeschlagen: {operation}",
   "errorAggregator.multipleFailure": "Mehrere Vorgänge fehlgeschlagen ({count} Fehler)",
   "errorAggregator.whatHappened": "Was geschehen ist:",
@@ -247,5 +230,34 @@
   "suggestion.proxy.ensureServerAccessible": "Stellen Sie sicher, dass der Proxy-Server erreichbar ist",
   "suggestion.permissions.checkFiles": "Überprüfen Sie die Datei- und Verzeichnisberechtigungen",
   "suggestion.generic.checkDetails": "Überprüfen Sie die obigen Fehlerdetails auf spezifische Probleme",
-  "suggestion.generic.tryAgain": "Versuchen Sie den Vorgang erneut"
+  "suggestion.generic.tryAgain": "Versuchen Sie den Vorgang erneut",
+  "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
+  "config.automaticRemediationEnabled": "Enable safe automatic proxy remediation such as bounded delayed retry and drift detection. Disruptive actions still require confirmation.",
+  "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.automaticRetryEnabled": "Allow one bounded delayed retry when a proxy apply operation fails and the failure is eligible for automatic remediation.",
+  "config.remediationDelayedRetryMs": "Delay before an automatic remediation retry in milliseconds.",
+  "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
+  "config.remediationFlapMaxAttempts": "Maximum automatic remediation attempts allowed for one issue fingerprint within the flap detection window.",
+  "config.remediationFlapCooldownMs": "Cooldown applied after repeated remediation failures for the same issue fingerprint.",
+  "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",
+  "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.notificationLevel": "Controls how aggressively otak-proxy shows diagnostic notifications. Details are always available from the diagnose command.",
+  "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
+  "config.credentialTargetPolicy": "Controls whether otak-proxy may write authenticated proxy URLs to plaintext target config files. Secrets are still stored in VS Code SecretStorage where possible.",
+  "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
+  "action.openNewTerminal": "Open New Terminal",
+  "action.reloadWindow": "Reload Window",
+  "remediation.notification.applyFailed": "Proxy settings did not fully apply. otak-proxy recorded sanitized diagnostics.",
+  "remediation.notification.issueDetected": "Proxy diagnostics found a setting that may require your attention.",
+  "remediation.notification.lockSkipped": "Another otak-proxy window is already applying proxy settings. This window skipped the write.",
+  "action.allowPlaintextWrite": "Allow Plaintext Write",
+  "remediation.notification.credentialConsentRequired": "This proxy URL contains credentials. Applying it may write credentials to plaintext target config files such as settings.json, .gitconfig, or .npmrc.",
+  "command.resetWinHttpProxy": "otak: Reset WinHTTP Proxy",
+  "action.resetWinHttpProxy": "Reset WinHTTP Proxy",
+  "windowsAction.notWindows": "Windows proxy actions are only available on a local Windows extension host.",
+  "windowsAction.disabled": "Windows proxy actions are disabled. Enable otakProxy.windowsActionsEnabled to use this command.",
+  "windowsAction.resetWinHttpConfirm": "Reset the WinHTTP proxy for this Windows user context? This may affect tools that use WinHTTP.",
+  "windowsAction.resetWinHttpSuccess": "WinHTTP proxy was reset.",
+  "windowsAction.resetWinHttpFailed": "Failed to reset WinHTTP proxy: {error}"
 }

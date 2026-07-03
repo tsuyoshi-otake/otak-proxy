@@ -1,13 +1,11 @@
 {
   "extension.description": "VSCode, Git, npm और इंटीग्रेटेड टर्मिनल के लिए एक-क्लिक proxy प्रबंधन।",
-
   "command.toggleProxy": "otak: Proxy टॉगल करें",
   "command.testProxy": "otak: Proxy परीक्षण करें",
   "command.importProxy": "otak: सिस्टम Proxy आयात करें",
   "command.configureUrl": "otak: मैनुअल Proxy कॉन्फ़िगर करें",
   "command.toggleShowProxyUrl": "otak: Proxy URL दृश्यता टॉगल करें",
   "command.diagnoseProxy": "otak: Diagnose Proxy State",
-
   "config.proxyUrl": "VSCode, Git, npm और इंटीग्रेटेड टर्मिनल की proxy सेटिंग्स के लिए proxy सर्वर URL (उदा., http://proxy.example.com:8080)",
   "config.pollingInterval": "ऑटो मोड पोलिंग अंतराल सेकंड में (10-300)। सिस्टम proxy परिवर्तनों की जाँच कितनी बार करनी है।",
   "config.detectionSourcePriority": "Proxy डिटेक्शन स्रोतों के लिए प्राथमिकता क्रम। स्रोतों को क्रम में आज़माया जाता है जब तक कोई सफल न हो।",
@@ -19,7 +17,6 @@
   "config.showProxyUrl": "स्टेटस बार में proxy URL दिखाएँ",
   "config.syncEnabled": "एकाधिक VSCode/Cursor इंस्टेंस के बीच सिंक्रनाइज़ेशन सक्षम करें। सक्षम होने पर, proxy सेटिंग्स सभी इंस्टेंस में साझा की जाती हैं।",
   "config.syncInterval": "सिंक्रनाइज़ेशन जाँच अंतराल मिलीसेकंड में (100-5000)। अन्य इंस्टेंस से परिवर्तनों की जाँच कितनी बार करनी है।",
-
   "action.yes": "हाँ",
   "action.no": "नहीं",
   "action.skip": "छोड़ें",
@@ -37,9 +34,7 @@
   "action.skipToAuto": "ऑटो पर छोड़ें",
   "action.autoSystem": "ऑटो (सिस्टम)",
   "action.manualSetup": "मैनुअल सेटअप",
-
   "label.suggestions": "सुझाव:",
-
   "prompt.proxyUrl": "Proxy URL दर्ज करें (उदा., http://proxy.example.com:8080)",
   "prompt.proxyUrlPlaceholder": "http://proxy.example.com:8080",
   "prompt.initialSetup": "आप proxy सेटिंग्स कैसे कॉन्फ़िगर करना चाहेंगे?",
@@ -47,7 +42,6 @@
   "prompt.couldNotDetect": "सिस्टम proxy का पता नहीं चल सका। मैन्युअल रूप से सेट करें?",
   "prompt.foundSystemProxy": "सिस्टम proxy मिला: {url}",
   "prompt.proxyWorks": "Proxy काम कर रहा है! आप इसे कैसे उपयोग करना चाहेंगे?",
-
   "message.detectingSystemProxy": "सिस्टम proxy का पता लगाया जा रहा है...",
   "message.testingProxy": "{mode} proxy का परीक्षण किया जा रहा है: {url}...",
   "message.testingProxyGeneric": "Proxy का परीक्षण किया जा रहा है...",
@@ -61,7 +55,6 @@
   "message.manualProxyConfigured": "मैनुअल proxy कॉन्फ़िगर किया गया: {url}",
   "message.switchedToAutoMode": "ऑटो मोड पर स्विच किया गया: {url}",
   "message.savedAsManualProxy": "मैनुअल proxy के रूप में सहेजा गया: {url}",
-
   "warning.noManualProxy": "कोई मैनुअल proxy कॉन्फ़िगर नहीं है",
   "warning.noSystemProxyDetected": "कोई सिस्टम proxy नहीं मिला। ऑफ़ मोड पर स्विच किया जा रहा है।",
   "warning.noSystemProxyCheck": "कोई सिस्टम proxy नहीं मिला। अपनी सिस्टम/ब्राउज़र proxy सेटिंग्स जाँचें।",
@@ -69,7 +62,6 @@
   "warning.detectionFailed": "सिस्टम proxy डिटेक्शन विफल रहा। आप मैन्युअल रूप से एक proxy कॉन्फ़िगर कर सकते हैं।",
   "warning.detectionFailedRetries": "कई पुनः प्रयासों के बाद सिस्टम proxy डिटेक्शन विफल रहा। अपनी सिस्टम/ब्राउज़र proxy सेटिंग्स जाँचें।",
   "warning.invalidFormat": "पता लगाए गए सिस्टम proxy का प्रारूप अमान्य है: {url}",
-
   "error.invalidProxyUrl": "अमान्य proxy URL प्रारूप",
   "error.invalidProxyUrlDetected": "अमान्य proxy URL प्रारूप पाया गया",
   "error.proxyTestFailed": "Proxy कनेक्शन परीक्षण विफल रहा: {url}",
@@ -80,7 +72,6 @@
   "error.importProxyFailed": "सिस्टम proxy आयात करने में विफल",
   "error.connectionFailed": "कनेक्शन विफल रहा",
   "error.attemptedUrls": "आज़माए गए परीक्षण URL:",
-
   "validation.proxyUrl.empty": "Proxy URL खाली नहीं हो सकता",
   "validation.proxyUrl.shellMetacharacters": "Proxy URL में खतरनाक शेल मेटाकैरेक्टर हैं",
   "validation.proxyUrl.hostnameInvalid": "होस्टनाम में अमान्य अक्षर हैं (केवल अल्फ़ान्यूमेरिक, डॉट और हाइफ़न की अनुमति है)",
@@ -90,7 +81,6 @@
   "validation.proxyUrl.portRange": "पोर्ट 1 and 65535 के बीच होना चाहिए",
   "validation.proxyUrl.usernameInvalid": "उपयोगकर्ता नाम में अमान्य अक्षर हैं (केवल अल्फ़ान्यूमेरिक, हाइफ़न, अंडरस्कोर और @ की अनुमति है)",
   "validation.proxyUrl.passwordInvalid": "पासवर्ड में अमान्य अक्षर हैं (केवल अल्फ़ान्यूमेरिक, हाइफ़न, अंडरस्कोर और @ की अनुमति है)",
-
   "suggestion.verifyUrl": "सत्यापित करें कि proxy URL सही है",
   "suggestion.checkServer": "जाँचें कि proxy सर्वर चल रहा है और सुलभ है",
   "suggestion.checkNetwork": "सुनिश्चित करें कि आपका नेटवर्क proxy कनेक्शन की अनुमति देता है",
@@ -108,7 +98,6 @@
   "suggestion.verifyServerRunning": "सत्यापित करें कि proxy सर्वर चल रहा है",
   "suggestion.checkConnectivity": "अपनी नेटवर्क कनेक्टिविटी जाँचें",
   "suggestion.tryDifferentConfig": "एक अलग proxy कॉन्फ़िगरेशन आज़माएँ",
-
   "statusbar.off": "Proxy: ऑफ़",
   "statusbar.proxyOff": "Proxy: ऑफ़",
   "statusbar.autoWithProxy": "ऑटो: {url}",
@@ -147,7 +136,6 @@
   "statusbar.link.testProxy": "Proxy परीक्षण करें",
   "statusbar.link.showProxyUrl": "URL दिखाएँ",
   "statusbar.link.hideProxyUrl": "URL छिपाएँ",
-
   "progress.testingProxy": "{total} में से {current} proxy का परीक्षण किया जा रहा है...",
   "progress.testingProxyUrl": "{total} में से {current} proxy का परीक्षण किया जा रहा है: {url}",
   "progress.detectingSystemProxy": "सिस्टम proxy का पता लगाया जा रहा है...",
@@ -166,7 +154,6 @@
   "progress.title.testingProxy": "Proxy कनेक्शन का परीक्षण",
   "progress.title.detectingProxy": "सिस्टम Proxy का पता लगाना",
   "progress.title.applyingSettings": "Proxy सेटिंग्स लागू करना",
-
   "connectionTest.testing": "Proxy कनेक्शन का परीक्षण किया जा रहा है...",
   "connectionTest.success": "Proxy कनेक्शन परीक्षण सफल: {url}",
   "connectionTest.successWithDuration": "Proxy कनेक्शन परीक्षण सफल: {url} ({duration}ms)",
@@ -180,16 +167,13 @@
   "connectionTest.schedulerStarted": "आवधिक proxy परीक्षण शुरू हुआ",
   "connectionTest.schedulerStopped": "आवधिक proxy परीक्षण बंद हुआ",
   "connectionTest.intervalUpdated": "परीक्षण अंतराल {seconds} सेकंड में अपडेट किया गया",
-
   "fallback.usingManualProxy": "सिस्टम proxy नहीं मिला, मैनुअल proxy का उपयोग: {url}",
   "fallback.manualProxyFailed": "मैनुअल proxy भी अनुपलब्ध है",
   "fallback.switchedToSystem": "वापस सिस्टम proxy पर स्विच किया गया",
   "fallback.autoModeOff": "ऑटो मोड OFF (proxy की प्रतीक्षा में)",
-
   "log.fallbackToManual": "मैनुअल Proxy पर फ़ॉलबैक",
   "log.autoModeOff": "ऑटो मोड OFF (proxy की प्रतीक्षा में)",
   "log.switchedToSystem": "वापस सिस्टम Proxy पर स्विच किया गया",
-
   "sync.enabled": "सिंक सक्षम",
   "sync.disabled": "सिंक अक्षम",
   "sync.status.syncing": "सिंक हो रहा है...",
@@ -207,7 +191,6 @@
   "sync.tooltip.lastSync": "अंतिम सिंक: {time}",
   "sync.tooltip.clickForDetails": "अधिक विवरण के लिए क्लिक करें",
   "sync.notification.conflictResolved": "सेटिंग्स विरोध हल किया गया। नवीनतम परिवर्तन लागू किया गया है।",
-
   "errorAggregator.singleFailure": "ऑपरेशन विफल: {operation}",
   "errorAggregator.multipleFailure": "कई ऑपरेशन विफल हुए ({count} त्रुटियाँ)",
   "errorAggregator.whatHappened": "क्या हुआ:",
@@ -247,5 +230,34 @@
   "suggestion.proxy.ensureServerAccessible": "सुनिश्चित करें कि proxy सर्वर सुलभ है",
   "suggestion.permissions.checkFiles": "फ़ाइल और डायरेक्टरी अनुमतियाँ जाँचें",
   "suggestion.generic.checkDetails": "विशिष्ट समस्याओं के लिए ऊपर दिए गए त्रुटि विवरण जाँचें",
-  "suggestion.generic.tryAgain": "ऑपरेशन पुनः प्रयास करें"
+  "suggestion.generic.tryAgain": "ऑपरेशन पुनः प्रयास करें",
+  "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
+  "config.automaticRemediationEnabled": "Enable safe automatic proxy remediation such as bounded delayed retry and drift detection. Disruptive actions still require confirmation.",
+  "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.automaticRetryEnabled": "Allow one bounded delayed retry when a proxy apply operation fails and the failure is eligible for automatic remediation.",
+  "config.remediationDelayedRetryMs": "Delay before an automatic remediation retry in milliseconds.",
+  "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
+  "config.remediationFlapMaxAttempts": "Maximum automatic remediation attempts allowed for one issue fingerprint within the flap detection window.",
+  "config.remediationFlapCooldownMs": "Cooldown applied after repeated remediation failures for the same issue fingerprint.",
+  "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",
+  "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.notificationLevel": "Controls how aggressively otak-proxy shows diagnostic notifications. Details are always available from the diagnose command.",
+  "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
+  "config.credentialTargetPolicy": "Controls whether otak-proxy may write authenticated proxy URLs to plaintext target config files. Secrets are still stored in VS Code SecretStorage where possible.",
+  "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
+  "action.openNewTerminal": "Open New Terminal",
+  "action.reloadWindow": "Reload Window",
+  "remediation.notification.applyFailed": "Proxy settings did not fully apply. otak-proxy recorded sanitized diagnostics.",
+  "remediation.notification.issueDetected": "Proxy diagnostics found a setting that may require your attention.",
+  "remediation.notification.lockSkipped": "Another otak-proxy window is already applying proxy settings. This window skipped the write.",
+  "action.allowPlaintextWrite": "Allow Plaintext Write",
+  "remediation.notification.credentialConsentRequired": "This proxy URL contains credentials. Applying it may write credentials to plaintext target config files such as settings.json, .gitconfig, or .npmrc.",
+  "command.resetWinHttpProxy": "otak: Reset WinHTTP Proxy",
+  "action.resetWinHttpProxy": "Reset WinHTTP Proxy",
+  "windowsAction.notWindows": "Windows proxy actions are only available on a local Windows extension host.",
+  "windowsAction.disabled": "Windows proxy actions are disabled. Enable otakProxy.windowsActionsEnabled to use this command.",
+  "windowsAction.resetWinHttpConfirm": "Reset the WinHTTP proxy for this Windows user context? This may affect tools that use WinHTTP.",
+  "windowsAction.resetWinHttpSuccess": "WinHTTP proxy was reset.",
+  "windowsAction.resetWinHttpFailed": "Failed to reset WinHTTP proxy: {error}"
 }
