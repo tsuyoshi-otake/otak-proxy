@@ -6,6 +6,7 @@
   "command.importProxy": "otak: استيراد وكيل النظام",
   "command.configureUrl": "otak: تكوين وكيل يدوي",
   "command.toggleShowProxyUrl": "otak: تبديل إظهار عنوان الوكيل",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "عنوان خادم الوكيل (مثال: http://proxy.example.com:8080) لإعدادات الوكيل في VSCode وGit وnpm والطرفية المدمجة",
   "config.pollingInterval": "فاصل الاستقصاء في الوضع التلقائي بالثواني (10-300). عدد مرات التحقق من تغييرات وكيل النظام.",

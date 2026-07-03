@@ -13,7 +13,8 @@ const EXPECTED_COMMANDS = [
     'otak-proxy.configureUrl',
     'otak-proxy.testProxy',
     'otak-proxy.importProxy',
-    'otak-proxy.toggleShowProxyUrl'
+    'otak-proxy.toggleShowProxyUrl',
+    'otak-proxy.diagnoseProxy'
 ];
 
 suite('CommandRegistry Smoke Tests', () => {

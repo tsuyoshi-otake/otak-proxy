@@ -6,6 +6,7 @@
   "command.importProxy": "otak: Nhập Proxy hệ thống",
   "command.configureUrl": "otak: Cấu hình Proxy thủ công",
   "command.toggleShowProxyUrl": "otak: Bật/tắt hiển thị URL Proxy",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "URL máy chủ proxy (ví dụ: http://proxy.example.com:8080) dùng cho cài đặt proxy của VS Code, Git, npm và terminal tích hợp",
   "config.pollingInterval": "Khoảng thời gian thăm dò ở chế độ Tự động (giây, 10-300). Tần suất kiểm tra thay đổi proxy hệ thống.",

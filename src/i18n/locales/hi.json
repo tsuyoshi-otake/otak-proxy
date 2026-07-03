@@ -6,6 +6,7 @@
   "command.importProxy": "otak: सिस्टम Proxy आयात करें",
   "command.configureUrl": "otak: मैनुअल Proxy कॉन्फ़िगर करें",
   "command.toggleShowProxyUrl": "otak: Proxy URL दृश्यता टॉगल करें",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "VSCode, Git, npm और इंटीग्रेटेड टर्मिनल की proxy सेटिंग्स के लिए proxy सर्वर URL (उदा., http://proxy.example.com:8080)",
   "config.pollingInterval": "ऑटो मोड पोलिंग अंतराल सेकंड में (10-300)। सिस्टम proxy परिवर्तनों की जाँच कितनी बार करनी है।",

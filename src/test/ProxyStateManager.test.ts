@@ -8,12 +8,21 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState, ProxyTestResult } from '../core/types';
+import { getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
 
 suite('ProxyStateManager Unit Tests', () => {
     let context: vscode.ExtensionContext;
     let stateManager: ProxyStateManager;
     let storedState: ProxyState | undefined;
     let secrets: Map<string, string>;
+
+    function credentialSecretFor(publicUrl: string): string | undefined {
+        return secrets.get(getCredentialKeyForPublicUrl(publicUrl));
+    }
+
+    function allSecretValues(): string {
+        return Array.from(secrets.values()).join('\n');
+    }
 
     setup(() => {
         storedState = undefined;
@@ -128,7 +137,9 @@ suite('ProxyStateManager Unit Tests', () => {
 
         await stateManager.saveState(testState);
 
-        assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), testState.manualProxyUrl);
+        assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), undefined);
+        assert.ok(credentialSecretFor('http://proxy.example.com:8080/'));
+        assert.ok(allSecretValues().includes('secret'));
         assert.strictEqual(storedState!.manualProxyUrl, 'http://proxy.example.com:8080/');
         assert.strictEqual(storedState!.autoProxyUrl, 'http://auto.example.com:8080/');
         assert.strictEqual(storedState!.fallbackProxyUrl, 'http://fallback.example.com:8080/');
@@ -172,7 +183,9 @@ suite('ProxyStateManager Unit Tests', () => {
             const state = await stateManager.getState();
 
             assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
-            assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), 'http://user:secret@proxy.example.com:8080');
+            assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), undefined);
+            assert.ok(credentialSecretFor('http://proxy.example.com:8080/'));
+            assert.ok(allSecretValues().includes('secret'));
             assert.strictEqual(updatedProxyUrl, 'http://proxy.example.com:8080/');
             assert.strictEqual(
                 stateManager.getActiveProxyUrl(state),
@@ -211,6 +224,8 @@ suite('ProxyStateManager Unit Tests', () => {
             const state = await stateManager.getState();
 
             assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
+            assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), undefined);
+            assert.ok(credentialSecretFor('http://proxy.example.com:8080/'));
         } finally {
             (vscode.workspace as any).getConfiguration = originalGetConfiguration;
         }
@@ -239,7 +254,8 @@ suite('ProxyStateManager Unit Tests', () => {
         const state = await stateManager.getState();
 
         assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
-        assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), 'http://user:secret@proxy.example.com:8080');
+        assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), undefined);
+        assert.ok(credentialSecretFor('http://proxy.example.com:8080/'));
         assert.strictEqual(storedState!.manualProxyUrl, 'http://proxy.example.com:8080/');
         assert.strictEqual(storedState!.autoProxyUrl, 'http://auto.example.com:8080/');
         assert.strictEqual(storedState!.lastTestResult!.proxyUrl, 'http://proxy.example.com:8080/');

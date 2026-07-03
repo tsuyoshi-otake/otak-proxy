@@ -18,8 +18,8 @@ import {
     hasProxyCredentials,
     sanitizeProxyStateForPersistence
 } from '../utils/ProxyStateSanitizer';
-
-const MANUAL_PROXY_SECRET_KEY = 'otakProxy.manualProxyUrl';
+import { ProxyCredentialStore } from '../security/ProxyCredentialStore';
+import { V3MigrationService, LEGACY_MANUAL_PROXY_SECRET_KEY } from './V3MigrationService';
 
 /**
  * ProxyStateManager handles all proxy state operations
@@ -30,8 +30,11 @@ const MANUAL_PROXY_SECRET_KEY = 'otakProxy.manualProxyUrl';
  */
 export class ProxyStateManager implements IProxyStateManager {
     private inMemoryState: ProxyState | null = null;
+    private readonly credentialStore: ProxyCredentialStore;
 
-    constructor(private context: vscode.ExtensionContext) {}
+    constructor(private context: vscode.ExtensionContext) {
+        this.credentialStore = new ProxyCredentialStore(context.secrets);
+    }
 
     /**
      * Get the current proxy state
@@ -42,6 +45,8 @@ export class ProxyStateManager implements IProxyStateManager {
      * @returns {Promise<ProxyState>} Current proxy state
      */
     async getState(): Promise<ProxyState> {
+        await new V3MigrationService(this.context).migrateIfNeeded();
+
         // If we have an in-memory fallback state, use it
         if (this.inMemoryState) {
             return await this.hydrateStateForRuntime(this.inMemoryState);
@@ -154,11 +159,15 @@ export class ProxyStateManager implements IProxyStateManager {
     private async hydrateStateForRuntime(state: ProxyState): Promise<ProxyState> {
         const config = vscode.workspace.getConfiguration('otakProxy');
         const configuredManualUrl = await this.normalizeConfiguredManualProxyUrl(config.get<string>('proxyUrl', ''));
-        const secretManualUrl = await this.getManualProxySecret();
+
+        if (state.manualProxyUrl && hasProxyCredentials(state.manualProxyUrl)) {
+            return state;
+        }
 
         const configuredPublicUrl = getProxyPublicUrl(configuredManualUrl);
-        const secretPublicUrl = getProxyPublicUrl(secretManualUrl);
         const statePublicUrl = getProxyPublicUrl(state.manualProxyUrl);
+        const secretManualUrl = await this.getManualProxySecret(statePublicUrl || configuredPublicUrl);
+        const secretPublicUrl = getProxyPublicUrl(secretManualUrl);
 
         if (secretManualUrl && statePublicUrl && secretPublicUrl === statePublicUrl) {
             return {
@@ -235,13 +244,24 @@ export class ProxyStateManager implements IProxyStateManager {
         }
     }
 
-    private async getManualProxySecret(): Promise<string | undefined> {
+    private async getManualProxySecret(publicUrl?: string): Promise<string | undefined> {
+        if (publicUrl) {
+            const reconstructed = await this.credentialStore.reconstructProxyUrl(publicUrl);
+            if (reconstructed) {
+                return reconstructed;
+            }
+        }
+
+        return await this.getLegacyManualProxySecret();
+    }
+
+    private async getLegacyManualProxySecret(): Promise<string | undefined> {
         const secrets = this.context.secrets;
         if (!secrets || typeof secrets.get !== 'function') {
             return undefined;
         }
         try {
-            return await secrets.get(MANUAL_PROXY_SECRET_KEY);
+            return await secrets.get(LEGACY_MANUAL_PROXY_SECRET_KEY);
         } catch (error) {
             Logger.warn('Failed to read proxy credentials from secret storage:', error);
             return undefined;
@@ -255,7 +275,7 @@ export class ProxyStateManager implements IProxyStateManager {
             return;
         }
         try {
-            await secrets.store(MANUAL_PROXY_SECRET_KEY, manualProxyUrl);
+            await this.credentialStore.storeFromProxyUrl(manualProxyUrl);
         } catch (error) {
             Logger.warn('Failed to store proxy credentials in secret storage:', error);
         }
@@ -267,7 +287,7 @@ export class ProxyStateManager implements IProxyStateManager {
             return;
         }
         try {
-            await secrets.delete(MANUAL_PROXY_SECRET_KEY);
+            await secrets.delete(LEGACY_MANUAL_PROXY_SECRET_KEY);
         } catch (error) {
             Logger.warn('Failed to delete proxy credentials from secret storage:', error);
         }

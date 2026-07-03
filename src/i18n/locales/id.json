@@ -6,6 +6,7 @@
   "command.importProxy": "otak: Impor Proxy Sistem",
   "command.configureUrl": "otak: Konfigurasikan Proxy Manual",
   "command.toggleShowProxyUrl": "otak: Alihkan Visibilitas URL Proxy",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "URL server proxy (mis., http://proxy.example.com:8080) untuk pengaturan proxy VSCode, Git, npm, dan terminal terintegrasi",
   "config.pollingInterval": "Interval polling mode Auto dalam detik (10-300). Seberapa sering memeriksa perubahan proxy sistem.",

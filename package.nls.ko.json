@@ -1,5 +1,6 @@
 {
   "command.configureUrl": "otak: 수동 프록시 설정",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
   "command.importProxy": "otak: 시스템 프록시 가져오기",
   "command.testProxy": "otak: 프록시 테스트",
   "command.toggleProxy": "otak: 프록시 전환",

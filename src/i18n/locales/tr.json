@@ -6,6 +6,7 @@
   "command.importProxy": "otak: Sistem Proxy'sini İçe Aktar",
   "command.configureUrl": "otak: Manuel Proxy'yi Yapılandır",
   "command.toggleShowProxyUrl": "otak: Proxy URL Görünürlüğünü Aç/Kapat",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "VSCode, Git, npm ve entegre terminal proxy ayarları için proxy sunucusu URL'si (ör. http://proxy.example.com:8080)",
   "config.pollingInterval": "Saniye cinsinden Otomatik mod yoklama aralığı (10-300). Sistem proxy değişikliklerinin ne sıklıkta denetleneceği.",

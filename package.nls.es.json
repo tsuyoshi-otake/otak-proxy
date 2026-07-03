@@ -1,5 +1,6 @@
 {
   "command.configureUrl": "otak: Configurar proxy manual",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
   "command.importProxy": "otak: Importar proxy del sistema",
   "command.testProxy": "otak: Probar proxy",
   "command.toggleProxy": "otak: Alternar proxy",

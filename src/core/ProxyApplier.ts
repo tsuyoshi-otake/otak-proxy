@@ -10,7 +10,13 @@ import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { ProxyStateManager } from './ProxyStateManager';
-import { ProxyApplyOptions, ProxyConfigResults, ProxyConfigStatusReporter, ProxyConfigTarget } from './ProxyApplierTypes';
+import {
+    ProxyApplyDetailedResult,
+    ProxyApplyOptions,
+    ProxyConfigResults,
+    ProxyConfigStatusReporter,
+    ProxyConfigTarget
+} from './ProxyApplierTypes';
 import { updateProxyConfigTarget } from './ProxyConfigTargetRunner';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
 import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
@@ -148,6 +154,11 @@ export class ProxyApplier {
      * @returns Promise<boolean> - True if all operations succeeded
      */
     async applyProxy(proxyUrl: string, enabled: boolean, options?: ProxyApplyOptions): Promise<boolean> {
+        const result = await this.applyProxyDetailed(proxyUrl, enabled, options);
+        return result.success;
+    }
+
+    async applyProxyDetailed(proxyUrl: string, enabled: boolean, options?: ProxyApplyOptions): Promise<ProxyApplyDetailedResult> {
         const errorAggregator = new ErrorAggregator();
         
         // Edge Case 1: Handle empty URL as disable proxy (Requirement 4.1)
@@ -157,16 +168,16 @@ export class ProxyApplier {
         
         // If disabling, use the dedicated disable function
         if (!enabled) {
-            return await this.disableProxy(options);
+            return await this.disableProxyDetailed(options);
         }
 
         if (this.blockIfUntrustedWorkspace(options)) {
-            return false;
+            return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
         }
         
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
         if (proxyUrl && !this.validateProxyUrlForApply(proxyUrl)) {
-            return false;
+            return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
         }
         
         const results = await this.withOptionalProgress(
@@ -188,7 +199,7 @@ export class ProxyApplier {
         // Requirement 2.5: Use ErrorAggregator to display all errors together
         this.notifyApplyResult(proxyUrl, options, errorAggregator);
 
-        return success;
+        return this.buildDetailedResult(success, true, proxyUrl, results, errorAggregator);
     }
 
     /**
@@ -199,10 +210,15 @@ export class ProxyApplier {
      * @returns Promise<boolean> - True if all operations succeeded
      */
     async disableProxy(options?: ProxyApplyOptions): Promise<boolean> {
+        const result = await this.disableProxyDetailed(options);
+        return result.success;
+    }
+
+    async disableProxyDetailed(options?: ProxyApplyOptions): Promise<ProxyApplyDetailedResult> {
         const errorAggregator = new ErrorAggregator();
 
         if (this.blockIfUntrustedWorkspace(options)) {
-            return false;
+            return this.buildDetailedResult(false, false, '', this.emptyResults(), errorAggregator);
         }
         
         const results = await this.withOptionalProgress(
@@ -224,7 +240,35 @@ export class ProxyApplier {
         // Use ErrorAggregator for any failures and UserNotifier for feedback
         this.notifyDisableResult(options, errorAggregator);
 
-        return success;
+        return this.buildDetailedResult(success, false, '', results, errorAggregator);
+    }
+
+    private emptyResults(): ProxyConfigResults {
+        return {
+            gitSuccess: false,
+            vscodeSuccess: false,
+            npmSuccess: false,
+            terminalEnvSuccess: false
+        };
+    }
+
+    private buildDetailedResult(
+        success: boolean,
+        enabled: boolean,
+        proxyUrl: string,
+        results: ProxyConfigResults,
+        errorAggregator: ErrorAggregator
+    ): ProxyApplyDetailedResult {
+        return {
+            success,
+            enabled,
+            proxyUrl: this.sanitizer.maskPassword(proxyUrl),
+            results,
+            errors: errorAggregator.getErrors().map(error => ({
+                target: error.operation,
+                message: this.sanitizer.maskPassword(error.error)
+            }))
+        };
     }
 
     private async updateTargets(

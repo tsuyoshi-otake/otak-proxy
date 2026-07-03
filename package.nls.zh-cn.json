@@ -1,5 +1,6 @@
 {
   "command.configureUrl": "otak: 配置手动代理",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
   "command.importProxy": "otak: 导入系统代理",
   "command.testProxy": "otak: 测试代理",
   "command.toggleProxy": "otak: 切换代理",

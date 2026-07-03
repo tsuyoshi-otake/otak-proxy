@@ -6,6 +6,7 @@
   "command.importProxy": "otak: Импортировать системный прокси",
   "command.configureUrl": "otak: Настроить прокси вручную",
   "command.toggleShowProxyUrl": "otak: Переключить видимость URL прокси",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "URL прокси-сервера (например, http://proxy.example.com:8080) для настроек прокси VSCode, Git, npm и встроенного терминала",
   "config.pollingInterval": "Интервал опроса в автоматическом режиме в секундах (10-300). Как часто проверять изменения системного прокси.",

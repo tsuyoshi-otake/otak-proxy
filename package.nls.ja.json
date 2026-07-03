@@ -1,5 +1,6 @@
 {
   "command.configureUrl": "otak: 手動Proxyを設定",
+  "command.diagnoseProxy": "otak: Proxy状態を診断",
   "command.importProxy": "otak: システムProxyをインポート",
   "command.testProxy": "otak: Proxyをテスト",
   "command.toggleProxy": "otak: Proxyを切り替え",

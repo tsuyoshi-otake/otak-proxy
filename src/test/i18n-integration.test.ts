@@ -66,7 +66,7 @@ suite('I18n Integration Tests', () => {
 
         test('should fallback to English for unsupported locale', () => {
             // Initialize with unsupported locale
-            i18n.initialize('fr');
+            i18n.initialize('xx-unsupported');
             
             // Verify fallback to English
             assert.strictEqual(i18n.getCurrentLocale(), 'en', 'Should fallback to English');

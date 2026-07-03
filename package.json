@@ -19,10 +19,12 @@
     "out/commands/**/*.js",
     "out/config/**/*.js",
     "out/core/**/*.js",
+    "out/diagnostics/**/*.js",
     "out/errors/**/*.js",
     "out/i18n/**/*.js",
     "out/i18n/locales/*.json",
     "out/monitoring/**/*.js",
+    "out/security/**/*.js",
     "out/sync/**/*.js",
     "out/ui/**/*.js",
     "out/utils/**/*.js",
@@ -43,6 +45,9 @@
   ],
   "activationEvents": [
     "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -66,6 +71,10 @@
       {
         "command": "otak-proxy.toggleShowProxyUrl",
         "title": "%command.toggleShowProxyUrl%"
+      },
+      {
+        "command": "otak-proxy.diagnoseProxy",
+        "title": "%command.diagnoseProxy%"
       }
     ],
     "configuration": {

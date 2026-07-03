@@ -6,6 +6,7 @@
   "command.importProxy": "otak: Importer le proxy système",
   "command.configureUrl": "otak: Configurer le proxy manuel",
   "command.toggleShowProxyUrl": "otak: Afficher/masquer l'URL du proxy",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "URL du serveur proxy (par ex. http://proxy.example.com:8080) pour les paramètres de proxy de VSCode, Git, npm et du terminal intégré",
   "config.pollingInterval": "Intervalle d'interrogation du mode Auto en secondes (10-300). Fréquence de vérification des changements de proxy système.",

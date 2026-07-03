@@ -30,6 +30,10 @@ export class ErrorAggregator {
     return this.errors.size > 0;
   }
 
+  getErrors(): Array<{ operation: string; error: string }> {
+    return Array.from(this.errors.entries()).map(([operation, error]) => ({ operation, error }));
+  }
+
   /**
    * Formats all errors into user-friendly message with structured output.
    * @returns Formatted error message with troubleshooting steps

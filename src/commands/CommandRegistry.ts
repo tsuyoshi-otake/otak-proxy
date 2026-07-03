@@ -17,6 +17,7 @@ import { executeConfigureUrl } from './ConfigureUrlCommand';
 import { executeTestProxy } from './TestProxyCommand';
 import { executeImportProxy } from './ImportProxyCommand';
 import { executeToggleShowProxyUrl } from './ToggleShowProxyUrlCommand';
+import { executeDiagnoseProxy } from './DiagnoseProxyCommand';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 
@@ -117,6 +118,7 @@ export class CommandRegistry {
         this.registerTestProxy(context);
         this.registerImportProxy(context);
         this.registerToggleShowProxyUrl(context);
+        this.registerDiagnoseProxy(context);
 
         // Register listeners
         this.registerConfigChangeListener(context);
@@ -174,6 +176,14 @@ export class CommandRegistry {
         const disposable = vscode.commands.registerCommand(
             'otak-proxy.toggleShowProxyUrl',
             async () => executeToggleShowProxyUrl(this.commandContext)
+        );
+        context.subscriptions.push(disposable);
+    }
+
+    private registerDiagnoseProxy(context: vscode.ExtensionContext): void {
+        const disposable = vscode.commands.registerCommand(
+            'otak-proxy.diagnoseProxy',
+            async () => executeDiagnoseProxy(context, () => this.config.getProxyState(context))
         );
         context.subscriptions.push(disposable);
     }

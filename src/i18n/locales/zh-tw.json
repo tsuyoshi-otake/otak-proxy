@@ -6,6 +6,7 @@
   "command.importProxy": "otak: 匯入系統代理",
   "command.configureUrl": "otak: 設定手動代理",
   "command.toggleShowProxyUrl": "otak: 切換代理 URL 顯示",
+  "command.diagnoseProxy": "otak: Diagnose Proxy State",
 
   "config.proxyUrl": "用於 VS Code、Git、npm 以及整合式終端機代理設定的代理伺服器 URL（例如：http://proxy.example.com:8080）",
   "config.pollingInterval": "自動模式輪詢間隔（秒，10-300）。檢查系統代理變更的頻率。",

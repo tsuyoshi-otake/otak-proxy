@@ -31,3 +31,15 @@ export interface ProxyConfigResults {
     npmSuccess: boolean;
     terminalEnvSuccess: boolean;
 }
+
+export interface ProxyApplyDetailedResult {
+    success: boolean;
+    enabled: boolean;
+    proxyUrl: string;
+    results: ProxyConfigResults;
+    errors: Array<{
+        target: string;
+        message: string;
+        errorType?: string;
+    }>;
+}

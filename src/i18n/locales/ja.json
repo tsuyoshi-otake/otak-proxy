@@ -6,6 +6,7 @@
   "command.importProxy": "otak: システムProxyをインポート",
   "command.configureUrl": "otak: 手動Proxyを設定",
   "command.toggleShowProxyUrl": "otak: Proxy URL表示を切り替え",
+  "command.diagnoseProxy": "otak: Proxy状態を診断",
 
   "config.proxyUrl": "VSCode・Git・npm・統合ターミナルのproxy設定用のProxyサーバーURL（例: http://proxy.example.com:8080）",
   "config.pollingInterval": "Autoモードのポーリング間隔（秒単位、10-300）。システムproxyの変更をチェックする頻度。",
