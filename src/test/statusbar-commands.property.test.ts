@@ -361,6 +361,9 @@ suite('StatusBar Commands Property Tests', () => {
     test('Property 2: All registered commands should be executable', async () => {
         const extension = require('../extension');
         await extension.activate(mockContext);
+        // Settle the background startup enforcement (#12) so it cannot leak into
+        // later suites through the shared hermetic git/npm config environment.
+        await extension.whenStartupProxyApplied();
 
         // The commands that should be registered and executable
         const commandIds = [

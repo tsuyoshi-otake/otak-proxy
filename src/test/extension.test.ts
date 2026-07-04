@@ -97,6 +97,9 @@ suite('Otak Proxy Extension Test Suite @smoke', () => {
         // 拡張機能のインポートとアクティベート
         extension = require('../extension');
         await extension.activate(mockContext);
+        // Startup enforcement is now a background task (#12); settle it so it does
+        // not leak into later suites via the shared hermetic git/npm config env.
+        await extension.whenStartupProxyApplied();
     });
 
     suiteTeardown(() => {

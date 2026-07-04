@@ -72,7 +72,12 @@ export class ApplyLockService {
     private readonly now: () => number;
 
     constructor(options: ApplyLockServiceOptions = {}) {
-        this.baseDir = options.baseDir ?? path.join(os.tmpdir(), 'otak-proxy-v3-locks');
+        // OTAK_PROXY_LOCK_DIR lets tests point the shared apply lock at a hermetic
+        // per-run directory (like GIT_CONFIG_GLOBAL / NPM_CONFIG_USERCONFIG do for
+        // git/npm), so a lock left by one run cannot make another run's apply skip.
+        this.baseDir = options.baseDir
+            ?? process.env.OTAK_PROXY_LOCK_DIR
+            ?? path.join(os.tmpdir(), 'otak-proxy-v3-locks');
         this.now = options.now ?? (() => Date.now());
     }
 

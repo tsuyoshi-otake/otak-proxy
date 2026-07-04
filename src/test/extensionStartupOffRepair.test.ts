@@ -163,6 +163,7 @@ suite('Extension startup OFF self-repair', () => {
     let originalGitConfigGlobal: string | undefined;
     let originalNpmConfigUserconfig: string | undefined;
     let originalLowerNpmConfigUserconfig: string | undefined;
+    let originalLockDir: string | undefined;
 
     setup(async () => {
         sandbox = sinon.createSandbox();
@@ -170,9 +171,13 @@ suite('Extension startup OFF self-repair', () => {
         originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
         originalNpmConfigUserconfig = process.env.NPM_CONFIG_USERCONFIG;
         originalLowerNpmConfigUserconfig = process.env.npm_config_userconfig;
+        originalLockDir = process.env.OTAK_PROXY_LOCK_DIR;
         process.env.GIT_CONFIG_GLOBAL = path.join(baseDir, 'gitconfig');
         process.env.NPM_CONFIG_USERCONFIG = path.join(baseDir, 'npmrc');
         process.env.npm_config_userconfig = process.env.NPM_CONFIG_USERCONFIG;
+        // Hermetic apply-lock dir so a lock left by a previous run (30s TTL) cannot
+        // make this run's startup apply skip and leave the stale proxy in place.
+        process.env.OTAK_PROXY_LOCK_DIR = path.join(baseDir, 'locks');
 
         sandbox.stub(vscode.window, 'createStatusBarItem').returns(createStatusBarItem());
         sandbox.stub(vscode.window, 'createOutputChannel').returns({
@@ -228,6 +233,11 @@ suite('Extension startup OFF self-repair', () => {
         } else {
             process.env.npm_config_userconfig = originalLowerNpmConfigUserconfig;
         }
+        if (originalLockDir === undefined) {
+            delete process.env.OTAK_PROXY_LOCK_DIR;
+        } else {
+            process.env.OTAK_PROXY_LOCK_DIR = originalLockDir;
+        }
         await fs.rm(baseDir, { recursive: true, force: true });
     });
 
@@ -246,9 +256,112 @@ suite('Extension startup OFF self-repair', () => {
                 npmConfigured: false
             }]
         ]);
-        const extension = require('../extension') as { activate: (context: vscode.ExtensionContext) => Promise<void> };
+        const extension = require('../extension') as {
+            activate: (context: vscode.ExtensionContext) => Promise<void>;
+            whenStartupProxyApplied: () => Promise<void>;
+        };
         await extension.activate(createContext(baseDir, globalState));
+        // The startup enforcement is now a tracked background task (issue #12);
+        // await it before asserting its side effect.
+        await extension.whenStartupProxyApplied();
 
         assert.strictEqual(await readGitProxy(env), undefined);
+    });
+
+    test('activation does not block on the startup proxy application', async function () {
+        this.timeout(10000);
+        // Gate the startup apply so it cannot complete until we release it. If
+        // activate() awaited the apply, this test would hang and time out; the
+        // fact that activate() resolves proves activation is non-blocking (#12).
+        let releaseGate!: () => void;
+        const gate = new Promise<void>(resolve => { releaseGate = resolve; });
+
+        const globalState = new Map<string, unknown>([
+            ['hasInitialSetup', true],
+            ['proxyState', {
+                mode: ProxyMode.Off,
+                gitConfigured: false,
+                vscodeConfigured: false,
+                npmConfigured: false
+            }]
+        ]);
+
+        const extension = require('../extension') as {
+            activate: (context: vscode.ExtensionContext) => Promise<void>;
+            whenStartupProxyApplied: () => Promise<void>;
+            __setStartupApplyRunnerForTest: (runner?: () => Promise<void>) => void;
+        };
+
+        extension.__setStartupApplyRunnerForTest(async () => { await gate; });
+        try {
+            await extension.activate(createContext(baseDir, globalState));
+
+            let applied = false;
+            const tracked = extension.whenStartupProxyApplied().then(() => { applied = true; });
+            await Promise.resolve();
+            assert.strictEqual(applied, false, 'activation must not wait for the gated startup apply');
+
+            releaseGate();
+            await tracked;
+            assert.strictEqual(applied, true, 'startup apply completes once unblocked');
+        } finally {
+            releaseGate();
+            extension.__setStartupApplyRunnerForTest(undefined);
+        }
+    });
+
+    test('startup enforcement reconciles on the latest state, not the activation snapshot', async function () {
+        this.timeout(10000);
+        const env = { ...process.env };
+        // Precondition: a stale git proxy present at activation time.
+        await execFileAsync('git', ['config', '--global', 'http.proxy', 'http://stale.example.com:8080'], { env });
+
+        let releaseGate!: () => void;
+        const gate = new Promise<void>(resolve => { releaseGate = resolve; });
+
+        // Snapshot at activation: Auto (a different apply target than Off below).
+        const store = new Map<string, unknown>([
+            ['hasInitialSetup', true],
+            ['proxyState', {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: '',
+                autoModeOff: false,
+                gitConfigured: false,
+                vscodeConfigured: false,
+                npmConfigured: false
+            }]
+        ]);
+
+        const extension = require('../extension') as {
+            activate: (context: vscode.ExtensionContext) => Promise<void>;
+            whenStartupProxyApplied: () => Promise<void>;
+            __setStartupApplyRunnerForTest: (runner?: () => Promise<void>) => void;
+        };
+
+        // Gate the initial (snapshot) apply so the "user command" below lands while
+        // the startup task is mid-flight.
+        extension.__setStartupApplyRunnerForTest(async () => { await gate; });
+        try {
+            await extension.activate(createContext(baseDir, store));
+
+            // Simulate a user command (toggle to Off) persisting a newer state
+            // while the startup apply is gated/in-flight.
+            store.set('proxyState', {
+                mode: ProxyMode.Off,
+                gitConfigured: false,
+                vscodeConfigured: false,
+                npmConfigured: false
+            });
+
+            releaseGate();
+            await extension.whenStartupProxyApplied();
+
+            // Reconciliation must enforce the LATEST (Off) state — clearing the
+            // proxy — rather than the stale Auto activation snapshot.
+            assert.strictEqual(await readGitProxy(env), undefined);
+        } finally {
+            releaseGate();
+            extension.__setStartupApplyRunnerForTest(undefined);
+        }
     });
 });

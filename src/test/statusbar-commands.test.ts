@@ -117,7 +117,15 @@ suite('StatusBar Commands Availability Tests', () => {
         globalState.set('hasInitialSetup', true);
     });
 
-    teardown(() => {
+    teardown(async () => {
+        // Settle the background startup enforcement (#12) before restoring stubs
+        // and dropping the module, so it cannot leak into later suites via the
+        // shared hermetic git/npm config environment.
+        try {
+            await (require('../extension') as { whenStartupProxyApplied?: () => Promise<void> }).whenStartupProxyApplied?.();
+        } catch {
+            // ignore — errors are logged where the enforcement was started
+        }
         sandbox.restore();
         // Clear the module cache to get fresh instance
         delete require.cache[require.resolve('../extension')];

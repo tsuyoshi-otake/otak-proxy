@@ -42,6 +42,30 @@ let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
 let proxyRemediationService: ProxyRemediationService;
 
+// The startup proxy enforcement can run a full diagnostics pass and delayed
+// retries (5s timeouts each on a broken corporate network). It must not block
+// activation, so it runs as a tracked background task. deactivate() and tests
+// await this to observe completion.
+let startupProxyApplication: Promise<void> = Promise.resolve();
+// Bumped on every activate()/deactivate() so an in-flight startup task can bail
+// out of its post-apply steps if it has been superseded (re-activation) or torn
+// down, instead of starting monitoring/sync after the window is gone.
+let activationGeneration = 0;
+let startupApplyRunner: (state: ProxyState, terminalEnvManager?: TerminalEnvConfigManager) => Promise<void> =
+    (state, terminalEnvManager) => applyStartupProxyState(state, terminalEnvManager);
+
+/** Resolves when the (fire-and-forget) startup proxy enforcement has settled. */
+export function whenStartupProxyApplied(): Promise<void> {
+    return startupProxyApplication;
+}
+
+/** Test-only seam: override the startup apply to assert non-blocking activation. */
+export function __setStartupApplyRunnerForTest(
+    runner?: (state: ProxyState, terminalEnvManager?: TerminalEnvConfigManager) => Promise<void>
+): void {
+    startupApplyRunner = runner ?? ((state, terminalEnvManager) => applyStartupProxyState(state, terminalEnvManager));
+}
+
 type EnvironmentVariableCollectionLike = {
     replace(name: string, value: string): void;
     delete(name: string): void;
@@ -294,6 +318,19 @@ async function loadSharedStateIfEnabled(state: ProxyState): Promise<ProxyState> 
     return updatedState;
 }
 
+/**
+ * A stable signature of everything applyStartupProxyState acts on. Used to detect
+ * whether the persisted state changed while the (slow) startup enforcement ran,
+ * so we can reconcile on the latest instead of a stale activation snapshot (#12).
+ */
+function startupEnforcementTarget(state: ProxyState): string {
+    return JSON.stringify({
+        mode: state.mode,
+        activeUrl: proxyStateManager.getActiveProxyUrl(state),
+        autoModeOff: state.autoModeOff === true
+    });
+}
+
 async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: TerminalEnvConfigManager): Promise<void> {
     const activeUrl = proxyStateManager.getActiveProxyUrl(state);
 
@@ -406,9 +443,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     state = await proxyStateManager.getState();
     state = await startSyncAndLoadSharedState(state);
 
-    await applyStartupProxyState(state, services.terminalEnvManager);
-    await updateMonitoringForState(state);
-    await publishStartupSyncState(state);
+    // Run the whole startup enforcement (apply -> monitoring -> sync) as one
+    // ordered background task so activation is not blocked on diagnostics passes
+    // + delayed retries (#12). Keeping the steps sequential (rather than racing the
+    // startup apply against the immediate monitoring check, whose apply lock skips
+    // rather than queues) keeps them from diverging from the saved state. The
+    // config listener stays synchronous: it is cheap and should be live immediately.
+    const generation = ++activationGeneration;
+    startupProxyApplication = (async () => {
+        // A user command (e.g. toggle) can run the moment activation resolves and
+        // persist a newer state while this slow task is mid-flight. Reconcile until
+        // the persisted state stops changing under us (bounded), so we finish
+        // owning the state the user last chose — never a stale snapshot. This
+        // matters most for monitoring, which is the reconciliation owner: starting
+        // or stopping it from a stale mode can strand the config (e.g. saved=Auto
+        // but proxy cleared and the monitor stopped) with nothing left to fix it.
+        // The bound keeps a pathological command storm from looping forever; the
+        // tiny remaining window (a command landing between the final read and the
+        // monitoring update) is the same irreducible concurrency the steady-state
+        // monitor-vs-command path already has. (#12)
+        let target = state;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const applyTarget = attempt === 0 ? startupApplyRunner : applyStartupProxyState;
+            await applyTarget(target, services.terminalEnvManager);
+            if (generation !== activationGeneration) {
+                return;
+            }
+            const latest = await proxyStateManager.getState();
+            const stable = startupEnforcementTarget(latest) === startupEnforcementTarget(target);
+            target = latest;
+            if (stable) {
+                break;
+            }
+        }
+        if (generation !== activationGeneration) {
+            return;
+        }
+        await updateMonitoringForState(target);
+        await publishStartupSyncState(target);
+    })().catch(error => Logger.warn('Startup proxy enforcement failed:', error));
+
     registerAutoTestConfigListener(context);
 }
 
@@ -416,7 +490,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
  * Deactivate the extension
  * Clean up resources
  */
+/**
+ * Waits for the in-flight startup enforcement to settle, but never longer than
+ * timeoutMs so a stuck apply cannot hang teardown/shutdown indefinitely.
+ */
+async function settleStartupApplication(timeoutMs: number): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>(resolve => {
+        timer = setTimeout(() => {
+            Logger.warn(`Startup proxy enforcement did not settle within ${timeoutMs}ms; continuing teardown.`);
+            resolve();
+        }, timeoutMs);
+        timer.unref?.();
+    });
+    try {
+        await Promise.race([startupProxyApplication.catch(() => undefined), timeout]);
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
+}
+
 export async function deactivate(): Promise<void> {
+    // Supersede any in-flight startup task so it does not start monitoring/sync
+    // after teardown (e.g. if the bounded settle below times out), then let it
+    // settle (bounded) before tearing down so we do not stop it mid-apply (#12).
+    activationGeneration++;
+    await settleStartupApplication(15000);
+    startupProxyApplication = Promise.resolve();
+
     // Stop SyncManager (Feature: multi-instance-sync)
     if (syncManager) {
         try {
