@@ -364,6 +364,85 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
+    test('ProxyRuntimeDiagnostics issue fingerprints are stable across restarts (no process id)', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', 'http://vscode.example.com:8080', 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoModeOff: true,
+                    gitConfigured: false,
+                    npmConfigured: false,
+                    vscodeConfigured: false
+                }),
+                {
+                    commandRunner: async (command, args) => {
+                        if (command === 'git' && args.includes('http.proxy')) {
+                            return { stdout: 'http://git.example.com:8080\n', stderr: '' };
+                        }
+                        return { stdout: '', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            assert.ok(report.issues.length > 0, 'scenario must produce at least one issue');
+            for (const issue of report.issues) {
+                // The fingerprint keys the cross-window notification cooldown in
+                // globalState; embedding the PID resets the cooldown on every
+                // reload and leaks one orphaned record per restart.
+                assert.ok(
+                    !issue.fingerprint.includes(`pid-${process.pid}`),
+                    `fingerprint must not embed the process id: ${issue.fingerprint}`
+                );
+            }
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics reads git and npm config concurrently (keeps the locked critical section short)', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', undefined, 'on');
+        const inFlight = { git: 0, npm: 0 };
+        const maxInFlight = { git: 0, npm: 0 };
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({ mode: ProxyMode.Manual, manualProxyUrl: 'http://proxy.example.com:8080' }),
+                {
+                    commandRunner: async (command, _args) => {
+                        const family = command === 'git'
+                            ? 'git' as const
+                            : (command === 'netsh' || command === 'reg') ? undefined : 'npm' as const;
+                        if (family) {
+                            inFlight[family] += 1;
+                            maxInFlight[family] = Math.max(maxInFlight[family], inFlight[family]);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 25));
+                        if (family) {
+                            inFlight[family] -= 1;
+                        }
+                        return { stdout: '', stderr: '' };
+                    }
+                }
+            );
+
+            await diagnostics.run({ bypassSlowCache: true });
+
+            assert.ok(maxInFlight.git >= 2, `git config reads must overlap, saw max in-flight ${maxInFlight.git}`);
+            assert.ok(maxInFlight.npm >= 2, `npm config reads must overlap, saw max in-flight ${maxInFlight.npm}`);
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('ProxyRuntimeDiagnostics caches slow command diagnostics within the configured TTL', async () => {
         const store: Store = new Map();
         const secrets = new Map<string, string>();

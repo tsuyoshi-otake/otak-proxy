@@ -135,12 +135,41 @@ export class ApplyLockService {
         }
     }
 
+    /**
+     * Extends the lease of a lock this process still holds. No-ops (returns
+     * false) when the lock was reclaimed by another holder in the meantime.
+     */
+    async renew(handle: ApplyLockHandle, ttlMs: number): Promise<boolean> {
+        const record = await this.readLock(handle.path);
+        if (!record || record.token !== handle.token) {
+            return false;
+        }
+
+        const renewed: ApplyLockRecord = { ...record, expiresAt: this.now() + ttlMs };
+        try {
+            await fs.writeFile(handle.path, JSON.stringify(renewed), 'utf8');
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     async withLocks<T>(
         targets: readonly ApplyLockRequest[],
         ttlMs: number,
         task: () => Promise<T>
     ): Promise<{ acquired: true; value: T } | { acquired: false; failed: ApplyLockAcquireResult }> {
         const acquired: ApplyLockHandle[] = [];
+        // The critical section (diagnostics passes, delayed retries) can
+        // legitimately outlive ttlMs. Keep the lease alive while the task runs
+        // so other windows never see the lock as stale and reclaim it mid-flight.
+        const renewEveryMs = Math.max(50, Math.floor(ttlMs / 3));
+        const renewTimer = setInterval(() => {
+            for (const handle of acquired) {
+                void this.renew(handle, ttlMs);
+            }
+        }, renewEveryMs);
+        renewTimer.unref?.();
         try {
             for (const target of [...targets].sort((a, b) => a.targetId.localeCompare(b.targetId))) {
                 const result = await this.tryAcquire(target, ttlMs);
@@ -151,6 +180,7 @@ export class ApplyLockService {
             }
             return { acquired: true, value: await task() };
         } finally {
+            clearInterval(renewTimer);
             for (const handle of acquired.reverse()) {
                 await this.release(handle);
             }

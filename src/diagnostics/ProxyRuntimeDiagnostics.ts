@@ -68,10 +68,6 @@ const defaultCommandRunner: CommandRunner = async (command, args) => execFileAsy
     windowsHide: true
 });
 
-function currentInstanceId(): string {
-    return `pid-${process.pid}`;
-}
-
 function sanitizeConfigInspect(inspect: unknown): unknown {
     if (!inspect || typeof inspect !== 'object') {
         return inspect;
@@ -329,9 +325,11 @@ export class ProxyRuntimeDiagnostics {
     private async collectGitDiagnostics(): Promise<{ observation: Record<string, unknown>; issues: ProxyIssue[] }> {
         const observation: Record<string, unknown> = {};
         const issues: ProxyIssue[] = [];
-        const httpProxy = await this.readGitConfig(['config', '--global', '--get', 'http.proxy']);
-        const httpsProxy = await this.readGitConfig(['config', '--global', '--get', 'https.proxy']);
-        const overrides = await this.readGitConfig(['config', '--get-regexp', '^(remote\\..*\\.proxy|http\\..*\\.proxy)$']);
+        const [httpProxy, httpsProxy, overrides] = await Promise.all([
+            this.readGitConfig(['config', '--global', '--get', 'http.proxy']),
+            this.readGitConfig(['config', '--global', '--get', 'https.proxy']),
+            this.readGitConfig(['config', '--get-regexp', '^(remote\\..*\\.proxy|http\\..*\\.proxy)$'])
+        ]);
         observation.httpProxy = httpProxy;
         observation.legacyHttpsProxy = httpsProxy;
         observation.overrides = overrides;
@@ -355,10 +353,12 @@ export class ProxyRuntimeDiagnostics {
     }
 
     private async collectNpmDiagnostics(): Promise<{ observation: Record<string, unknown>; issues: ProxyIssue[] }> {
-        const proxy = normalizeNpmValue(await this.readNpmConfig('proxy') ?? '');
-        const httpsProxy = normalizeNpmValue(await this.readNpmConfig('https-proxy') ?? '');
-        const noproxy = normalizeNpmValue(await this.readNpmConfig('noproxy') ?? '');
-        const registry = normalizeNpmValue(await this.readNpmConfig('registry') ?? '');
+        const [proxy, httpsProxy, noproxy, registry] = (await Promise.all([
+            this.readNpmConfig('proxy'),
+            this.readNpmConfig('https-proxy'),
+            this.readNpmConfig('noproxy'),
+            this.readNpmConfig('registry')
+        ])).map(value => normalizeNpmValue(value ?? ''));
         const observation = { proxy, httpsProxy, noproxy, registry };
         const issues: ProxyIssue[] = [];
 
@@ -578,7 +578,9 @@ export class ProxyRuntimeDiagnostics {
     ): ProxyIssue {
         return {
             id,
-            fingerprint: `${id}:${targetId}:${currentInstanceId()}`,
+            // Stable across restarts and windows: this keys the cross-window
+            // notification cooldown persisted in globalState.
+            fingerprint: `${id}:${targetId}`,
             category,
             impact,
             targetId,
