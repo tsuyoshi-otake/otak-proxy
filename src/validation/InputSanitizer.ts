@@ -1,11 +1,21 @@
 /**
  * InputSanitizer - Sanitizes proxy URLs for safe display in logs, UI, and error messages
- * 
+ *
  * This class ensures that sensitive credentials (passwords) are never exposed in:
  * - Log files
  * - UI elements (status bar, notifications)
  * - Error messages
  * - Any other display contexts
+ *
+ * Redaction overlap (#16): this is the URL-shaped, username-preserving masker for
+ * the Logger/UI hot path — it emits `user:****@host` from a single proxy URL. The
+ * broader, stricter masker for arbitrary diagnostics/remediation text is
+ * {@link ../security/ProxySecretRedactor.ProxySecretRedactor}, which fully masks
+ * credentials (`<credentials>@`) plus headers, tokens, and known secrets. The two
+ * are deliberately separate (different placeholders and username policy); if you
+ * change credential-masking behavior here, mirror it there so they cannot drift.
+ * Unifying them is tracked as follow-up work, not done inline, because this masker
+ * feeds ~two dozen UI/log call sites whose output format would otherwise change.
  */
 export class InputSanitizer {
     /**

@@ -35,6 +35,19 @@ function encodedForms(secret: string): string[] {
     return forms;
 }
 
+/**
+ * ProxySecretRedactor - the strict, general-purpose redactor for arbitrary
+ * diagnostics/remediation/sync text and object graphs. It fully masks credentials
+ * (`<credentials>@`) and also strips Authorization/Basic headers, npm auth tokens,
+ * Git extraHeaders, caller-supplied known secrets (incl. url/base64 encodings),
+ * and control/ANSI sequences.
+ *
+ * Redaction overlap (#16): the Logger/UI hot path uses the lighter,
+ * username-preserving {@link ../validation/InputSanitizer.InputSanitizer}
+ * (`user:****@host`) instead. The two are intentionally distinct (different
+ * placeholders and username policy); keep credential-masking behavior in sync
+ * across both. Merging them is deferred follow-up work, not done inline.
+ */
 export class ProxySecretRedactor {
     redactString(value: string, knownSecrets: readonly string[] = []): string {
         let redacted = value

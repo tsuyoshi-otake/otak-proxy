@@ -1,5 +1,27 @@
 # Change Log
 
+## [3.1.0] - 2026-07-04
+
+### Fixed
+- Read the WinHTTP proxy state from the locale-independent `WinHttpSettings` registry binary, so proxy diagnostics no longer fail to parse localized `netsh winhttp show proxy` output on non-English/Japanese Windows (#11).
+- Run startup proxy enforcement off the activation critical path via a bounded background reconciliation loop, so a slow diagnostics pass can no longer delay extension activation (#12).
+- Localize the `otak: Diagnose Proxy State` output: every notification and target/reason label now resolves through the 16 shipped locale files instead of hard-coded English (#13).
+- Preserve every distinct proxy credential during the v2→v3 SecretStorage migration (previously only one survived when several authenticated proxy URLs existed), and warn when duplicates cannot be migrated (#14).
+- Key flap-tracker fingerprints on stable proxy identity so rapidly changing proxy values can no longer bypass flap suppression and retry escalation (#15).
+- Distinguish a Git config read failure (unparsable `.gitconfig` or missing `git`) from an unset key, so read failures are surfaced as informational instead of triggering retryable convergence mismatches that retries cannot fix (#16).
+- Renew the apply-lock lease during long applies and shorten the locked critical section so concurrent windows contend for a shorter time.
+
+### Changed
+- The manual `otak: Diagnose Proxy State` command now always reads fresh state, bypassing the slow-diagnostics TTL cache (#16).
+- WinINet diagnostics query only the four required registry values individually instead of dumping the entire Internet Settings key (#16).
+- Run WinHTTP/WinINet diagnostics wherever the extension host is a Windows host, including Remote-SSH to Windows, not only the local UI host (#16).
+- Clarify the diagnostic issue notification wording (#9).
+- Remove dead internal API surface: unused `ProxyApplyTrigger` values and the unpopulated `TargetOwnership.previousUserValue` field (#16).
+
+### Security
+- Close credential redaction gaps found in the v3 review so authenticated URLs, authorization headers, and tokens are consistently masked in logs and diagnostics.
+- Pin the v3 remediation safety settings to machine scope so synced or workspace configuration cannot weaken them.
+
 ## [3.0.0] - 2026-07-04
 
 ### Added

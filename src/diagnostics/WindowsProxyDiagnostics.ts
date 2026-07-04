@@ -226,22 +226,31 @@ export class WindowsProxyDiagnostics {
     }
 
     private async observeWinInet(): Promise<Partial<WindowsProxyObservation>> {
+        // Query only the 4 values we need, individually, rather than dumping the
+        // whole Internet Settings key with `/v *` — that key holds many unrelated
+        // values which future debug logging of the raw output could expose (#16).
+        const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+        const [proxyEnable, proxyServer, autoConfigUrl, proxyOverride] = await Promise.all([
+            this.readWinInetValue(key, 'ProxyEnable'),
+            this.readWinInetValue(key, 'ProxyServer'),
+            this.readWinInetValue(key, 'AutoConfigURL'),
+            this.readWinInetValue(key, 'ProxyOverride')
+        ]);
+        return {
+            winInetProxyEnable: proxyEnable !== undefined ? proxyEnable.endsWith('1') : undefined,
+            winInetProxyServer: proxyServer,
+            winInetAutoConfigUrl: autoConfigUrl,
+            winInetProxyOverride: proxyOverride
+        };
+    }
+
+    private async readWinInetValue(key: string, name: string): Promise<string | undefined> {
         try {
-            const { stdout } = await this.runner('reg', [
-                'query',
-                'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-                '/v',
-                '*'
-            ]);
-            const proxyEnable = parseRegValue(stdout, 'ProxyEnable');
-            return {
-                winInetProxyEnable: proxyEnable ? proxyEnable.endsWith('1') : undefined,
-                winInetProxyServer: parseRegValue(stdout, 'ProxyServer'),
-                winInetAutoConfigUrl: parseRegValue(stdout, 'AutoConfigURL'),
-                winInetProxyOverride: parseRegValue(stdout, 'ProxyOverride')
-            };
+            const { stdout } = await this.runner('reg', ['query', key, '/v', name]);
+            return parseRegValue(stdout, name);
         } catch {
-            return {};
+            // Value absent (reg exits non-zero) or reg unavailable.
+            return undefined;
         }
     }
 }

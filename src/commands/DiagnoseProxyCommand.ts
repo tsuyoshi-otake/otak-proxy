@@ -55,6 +55,8 @@ function issueReasonKey(issue: ProxyIssue): string | undefined {
             return 'diagnose.reason.winhttpParseUnavailable';
         case 'windows.wininet.pac':
             return 'diagnose.reason.wininetPac';
+        case 'git.readUnavailable':
+            return 'diagnose.reason.gitReadUnavailable';
         case 'vscode.proxySupport.off':
             return 'diagnose.reason.proxySupportOff';
         case 'vscode.launch.proxyFlags':
@@ -111,7 +113,9 @@ export async function executeDiagnoseProxy(
     const redactor = new ProxySecretRedactor();
     try {
         const diagnostics = new ProxyRuntimeDiagnostics(context, getProxyState);
-        const report = await diagnostics.run();
+        // A user-invoked diagnosis should read fresh state, not a slow-diagnostics
+        // cache entry up to slowDiagnosticsTtlMs (default 5 min) old (#16).
+        const report = await diagnostics.run({ bypassSlowCache: true });
         const channel = getDiagnosticsChannel();
         channel.info(i18n.t('diagnose.generatedAt', { timestamp: String(report.generatedAt) }));
         channel.info(JSON.stringify(redactor.redactValue(report), null, 2));

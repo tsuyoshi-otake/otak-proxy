@@ -109,6 +109,13 @@ export class FlapTracker {
     }
 
     async shouldNotify(fingerprint: string, settings: FlapTrackerSettings): Promise<boolean> {
+        // Known, accepted cross-window race (#16): this is a get-then-update on
+        // shared globalState, and VS Code's Memento offers no atomic
+        // compare-and-set. Two windows entering here simultaneously can both read
+        // a pre-cooldown record and both decide to notify, so the notification
+        // cooldown can leak at most one duplicate warning across windows. That is
+        // cosmetic; guarding it with a file lock (as apply uses) would add
+        // disproportionate cost for a duplicate notification, so it is left as-is.
         const state = this.getState();
         const record = this.getRecord(state, fingerprint);
         const now = this.now();

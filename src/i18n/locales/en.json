@@ -295,5 +295,6 @@
   "diagnose.target.windowsWininet": "WinINet proxy diagnostics",
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP proxy output could not be parsed",
   "diagnose.reason.wininetPac": "a proxy auto-config (PAC) URL is configured",
+  "diagnose.reason.gitReadUnavailable": "git configuration could not be read",
   "migration.credentialsDropped": "otak-proxy could not migrate {count} duplicate proxy credential(s) to secure storage during the v3 upgrade. Re-enter them if a proxy stops authenticating."
 }

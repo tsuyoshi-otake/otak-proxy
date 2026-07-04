@@ -124,7 +124,6 @@ export interface TargetOwnership {
     fingerprintKeyRef?: string;
     previousUserPublicFingerprint?: string;
     previousUserSecretRef?: string;
-    previousUserValue?: string;
     lastSuccessfulApplyAt?: number;
     lastObservedHash?: string;
     lastObservedAt?: number;

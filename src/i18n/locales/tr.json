@@ -295,5 +295,6 @@
   "diagnose.target.windowsWininet": "WinINet proxy tanılaması",
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP proxy çıktısı ayrıştırılamadı",
   "diagnose.reason.wininetPac": "bir proxy otomatik yapılandırma (PAC) URL'si yapılandırılmış",
+  "diagnose.reason.gitReadUnavailable": "git yapılandırması okunamadı",
   "migration.credentialsDropped": "otak-proxy, v3 yükseltmesi sırasında {count} yinelenen proxy kimlik bilgisini güvenli depolamaya taşıyamadı. Bir proxy kimlik doğrulamayı durdurursa bunları yeniden girin."
 }

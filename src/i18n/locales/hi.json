@@ -295,5 +295,6 @@
   "diagnose.target.windowsWininet": "WinINet प्रॉक्सी निदान",
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP प्रॉक्सी आउटपुट का विश्लेषण नहीं किया जा सका",
   "diagnose.reason.wininetPac": "एक प्रॉक्सी ऑटो-कॉन्फ़िग (PAC) URL कॉन्फ़िगर है",
+  "diagnose.reason.gitReadUnavailable": "git कॉन्फ़िगरेशन पढ़ा नहीं जा सका",
   "migration.credentialsDropped": "otak-proxy v3 अपग्रेड के दौरान {count} डुप्लिकेट प्रॉक्सी क्रेडेंशियल को सुरक्षित संग्रहण में माइग्रेट नहीं कर सका। यदि कोई प्रॉक्सी प्रमाणीकरण करना बंद कर दे तो उन्हें फिर से दर्ज करें।"
 }

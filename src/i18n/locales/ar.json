@@ -295,5 +295,6 @@
   "diagnose.target.windowsWininet": "تشخيص وكيل WinINet",
   "diagnose.reason.winhttpParseUnavailable": "تعذّر تحليل مخرجات وكيل WinHTTP",
   "diagnose.reason.wininetPac": "تم تهيئة عنوان URL للتكوين التلقائي للوكيل (PAC)",
+  "diagnose.reason.gitReadUnavailable": "تعذّرت قراءة تكوين git",
   "migration.credentialsDropped": "تعذّر على otak-proxy ترحيل {count} من بيانات اعتماد الوكيل المكررة إلى التخزين الآمن أثناء الترقية إلى v3. أعد إدخالها إذا توقف أحد الوكلاء عن المصادقة."
 }

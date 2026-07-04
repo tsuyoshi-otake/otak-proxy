@@ -86,6 +86,22 @@ function normalizeNpmValue(value: string): string | undefined {
     return trimmed && trimmed !== 'undefined' && trimmed !== 'null' ? trimmed : undefined;
 }
 
+interface GitConfigRead {
+    value?: string;
+    readFailed?: boolean;
+}
+
+/**
+ * `git config --get[-regexp]` exits 1 when the requested key/section is simply
+ * not present — the normal "not configured" case. Any other exit code (e.g. 3 =
+ * unparsable .gitconfig) or a spawn failure (git not installed surfaces a string
+ * `code` such as 'ENOENT') means we could not read the value at all, which must
+ * not be mistaken for "unset" (#16).
+ */
+function isGitKeyUnsetError(error: unknown): boolean {
+    return (error as { code?: unknown } | null)?.code === 1;
+}
+
 export class ProxyRuntimeDiagnostics {
     private readonly redactor = new ProxySecretRedactor();
     private readonly commandRunner: CommandRunner;
@@ -330,22 +346,27 @@ export class ProxyRuntimeDiagnostics {
             this.readGitConfig(['config', '--global', '--get', 'https.proxy']),
             this.readGitConfig(['config', '--get-regexp', '^(remote\\..*\\.proxy|http\\..*\\.proxy)$'])
         ]);
-        observation.httpProxy = httpProxy;
-        observation.legacyHttpsProxy = httpsProxy;
-        observation.overrides = overrides;
+        observation.httpProxy = httpProxy.value;
+        observation.legacyHttpsProxy = httpsProxy.value;
+        observation.overrides = overrides.value;
+        // Only the two --get reads feed convergence checking; the regexp read
+        // only informs git.effectiveOverride. Flag a convergence-blocking read
+        // failure so the managed-mismatch check can skip an unreadable value
+        // instead of treating it as "unset" (#16).
+        observation.readFailed = Boolean(httpProxy.readFailed || httpsProxy.readFailed);
 
-        if (httpsProxy) {
+        if (httpsProxy.value) {
             issues.push(this.issue('git.legacyHttpsProxy', 'info', 'informational', 'git.global.https.proxy', 'workspaceHost', {
                 source: 'git config',
                 capability: 'readOnly',
-                evidence: { legacyHttpsProxy: httpsProxy }
+                evidence: { legacyHttpsProxy: httpsProxy.value }
             }));
         }
-        if (overrides) {
+        if (overrides.value) {
             issues.push(this.issue('git.effectiveOverride', 'externalOverride', 'informational', 'git.override', 'workspaceHost', {
                 source: 'git config',
                 capability: 'readOnly',
-                evidence: { overrides }
+                evidence: { overrides: overrides.value }
             }));
         }
 
@@ -377,19 +398,40 @@ export class ProxyRuntimeDiagnostics {
         state: ProxyState,
         observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> }
     ): ProxyIssue[] {
+        const issues: ProxyIssue[] = [];
+        const gitReadFailed = this.observedFlag(observations.git, 'readFailed');
+
+        // When we manage git's proxy but could not read git config at all (e.g.
+        // an unparsable .gitconfig or a missing git binary), we cannot verify
+        // convergence. Surface it as informational and skip the retryable git
+        // mismatch/residual below: retries cannot fix a read failure, and
+        // treating an unreadable value as "unset" would demand pointless apply
+        // retries (#16).
+        if (state.gitConfigured && gitReadFailed) {
+            issues.push(this.issue('git.readUnavailable', 'capabilityUnavailable', 'informational', 'git.global.proxy', 'workspaceHost', {
+                source: 'git config',
+                capability: 'unsupported',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    gitConfigured: state.gitConfigured
+                }
+            }));
+        }
+
         if (this.expectsProxyDisabled(state)) {
-            return this.collectManagedResidualIssues(state, observations);
+            issues.push(...this.collectManagedResidualIssues(state, observations));
+            return issues;
         }
 
         const expectedProxy = this.expectedActiveProxyUrl(state);
         if (!expectedProxy) {
-            return [];
+            return issues;
         }
 
-        const issues: ProxyIssue[] = [];
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
         const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
-        if (state.gitConfigured &&
+        if (state.gitConfigured && !gitReadFailed &&
             (!this.proxyMatchesExpected(gitHttpProxy, expectedProxy) ||
                 !this.proxyMatchesExpected(gitHttpsProxy, expectedProxy))) {
             issues.push(this.issue('git.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
@@ -529,6 +571,10 @@ export class ProxyRuntimeDiagnostics {
         return typeof value === 'string' && value.trim() ? value : undefined;
     }
 
+    private observedFlag(observation: Record<string, unknown> | undefined, key: string): boolean {
+        return observation?.[key] === true;
+    }
+
     private proxyMatchesExpected(observed: string | undefined, expected: string): boolean {
         if (!observed) {
             return false;
@@ -545,12 +591,17 @@ export class ProxyRuntimeDiagnostics {
         }
     }
 
-    private async readGitConfig(args: string[]): Promise<string | undefined> {
+    private async readGitConfig(args: string[]): Promise<GitConfigRead> {
         try {
             const { stdout } = await this.commandRunner('git', args);
-            return stdout.trim() || undefined;
-        } catch {
-            return undefined;
+            return { value: stdout.trim() || undefined };
+        } catch (error) {
+            // Exit 1 means the key is unset; anything else (bad config, missing
+            // git) is a read failure we must not report as "unset" (#16).
+            if (isGitKeyUnsetError(error)) {
+                return { value: undefined };
+            }
+            return { value: undefined, readFailed: true };
         }
     }
 

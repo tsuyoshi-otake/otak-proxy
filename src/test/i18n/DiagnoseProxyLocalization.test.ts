@@ -51,7 +51,8 @@ const DIAGNOSE_KEYS = [
     'diagnose.reason.effectiveOverride',
     'diagnose.reason.npmNoproxy',
     'diagnose.reason.winhttpParseUnavailable',
-    'diagnose.reason.wininetPac'
+    'diagnose.reason.wininetPac',
+    'diagnose.reason.gitReadUnavailable'
 ];
 
 function localesDir(): string {

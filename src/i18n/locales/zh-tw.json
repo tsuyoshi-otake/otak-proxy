@@ -295,5 +295,6 @@
   "diagnose.target.windowsWininet": "WinINet Proxy 診斷",
   "diagnose.reason.winhttpParseUnavailable": "無法解析 WinHTTP Proxy 輸出",
   "diagnose.reason.wininetPac": "設定了 Proxy 自動設定 (PAC) URL",
+  "diagnose.reason.gitReadUnavailable": "無法讀取 git 設定",
   "migration.credentialsDropped": "在升級到 v3 期間，otak-proxy 無法將 {count} 個重複的 Proxy 認證遷移到安全儲存。如果 Proxy 停止驗證，請重新輸入。"
 }

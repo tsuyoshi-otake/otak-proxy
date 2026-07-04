@@ -295,5 +295,6 @@
   "diagnose.target.windowsWininet": "WinINet プロキシ診断",
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP プロキシの出力を解析できませんでした",
   "diagnose.reason.wininetPac": "プロキシ自動構成 (PAC) の URL が設定されています",
+  "diagnose.reason.gitReadUnavailable": "git 設定を読み取れませんでした",
   "migration.credentialsDropped": "otak-proxy は v3 へのアップグレード中に {count} 件の重複したプロキシ資格情報をセキュアストレージへ移行できませんでした。プロキシの認証が通らなくなった場合は再入力してください。"
 }

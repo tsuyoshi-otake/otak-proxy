@@ -53,7 +53,11 @@ export class ExecutionContextDetector {
         const extensionHostLocation = getExtensionHostLocation(this.context);
         const workspaceHostKind = getWorkspaceHostKind(extensionHostLocation);
         const isWeb = extensionHostLocation === 'web';
-        const runsInLocalWindowsHost = extensionHostLocation === 'localUi' && process.platform === 'win32';
+        // reg.exe / netsh run wherever the extension host process runs on Windows,
+        // including a Remote-SSH connection to a Windows host (remoteWorkspace +
+        // win32). Gating on localUi skipped WinHTTP/WinINet diagnostics there even
+        // though they work; gate on the host actually being Windows instead (#16).
+        const runsOnWindowsHost = !isWeb && process.platform === 'win32';
 
         return {
             uiKind: vscode.env.uiKind === vscode.UIKind.Web ? 'web' : 'desktop',
@@ -61,7 +65,7 @@ export class ExecutionContextDetector {
             extensionHostLocation,
             workspaceHostKind,
             canUseChildProcess: !isWeb,
-            canReadWindowsRegistry: runsInLocalWindowsHost,
+            canReadWindowsRegistry: runsOnWindowsHost,
             canWriteVSCodeUserSettings: !isWeb,
             canAccessWorkspaceFiles: !isWeb && Boolean(vscode.workspace.workspaceFolders?.length)
         };

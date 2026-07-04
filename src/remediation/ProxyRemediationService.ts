@@ -16,12 +16,10 @@ import { FlapTracker, FlapTrackerSettings } from './FlapTracker';
 
 export type ProxyApplyTrigger =
     | 'manual'
-    | 'configChange'
     | 'startup'
     | 'sync'
     | 'autoDetection'
-    | 'autoReachability'
-    | 'initialSetup';
+    | 'autoReachability';
 
 export interface SafeProxyApplyOptions extends ProxyApplyOptions {
     trigger: ProxyApplyTrigger;

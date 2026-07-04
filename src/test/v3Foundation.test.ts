@@ -531,6 +531,100 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
+    test('ProxyRuntimeDiagnostics downgrades a git config READ FAILURE to informational (no retryable mismatch)', async () => {
+        // A corrupted .gitconfig or a missing git binary makes `git config --get`
+        // fail with a non-1 exit (or a spawn error). That must NOT be mistaken for
+        // "proxy unset" and reported as the retryable git.managedProxyMismatch,
+        // because retrying an apply cannot fix an unreadable config (#16).
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', 'http://expected.example.com:8080', 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://expected.example.com:8080',
+                    autoModeOff: false,
+                    gitConfigured: true,
+                    npmConfigured: false,
+                    vscodeConfigured: true
+                }),
+                {
+                    commandRunner: async (command) => {
+                        if (command === 'git') {
+                            // Exit 3 = unparsable .gitconfig: a read failure, which
+                            // is distinct from exit 1 (the key is simply unset).
+                            const error = new Error('fatal: bad config line') as Error & { code: number };
+                            error.code = 3;
+                            throw error;
+                        }
+                        if (command === 'reg' || command === 'netsh') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            assert.ok(!issueIds.has('git.managedProxyMismatch'), 'a read failure must not become a retryable mismatch');
+            assert.ok(issueIds.has('git.readUnavailable'), 'a read failure must be surfaced as an informational issue');
+            const readIssue = report.issues.find(issue => issue.id === 'git.readUnavailable');
+            assert.strictEqual(readIssue?.impact, 'informational');
+            assert.strictEqual(readIssue?.autoAction, 'none');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics still reports git.managedProxyMismatch when the proxy is genuinely unset (exit 1)', async () => {
+        // `git config --get` exits 1 when the key is not set. With the proxy
+        // expected ON and git managed, that IS a real convergence gap a retry can
+        // fix, so the retryable mismatch must still fire; only true read failures
+        // are downgraded.
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', 'http://expected.example.com:8080', 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://expected.example.com:8080',
+                    autoModeOff: false,
+                    gitConfigured: true,
+                    npmConfigured: false,
+                    vscodeConfigured: false
+                }),
+                {
+                    commandRunner: async (command) => {
+                        if (command === 'git') {
+                            // Exit 1 = key unset (the normal "not configured" case).
+                            const error = new Error('') as Error & { code: number };
+                            error.code = 1;
+                            throw error;
+                        }
+                        if (command === 'reg' || command === 'netsh') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            assert.ok(issueIds.has('git.managedProxyMismatch'), 'a genuinely unset managed proxy is a real, retryable mismatch');
+            assert.ok(!issueIds.has('git.readUnavailable'), 'exit 1 is "unset", not a read failure');
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('ProxyRuntimeDiagnostics issue fingerprints are stable across restarts (no process id)', async () => {
         const store: Store = new Map();
         const secrets = new Map<string, string>();
