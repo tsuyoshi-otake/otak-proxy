@@ -3,6 +3,7 @@ import { ProxyState } from '../core/types';
 import { getHighestPriorityIssue, type ProxyIssue } from '../core/v3Types';
 import { ProxyRuntimeDiagnostics, type ProxyDiagnosticReport } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 
 let diagnosticsChannel: vscode.LogOutputChannel | undefined;
@@ -14,98 +15,114 @@ function getDiagnosticsChannel(): vscode.LogOutputChannel {
     return diagnosticsChannel;
 }
 
-function targetLabel(issue: ProxyIssue): string {
-    const labels: Record<string, string> = {
-        'git.global.proxy': 'Git global proxy',
-        'git.global.https.proxy': 'Git global https.proxy',
-        'git.override': 'Git proxy override',
-        'npm.user.proxy': 'npm user proxy',
-        'npm.noproxy': 'npm noproxy',
-        'vscode.http.proxy': 'VS Code http.proxy',
-        'vscode.http.proxySupport': 'VS Code proxy support',
-        'vscode.launch.argv': 'VS Code launch proxy flags',
-        'terminal.env.inherited': 'Terminal proxy environment',
-        'terminal.existing': 'Existing terminals',
-        'diagnostics.childProcess': 'Git/npm diagnostics',
-        'windows': 'Windows proxy diagnostics'
-    };
+// Maps a diagnostic targetId to its localized label key. Kept as data (not inline
+// strings) so every target is localized through the locale files (issue #13).
+const TARGET_LABEL_KEYS: Record<string, string> = {
+    'git.global.proxy': 'diagnose.target.gitGlobalProxy',
+    'git.global.https.proxy': 'diagnose.target.gitGlobalHttpsProxy',
+    'git.override': 'diagnose.target.gitOverride',
+    'npm.user.proxy': 'diagnose.target.npmUserProxy',
+    'npm.noproxy': 'diagnose.target.npmNoproxy',
+    'vscode.http.proxy': 'diagnose.target.vscodeHttpProxy',
+    'vscode.http.proxySupport': 'diagnose.target.vscodeHttpProxySupport',
+    'vscode.launch.argv': 'diagnose.target.vscodeLaunchArgv',
+    'terminal.env.inherited': 'diagnose.target.terminalEnvInherited',
+    'terminal.existing': 'diagnose.target.terminalExisting',
+    'diagnostics.childProcess': 'diagnose.target.diagnosticsChildProcess',
+    'windows': 'diagnose.target.windows',
+    'windows.winhttp': 'diagnose.target.windowsWinhttp',
+    'windows.wininet': 'diagnose.target.windowsWininet'
+};
 
-    return labels[issue.targetId] ?? issue.targetId;
+function targetLabel(issue: ProxyIssue): string {
+    const key = TARGET_LABEL_KEYS[issue.targetId];
+    return key ? I18nManager.getInstance().t(key) : issue.targetId;
+}
+
+function issueReasonKey(issue: ProxyIssue): string | undefined {
+    if (issue.id.endsWith('.managedProxyResidual')) {
+        return 'diagnose.reason.managedProxyResidual';
+    }
+    if (issue.id.endsWith('.managedProxyMismatch')) {
+        return 'diagnose.reason.managedProxyMismatch';
+    }
+    switch (issue.id) {
+        case 'diagnostics.childProcess.unavailable':
+            return 'diagnose.reason.childProcessUnavailable';
+        case 'windows.diagnostics.unavailable':
+            return 'diagnose.reason.windowsUnavailable';
+        case 'windows.winhttp.parseUnavailable':
+            return 'diagnose.reason.winhttpParseUnavailable';
+        case 'windows.wininet.pac':
+            return 'diagnose.reason.wininetPac';
+        case 'vscode.proxySupport.off':
+            return 'diagnose.reason.proxySupportOff';
+        case 'vscode.launch.proxyFlags':
+            return 'diagnose.reason.launchProxyFlags';
+        case 'terminal.inheritedProxyEnv':
+            return 'diagnose.reason.inheritedProxyEnv';
+        case 'terminal.existingTerminals':
+            return 'diagnose.reason.existingTerminals';
+        case 'git.legacyHttpsProxy':
+            return 'diagnose.reason.legacyHttpsProxy';
+        case 'git.effectiveOverride':
+            return 'diagnose.reason.effectiveOverride';
+        case 'npm.noproxy':
+            return 'diagnose.reason.npmNoproxy';
+        default:
+            return undefined;
+    }
 }
 
 function issueReason(issue: ProxyIssue): string {
-    if (issue.id.endsWith('.managedProxyResidual')) {
-        return 'proxy should be disabled, but a proxy is still configured';
-    }
-    if (issue.id.endsWith('.managedProxyMismatch')) {
-        return 'configured proxy does not match the expected active proxy';
-    }
-    if (issue.id === 'diagnostics.childProcess.unavailable') {
-        return 'Git/npm configuration could not be inspected in this extension host';
-    }
-    if (issue.id === 'windows.diagnostics.unavailable') {
-        return 'Windows proxy state cannot be inspected from this extension host';
-    }
-    if (issue.id === 'vscode.proxySupport.off') {
-        return 'VS Code proxy support is disabled';
-    }
-    if (issue.id === 'vscode.launch.proxyFlags') {
-        return 'VS Code was launched with proxy-related process flags';
-    }
-    if (issue.id === 'terminal.inheritedProxyEnv') {
-        return 'new terminals may inherit proxy environment variables';
-    }
-    if (issue.id === 'terminal.existingTerminals') {
-        return 'existing terminals keep their old proxy environment';
-    }
-    if (issue.id === 'git.legacyHttpsProxy') {
-        return 'legacy Git https.proxy is configured';
-    }
-    if (issue.id === 'git.effectiveOverride') {
-        return 'Git has an effective proxy override';
-    }
-    if (issue.id === 'npm.noproxy') {
-        return 'npm noproxy is configured and may bypass the proxy';
-    }
-
-    return issue.id;
+    const key = issueReasonKey(issue);
+    return key ? I18nManager.getInstance().t(key) : issue.id;
 }
 
 export function formatDiagnosticsNotification(report: Pick<ProxyDiagnosticReport, 'issueCount' | 'issues'>): string {
+    const i18n = I18nManager.getInstance();
     if (report.issueCount === 0) {
-        return 'Proxy diagnostics completed: no issues found.';
+        return i18n.t('diagnose.noIssues');
     }
 
-    const issueCountLabel = report.issueCount === 1 ? '1 issue' : `${report.issueCount} issues`;
+    const issuesLabel = report.issueCount === 1
+        ? i18n.t('diagnose.issueCountOne')
+        : i18n.t('diagnose.issueCountMany', { count: String(report.issueCount) });
     const primaryIssue = getHighestPriorityIssue(report.issues) ?? report.issues[0];
     if (!primaryIssue) {
-        return `Proxy diagnostics found ${issueCountLabel}. See Otak Proxy Diagnostics for details.`;
+        return i18n.t('diagnose.summaryNoPrimary', { issues: issuesLabel });
     }
 
     const extraCount = Math.max(0, report.issueCount - 1);
-    const extraSuffix = extraCount > 0 ? ` (+${extraCount} more)` : '';
-    return `Proxy diagnostics found ${issueCountLabel}: ${targetLabel(primaryIssue)} - ${issueReason(primaryIssue)}${extraSuffix}. See Otak Proxy Diagnostics for details.`;
+    const extra = extraCount > 0 ? i18n.t('diagnose.extraMore', { count: String(extraCount) }) : '';
+    return i18n.t('diagnose.summary', {
+        issues: issuesLabel,
+        label: targetLabel(primaryIssue),
+        reason: issueReason(primaryIssue),
+        extra
+    });
 }
 
 export async function executeDiagnoseProxy(
     context: vscode.ExtensionContext,
     getProxyState: () => Promise<ProxyState>
 ): Promise<void> {
+    const i18n = I18nManager.getInstance();
     const redactor = new ProxySecretRedactor();
     try {
         const diagnostics = new ProxyRuntimeDiagnostics(context, getProxyState);
         const report = await diagnostics.run();
         const channel = getDiagnosticsChannel();
-        channel.info(`Proxy diagnostics generated at ${report.generatedAt}`);
+        channel.info(i18n.t('diagnose.generatedAt', { timestamp: String(report.generatedAt) }));
         channel.info(JSON.stringify(redactor.redactValue(report), null, 2));
         channel.show();
         void vscode.window.showInformationMessage(
             formatDiagnosticsNotification(report),
-            'OK'
+            i18n.t('action.ok')
         );
     } catch (error) {
         const message = redactor.redactString(error instanceof Error ? error.message : String(error));
         Logger.error('Proxy diagnostics failed:', message);
-        void vscode.window.showErrorMessage(`Proxy diagnostics failed: ${message}`);
+        void vscode.window.showErrorMessage(i18n.t('diagnose.failed', { message }));
     }
 }

@@ -1,8 +1,15 @@
 import * as assert from 'assert';
 import { formatDiagnosticsNotification } from '../../commands/DiagnoseProxyCommand';
 import { ProxyIssue } from '../../core/v3Types';
+import { I18nManager } from '../../i18n/I18nManager';
 
 suite('DiagnoseProxyCommand Unit Tests', () => {
+    suiteSetup(() => {
+        // The notification is now localized (issue #13); pin English so these
+        // assertions check the English rendering deterministically.
+        I18nManager.getInstance().initialize('en');
+    });
+
     function issue(id: string, targetId: string, category: ProxyIssue['category'] = 'applyFailed'): ProxyIssue {
         return {
             id,
