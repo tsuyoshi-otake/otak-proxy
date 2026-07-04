@@ -506,16 +506,26 @@ export class ProxyRemediationService {
         enabled: boolean,
         applyResult: ProxyApplyDetailedResult
     ): string {
-        const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl || applyResult.proxyUrl;
-        const failedTargets = applyResult.errors.map(error => error.target).sort().join(',');
+        // Key the flap bucket on stable identity only (the on/off apply of this
+        // URL). The set of currently-failing targets is volatile — an external
+        // tool alternating which target it stomps would otherwise land every
+        // attempt in a fresh bucket and bypass flap detection entirely (#15).
+        // A disable (OFF) apply ignores the URL — it just unsets the proxy, and
+        // different callers pass different (or empty) prior URLs — so normalize the
+        // URL away when !enabled to keep OFF failures in one bucket.
+        const publicUrl = enabled ? (removeProxyCredentials(proxyUrl) || proxyUrl || applyResult.proxyUrl) : '';
         return crypto
             .createHash('sha256')
-            .update(`${enabled ? 'on' : 'off'}\n${publicUrl}\n${failedTargets}`)
+            .update(`${enabled ? 'on' : 'off'}\n${publicUrl}`)
             .digest('hex');
     }
 
     private convergenceIssueFingerprint(proxyUrl: string, enabled: boolean, issue: ProxyIssue): string {
-        const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl || issue.expectedSanitized || '';
+        // Stable identity: the on/off apply + the issue (id/targetId) + what we
+        // EXPECT. The observed value (actualSanitized) is volatile — a tool that
+        // leaves a different residual each time must not reset the flap bucket (#15).
+        // OFF ignores the URL, so normalize it away when !enabled (see above).
+        const publicUrl = enabled ? (removeProxyCredentials(proxyUrl) || proxyUrl || issue.expectedSanitized || '') : '';
         return crypto
             .createHash('sha256')
             .update([
@@ -523,8 +533,7 @@ export class ProxyRemediationService {
                 publicUrl,
                 issue.id,
                 issue.targetId,
-                issue.expectedSanitized ?? '',
-                issue.actualSanitized ?? ''
+                issue.expectedSanitized ?? ''
             ].join('\n'))
             .digest('hex');
     }

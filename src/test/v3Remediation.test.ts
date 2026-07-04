@@ -241,6 +241,164 @@ suite('v3 remediation foundation', () => {
         }
     });
 
+    test('flap detection trips despite the failing target changing every attempt (#15)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            remediationDelayedRetryMs: 0,
+            remediationFlapMaxAttempts: 2,
+            automaticRemediationEnabled: true,
+            automaticRetryEnabled: true
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-flap-apply-'));
+        const context = createContext(new Map());
+        const now = 1000;
+        const diagnostics = { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {},
+                flapTracker: new FlapTracker(context.globalState, () => now)
+            }
+        );
+
+        try {
+            const results = [];
+            for (let i = 0; i < 3; i++) {
+                // Each attempt fails on a DIFFERENT target (an external tool stomping
+                // a different write each cycle). The old fingerprint keyed on the
+                // failing-target set, so every attempt landed in a fresh bucket.
+                const target = `volatile-target-${i}`;
+                results.push(await service.applyWithSafety(
+                    'http://proxy.example.com:8080',
+                    true,
+                    { trigger: 'autoDetection' },
+                    async () => detailedResult(false, [{ target, message: 'stomped' }])
+                ));
+            }
+
+            assert.strictEqual(results[0].retrySuppressed, false, 'the first attempt must be allowed');
+            assert.strictEqual(
+                results[2].retrySuppressed,
+                true,
+                'flap must trip after maxAttempts even though the failing target changes each attempt'
+            );
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('OFF-apply flap trips despite the prior proxy URL changing every attempt (#15)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            remediationDelayedRetryMs: 0,
+            remediationFlapMaxAttempts: 2,
+            automaticRemediationEnabled: true,
+            automaticRetryEnabled: true
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-flap-off-'));
+        const context = createContext(new Map());
+        const now = 1000;
+        const diagnostics = { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Off }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {},
+                flapTracker: new FlapTracker(context.globalState, () => now)
+            }
+        );
+
+        try {
+            const results = [];
+            for (let i = 0; i < 3; i++) {
+                // A disable apply is URL-independent, but reachability-OFF callers pass
+                // the prior proxy URL, which varies. It must not split the flap bucket.
+                results.push(await service.applyWithSafety(
+                    `http://prior-${i}.example.com:8080`,
+                    false,
+                    { trigger: 'autoDetection' },
+                    async (_url, enabled) => detailedResult(false, [{ target: 'git config', message: 'stomped' }], enabled)
+                ));
+            }
+
+            assert.strictEqual(results[0].retrySuppressed, false, 'the first OFF attempt must be allowed');
+            assert.strictEqual(
+                results[2].retrySuppressed,
+                true,
+                'OFF flap must trip after maxAttempts even though the prior URL changes each attempt'
+            );
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('convergence flap trips despite the observed stale value changing every attempt (#15)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            remediationDelayedRetryMs: 0,
+            remediationFlapMaxAttempts: 2,
+            automaticRemediationEnabled: true,
+            automaticRetryEnabled: true
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-flap-conv-'));
+        const context = createContext(new Map());
+        const now = 1000;
+        let callIndex = 0;
+        const diagnostics = {
+            run: async () => {
+                // A retryable convergence issue whose OBSERVED residual value differs
+                // each cycle (an external tool leaving a different leftover). The old
+                // fingerprint keyed on actualSanitized, so it never accumulated.
+                const issue = managedConvergenceIssue('npm.managedProxyResidual', 'npm.user.proxy');
+                issue.actualSanitized = `http://stale-${callIndex}.example.com:8080`;
+                return diagnosticReport([issue]);
+            }
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto, autoModeOff: true, npmConfigured: false }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {},
+                flapTracker: new FlapTracker(context.globalState, () => now)
+            }
+        );
+
+        try {
+            const results = [];
+            for (let i = 0; i < 3; i++) {
+                callIndex = i;
+                results.push(await service.applyWithSafety(
+                    '',
+                    false,
+                    { trigger: 'autoDetection' },
+                    async (_url, enabled) => detailedResult(true, [], enabled)
+                ));
+            }
+
+            assert.strictEqual(results[0].retrySuppressed, false, 'the first convergence retry must be allowed');
+            assert.strictEqual(
+                results[2].retrySuppressed,
+                true,
+                'convergence flap must trip after maxAttempts even though the observed stale value changes each attempt'
+            );
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
     test('ProxyRemediationService retries successful OFF writes when diagnostics still sees managed proxy', async () => {
         const restoreConfig = stubOtakProxyConfiguration({
             notificationLevel: 'off',
