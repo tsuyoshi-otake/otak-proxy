@@ -426,17 +426,20 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
-    test('ProxyRuntimeDiagnostics reports managed residual proxies when Auto is off', async () => {
+    test('ProxyRuntimeDiagnostics reports managed residual proxies when Auto is off with retained detected URL', async () => {
         const store: Store = new Map();
         const secrets = new Map<string, string>();
         const context = createContext(store, secrets);
-        const restoreConfig = stubConfiguration('', 'http://vscode.example.com:8080', 'on');
+        const retainedProxy = 'http://detected.example.com:8080';
+        const restoreConfig = stubConfiguration('', retainedProxy, 'on');
         try {
             const diagnostics = new ProxyRuntimeDiagnostics(
                 context,
                 async () => ({
                     mode: ProxyMode.Auto,
+                    autoProxyUrl: retainedProxy,
                     autoModeOff: true,
+                    proxyReachable: false,
                     gitConfigured: false,
                     npmConfigured: false,
                     vscodeConfigured: false
@@ -444,7 +447,7 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                 {
                     commandRunner: async (command, args) => {
                         if (command === 'git' && args.includes('http.proxy')) {
-                            return { stdout: 'http://git.example.com:8080\n', stderr: '' };
+                            return { stdout: `${retainedProxy}\n`, stderr: '' };
                         }
                         if (command === 'git') {
                             return { stdout: '', stderr: '' };
@@ -456,7 +459,7 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                             return { stdout: '', stderr: '' };
                         }
                         if (args.includes('proxy') || args.includes('https-proxy')) {
-                            return { stdout: 'http://npm.example.com:8080\n', stderr: '' };
+                            return { stdout: `${retainedProxy}\n`, stderr: '' };
                         }
                         if (args.includes('registry')) {
                             return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };

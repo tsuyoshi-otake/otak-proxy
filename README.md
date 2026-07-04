@@ -249,7 +249,7 @@ ext install odangoo.otak-proxy
 ```bash
 npm install
 npx --yes @vscode/vsce package
-code --install-extension otak-proxy-3.1.1.vsix
+code --install-extension otak-proxy-3.1.2.vsix
 ```
 
 Reload VS Code afterwards.

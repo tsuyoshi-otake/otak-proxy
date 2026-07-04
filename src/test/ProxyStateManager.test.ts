@@ -338,6 +338,16 @@ suite('ProxyStateManager Unit Tests', () => {
         );
     });
 
+    test('getActiveProxyUrl should return empty string for Auto Mode OFF with retained detected URL', () => {
+        const autoOffState: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://detected.example.com:8080',
+            autoModeOff: true
+        };
+
+        assert.strictEqual(stateManager.getActiveProxyUrl(autoOffState), '');
+    });
+
     test('getNextMode should cycle through Auto and Off only', () => {
         assert.strictEqual(stateManager.getNextMode(ProxyMode.Off), ProxyMode.Auto);
         assert.strictEqual(stateManager.getNextMode(ProxyMode.Manual), ProxyMode.Auto);

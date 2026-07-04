@@ -556,6 +556,9 @@ export class ProxyRuntimeDiagnostics {
             return undefined;
         }
         if (state.mode === ProxyMode.Auto) {
+            if (state.autoModeOff === true) {
+                return undefined;
+            }
             return state.autoProxyUrl || state.fallbackProxyUrl;
         }
         return state.manualProxyUrl;
@@ -563,7 +566,7 @@ export class ProxyRuntimeDiagnostics {
 
     private expectsProxyDisabled(state: ProxyState): boolean {
         return state.mode === ProxyMode.Off ||
-            (state.mode === ProxyMode.Auto && state.autoModeOff === true && !state.autoProxyUrl && !state.usingFallbackProxy);
+            (state.mode === ProxyMode.Auto && state.autoModeOff === true && !state.usingFallbackProxy);
     }
 
     private observedString(observation: Record<string, unknown> | undefined, key: string): string | undefined {

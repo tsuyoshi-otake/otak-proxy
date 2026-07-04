@@ -48,6 +48,10 @@ export async function handleProxyTestComplete(
     await context.proxyStateManager.saveState(state);
     context.updateStatusBar?.(state);
     clearStartupPendingIfNeeded(startupTestState, testResult);
+
+    if (!testResult.success) {
+        await applyProxyThroughContext(context, '', false, { silent: true });
+    }
 }
 
 export async function handleProxyStateChanged(
@@ -74,6 +78,7 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
         state.lastTestResult = result.testResult as ProxyTestResult;
         state.proxyReachable = result.proxyReachable;
         state.lastTestTimestamp = Date.now();
+        updateAutoModeFromTestResult(state, result.testResult);
     }
 }
 

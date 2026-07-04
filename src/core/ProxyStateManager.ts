@@ -118,6 +118,9 @@ export class ProxyStateManager implements IProxyStateManager {
     getActiveProxyUrl(state: ProxyState): string {
         switch (state.mode) {
             case ProxyMode.Auto:
+                if (state.autoModeOff === true) {
+                    return '';
+                }
                 return state.autoProxyUrl || '';
             case ProxyMode.Manual:
                 return state.manualProxyUrl || '';

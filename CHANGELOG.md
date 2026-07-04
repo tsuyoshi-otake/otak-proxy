@@ -1,5 +1,12 @@
 # Change Log
 
+## [3.1.2] - 2026-07-05
+
+### Fixed
+- Clear managed Git, npm, VS Code, and terminal proxy settings when an Auto mode startup/focus connection test fails, so `Auto: OFF` no longer leaves tools pointed at an unreachable detected proxy (#18).
+- Treat Auto OFF as having no active proxy even when the last detected `autoProxyUrl` is retained for monitoring context, preventing startup/sync paths from re-applying the unreachable URL (#18).
+- Report managed residual Git/npm/VS Code proxy settings from `otak: Diagnose Proxy State` when Auto OFF retains the last detected URL, instead of treating that URL as the expected active proxy (#18).
+
 ## [3.1.1] - 2026-07-05
 
 ### Fixed
