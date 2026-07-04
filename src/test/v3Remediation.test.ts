@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import { ProxyApplyDetailedResult } from '../core/ProxyApplierTypes';
 import { ProxyMode } from '../core/types';
+import { ProxyIssue } from '../core/v3Types';
 import { ProxyDiagnosticReport, ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { ApplyLockRequest, ApplyLockService } from '../remediation/ApplyLockService';
 import { FlapTracker, FlapTrackerSettings } from '../remediation/FlapTracker';
@@ -77,11 +78,15 @@ function stubOtakProxyConfiguration(overrides: Record<string, unknown>): () => v
     };
 }
 
-function detailedResult(success: boolean, errors: ProxyApplyDetailedResult['errors'] = []): ProxyApplyDetailedResult {
+function detailedResult(
+    success: boolean,
+    errors: ProxyApplyDetailedResult['errors'] = [],
+    enabled = true
+): ProxyApplyDetailedResult {
     return {
         success,
-        enabled: true,
-        proxyUrl: 'http://proxy.example.com:8080',
+        enabled,
+        proxyUrl: enabled ? 'http://proxy.example.com:8080' : '',
         results: {
             gitSuccess: success,
             vscodeSuccess: success,
@@ -92,7 +97,7 @@ function detailedResult(success: boolean, errors: ProxyApplyDetailedResult['erro
     };
 }
 
-function diagnosticReport(): ProxyDiagnosticReport {
+function diagnosticReport(issues: ProxyIssue[] = []): ProxyDiagnosticReport {
     return {
         generatedAt: new Date(0).toISOString(),
         runtimeState: 'diagnosed',
@@ -105,9 +110,28 @@ function diagnosticReport(): ProxyDiagnosticReport {
             canWriteVSCodeUserSettings: true,
             canAccessWorkspaceFiles: false
         },
-        issueCount: 0,
-        issues: [],
+        issueCount: issues.length,
+        highestPriorityCategory: issues[0]?.category,
+        issues,
         observations: {}
+    };
+}
+
+function managedConvergenceIssue(id: string, targetId: string): ProxyIssue {
+    return {
+        id,
+        fingerprint: `${id}:${targetId}`,
+        category: 'applyFailed',
+        impact: 'blocksConvergence',
+        targetId,
+        targetHost: 'workspaceHost',
+        expectedSanitized: 'unset',
+        actualSanitized: 'http://stale.example.com:8080',
+        source: 'diagnostics',
+        capability: 'readOnly',
+        autoAction: 'none',
+        userAction: 'showDetails',
+        evidence: {}
     };
 }
 
@@ -210,6 +234,119 @@ suite('v3 remediation foundation', () => {
             assert.deepStrictEqual(calls, [
                 'http://alice:s3cr3t@proxy.example.com:8080',
                 'http://alice:s3cr3t@proxy.example.com:8080'
+            ]);
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService retries successful OFF writes when diagnostics still sees managed proxy', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            remediationDelayedRetryMs: 250
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-off-convergence-test-'));
+        const context = createContext(new Map());
+        const calls: Array<{ enabled: boolean; silent?: boolean }> = [];
+        const diagnosticOptions: unknown[] = [];
+        const reports = [
+            diagnosticReport([managedConvergenceIssue('npm.managedProxyResidual', 'npm.user.proxy')]),
+            diagnosticReport()
+        ];
+        const diagnostics = {
+            run: async (options?: unknown) => {
+                diagnosticOptions.push(options);
+                return reports.shift() ?? diagnosticReport();
+            }
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto, autoModeOff: true, npmConfigured: false }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {}
+            }
+        );
+
+        try {
+            const result = await service.applyWithSafety(
+                '',
+                false,
+                { trigger: 'manual' },
+                async (_url, enabled, options) => {
+                    calls.push({ enabled, silent: options?.silent });
+                    return detailedResult(true, [], enabled);
+                }
+            );
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.retryAttempted, true);
+            assert.strictEqual(result.retrySuppressed, false);
+            assert.deepStrictEqual(calls, [
+                { enabled: false, silent: undefined },
+                { enabled: false, silent: true }
+            ]);
+            assert.ok(diagnosticOptions.every(option =>
+                typeof option === 'object' &&
+                option !== null &&
+                (option as { bypassSlowCache?: boolean }).bypassSlowCache === true
+            ));
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService retries successful ON writes when diagnostics sees a managed proxy mismatch', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            remediationDelayedRetryMs: 250
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-on-convergence-test-'));
+        const context = createContext(new Map());
+        const calls: Array<{ url: string; enabled: boolean; silent?: boolean }> = [];
+        const reports = [
+            diagnosticReport([managedConvergenceIssue('git.managedProxyMismatch', 'git.global.proxy')]),
+            diagnosticReport()
+        ];
+        const diagnostics = {
+            run: async () => reports.shift() ?? diagnosticReport()
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                gitConfigured: true
+            }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {}
+            }
+        );
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async (url, enabled, options) => {
+                    calls.push({ url, enabled, silent: options?.silent });
+                    return detailedResult(true, [], enabled);
+                }
+            );
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.retryAttempted, true);
+            assert.strictEqual(result.retrySuppressed, false);
+            assert.deepStrictEqual(calls, [
+                { url: 'http://proxy.example.com:8080', enabled: true, silent: undefined },
+                { url: 'http://proxy.example.com:8080', enabled: true, silent: true }
             ]);
         } finally {
             restoreConfig();

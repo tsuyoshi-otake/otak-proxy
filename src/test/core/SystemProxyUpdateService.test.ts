@@ -163,6 +163,7 @@ suite('SystemProxyUpdateService Tests', () => {
         assert.strictEqual(state.autoProxyUrl, undefined);
         assert.strictEqual(state.autoModeOff, true);
         assert.strictEqual(state.usingFallbackProxy, false);
+        sinon.assert.calledWith(applyProxyStub, '', false, sinon.match({ silent: true }));
     });
 
     test('Auto + had detected proxy + detection now null + no fallback: clears and emits systemProxyRemoved', async () => {
@@ -180,8 +181,25 @@ suite('SystemProxyUpdateService Tests', () => {
         assert.strictEqual(state.autoModeOff, true);
         assert.strictEqual(state.usingFallbackProxy, false);
         assert.strictEqual(state.fallbackProxyUrl, undefined);
-        sinon.assert.calledWith(applyProxyStub, '', true);
+        sinon.assert.calledWith(applyProxyStub, '', false, sinon.match({ silent: true }));
         sinon.assert.calledWith(notifyStub, 'message.systemProxyRemoved');
+    });
+
+    test('Auto + autoModeOff: self-repairs OFF even when URL was already empty', async () => {
+        state.mode = ProxyMode.Auto;
+        state.autoProxyUrl = undefined;
+        state.gitConfigured = false;
+        state.vscodeConfigured = false;
+        state.npmConfigured = false;
+        configValues.enableFallback = false;
+        detectStub.resolves(null);
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoProxyUrl, undefined);
+        assert.strictEqual(state.autoModeOff, true);
+        sinon.assert.calledWith(applyProxyStub, '', false, sinon.match({ silent: true }));
+        sinon.assert.notCalled(notifyStub);
     });
 
     test('Auto + detection fails + no manualProxyUrl: enters autoModeOff', async () => {
@@ -194,6 +212,7 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.notCalled(connectionTester!.testProxyAuto);
         assert.strictEqual(state.autoProxyUrl, undefined);
         assert.strictEqual(state.autoModeOff, true);
+        sinon.assert.calledWith(applyProxyStub, '', false, sinon.match({ silent: true }));
     });
 
     test('Auto + fallback enabled + connection tester unavailable: treats as unreachable', async () => {
@@ -207,6 +226,7 @@ suite('SystemProxyUpdateService Tests', () => {
 
         assert.strictEqual(state.autoModeOff, true);
         assert.strictEqual(state.autoProxyUrl, undefined);
+        sinon.assert.calledWith(applyProxyStub, '', false, sinon.match({ silent: true }));
     });
 
     test('Auto: transition from fallback back to detected proxy clears fallback flags', async () => {

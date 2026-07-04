@@ -92,8 +92,9 @@ suite('ProxyStateManager Property Tests', () => {
                     // Retrieve state (should return in-memory fallback)
                     const retrievedState = await failingStateManager.getState();
 
-                    // Verify that the retrieved state matches the saved state
-                    assert.strictEqual(retrievedState.mode, state.mode);
+                    // Manual is a legacy mode and is normalized to Auto when read.
+                    const expectedMode = state.mode === ProxyMode.Manual ? ProxyMode.Auto : state.mode;
+                    assert.strictEqual(retrievedState.mode, expectedMode);
                     assert.strictEqual(retrievedState.manualProxyUrl, state.manualProxyUrl);
                     assert.strictEqual(retrievedState.autoProxyUrl, state.autoProxyUrl);
                     assert.strictEqual(retrievedState.lastSystemProxyCheck, state.lastSystemProxyCheck);
@@ -170,7 +171,7 @@ suite('ProxyStateManager Property Tests', () => {
 
                         // Verify migration
                         if (oldEnabled && manualUrl) {
-                            assert.strictEqual(migratedState.mode, ProxyMode.Manual);
+                            assert.strictEqual(migratedState.mode, ProxyMode.Auto);
                             assert.strictEqual(migratedState.manualProxyUrl, manualUrl);
                         } else {
                             assert.strictEqual(migratedState.mode, ProxyMode.Off);

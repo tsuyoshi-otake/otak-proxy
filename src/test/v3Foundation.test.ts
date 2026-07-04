@@ -259,6 +259,111 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
+    test('ProxyRuntimeDiagnostics reports managed residual proxies when Auto is off', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', 'http://vscode.example.com:8080', 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoModeOff: true,
+                    gitConfigured: false,
+                    npmConfigured: false,
+                    vscodeConfigured: false
+                }),
+                {
+                    commandRunner: async (command, args) => {
+                        if (command === 'git' && args.includes('http.proxy')) {
+                            return { stdout: 'http://git.example.com:8080\n', stderr: '' };
+                        }
+                        if (command === 'git') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (command === 'netsh') {
+                            return { stdout: 'Current WinHTTP proxy settings:\r\n    Direct access (no proxy server).\r\n', stderr: '' };
+                        }
+                        if (command === 'reg') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (args.includes('proxy') || args.includes('https-proxy')) {
+                            return { stdout: 'http://npm.example.com:8080\n', stderr: '' };
+                        }
+                        if (args.includes('registry')) {
+                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            assert.ok(issueIds.has('git.managedProxyResidual'));
+            assert.ok(issueIds.has('npm.managedProxyResidual'));
+            assert.ok(issueIds.has('vscode.managedProxyResidual'));
+            assert.strictEqual(report.highestPriorityCategory, 'applyFailed');
+            assert.ok(report.issues.every(issue => issue.capability === 'readOnly'));
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics reports managed proxy mismatches when Auto is on', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('', 'http://stale.example.com:8080', 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://expected.example.com:8080',
+                    autoModeOff: false,
+                    gitConfigured: true,
+                    npmConfigured: true,
+                    vscodeConfigured: true
+                }),
+                {
+                    commandRunner: async (command, args) => {
+                        if (command === 'git' && (args.includes('http.proxy') || args.includes('https.proxy'))) {
+                            return { stdout: 'http://stale.example.com:8080\n', stderr: '' };
+                        }
+                        if (command === 'git') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (command === 'netsh') {
+                            return { stdout: 'Current WinHTTP proxy settings:\r\n    Direct access (no proxy server).\r\n', stderr: '' };
+                        }
+                        if (command === 'reg') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (args.includes('proxy') || args.includes('https-proxy')) {
+                            return { stdout: 'http://stale.example.com:8080\n', stderr: '' };
+                        }
+                        if (args.includes('registry')) {
+                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            assert.ok(issueIds.has('git.managedProxyMismatch'));
+            assert.ok(issueIds.has('npm.managedProxyMismatch'));
+            assert.ok(issueIds.has('vscode.managedProxyMismatch'));
+            assert.strictEqual(report.highestPriorityCategory, 'applyFailed');
+            assert.ok(report.issues.every(issue => issue.capability === 'readOnly'));
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('ProxyRuntimeDiagnostics caches slow command diagnostics within the configured TTL', async () => {
         const store: Store = new Map();
         const secrets = new Map<string, string>();

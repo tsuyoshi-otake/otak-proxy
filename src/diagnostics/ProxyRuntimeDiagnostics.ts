@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
-import { ProxyState } from '../core/types';
+import { ProxyMode, ProxyState } from '../core/types';
 import {
     ExecutionContext,
     getHighestPriorityIssue,
@@ -13,6 +13,10 @@ import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostic
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
+
+export interface ProxyRuntimeDiagnosticsRunOptions {
+    bypassSlowCache?: boolean;
+}
 
 const execFileAsync = promisify(execFile);
 const PROXY_ENV_NAMES = [
@@ -101,7 +105,7 @@ export class ProxyRuntimeDiagnostics {
         this.windowsDiagnostics = new WindowsProxyDiagnostics(this.commandRunner);
     }
 
-    async run(): Promise<ProxyDiagnosticReport> {
+    async run(options: ProxyRuntimeDiagnosticsRunOptions = {}): Promise<ProxyDiagnosticReport> {
         const state = await this.stateProvider();
         const executionContext = new ExecutionContextDetector(this.context).detect();
         const knownSecrets = this.collectKnownSecrets(state);
@@ -116,7 +120,7 @@ export class ProxyRuntimeDiagnostics {
         observations.terminal = terminalDiagnostics.observation;
         issues.push(...terminalDiagnostics.issues);
 
-        const slowDiagnostics = await this.collectSlowDiagnostics(executionContext);
+        const slowDiagnostics = await this.collectSlowDiagnostics(executionContext, options.bypassSlowCache === true);
         if (slowDiagnostics.git && slowDiagnostics.npm) {
             const git = slowDiagnostics.git;
             const npm = slowDiagnostics.npm;
@@ -141,6 +145,12 @@ export class ProxyRuntimeDiagnostics {
                 evidence: { workspaceHostKind: executionContext.workspaceHostKind }
             }));
         }
+
+        issues.push(...this.collectManagedConvergenceIssues(state, {
+            git: slowDiagnostics.git?.observation,
+            npm: slowDiagnostics.npm?.observation,
+            vscode: vscodeDiagnostics.observation
+        }));
 
         const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
@@ -187,10 +197,11 @@ export class ProxyRuntimeDiagnostics {
         return secrets;
     }
 
-    private async collectSlowDiagnostics(executionContext: ExecutionContext): Promise<SlowDiagnosticsCache> {
+    private async collectSlowDiagnostics(executionContext: ExecutionContext, bypassCache: boolean): Promise<SlowDiagnosticsCache> {
         const settings = readV3Settings();
         const now = Date.now();
-        if (this.slowCache &&
+        if (!bypassCache &&
+            this.slowCache &&
             this.slowCache.expiresAt > now &&
             this.slowCache.canUseChildProcess === executionContext.canUseChildProcess &&
             this.slowCache.canReadWindowsRegistry === executionContext.canReadWindowsRegistry &&
@@ -360,6 +371,178 @@ export class ProxyRuntimeDiagnostics {
         }
 
         return { observation, issues };
+    }
+
+    private collectManagedConvergenceIssues(
+        state: ProxyState,
+        observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> }
+    ): ProxyIssue[] {
+        if (this.expectsProxyDisabled(state)) {
+            return this.collectManagedResidualIssues(state, observations);
+        }
+
+        const expectedProxy = this.expectedActiveProxyUrl(state);
+        if (!expectedProxy) {
+            return [];
+        }
+
+        const issues: ProxyIssue[] = [];
+        const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
+        const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
+        if (state.gitConfigured &&
+            (!this.proxyMatchesExpected(gitHttpProxy, expectedProxy) ||
+                !this.proxyMatchesExpected(gitHttpsProxy, expectedProxy))) {
+            issues.push(this.issue('git.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
+                expectedSanitized: expectedProxy,
+                actualSanitized: gitHttpProxy ?? gitHttpsProxy ?? 'unset',
+                source: 'git config',
+                capability: 'readOnly',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    gitConfigured: state.gitConfigured,
+                    expectedProxy,
+                    httpProxy: gitHttpProxy,
+                    legacyHttpsProxy: gitHttpsProxy
+                }
+            }));
+        }
+
+        const npmProxy = this.observedString(observations.npm, 'proxy');
+        const npmHttpsProxy = this.observedString(observations.npm, 'httpsProxy');
+        if (state.npmConfigured &&
+            (!this.proxyMatchesExpected(npmProxy, expectedProxy) ||
+                !this.proxyMatchesExpected(npmHttpsProxy, expectedProxy))) {
+            issues.push(this.issue('npm.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
+                expectedSanitized: expectedProxy,
+                actualSanitized: npmProxy ?? npmHttpsProxy ?? 'unset',
+                source: 'npm config',
+                capability: 'readOnly',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    npmConfigured: state.npmConfigured,
+                    expectedProxy,
+                    proxy: npmProxy,
+                    httpsProxy: npmHttpsProxy
+                }
+            }));
+        }
+
+        const vscodeProxy = this.observedString(observations.vscode, 'proxy');
+        if (state.vscodeConfigured && !this.proxyMatchesExpected(vscodeProxy, expectedProxy)) {
+            issues.push(this.issue('vscode.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'vscode.http.proxy', 'workspaceHost', {
+                expectedSanitized: expectedProxy,
+                actualSanitized: vscodeProxy ?? 'unset',
+                source: 'vscode',
+                capability: 'readOnly',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    vscodeConfigured: state.vscodeConfigured,
+                    expectedProxy,
+                    proxy: vscodeProxy
+                }
+            }));
+        }
+
+        return issues;
+    }
+
+    private collectManagedResidualIssues(
+        state: ProxyState,
+        observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> }
+    ): ProxyIssue[] {
+        const issues: ProxyIssue[] = [];
+        const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
+        const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
+        if (gitHttpProxy || gitHttpsProxy) {
+            issues.push(this.issue('git.managedProxyResidual', 'applyFailed', 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
+                expectedSanitized: 'unset',
+                actualSanitized: gitHttpProxy ?? gitHttpsProxy,
+                source: 'git config',
+                capability: 'readOnly',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    gitConfigured: state.gitConfigured,
+                    httpProxy: gitHttpProxy,
+                    legacyHttpsProxy: gitHttpsProxy
+                }
+            }));
+        }
+
+        const npmProxy = this.observedString(observations.npm, 'proxy');
+        const npmHttpsProxy = this.observedString(observations.npm, 'httpsProxy');
+        if (npmProxy || npmHttpsProxy) {
+            issues.push(this.issue('npm.managedProxyResidual', 'applyFailed', 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
+                expectedSanitized: 'unset',
+                actualSanitized: npmProxy ?? npmHttpsProxy,
+                source: 'npm config',
+                capability: 'readOnly',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    npmConfigured: state.npmConfigured,
+                    proxy: npmProxy,
+                    httpsProxy: npmHttpsProxy
+                }
+            }));
+        }
+
+        const vscodeProxy = this.observedString(observations.vscode, 'proxy');
+        if (vscodeProxy) {
+            issues.push(this.issue('vscode.managedProxyResidual', 'applyFailed', 'blocksConvergence', 'vscode.http.proxy', 'workspaceHost', {
+                expectedSanitized: 'unset',
+                actualSanitized: vscodeProxy,
+                source: 'vscode',
+                capability: 'readOnly',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    vscodeConfigured: state.vscodeConfigured,
+                    proxy: vscodeProxy
+                }
+            }));
+        }
+
+        return issues;
+    }
+
+    private expectedActiveProxyUrl(state: ProxyState): string | undefined {
+        if (state.mode === ProxyMode.Off) {
+            return undefined;
+        }
+        if (state.mode === ProxyMode.Auto) {
+            return state.autoProxyUrl || state.fallbackProxyUrl;
+        }
+        return state.manualProxyUrl;
+    }
+
+    private expectsProxyDisabled(state: ProxyState): boolean {
+        return state.mode === ProxyMode.Off ||
+            (state.mode === ProxyMode.Auto && state.autoModeOff === true && !state.autoProxyUrl && !state.usingFallbackProxy);
+    }
+
+    private observedString(observation: Record<string, unknown> | undefined, key: string): string | undefined {
+        const value = observation?.[key];
+        return typeof value === 'string' && value.trim() ? value : undefined;
+    }
+
+    private proxyMatchesExpected(observed: string | undefined, expected: string): boolean {
+        if (!observed) {
+            return false;
+        }
+        return this.normalizeProxyForComparison(observed) === this.normalizeProxyForComparison(expected);
+    }
+
+    private normalizeProxyForComparison(value: string): string {
+        const trimmed = value.trim();
+        try {
+            return new URL(trimmed).toString();
+        } catch {
+            return trimmed;
+        }
     }
 
     private async readGitConfig(args: string[]): Promise<string | undefined> {

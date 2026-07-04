@@ -182,14 +182,16 @@ suite('ProxyStateManager Unit Tests', () => {
 
             const state = await stateManager.getState();
 
+            assert.strictEqual(state.mode, ProxyMode.Auto);
             assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
             assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), undefined);
             assert.ok(credentialSecretFor('http://proxy.example.com:8080/'));
             assert.ok(allSecretValues().includes('secret'));
             assert.strictEqual(updatedProxyUrl, 'http://proxy.example.com:8080/');
+            assert.strictEqual(storedState!.mode, ProxyMode.Auto);
             assert.strictEqual(
                 stateManager.getActiveProxyUrl(state),
-                'http://user:secret@proxy.example.com:8080'
+                ''
             );
         } finally {
             (vscode.workspace as any).getConfiguration = originalGetConfiguration;
@@ -223,9 +225,11 @@ suite('ProxyStateManager Unit Tests', () => {
 
             const state = await stateManager.getState();
 
+            assert.strictEqual(state.mode, ProxyMode.Auto);
             assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080');
             assert.strictEqual(secrets.get('otakProxy.manualProxyUrl'), undefined);
             assert.ok(credentialSecretFor('http://proxy.example.com:8080/'));
+            assert.strictEqual(storedState!.mode, ProxyMode.Auto);
         } finally {
             (vscode.workspace as any).getConfiguration = originalGetConfiguration;
         }
@@ -281,6 +285,26 @@ suite('ProxyStateManager Unit Tests', () => {
         assert.deepStrictEqual(retrievedState, testState);
     });
 
+    test('getState should migrate saved Manual state to Auto and persist it', async () => {
+        storedState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://manual.example.com:8080',
+            autoProxyUrl: undefined,
+            gitConfigured: true,
+            vscodeConfigured: false,
+            npmConfigured: true
+        };
+
+        const retrievedState = await stateManager.getState();
+
+        assert.strictEqual(retrievedState.mode, ProxyMode.Auto);
+        assert.strictEqual(retrievedState.manualProxyUrl, 'http://manual.example.com:8080');
+        assert.strictEqual(retrievedState.autoProxyUrl, undefined);
+        assert.strictEqual(retrievedState.gitConfigured, true);
+        assert.strictEqual(storedState!.mode, ProxyMode.Auto);
+        assert.strictEqual(storedState!.manualProxyUrl, 'http://manual.example.com:8080');
+    });
+
     test('getActiveProxyUrl should return correct URL based on mode', () => {
         const manualState: ProxyState = {
             mode: ProxyMode.Manual,
@@ -314,8 +338,8 @@ suite('ProxyStateManager Unit Tests', () => {
         );
     });
 
-    test('getNextMode should cycle through modes correctly', () => {
-        assert.strictEqual(stateManager.getNextMode(ProxyMode.Off), ProxyMode.Manual);
+    test('getNextMode should cycle through Auto and Off only', () => {
+        assert.strictEqual(stateManager.getNextMode(ProxyMode.Off), ProxyMode.Auto);
         assert.strictEqual(stateManager.getNextMode(ProxyMode.Manual), ProxyMode.Auto);
         assert.strictEqual(stateManager.getNextMode(ProxyMode.Auto), ProxyMode.Off);
     });
@@ -411,11 +435,12 @@ suite('ProxyStateManager Unit Tests', () => {
             const retrievedState = await stateManager.getState();
 
             // Should work without errors and have undefined for new fields
-            assert.strictEqual(retrievedState.mode, ProxyMode.Manual);
+            assert.strictEqual(retrievedState.mode, ProxyMode.Auto);
             assert.strictEqual(retrievedState.manualProxyUrl, 'http://proxy.example.com:8080');
             assert.strictEqual(retrievedState.lastTestResult, undefined);
             assert.strictEqual(retrievedState.proxyReachable, undefined);
             assert.strictEqual(retrievedState.lastTestTimestamp, undefined);
+            assert.strictEqual(storedState!.mode, ProxyMode.Auto);
         });
 
         test('state with only some new fields should work', async () => {

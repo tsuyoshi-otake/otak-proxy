@@ -192,7 +192,7 @@ export class ProxyApplier {
         );
 
         // Track configuration state if stateManager is provided
-        await saveProxyConfigResults(this.stateManager, results, errorAggregator);
+        await saveProxyConfigResults(this.stateManager, true, results, errorAggregator);
 
         const success = this.areConfigResultsSuccessful(results);
         
@@ -233,7 +233,7 @@ export class ProxyApplier {
         );
 
         // Track configuration state if stateManager is provided
-        await saveProxyConfigResults(this.stateManager, results, errorAggregator);
+        await saveProxyConfigResults(this.stateManager, false, results, errorAggregator);
 
         const success = this.areConfigResultsSuccessful(results);
         

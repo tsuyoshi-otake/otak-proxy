@@ -49,17 +49,31 @@ export class ProxyStateManager implements IProxyStateManager {
 
         // If we have an in-memory fallback state, use it
         if (this.inMemoryState) {
-            return await this.hydrateStateForRuntime(this.inMemoryState);
+            const hydratedState = await this.hydrateStateForRuntime(this.inMemoryState);
+            const migratedState = this.migrateManualModeToAuto(hydratedState);
+            this.inMemoryState = { ...migratedState };
+            return migratedState;
         }
 
         const state = this.context.globalState.get<ProxyState>('proxyState');
         if (!state) {
             // Migrate from old settings
-            return await this.migrateOldSettings();
+            const migratedState = await this.migrateOldSettings();
+            const normalizedState = this.migrateManualModeToAuto(migratedState);
+            if (normalizedState.mode !== migratedState.mode) {
+                await this.saveState(normalizedState);
+            }
+            return normalizedState;
         }
         const hydratedState = await this.hydrateStateForRuntime(state);
+        const migratedState = this.migrateManualModeToAuto(hydratedState);
+        if (migratedState.mode !== hydratedState.mode) {
+            await this.saveState(migratedState);
+            return migratedState;
+        }
+
         await this.scrubPersistedStateIfNeeded(state);
-        return hydratedState;
+        return migratedState;
     }
 
     /**
@@ -113,7 +127,9 @@ export class ProxyStateManager implements IProxyStateManager {
     }
 
     /**
-     * Get the next mode in the cycle: Off -> Manual -> Auto -> Off
+     * Get the next mode in the cycle: Off -> Auto -> Off
+     * Legacy Manual states are migrated to Auto when loaded; if encountered at
+     * runtime, they also move to Auto on the next toggle.
      *
      * @param {ProxyMode} currentMode - Current proxy mode
      * @returns {ProxyMode} Next mode in the cycle
@@ -121,7 +137,6 @@ export class ProxyStateManager implements IProxyStateManager {
     getNextMode(currentMode: ProxyMode): ProxyMode {
         switch (currentMode) {
             case ProxyMode.Off:
-                return ProxyMode.Manual;
             case ProxyMode.Manual:
                 return ProxyMode.Auto;
             case ProxyMode.Auto:
@@ -153,6 +168,17 @@ export class ProxyStateManager implements IProxyStateManager {
             npmConfigured: undefined,
             systemProxyDetected: undefined,
             lastError: undefined
+        };
+    }
+
+    private migrateManualModeToAuto(state: ProxyState): ProxyState {
+        if (state.mode !== ProxyMode.Manual) {
+            return state;
+        }
+
+        return {
+            ...state,
+            mode: ProxyMode.Auto
         };
     }
 

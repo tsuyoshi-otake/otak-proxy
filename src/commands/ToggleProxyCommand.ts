@@ -22,6 +22,8 @@ import { OutputChannelManager } from '../errors/OutputChannelManager';
 
 type TogglePreparationResult = 'continue' | 'handled';
 
+let toggleQueue: Promise<void> = Promise.resolve();
+
 function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
     target.autoProxyUrl = source.autoProxyUrl;
     target.lastSystemProxyCheck = source.lastSystemProxyCheck;
@@ -223,12 +225,13 @@ async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promi
 
 /**
  * Execute the toggle proxy command
- * Cycles through Off -> Manual -> Auto -> Off modes
+ * Cycles through Off -> Auto -> Off modes.
+ * Legacy Manual states are normalized to Auto by ProxyStateManager.getNextMode().
  *
  * @param ctx - Command execution context
  * @returns CommandResult indicating success or failure
  */
-export async function executeToggleProxy(ctx: CommandContext): Promise<CommandResult> {
+async function executeToggleProxyOnce(ctx: CommandContext): Promise<CommandResult> {
     try {
         const currentState = await ctx.getProxyState();
         const nextMode = ctx.getNextMode(currentState.mode);
@@ -258,4 +261,15 @@ export async function executeToggleProxy(ctx: CommandContext): Promise<CommandRe
         );
         return { success: false, error: error as Error };
     }
+}
+
+export function executeToggleProxy(ctx: CommandContext): Promise<CommandResult> {
+    const queuedResult = toggleQueue.then(
+        () => executeToggleProxyOnce(ctx),
+        () => executeToggleProxyOnce(ctx)
+    );
+
+    // Keep rapid command invocations from reading and applying stale state in parallel.
+    toggleQueue = queuedResult.then(() => undefined, () => undefined);
+    return queuedResult;
 }

@@ -297,8 +297,8 @@ async function loadSharedStateIfEnabled(state: ProxyState): Promise<ProxyState> 
 async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: TerminalEnvConfigManager): Promise<void> {
     const activeUrl = proxyStateManager.getActiveProxyUrl(state);
 
-    if (state.mode === ProxyMode.Off) {
-        await clearManagedStartupProxyState(state, terminalEnvManager);
+    if (shouldEnsureStartupProxyDisabled(state, activeUrl)) {
+        await clearManagedStartupProxyState(terminalEnvManager);
         return;
     }
 
@@ -307,17 +307,17 @@ async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: Te
     }
 }
 
-async function clearManagedStartupProxyState(
-    state: ProxyState,
-    terminalEnvManager?: TerminalEnvConfigManager
-): Promise<void> {
+function shouldEnsureStartupProxyDisabled(state: ProxyState, activeUrl: string): boolean {
+    return state.mode === ProxyMode.Off ||
+        (state.mode === ProxyMode.Auto && state.autoModeOff === true && !activeUrl);
+}
+
+async function clearManagedStartupProxyState(terminalEnvManager?: TerminalEnvConfigManager): Promise<void> {
     if (terminalEnvManager) {
         await terminalEnvManager.unsetProxy();
     }
 
-    if (state.gitConfigured || state.vscodeConfigured || state.npmConfigured) {
-        await applyProxySafely('', false, 'startup', { silent: true });
-    }
+    await applyProxySafely('', false, 'startup', { silent: true });
 }
 
 async function updateMonitoringForState(state: ProxyState): Promise<void> {

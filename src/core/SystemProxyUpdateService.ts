@@ -53,7 +53,7 @@ export class SystemProxyUpdateService {
             await this.applyFallbackProxyState(state);
         }
 
-        if (previousProxy === state.autoProxyUrl) {
+        if (previousProxy === state.autoProxyUrl && !this.shouldEnsureDisabledProxy(state)) {
             await this.context.proxyStateManager.saveState(state);
             return;
         }
@@ -70,8 +70,18 @@ export class SystemProxyUpdateService {
 
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
         await this.context.proxyStateManager.saveState(state);
-        await applyProxyThroughContext(this.context, state.autoProxyUrl || '', true);
+        const activeProxyUrl = state.autoProxyUrl || '';
+        await applyProxyThroughContext(
+            this.context,
+            activeProxyUrl,
+            Boolean(activeProxyUrl),
+            activeProxyUrl ? undefined : { silent: true }
+        );
         this.notifyAutoProxyChange(state, previousProxy);
+    }
+
+    private shouldEnsureDisabledProxy(state: ProxyState): boolean {
+        return !state.autoProxyUrl && state.autoModeOff === true && !state.usingFallbackProxy;
     }
 
     private notifyAutoProxyChange(state: ProxyState, previousProxy: string | undefined): void {

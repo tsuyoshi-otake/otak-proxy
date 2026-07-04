@@ -48,10 +48,17 @@ suite('ToggleProxyCommand Unit Tests', () => {
 
     function createContext(
         initialState: ProxyState,
-        checkAndUpdateSystemProxy: () => Promise<void>
-    ): { ctx: CommandContext; getState: () => ProxyState; applyCalls: Array<{ url: string; enabled: boolean }> } {
+        checkAndUpdateSystemProxy: () => Promise<void>,
+        applyProxySettings?: (url: string, enabled: boolean) => Promise<boolean>
+    ): {
+        ctx: CommandContext;
+        getState: () => ProxyState;
+        applyCalls: Array<{ url: string; enabled: boolean }>;
+        monitorCalls: string[];
+    } {
         let state = { ...initialState };
         const applyCalls: Array<{ url: string; enabled: boolean }> = [];
+        const monitorCalls: string[] = [];
 
         const ctx: CommandContext = {
             extensionContext: {} as vscode.ExtensionContext,
@@ -68,15 +75,18 @@ suite('ToggleProxyCommand Unit Tests', () => {
                 }
                 return '';
             },
-            getNextMode: (mode) => mode === ProxyMode.Manual ? ProxyMode.Auto : ProxyMode.Off,
+            getNextMode: (mode) => mode === ProxyMode.Auto ? ProxyMode.Off : ProxyMode.Auto,
             applyProxySettings: async (url, enabled) => {
                 applyCalls.push({ url, enabled });
+                if (applyProxySettings) {
+                    return applyProxySettings(url, enabled);
+                }
                 return true;
             },
             updateStatusBar: () => {},
             checkAndUpdateSystemProxy,
-            startSystemProxyMonitoring: async () => {},
-            stopSystemProxyMonitoring: async () => {},
+            startSystemProxyMonitoring: async () => { monitorCalls.push('start'); },
+            stopSystemProxyMonitoring: async () => { monitorCalls.push('stop'); },
             userNotifier: {
                 showSuccess: () => {},
                 showWarning: () => {},
@@ -89,8 +99,53 @@ suite('ToggleProxyCommand Unit Tests', () => {
             }
         };
 
-        return { ctx, getState: () => state, applyCalls };
+        return { ctx, getState: () => state, applyCalls, monitorCalls };
     }
+
+    test('should switch from Off to Auto when an auto proxy is detected', async () => {
+        let setDetectedProxy: (() => void) | undefined;
+        const { ctx, getState, applyCalls, monitorCalls } = createContext(
+            { mode: ProxyMode.Off },
+            async () => setDetectedProxy?.()
+        );
+        setDetectedProxy = () => {
+            const state = getState();
+            state.autoProxyUrl = 'http://system.example.com:8080';
+            state.systemProxyDetected = true;
+        };
+
+        const result = await executeToggleProxy(ctx);
+        const state = getState();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.deepStrictEqual(applyCalls[applyCalls.length - 1], {
+            url: 'http://system.example.com:8080',
+            enabled: true
+        });
+        assert.deepStrictEqual(monitorCalls, ['start']);
+    });
+
+    test('should switch from Auto to Off', async () => {
+        const { ctx, getState, applyCalls, monitorCalls } = createContext(
+            {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://system.example.com:8080'
+            },
+            async () => {}
+        );
+
+        const result = await executeToggleProxy(ctx);
+        const state = getState();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Off);
+        assert.deepStrictEqual(applyCalls[applyCalls.length - 1], {
+            url: '',
+            enabled: false
+        });
+        assert.deepStrictEqual(monitorCalls, ['stop']);
+    });
 
     test('should keep detected auto proxy when switching from Manual to Auto', async () => {
         let setDetectedProxy: (() => void) | undefined;
@@ -155,5 +210,44 @@ suite('ToggleProxyCommand Unit Tests', () => {
         } finally {
             await close(server);
         }
+    });
+
+    test('should serialize rapid toggles and apply each transition in order', async () => {
+        let setDetectedProxy: (() => void) | undefined;
+        let activeApplyCount = 0;
+        let maxActiveApplyCount = 0;
+
+        const { ctx, getState, applyCalls, monitorCalls } = createContext(
+            { mode: ProxyMode.Off },
+            async () => setDetectedProxy?.(),
+            async () => {
+                activeApplyCount++;
+                maxActiveApplyCount = Math.max(maxActiveApplyCount, activeApplyCount);
+                await new Promise<void>(resolve => setTimeout(resolve, 20));
+                activeApplyCount--;
+                return true;
+            }
+        );
+        setDetectedProxy = () => {
+            const state = getState();
+            state.autoProxyUrl = 'http://system.example.com:8080';
+            state.systemProxyDetected = true;
+        };
+
+        const [firstResult, secondResult] = await Promise.all([
+            executeToggleProxy(ctx),
+            executeToggleProxy(ctx)
+        ]);
+        const state = getState();
+
+        assert.strictEqual(firstResult.success, true);
+        assert.strictEqual(secondResult.success, true);
+        assert.strictEqual(maxActiveApplyCount, 1);
+        assert.strictEqual(state.mode, ProxyMode.Off);
+        assert.deepStrictEqual(applyCalls, [
+            { url: 'http://system.example.com:8080', enabled: true },
+            { url: '', enabled: false }
+        ]);
+        assert.deepStrictEqual(monitorCalls, ['start', 'stop']);
     });
 });

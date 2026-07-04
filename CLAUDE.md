@@ -53,6 +53,12 @@ Kiro-style Spec Driven Development implementation on AI-DLC (AI Development Life
 ## Testing (Fast + Isolated)
 This repo has two test modes: VS Code extension-host tests and plain Node unit tests. Keep them isolated and fast.
 
+### Mandatory Proxy Behavior Verification
+- For every change that affects proxy detection, proxy application/removal, diagnostics, remediation, credentials, Git/npm/VS Code config writers, terminal environment handling, startup behavior, or toggle behavior, run E2E-level proxy behavior tests on an actual machine/environment. Do not rely only on mocks, unit tests, or extension-host simulations for these paths.
+- Real-machine E2E verification must cover both normal and failure scenarios, including proxy ON, proxy OFF, Auto/Auto OFF, stale proxy cleanup, diagnostics output, automatic remediation/retry behavior, and recovery after failed or interrupted writes when relevant.
+- Also run integration-level and unit-level tests for both happy paths and error paths. Include tests for successful writes/removals, unavailable tools, permission/config failures, stale settings, credential-bearing proxy URLs, and concurrency or rapid-toggle cases when the change can affect them.
+- Because real-machine proxy E2E tests can touch VS Code, Git, npm, and terminal environment settings, record the pre-test state, use temporary profiles/config files where possible, and explicitly restore or verify cleanup after the test.
+
 ## Localization Source Of Truth
 - UI/runtime messages: `src/i18n/locales/*.json`
 - VS Code contributed strings (`package.json` placeholders like `%command.toggleProxy%`):

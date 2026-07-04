@@ -5,6 +5,7 @@ import { ProxyConfigResults } from './ProxyApplierTypes';
 
 export async function saveProxyConfigResults(
     stateManager: ProxyStateManager | undefined,
+    enabled: boolean,
     results: ProxyConfigResults,
     errorAggregator: ErrorAggregator
 ): Promise<void> {
@@ -14,12 +15,20 @@ export async function saveProxyConfigResults(
 
     try {
         const state = await stateManager.getState();
-        state.gitConfigured = results.gitSuccess;
-        state.vscodeConfigured = results.vscodeSuccess;
-        state.npmConfigured = results.npmSuccess;
+        state.gitConfigured = nextConfiguredState(state.gitConfigured, results.gitSuccess, enabled);
+        state.vscodeConfigured = nextConfiguredState(state.vscodeConfigured, results.vscodeSuccess, enabled);
+        state.npmConfigured = nextConfiguredState(state.npmConfigured, results.npmSuccess, enabled);
         state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
         await stateManager.saveState(state);
     } catch (error) {
         Logger.error('Failed to update configuration state tracking:', error);
     }
+}
+
+function nextConfiguredState(previous: boolean | undefined, success: boolean, enabled: boolean): boolean | undefined {
+    if (!success) {
+        return previous;
+    }
+
+    return enabled;
 }

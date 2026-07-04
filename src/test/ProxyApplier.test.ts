@@ -325,6 +325,59 @@ suite('ProxyApplier Unit Tests', () => {
         assert.strictEqual(result, true, 'disableProxy should return true when all managers succeed');
     });
 
+    test('disableProxy marks tracked proxy targets as not configured after successful unset', async () => {
+        let state = {
+            mode: 'auto',
+            gitConfigured: true,
+            vscodeConfigured: true,
+            npmConfigured: true
+        };
+        const stateManager = {
+            getState: async () => ({ ...state }),
+            saveState: async (nextState: typeof state) => {
+                state = { ...nextState };
+            }
+        } as any;
+
+        const mockGitManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockVscodeManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockNpmManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockNotifier = {
+            showSuccess: () => {},
+            showError: () => {},
+            showWarning: () => {}
+        } as any;
+
+        const applier = new ProxyApplier(
+            mockGitManager,
+            mockVscodeManager,
+            mockNpmManager,
+            new ProxyUrlValidator(),
+            new InputSanitizer(),
+            mockNotifier,
+            stateManager
+        );
+
+        const result = await applier.disableProxy();
+
+        assert.strictEqual(result, true);
+        assert.strictEqual(state.gitConfigured, false);
+        assert.strictEqual(state.vscodeConfigured, false);
+        assert.strictEqual(state.npmConfigured, false);
+    });
+
     test('disableProxy returns false when any manager fails', async () => {
         const mockGitManager = {
             setProxy: async () => ({ success: true }),
