@@ -1,6 +1,12 @@
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]/g;
 const ANSI_ESCAPE_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]/g;
-const URL_CREDENTIAL_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi;
+// Greedy credential part: backtracks to the LAST "@" before the host, so
+// passwords containing an unencoded "@" (http://user:p@ss@host) are fully consumed.
+const URL_CREDENTIAL_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)([^/\s]+)@/gi;
+// Scheme-less "user:pass@host" as returned by git/npm config reads. Requires a
+// ":" between user and password so plain email addresses never match. May
+// over-redact exotic prose containing ":...@"; that is the safe direction here.
+const BARE_CREDENTIAL_PATTERN = /(^|[\s"'=(,;])([^\s@/:"']+):([^\s@/"']+)@/gm;
 const HEADER_SECRET_PATTERN = /\b(Proxy-Authorization|Authorization)\s*:\s*([^\r\n]+)/gi;
 const BASIC_SECRET_PATTERN = /\bBasic\s+[A-Za-z0-9+/]+={0,2}\b/g;
 const NPM_AUTH_PATTERN = /^(\s*(?:\/\/[^=]+:)?_authToken\s*=\s*)(.+)$/gim;
@@ -37,7 +43,8 @@ export class ProxySecretRedactor {
             .replace(BASIC_SECRET_PATTERN, 'Basic <redacted>')
             .replace(NPM_AUTH_PATTERN, '$1<redacted>')
             .replace(GIT_EXTRA_HEADER_PATTERN, '$1 <redacted>')
-            .replace(URL_CREDENTIAL_PATTERN, '$1<credentials>@');
+            .replace(URL_CREDENTIAL_PATTERN, '$1<credentials>@')
+            .replace(BARE_CREDENTIAL_PATTERN, '$1<credentials>@');
 
         for (const secret of uniqueSecrets(knownSecrets.flatMap(encodedForms))) {
             redacted = redacted.replace(new RegExp(escapeRegExp(secret), 'g'), '<redacted>');

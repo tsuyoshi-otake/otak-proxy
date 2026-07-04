@@ -23,31 +23,42 @@ export class InputSanitizer {
     maskPassword(url: string): string {
         try {
             const parsed = new URL(url);
-            
+
             // If there's a password, mask it
             if (parsed.password) {
                 parsed.password = '****';
+                return parsed.toString();
             }
-            
-            return parsed.toString();
+
+            if (parsed.username || parsed.host) {
+                return parsed.toString();
+            }
+
+            // Scheme-less "user:secret@host" parses as an opaque URL ("user:" is
+            // taken as the scheme, the rest as the path) with no host and no
+            // credentials — fall through to the regex fallbacks below.
         } catch {
-            // If URL parsing fails, try to mask password using regex
-            // This handles edge cases where URL is malformed but still contains credentials
-            // Pattern: looks for :password@ (password between : and @, but not at the start of URL)
-            // We need to ensure we're matching the password in credentials, not a port number
-            // Look for pattern: //username:password@ or ://username:password@
-            const credentialPattern = /(\/\/[^:@]+):([^@]+)@/;
-            const match = url.match(credentialPattern);
-            
-            if (match && match[1] && match[2]) {
-                // Replace the password (everything after : and before @)
-                // Keep the username part (match[1] includes //username)
-                return url.replace(credentialPattern, '$1:****@');
-            }
-            
-            // If no credentials found, return the original URL
-            return url;
+            // Fall through to the regex fallbacks.
         }
+
+        // URL parsing failed or found no authority; try to mask credentials with
+        // regexes so malformed or scheme-less values still get masked.
+        // Look for pattern: //username:password@ or ://username:password@
+        const credentialPattern = /(\/\/[^:@]+):([^@]+)@/;
+        if (credentialPattern.test(url)) {
+            // Replace the password (everything after : and before @)
+            // Keep the username part (match[1] includes //username)
+            return url.replace(credentialPattern, '$1:****@');
+        }
+
+        // Scheme-less "user:password@host" (e.g. raw git/npm config values).
+        const bareCredentialPattern = /(^|[\s=])([^\s@:/]+):([^\s@/]+)@/g;
+        if (bareCredentialPattern.test(url)) {
+            return url.replace(bareCredentialPattern, '$1$2:****@');
+        }
+
+        // If no credentials found, return the original URL
+        return url;
     }
 
     /**
