@@ -168,25 +168,25 @@
         "otakProxy.diagnosticsEnabled": {
           "type": "boolean",
           "default": true,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.diagnosticsEnabled%"
         },
         "otakProxy.automaticRemediationEnabled": {
           "type": "boolean",
           "default": true,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.automaticRemediationEnabled%"
         },
         "otakProxy.hostUserLockEnabled": {
           "type": "boolean",
           "default": true,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.hostUserLockEnabled%"
         },
         "otakProxy.automaticRetryEnabled": {
           "type": "boolean",
           "default": true,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.automaticRetryEnabled%"
         },
         "otakProxy.remediationDelayedRetryMs": {
@@ -194,7 +194,7 @@
           "default": 2000,
           "minimum": 250,
           "maximum": 30000,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.remediationDelayedRetryMs%"
         },
         "otakProxy.remediationFlapWindowMs": {
@@ -202,7 +202,7 @@
           "default": 600000,
           "minimum": 60000,
           "maximum": 3600000,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.remediationFlapWindowMs%"
         },
         "otakProxy.remediationFlapMaxAttempts": {
@@ -210,7 +210,7 @@
           "default": 2,
           "minimum": 1,
           "maximum": 10,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.remediationFlapMaxAttempts%"
         },
         "otakProxy.remediationFlapCooldownMs": {
@@ -218,7 +218,7 @@
           "default": 600000,
           "minimum": 60000,
           "maximum": 7200000,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.remediationFlapCooldownMs%"
         },
         "otakProxy.notificationCooldownMs": {
@@ -226,7 +226,7 @@
           "default": 600000,
           "minimum": 10000,
           "maximum": 7200000,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.notificationCooldownMs%"
         },
         "otakProxy.slowDiagnosticsTtlMs": {
@@ -234,13 +234,13 @@
           "default": 300000,
           "minimum": 30000,
           "maximum": 3600000,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.slowDiagnosticsTtlMs%"
         },
         "otakProxy.terminalOffMaskingEnabled": {
           "type": "boolean",
           "default": true,
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "%config.terminalOffMaskingEnabled%"
         },
         "otakProxy.notificationLevel": {
