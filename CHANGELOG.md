@@ -1,6 +1,6 @@
 # Change Log
 
-## [3.1.0] - 2026-07-04
+## [3.1.1] - 2026-07-05
 
 ### Fixed
 - Read the WinHTTP proxy state from the locale-independent `WinHttpSettings` registry binary, so proxy diagnostics no longer fail to parse localized `netsh winhttp show proxy` output on non-English/Japanese Windows (#11).
