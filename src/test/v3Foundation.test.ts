@@ -5,7 +5,7 @@ import { ProxyMode, ProxyState } from '../core/types';
 import { deriveRuntimeApplyState, ProxyIssue, V3_SCHEMA_VERSION } from '../core/v3Types';
 import { publicFingerprint, TargetOwnershipStore } from '../core/TargetOwnershipStore';
 import { V3_MIGRATION_JOURNAL_KEY, V3_SCHEMA_VERSION_KEY, LEGACY_MANUAL_PROXY_SECRET_KEY } from '../core/V3MigrationService';
-import { ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
+import { ProxyCredentialStore, splitProxyUrl, getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { parseWinHttpShowProxy } from '../diagnostics/WindowsProxyDiagnostics';
 import { ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
@@ -159,6 +159,173 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             assert.ok(!JSON.stringify([...store.entries()]).includes('s3cr3t'));
             assert.ok(!secrets.has(LEGACY_MANUAL_PROXY_SECRET_KEY));
             assert.ok([...secrets.values()].some(value => value.includes('s3cr3t')));
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('migration preserves every distinct credential-bearing URL (not only the first)', async () => {
+        // Regression for #14: v2 users could hold differently-credentialed URLs in
+        // more than one field. Migrating only the first and stripping the rest
+        // silently discarded the other passwords.
+        const persistedState: ProxyState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://alice:manualpass@manual.example.com:8080',
+            fallbackProxyUrl: 'http://bob:fallbackpass@fallback.example.com:9090'
+        };
+        const store: Store = new Map([['proxyState', persistedState]]);
+        const secrets = new Map<string, string>();
+        const restoreConfig = stubConfiguration('');
+        try {
+            const context = createContext(store, secrets);
+            await new ProxyStateManager(context).getState();
+
+            const credentialStore = new ProxyCredentialStore(context.secrets);
+            const manualPublic = splitProxyUrl(persistedState.manualProxyUrl!).publicUrl;
+            const fallbackPublic = splitProxyUrl(persistedState.fallbackProxyUrl!).publicUrl;
+
+            assert.deepStrictEqual(
+                await credentialStore.getCredentialsForPublicUrl(manualPublic),
+                { username: 'alice', password: 'manualpass' },
+                'manual URL credentials must be migrated'
+            );
+            assert.deepStrictEqual(
+                await credentialStore.getCredentialsForPublicUrl(fallbackPublic),
+                { username: 'bob', password: 'fallbackpass' },
+                'fallback URL credentials must ALSO be migrated, not discarded'
+            );
+
+            // Both are reconstructable, and neither password remains in globalState.
+            const persisted = JSON.stringify([...store.entries()]);
+            assert.ok(!persisted.includes('manualpass'), 'manual password must not remain in globalState');
+            assert.ok(!persisted.includes('fallbackpass'), 'fallback password must not remain in globalState');
+
+            const journal = store.get(V3_MIGRATION_JOURNAL_KEY) as { phase: string; migratedCredentialRefs?: string[] };
+            assert.strictEqual(journal.phase, 'completed');
+            assert.strictEqual(journal.migratedCredentialRefs?.length, 2, 'journal must record both migrated credential refs');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('migration records a dropped credential when two fields share a proxy address with different secrets', async () => {
+        // Same public URL (host:port) but different credentials collide on one
+        // secret key; the first wins and the loss is recorded in the journal.
+        const persistedState: ProxyState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://alice:firstpass@shared.example.com:8080',
+            fallbackProxyUrl: 'http://alice:secondpass@shared.example.com:8080'
+        };
+        const store: Store = new Map([['proxyState', persistedState]]);
+        const secrets = new Map<string, string>();
+        const restoreConfig = stubConfiguration('');
+        try {
+            const context = createContext(store, secrets);
+            await new ProxyStateManager(context).getState();
+
+            const credentialStore = new ProxyCredentialStore(context.secrets);
+            const sharedPublic = splitProxyUrl(persistedState.manualProxyUrl!).publicUrl;
+            assert.deepStrictEqual(
+                await credentialStore.getCredentialsForPublicUrl(sharedPublic),
+                { username: 'alice', password: 'firstpass' },
+                'the first (highest-priority) credential must win the shared address'
+            );
+
+            const journal = store.get(V3_MIGRATION_JOURNAL_KEY) as { droppedCredentialCount?: number };
+            assert.strictEqual(journal.droppedCredentialCount, 1, 'the dropped distinct credential must be recorded');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('a single malformed credential-bearing field does not abort migrating the valid ones', async () => {
+        // hasProxyCredentials() accepts values that new URL() rejects (e.g. no host);
+        // one such field must not fail the whole migration.
+        const persistedState: ProxyState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://carol:goodpass@valid.example.com:8080',
+            autoProxyUrl: 'http://mallory:badpass@'
+        };
+        const store: Store = new Map([['proxyState', persistedState]]);
+        const secrets = new Map<string, string>();
+        const restoreConfig = stubConfiguration('');
+        try {
+            const context = createContext(store, secrets);
+            await new ProxyStateManager(context).getState();
+
+            const credentialStore = new ProxyCredentialStore(context.secrets);
+            const validPublic = splitProxyUrl(persistedState.manualProxyUrl!).publicUrl;
+            assert.deepStrictEqual(
+                await credentialStore.getCredentialsForPublicUrl(validPublic),
+                { username: 'carol', password: 'goodpass' },
+                'the valid credential must still be migrated'
+            );
+
+            const journal = store.get(V3_MIGRATION_JOURNAL_KEY) as { phase: string };
+            assert.strictEqual(journal.phase, 'completed', 'migration must complete despite the malformed field');
+            assert.strictEqual(store.get(V3_SCHEMA_VERSION_KEY), V3_SCHEMA_VERSION);
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('two fields with the identical losing login count as one dropped credential', async () => {
+        const persistedState: ProxyState = {
+            mode: ProxyMode.Manual,
+            manualProxyUrl: 'http://alice:winner@shared.example.com:8080',
+            lastSystemProxyUrl: 'http://alice:loser@shared.example.com:8080',
+            fallbackProxyUrl: 'http://alice:loser@shared.example.com:8080'
+        };
+        const store: Store = new Map([['proxyState', persistedState]]);
+        const secrets = new Map<string, string>();
+        const restoreConfig = stubConfiguration('');
+        try {
+            await new ProxyStateManager(createContext(store, secrets)).getState();
+            const journal = store.get(V3_MIGRATION_JOURNAL_KEY) as { droppedCredentialCount?: number };
+            assert.strictEqual(journal.droppedCredentialCount, 1, 'the same losing login must not be double-counted');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('a partial SecretStorage failure preserves the other credential and is recorded', async () => {
+        const manualUrl = 'http://alice:manualpass@manual.example.com:8080';
+        const fallbackUrl = 'http://bob:fallbackpass@fallback.example.com:9090';
+        const failingKey = getCredentialKeyForPublicUrl(splitProxyUrl(manualUrl).publicUrl);
+
+        // A SecretStorage that rejects storing the manual credential but works otherwise.
+        class PartiallyFailingSecrets extends Map<string, string> {
+            set(key: string, value: string): this {
+                if (key === failingKey) {
+                    throw new Error('secret store failed');
+                }
+                return super.set(key, value);
+            }
+        }
+
+        const persistedState: ProxyState = { mode: ProxyMode.Manual, manualProxyUrl: manualUrl, fallbackProxyUrl: fallbackUrl };
+        const store: Store = new Map([['proxyState', persistedState]]);
+        const secrets = new PartiallyFailingSecrets();
+        const restoreConfig = stubConfiguration('');
+        try {
+            const context = createContext(store, secrets);
+            await new ProxyStateManager(context).getState();
+
+            const credentialStore = new ProxyCredentialStore(context.secrets);
+            assert.strictEqual(
+                await credentialStore.getCredentialsForPublicUrl(splitProxyUrl(manualUrl).publicUrl),
+                undefined,
+                'the credential whose store failed must not be present'
+            );
+            assert.deepStrictEqual(
+                await credentialStore.getCredentialsForPublicUrl(splitProxyUrl(fallbackUrl).publicUrl),
+                { username: 'bob', password: 'fallbackpass' },
+                'the other credential must still be migrated despite the partial failure'
+            );
+
+            const journal = store.get(V3_MIGRATION_JOURNAL_KEY) as { phase: string; lastErrorSanitized?: string };
+            assert.strictEqual(journal.phase, 'completed');
+            assert.ok(journal.lastErrorSanitized, 'a partial SecretStorage failure must be recorded in the journal');
         } finally {
             restoreConfig();
         }

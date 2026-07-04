@@ -294,5 +294,6 @@
   "diagnose.target.windowsWinhttp": "Diagnostik proxy WinHTTP",
   "diagnose.target.windowsWininet": "Diagnostik proxy WinINet",
   "diagnose.reason.winhttpParseUnavailable": "keluaran proxy WinHTTP tidak dapat diurai",
-  "diagnose.reason.wininetPac": "URL konfigurasi otomatis proxy (PAC) telah dikonfigurasi"
+  "diagnose.reason.wininetPac": "URL konfigurasi otomatis proxy (PAC) telah dikonfigurasi",
+  "migration.credentialsDropped": "otak-proxy tidak dapat memigrasikan {count} kredensial proxy duplikat ke penyimpanan aman selama peningkatan v3. Masukkan kembali jika sebuah proxy berhenti mengautentikasi."
 }

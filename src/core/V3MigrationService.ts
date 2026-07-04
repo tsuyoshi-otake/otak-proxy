@@ -13,6 +13,7 @@ import {
     sanitizeProxyStateForPersistence
 } from '../utils/ProxyStateSanitizer';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 
 export const V3_SCHEMA_VERSION_KEY = 'otakProxy.v3.schemaVersion';
@@ -45,19 +46,27 @@ export class V3MigrationService {
             const state = this.context.globalState.get<ProxyState>('proxyState');
             const configuredUrl = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
             const legacySecret = await this.readLegacySecret();
-            const credentialCandidate = this.findCredentialCandidate(state, configuredUrl, legacySecret);
+            const credentialCandidates = this.findCredentialCandidates(state, configuredUrl, legacySecret);
             let credentialPublicUrl: string | undefined;
             let credentialFullUrl: string | undefined;
+            let droppedCredentialCount = 0;
 
-            if (credentialCandidate) {
-                const ref = await this.credentialStore.storeFromProxyUrl(credentialCandidate);
-                credentialFullUrl = credentialCandidate;
-                credentialPublicUrl = splitProxyUrl(credentialCandidate).publicUrl;
+            if (credentialCandidates.length > 0) {
+                const stored = await this.migrateCredentials(credentialCandidates);
+                credentialFullUrl = stored.primaryFullUrl;
+                credentialPublicUrl = stored.primaryPublicUrl;
+                droppedCredentialCount = stored.droppedCount;
                 journal = await this.saveJournal({
                     ...journal,
                     phase: 'secretStored',
-                    migratedCredentialRef: ref?.key,
-                    lastErrorSanitized: ref ? undefined : 'SecretStorage unavailable; credentials require re-entry'
+                    migratedCredentialRef: stored.refs[0],
+                    migratedCredentialRefs: stored.refs.length > 0 ? stored.refs : undefined,
+                    droppedCredentialCount: stored.droppedCount > 0 ? stored.droppedCount : undefined,
+                    // Set on ANY store failure (not only total failure) so a partial
+                    // SecretStorage outage that lost some credentials is still recorded.
+                    lastErrorSanitized: stored.secretStorageUnavailable
+                        ? 'SecretStorage unavailable; some credentials require re-entry'
+                        : undefined
                 });
             }
 
@@ -76,6 +85,11 @@ export class V3MigrationService {
 
             await this.context.globalState.update(V3_SCHEMA_VERSION_KEY, V3_SCHEMA_VERSION);
             journal = await this.saveJournal({ ...journal, phase: 'completed' });
+            // Notify only after the schema version is committed, so a failure in a
+            // later phase (which re-runs migration next time) cannot warn twice.
+            if (droppedCredentialCount > 0) {
+                this.notifyDroppedCredentials(droppedCredentialCount);
+            }
             return journal;
         } catch (error) {
             const sanitized = this.redactor.redactString(error instanceof Error ? error.message : String(error));
@@ -106,11 +120,13 @@ export class V3MigrationService {
         return journal;
     }
 
-    private findCredentialCandidate(
+    private findCredentialCandidates(
         state: ProxyState | undefined,
         configuredUrl: string,
         legacySecret: string | undefined
-    ): string | undefined {
+    ): string[] {
+        // Priority order: the first credential-bearing URL is the "primary" one
+        // used for ownership bootstrap and wins any shared-address collision.
         const candidates = [
             state?.manualProxyUrl,
             state?.autoProxyUrl,
@@ -119,7 +135,87 @@ export class V3MigrationService {
             state?.lastSystemProxyUrl,
             state?.fallbackProxyUrl
         ];
-        return candidates.find((candidate): candidate is string => Boolean(candidate && hasProxyCredentials(candidate)));
+        return candidates.filter((candidate): candidate is string => Boolean(candidate && hasProxyCredentials(candidate)));
+    }
+
+    /**
+     * Stores each distinct credential-bearing URL under its own secret (keyed by
+     * public URL). A v2 user could hold differently-credentialed URLs in more than
+     * one field; migrating only the first (as before) silently discarded the rest.
+     * Two fields sharing the same public URL but different logins collide on one
+     * key: the first (highest priority) wins and the loss is counted for the journal.
+     */
+    private async migrateCredentials(candidates: string[]): Promise<{
+        refs: string[];
+        primaryPublicUrl?: string;
+        primaryFullUrl?: string;
+        droppedCount: number;
+        secretStorageUnavailable: boolean;
+    }> {
+        const refs: string[] = [];
+        const storedCredentialByPublicUrl = new Map<string, string>();
+        // Distinct (public URL + losing login) pairs, so two fields carrying the
+        // identical alternate login are not counted twice.
+        const droppedCredentialKeys = new Set<string>();
+        let primaryPublicUrl: string | undefined;
+        let primaryFullUrl: string | undefined;
+        let secretStorageUnavailable = false;
+
+        for (const candidate of candidates) {
+            try {
+                const split = splitProxyUrl(candidate);
+                const credentialJson = JSON.stringify(split.credentials ?? {});
+                const alreadyStored = storedCredentialByPublicUrl.get(split.publicUrl);
+                if (alreadyStored !== undefined) {
+                    // Same proxy address as an earlier field. Only a real loss if the
+                    // login differs (identical duplicates cost nothing).
+                    if (alreadyStored !== credentialJson) {
+                        droppedCredentialKeys.add(`${split.publicUrl}\n${credentialJson}`);
+                    }
+                    continue;
+                }
+
+                const ref = await this.credentialStore.storeFromProxyUrl(candidate);
+                if (!ref) {
+                    secretStorageUnavailable = true;
+                    continue;
+                }
+                storedCredentialByPublicUrl.set(split.publicUrl, credentialJson);
+                refs.push(ref.key);
+                if (!primaryPublicUrl) {
+                    primaryPublicUrl = split.publicUrl;
+                    primaryFullUrl = candidate;
+                }
+            } catch (error) {
+                // hasProxyCredentials() can pass a value that new URL() rejects
+                // (e.g. "http://user:pass@" with no host). Skip that one malformed
+                // field instead of aborting migration of the valid ones; it is
+                // stripped from public state regardless.
+                Logger.warn(
+                    'Skipping unparseable credential-bearing field during migration:',
+                    this.redactor.redactString(error instanceof Error ? error.message : String(error))
+                );
+            }
+        }
+
+        return {
+            refs,
+            primaryPublicUrl,
+            primaryFullUrl,
+            droppedCount: droppedCredentialKeys.size,
+            secretStorageUnavailable
+        };
+    }
+
+    private notifyDroppedCredentials(count: number): void {
+        try {
+            const message = I18nManager.getInstance().t('migration.credentialsDropped', { count: String(count) });
+            // Fire-and-forget: do not block migration on the user dismissing the
+            // dialog, but still swallow any rejection so it is not unhandled.
+            Promise.resolve(vscode.window.showWarningMessage(message)).catch(() => undefined);
+        } catch (error) {
+            Logger.warn('Failed to notify about dropped proxy credentials:', error);
+        }
     }
 
     private async writePublicState(state: ProxyState | undefined, configuredUrl: string): Promise<void> {

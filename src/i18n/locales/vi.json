@@ -294,5 +294,6 @@
   "diagnose.target.windowsWinhttp": "Chẩn đoán proxy WinHTTP",
   "diagnose.target.windowsWininet": "Chẩn đoán proxy WinINet",
   "diagnose.reason.winhttpParseUnavailable": "không thể phân tích đầu ra proxy WinHTTP",
-  "diagnose.reason.wininetPac": "một URL tự động cấu hình proxy (PAC) đã được cấu hình"
+  "diagnose.reason.wininetPac": "một URL tự động cấu hình proxy (PAC) đã được cấu hình",
+  "migration.credentialsDropped": "otak-proxy không thể di chuyển {count} thông tin đăng nhập proxy trùng lặp sang bộ lưu trữ an toàn trong quá trình nâng cấp lên v3. Hãy nhập lại nếu một proxy ngừng xác thực."
 }

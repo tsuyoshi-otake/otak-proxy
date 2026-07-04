@@ -150,7 +150,16 @@ export interface MigrationJournal {
     schemaFrom: number;
     schemaTo: number;
     phase: MigrationPhase;
+    /** The primary migrated credential (highest-priority field). */
     migratedCredentialRef?: string;
+    /** Every distinct credential migrated to SecretStorage (one per public URL). */
+    migratedCredentialRefs?: string[];
+    /**
+     * Count of distinct credentials that could not be preserved because two fields
+     * shared a proxy address (public URL) with different logins — one secret per
+     * public URL, so the lower-priority one is dropped and recorded here (#14).
+     */
+    droppedCredentialCount?: number;
     legacySecretKeyNames?: string[];
     lastErrorSanitized?: string;
 }

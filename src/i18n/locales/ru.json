@@ -294,5 +294,6 @@
   "diagnose.target.windowsWinhttp": "Диагностика прокси WinHTTP",
   "diagnose.target.windowsWininet": "Диагностика прокси WinINet",
   "diagnose.reason.winhttpParseUnavailable": "не удалось разобрать вывод прокси WinHTTP",
-  "diagnose.reason.wininetPac": "настроен URL автоконфигурации прокси (PAC)"
+  "diagnose.reason.wininetPac": "настроен URL автоконфигурации прокси (PAC)",
+  "migration.credentialsDropped": "otak-proxy не удалось перенести {count} повторяющихся учётных данных прокси в безопасное хранилище при обновлении до v3. Введите их заново, если прокси перестанет проходить аутентификацию."
 }

@@ -294,5 +294,6 @@
   "diagnose.target.windowsWinhttp": "WinHTTP 代理诊断",
   "diagnose.target.windowsWininet": "WinINet 代理诊断",
   "diagnose.reason.winhttpParseUnavailable": "无法解析 WinHTTP 代理输出",
-  "diagnose.reason.wininetPac": "配置了代理自动配置 (PAC) URL"
+  "diagnose.reason.wininetPac": "配置了代理自动配置 (PAC) URL",
+  "migration.credentialsDropped": "在升级到 v3 期间，otak-proxy 无法将 {count} 个重复的代理凭据迁移到安全存储。如果代理停止验证，请重新输入。"
 }
