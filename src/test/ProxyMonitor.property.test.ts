@@ -274,8 +274,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 2.4
      */
     test('Property 5: Debounce processing', async function() {
-        // Increase timeout for this test as it involves waiting for debounce
-        this.timeout(30000);
+        // Use fake timers so the property cannot time out under CI load.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -293,6 +293,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                     );
 
                     mockDetector.resetCheckCount();
+                    const clock = sinon.useFakeTimers();
 
                     try {
                         // Start monitoring
@@ -302,12 +303,12 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         // Each trigger is 50ms apart, which is well within the 500ms debounce
                         for (let i = 0; i < triggerCount; i++) {
                             monitor.triggerCheck('focus');
-                            await sleep(50); // 50ms between triggers
+                            await clock.tickAsync(50); // 50ms between triggers
                         }
 
                         // Wait for debounce period plus some buffer
                         // This ensures the debounced check has time to execute
-                        await sleep(debounceDelay + 300);
+                        await clock.tickAsync(debounceDelay + 300);
 
                         // Get check count
                         const checkCount = mockDetector.getCheckCount();
@@ -323,6 +324,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                     } finally {
                         monitor.stop();
+                        clock.restore();
                     }
                 }
             ),
