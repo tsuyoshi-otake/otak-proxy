@@ -535,8 +535,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 3.4
      */
     test('Property 8: Retry counter reset on success', async function() {
-        // Increase timeout for this test as it involves retries with backoff
-        this.timeout(120000);
+        // Keep retry-success validation deterministic by skipping real backoff timers.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -596,21 +596,12 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         emittedResult = result;
                     });
 
+                    (monitor as any).sleep = async (): Promise<void> => {};
+
                     try {
-                        // Start monitoring
-                        monitor.start();
-
-                        // Trigger a check
-                        monitor.triggerCheck('focus');
-
-                        // Wait for debounce + all retries to complete
-                        // Calculate maximum wait time based on exponential backoff
-                        let maxBackoffTime = 0;
-                        for (let i = 1; i <= maxRetries; i++) {
-                            maxBackoffTime += 0.05 * Math.pow(2, i - 1) * 1000;
-                        }
-                        await sleep(10 + maxBackoffTime + 2000); // debounce + backoff + buffer
-
+                        // Call full check logic directly so state updates and events still run.
+                        await (monitor as any).executeCheck('focus');
+                        
                         // If failuresBeforeSuccess <= maxRetries, detection should succeed eventually
                         if (failuresBeforeSuccess <= maxRetries) {
                             // Property: On successful retry, proxyChanged event should be emitted
@@ -663,8 +654,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 1.4
      */
     test('Property 4: Polling stops when switching modes', async function() {
-        // Increase timeout for this test as it involves waiting for polling
-        this.timeout(60000);
+        // Use fake timers to validate polling behavior without real 40s waits.
+        this.timeout(5000);
 
         // Test with minimum valid interval (10 seconds) as required by ProxyMonitor
         const intervalSeconds = 10;
@@ -680,16 +671,17 @@ suite('ProxyMonitor Property-Based Tests', () => {
         );
 
         mockDetector.resetCheckCount();
+        const clock = sinon.useFakeTimers();
 
         try {
             // Start monitoring (simulating Auto mode)
             monitor.start();
 
             // Wait a bit for the first check to be scheduled
-            await sleep(100);
+            await clock.tickAsync(100);
 
             // Wait for approximately 1.8 intervals to see at least one check
-            await sleep(intervalMs * 1.8);
+            await clock.tickAsync(intervalMs * 1.8);
 
             // Get check count while monitoring is active
             const checksWhileActive = mockDetector.getCheckCount();
@@ -703,14 +695,14 @@ suite('ProxyMonitor Property-Based Tests', () => {
             monitor.stop();
 
             // Wait a bit for any in-flight operations to complete
-            await sleep(200);
+            await clock.tickAsync(200);
 
             // Reset check count to measure checks after stop
             mockDetector.resetCheckCount();
 
             // Wait for approximately 2 intervals
             // If polling was not stopped, we would see at least 2 checks
-            await sleep(intervalMs * 2.2);
+            await clock.tickAsync(intervalMs * 2.2);
 
             // Get check count after stop
             const checksAfterStop = mockDetector.getCheckCount();
@@ -732,6 +724,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
         } finally {
             monitor.stop();
+            clock.restore();
         }
     });
 
