@@ -3,7 +3,7 @@
 ## [3.1.5] - 2026-07-05
 
 ### Fixed
-- Keep `existing terminals keep their old proxy environment` as a diagnostics advisory without showing a warning notification at the default notification level.
+- Keep `existing terminals keep their old proxy environment` as a diagnostics advisory without showing default remediation warnings or manual-diagnose info notifications when it is the only issue.
 
 ## [3.1.4] - 2026-07-05
 

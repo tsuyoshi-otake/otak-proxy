@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { formatDiagnosticsNotification } from '../../commands/DiagnoseProxyCommand';
+import { formatDiagnosticsNotification, shouldShowDiagnosticsNotification } from '../../commands/DiagnoseProxyCommand';
 import { ProxyIssue } from '../../core/v3Types';
 import { I18nManager } from '../../i18n/I18nManager';
 
@@ -23,6 +23,22 @@ suite('DiagnoseProxyCommand Unit Tests', () => {
             autoAction: 'none',
             userAction: 'showDetails',
             evidence: {}
+        };
+    }
+
+    function existingTerminalAdvisory(): ProxyIssue {
+        return {
+            id: 'terminal.existingTerminals',
+            fingerprint: 'terminal.existingTerminals:test',
+            category: 'needsNewTerminal',
+            impact: 'advisoryResidualRisk',
+            targetId: 'terminal.existing',
+            targetHost: 'workspaceHost',
+            source: 'vscode.window.terminals',
+            capability: 'readOnly',
+            autoAction: 'none',
+            userAction: 'openNewTerminal',
+            evidence: { terminalCount: 1 }
         };
     }
 
@@ -58,6 +74,36 @@ suite('DiagnoseProxyCommand Unit Tests', () => {
         assert.ok(message.includes('npm user proxy'));
         assert.ok(message.includes('does not match the expected active proxy'));
         assert.ok(message.includes('(+2 more)'));
+    });
+
+    test('suppresses notifications when existing terminal advisory is the only issue', () => {
+        const report = {
+            issueCount: 1,
+            issues: [existingTerminalAdvisory()]
+        };
+
+        assert.strictEqual(shouldShowDiagnosticsNotification(report), false);
+    });
+
+    test('excludes existing terminal advisory from notification issue count when actionable issues exist', () => {
+        const message = formatDiagnosticsNotification({
+            issueCount: 2,
+            issues: [
+                existingTerminalAdvisory(),
+                issue('git.managedProxyResidual', 'git.global.proxy')
+            ]
+        });
+
+        assert.strictEqual(shouldShowDiagnosticsNotification({
+            issueCount: 2,
+            issues: [
+                existingTerminalAdvisory(),
+                issue('git.managedProxyResidual', 'git.global.proxy')
+            ]
+        }), true);
+        assert.ok(message.includes('Proxy diagnostics found 1 issue'));
+        assert.ok(message.includes('Git global proxy'));
+        assert.ok(!message.includes('existing terminals'));
     });
 
     test('explains diagnostics capability issues', () => {

@@ -81,21 +81,40 @@ function issueReason(issue: ProxyIssue): string {
     return key ? I18nManager.getInstance().t(key) : issue.id;
 }
 
+function isExistingTerminalAdvisory(issue: ProxyIssue): boolean {
+    return issue.id === 'terminal.existingTerminals' &&
+        issue.category === 'needsNewTerminal' &&
+        issue.impact === 'advisoryResidualRisk';
+}
+
+function notificationIssues(report: Pick<ProxyDiagnosticReport, 'issueCount' | 'issues'>): ProxyIssue[] {
+    if (report.issueCount === 0) {
+        return [];
+    }
+    return report.issues.filter(issue => !isExistingTerminalAdvisory(issue));
+}
+
+export function shouldShowDiagnosticsNotification(report: Pick<ProxyDiagnosticReport, 'issueCount' | 'issues'>): boolean {
+    return report.issueCount === 0 || notificationIssues(report).length > 0;
+}
+
 export function formatDiagnosticsNotification(report: Pick<ProxyDiagnosticReport, 'issueCount' | 'issues'>): string {
     const i18n = I18nManager.getInstance();
-    if (report.issueCount === 0) {
+    const issues = notificationIssues(report);
+    if (report.issueCount === 0 || issues.length === 0) {
         return i18n.t('diagnose.noIssues');
     }
 
-    const issuesLabel = report.issueCount === 1
+    const issueCount = issues.length;
+    const issuesLabel = issueCount === 1
         ? i18n.t('diagnose.issueCountOne')
-        : i18n.t('diagnose.issueCountMany', { count: String(report.issueCount) });
-    const primaryIssue = getHighestPriorityIssue(report.issues) ?? report.issues[0];
+        : i18n.t('diagnose.issueCountMany', { count: String(issueCount) });
+    const primaryIssue = getHighestPriorityIssue(issues) ?? issues[0];
     if (!primaryIssue) {
         return i18n.t('diagnose.summaryNoPrimary', { issues: issuesLabel });
     }
 
-    const extraCount = Math.max(0, report.issueCount - 1);
+    const extraCount = Math.max(0, issueCount - 1);
     const extra = extraCount > 0 ? i18n.t('diagnose.extraMore', { count: String(extraCount) }) : '';
     return i18n.t('diagnose.summary', {
         issues: issuesLabel,
@@ -120,10 +139,12 @@ export async function executeDiagnoseProxy(
         channel.info(i18n.t('diagnose.generatedAt', { timestamp: String(report.generatedAt) }));
         channel.info(JSON.stringify(redactor.redactValue(report), null, 2));
         channel.show();
-        void vscode.window.showInformationMessage(
-            formatDiagnosticsNotification(report),
-            i18n.t('action.ok')
-        );
+        if (shouldShowDiagnosticsNotification(report)) {
+            void vscode.window.showInformationMessage(
+                formatDiagnosticsNotification(report),
+                i18n.t('action.ok')
+            );
+        }
     } catch (error) {
         const message = redactor.redactString(error instanceof Error ? error.message : String(error));
         Logger.error('Proxy diagnostics failed:', message);
