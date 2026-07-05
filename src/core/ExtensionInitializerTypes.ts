@@ -21,4 +21,5 @@ export interface InitializerContext {
     sanitizer: InputSanitizer;
     proxyChangeLogger: ProxyChangeLogger;
     updateStatusBar?: (state: ProxyState) => void;
+    publishProxyState?: (state: ProxyState) => Promise<void>;
 }

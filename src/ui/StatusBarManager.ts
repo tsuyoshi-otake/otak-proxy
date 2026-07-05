@@ -113,7 +113,9 @@ export class StatusBarManager {
      */
     update(state: ProxyState): void {
         const i18n = I18nManager.getInstance();
-        const showUrl = vscode.workspace.getConfiguration('otakProxy').get<boolean>('showProxyUrl', true);
+        const config = vscode.workspace.getConfiguration('otakProxy');
+        const showUrl = config.get<boolean>('showProxyUrl', true);
+        const showTooltip = config.get<boolean>('statusBarTooltip', false);
 
         // Get monitoring state and last check info
         const monitorState = this.monitorProvider?.getState() ?? null;
@@ -122,17 +124,18 @@ export class StatusBarManager {
 
         this.statusBarItem.text = display.text;
 
-        // Build tooltip
-        this.statusBarItem.tooltip = buildStatusBarTooltip({
-            state,
-            statusText: display.statusText,
-            monitorState,
-            lastCheck,
-            i18n,
-            sanitizer: this.sanitizer,
-            registeredCommands: this.registeredCommands,
-            showUrl
-        });
+        this.statusBarItem.tooltip = showTooltip
+            ? buildStatusBarTooltip({
+                state,
+                statusText: display.statusText,
+                monitorState,
+                lastCheck,
+                i18n,
+                sanitizer: this.sanitizer,
+                registeredCommands: this.registeredCommands,
+                showUrl
+            })
+            : undefined;
         this.statusBarItem.show();
     }
 

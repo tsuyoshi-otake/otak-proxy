@@ -135,6 +135,22 @@ function managedConvergenceIssue(id: string, targetId: string): ProxyIssue {
     };
 }
 
+function terminalAdvisoryIssue(): ProxyIssue {
+    return {
+        id: 'terminal.existingTerminals',
+        fingerprint: 'terminal.existingTerminals:test',
+        category: 'needsNewTerminal',
+        impact: 'advisoryResidualRisk',
+        targetId: 'terminal.existing',
+        targetHost: 'workspaceHost',
+        source: 'vscode.window.terminals',
+        capability: 'readOnly',
+        autoAction: 'none',
+        userAction: 'openNewTerminal',
+        evidence: { terminalCount: 1 }
+    };
+}
+
 suite('v3 remediation foundation', () => {
     const flapSettings: FlapTrackerSettings = {
         windowMs: 1000,
@@ -236,6 +252,69 @@ suite('v3 remediation foundation', () => {
                 'http://alice:s3cr3t@proxy.example.com:8080'
             ]);
         } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService releases apply locks without waiting for notification dismissal', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'warnings',
+            credentialTargetPolicy: 'allowPlaintextTargets'
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-notify-lock-test-'));
+        const context = createContext(new Map());
+        const diagnostics = {
+            run: async () => diagnosticReport([terminalAdvisoryIssue()])
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let dismissNotification!: () => void;
+        const pendingNotification = new Promise<undefined>(resolve => {
+            dismissNotification = () => resolve(undefined);
+        });
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => pendingNotification) as (...args: unknown[]) => Thenable<string | undefined>;
+        let applyPromise: Promise<unknown> | undefined;
+
+        try {
+            applyPromise = service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'autoDetection' },
+                async () => detailedResult(true)
+            );
+
+            const outcome = await Promise.race([
+                applyPromise.then(() => 'resolved'),
+                new Promise<string>(resolve => setTimeout(() => resolve('timeout'), 100))
+            ]);
+            assert.strictEqual(outcome, 'resolved', 'apply must not wait for the warning notification to be dismissed');
+
+            const lockProbe = await new ApplyLockService({ baseDir }).tryAcquire({
+                targetId: 'vscode.http.proxy',
+                targetHost: 'workspaceHost',
+                scope: 'profile'
+            }, 1000);
+            assert.strictEqual(lockProbe.acquired, true, 'apply lock must be released after apply result resolves');
+            if (lockProbe.acquired && lockProbe.handle) {
+                await new ApplyLockService({ baseDir }).release(lockProbe.handle);
+            }
+        } finally {
+            dismissNotification();
+            await applyPromise?.catch(() => undefined);
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });
         }

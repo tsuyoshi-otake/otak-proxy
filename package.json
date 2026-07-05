@@ -13,7 +13,7 @@
     "url": "https://github.com/tsuyoshi-otake/otak-proxy/issues"
   },
   "homepage": "https://github.com/tsuyoshi-otake/otak-proxy#readme",
-  "version": "3.1.2",
+  "version": "3.1.4",
   "files": [
     "out/extension.js",
     "out/commands/**/*.js",
@@ -150,6 +150,12 @@
           "default": true,
           "scope": "machine-overridable",
           "description": "%config.showProxyUrl%"
+        },
+        "otakProxy.statusBarTooltip": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine-overridable",
+          "description": "%config.statusBarTooltip%"
         },
         "otakProxy.syncEnabled": {
           "type": "boolean",

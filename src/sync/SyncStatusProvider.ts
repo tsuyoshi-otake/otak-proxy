@@ -84,10 +84,13 @@ export class SyncStatusProvider {
     update(status: SyncStatus): void {
         this.currentStatus = status;
         const displayState = this.calculateDisplayState(status);
+        const showTooltip = vscode.workspace
+            .getConfiguration('otakProxy')
+            .get<boolean>('statusBarTooltip', false);
 
         // Update status bar item
         this.statusBarItem.text = displayState.icon;
-        this.statusBarItem.tooltip = this.buildTooltip(status);
+        this.statusBarItem.tooltip = showTooltip ? this.buildTooltip(status) : undefined;
 
         if (displayState.backgroundColor) {
             this.statusBarItem.backgroundColor = displayState.backgroundColor;

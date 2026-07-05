@@ -15,6 +15,7 @@
   "config.enableFallback": "जब सिस्टम proxy का पता न चले तो मैनुअल proxy पर फ़ॉलबैक सक्षम करें (केवल ऑटो मोड)। सक्षम होने पर, यदि कोई सिस्टम proxy नहीं मिलता, तो एक्सटेंशन फ़ॉलबैक के रूप में मैन्युअल रूप से कॉन्फ़िगर किए गए proxy का उपयोग करने का प्रयास करेगा।",
   "config.enableFallback.description": "सक्षम होने पर, यदि ऑटो मोड में कोई सिस्टम proxy नहीं मिलता, तो एक्सटेंशन फ़ॉलबैक के रूप में मैन्युअल रूप से कॉन्फ़िगर किए गए proxy का उपयोग करने का प्रयास करेगा।",
   "config.showProxyUrl": "स्टेटस बार में proxy URL दिखाएँ",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "एकाधिक VSCode/Cursor इंस्टेंस के बीच सिंक्रनाइज़ेशन सक्षम करें। सक्षम होने पर, proxy सेटिंग्स सभी इंस्टेंस में साझा की जाती हैं।",
   "config.syncInterval": "सिंक्रनाइज़ेशन जाँच अंतराल मिलीसेकंड में (100-5000)। अन्य इंस्टेंस से परिवर्तनों की जाँच कितनी बार करनी है।",
   "action.yes": "हाँ",

@@ -22,7 +22,7 @@ export async function handleProxyChanged(
     applyProxyDetectionResultToState(state, result);
 
     if (previousProxy === state.autoProxyUrl) {
-        await context.proxyStateManager.saveState(state);
+        await saveAndPublishProxyState(context, state);
         return;
     }
 
@@ -45,7 +45,7 @@ export async function handleProxyTestComplete(
     state.lastTestTimestamp = Date.now();
     updateAutoModeFromTestResult(state, testResult);
 
-    await context.proxyStateManager.saveState(state);
+    await saveAndPublishProxyState(context, state);
     context.updateStatusBar?.(state);
     clearStartupPendingIfNeeded(startupTestState, testResult);
 
@@ -67,8 +67,22 @@ export async function handleProxyStateChanged(
     state.proxyReachable = data.reachable;
     await applyReachabilityChange(context, state, data);
 
-    await context.proxyStateManager.saveState(state);
+    await saveAndPublishProxyState(context, state);
     context.updateStatusBar?.(state);
+}
+
+async function saveAndPublishProxyState(context: InitializerContext, state: ProxyState): Promise<void> {
+    await context.proxyStateManager.saveState(state);
+
+    if (!context.publishProxyState) {
+        return;
+    }
+
+    try {
+        await context.publishProxyState(state);
+    } catch (error) {
+        Logger.warn('Failed to publish proxy state:', error);
+    }
 }
 
 function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetectionResult): void {
@@ -88,7 +102,7 @@ async function saveAndApplyProxyChange(
     result: ProxyDetectionResult,
     previousProxy: string | undefined
 ): Promise<void> {
-    await context.proxyStateManager.saveState(state);
+    await saveAndPublishProxyState(context, state);
 
     const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
     await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);

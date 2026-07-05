@@ -66,6 +66,12 @@ export function __setStartupApplyRunnerForTest(
     startupApplyRunner = runner ?? ((state, terminalEnvManager) => applyStartupProxyState(state, terminalEnvManager));
 }
 
+async function publishProxyState(state: ProxyState): Promise<void> {
+    if (syncManager && syncConfigManager?.isSyncEnabled()) {
+        await syncManager.notifyChange(state);
+    }
+}
+
 type EnvironmentVariableCollectionLike = {
     replace(name: string, value: string): void;
     delete(name: string): void;
@@ -145,7 +151,8 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         systemProxyDetector: services.systemProxyDetector,
         userNotifier: services.userNotifier,
         sanitizer: services.sanitizer,
-        proxyChangeLogger: services.proxyChangeLogger
+        proxyChangeLogger: services.proxyChangeLogger,
+        publishProxyState
     });
 
     proxyMonitor = initializer.initializeProxyMonitor();
@@ -261,9 +268,7 @@ function registerExtensionCommands(context: vscode.ExtensionContext, services: C
         getProxyState: () => proxyStateManager.getState(),
         saveProxyState: async (_ctx, s) => {
             await proxyStateManager.saveState(s);
-            if (syncManager && syncConfigManager?.isSyncEnabled()) {
-                await syncManager.notifyChange(s);
-            }
+            await publishProxyState(s);
         },
         getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
         getNextMode: (mode) => proxyStateManager.getNextMode(mode),

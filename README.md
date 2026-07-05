@@ -81,6 +81,7 @@ Older saved Manual states are migrated to Auto when loaded. A configured proxy U
 - `Auto: OFF` — No proxy is currently available
 
 When `otakProxy.showProxyUrl` is `false`, the URL is replaced with `Configured` (for example, `Auto: Configured`).
+The detailed status bar hover tooltip is disabled by default so it does not cover VS Code notifications. Set `otakProxy.statusBarTooltip` to `true` to restore it.
 
 ### Auto Detection Scope
 
@@ -105,6 +106,7 @@ Existing terminals keep their current environment. Open a new terminal for the u
   "otakProxy.pollingInterval": 30,
   "otakProxy.enableFallback": true,
   "otakProxy.showProxyUrl": true,
+  "otakProxy.statusBarTooltip": false,
   "otakProxy.autoTestEnabled": true,
   "otakProxy.testInterval": 60,
   "otakProxy.credentialTargetPolicy": "ask"
@@ -150,6 +152,7 @@ For stricter corporate environments, prefer:
 | `otakProxy.pollingInterval` | `30` | System proxy check interval, in seconds |
 | `otakProxy.enableFallback` | `true` | Fall back to the configured proxy URL when the system proxy is unavailable |
 | `otakProxy.showProxyUrl` | `true` | Show the proxy URL in the status bar; set `false` to display `Configured` instead |
+| `otakProxy.statusBarTooltip` | `false` | Show the detailed status bar hover tooltip; disabled by default so notifications are not covered while hovering |
 | `otakProxy.autoTestEnabled` | `true` | Periodically test proxy connectivity in Auto mode |
 | `otakProxy.testInterval` | `60` | Automatic connection test interval, in seconds (Auto mode only; range `30`–`600`) |
 | `otakProxy.syncEnabled` | `true` | Synchronize proxy settings across multiple VS Code/Cursor instances |
@@ -249,7 +252,7 @@ ext install odangoo.otak-proxy
 ```bash
 npm install
 npx --yes @vscode/vsce package
-code --install-extension otak-proxy-3.1.2.vsix
+code --install-extension otak-proxy-3.1.4.vsix
 ```
 
 Reload VS Code afterwards.

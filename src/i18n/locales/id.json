@@ -15,6 +15,7 @@
   "config.enableFallback": "Aktifkan fallback ke proxy manual saat proxy sistem tidak terdeteksi (hanya mode Auto). Saat diaktifkan, jika tidak ada proxy sistem yang terdeteksi, ekstensi akan mencoba menggunakan proxy yang dikonfigurasi manual sebagai fallback.",
   "config.enableFallback.description": "Saat diaktifkan, jika tidak ada proxy sistem yang terdeteksi dalam mode Auto, ekstensi akan mencoba menggunakan proxy yang dikonfigurasi manual sebagai fallback.",
   "config.showProxyUrl": "Tampilkan URL proxy di bilah status",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "Aktifkan sinkronisasi antara beberapa instans VSCode/Cursor. Saat diaktifkan, pengaturan proxy dibagikan ke semua instans.",
   "config.syncInterval": "Interval pemeriksaan sinkronisasi dalam milidetik (100-5000). Seberapa sering memeriksa perubahan dari instans lain.",
   "action.yes": "Ya",

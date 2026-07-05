@@ -173,7 +173,7 @@ suite('CommandRegistry Smoke Tests', () => {
         sinon.assert.calledWith(getConfigStub, 'otakProxy');
     });
 
-    test('config-change callback: otakProxy.showProxyUrl refreshes the status bar', async () => {
+    test('config-change callback: status bar display settings refresh the status bar', async () => {
         let statusBarUpdates = 0;
         const config: CommandRegistryConfig = {
             ...baseConfig,
@@ -192,10 +192,14 @@ suite('CommandRegistry Smoke Tests', () => {
             e: vscode.ConfigurationChangeEvent
         ) => Promise<void>;
 
-        await cb({ affectsConfiguration: (k: string) => k === 'otakProxy.showProxyUrl' } as
-            vscode.ConfigurationChangeEvent);
+        await cb({
+            affectsConfiguration: (k: string) => k === 'otakProxy.showProxyUrl'
+        } as vscode.ConfigurationChangeEvent);
+        await cb({
+            affectsConfiguration: (k: string) => k === 'otakProxy.statusBarTooltip'
+        } as vscode.ConfigurationChangeEvent);
 
-        assert.strictEqual(statusBarUpdates, 1);
+        assert.strictEqual(statusBarUpdates, 2);
     });
 
     test('package.json contributed commands list matches what is registered', () => {

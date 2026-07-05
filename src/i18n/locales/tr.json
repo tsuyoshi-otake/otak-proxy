@@ -15,6 +15,7 @@
   "config.enableFallback": "Sistem proxy'si algılanmadığında manuel proxy'ye yedek olarak geçişi etkinleştirin (yalnızca Otomatik mod). Etkinleştirildiğinde, hiçbir sistem proxy'si algılanmazsa eklenti yedek olarak manuel yapılandırılmış proxy'yi kullanmayı dener.",
   "config.enableFallback.description": "Etkinleştirildiğinde, Otomatik modda hiçbir sistem proxy'si algılanmazsa eklenti yedek olarak manuel yapılandırılmış proxy'yi kullanmayı dener.",
   "config.showProxyUrl": "Proxy URL'sini durum çubuğunda göster",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "Birden fazla VSCode/Cursor örneği arasında eşitlemeyi etkinleştirin. Etkinleştirildiğinde proxy ayarları tüm örnekler arasında paylaşılır.",
   "config.syncInterval": "Milisaniye cinsinden eşitleme denetim aralığı (100-5000). Diğer örneklerden gelen değişikliklerin ne sıklıkta denetleneceği.",
   "action.yes": "Evet",

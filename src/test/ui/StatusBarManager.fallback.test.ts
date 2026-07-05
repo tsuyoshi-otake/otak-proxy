@@ -28,9 +28,11 @@ suite('StatusBarManager Fallback Display Tests', () => {
     let context: vscode.ExtensionContext;
     let statusBarManager: StatusBarManager;
     let mockStatusBarItem: vscode.StatusBarItem;
+    let statusBarTooltipEnabled: boolean;
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        statusBarTooltipEnabled = false;
 
         // Create mock status bar item
         mockStatusBarItem = {
@@ -51,6 +53,22 @@ suite('StatusBarManager Fallback Display Tests', () => {
 
         // Mock window.createStatusBarItem
         sandbox.stub(vscode.window, 'createStatusBarItem').returns(mockStatusBarItem);
+        sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) => {
+                if (key === 'showProxyUrl') {
+                    return true;
+                }
+
+                if (key === 'statusBarTooltip') {
+                    return statusBarTooltipEnabled;
+                }
+
+                return defaultValue;
+            },
+            update: sandbox.stub().resolves(),
+            has: sandbox.stub().returns(true),
+            inspect: sandbox.stub().returns(undefined)
+        } as unknown as vscode.WorkspaceConfiguration);
 
         // Create mock context
         context = {
@@ -238,7 +256,7 @@ suite('StatusBarManager Fallback Display Tests', () => {
      * Validates: Requirements 4.3
      */
     suite('Task 4.4: Tooltip Updates', () => {
-        test('should include explanation in tooltip for Auto Mode OFF', () => {
+        test('should suppress tooltip by default so hover does not cover notifications', () => {
             const state: ProxyState = {
                 mode: ProxyMode.Auto,
                 autoModeOff: true,
@@ -247,12 +265,26 @@ suite('StatusBarManager Fallback Display Tests', () => {
 
             statusBarManager.update(state);
 
-            // Tooltip should be set
-            assert.ok(mockStatusBarItem.tooltip !== undefined,
-                'Tooltip should be set');
+            assert.strictEqual(mockStatusBarItem.tooltip, undefined,
+                'Tooltip should be disabled by default');
         });
 
-        test('should include different explanation for complete OFF mode', () => {
+        test('should include explanation in tooltip for Auto Mode OFF when enabled', () => {
+            statusBarTooltipEnabled = true;
+            const state: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoModeOff: true,
+                usingFallbackProxy: false
+            };
+
+            statusBarManager.update(state);
+
+            assert.ok(mockStatusBarItem.tooltip !== undefined,
+                'Tooltip should be set when enabled');
+        });
+
+        test('should include different explanation for complete OFF mode when enabled', () => {
+            statusBarTooltipEnabled = true;
             const state: ProxyState = {
                 mode: ProxyMode.Off,
                 autoModeOff: false
@@ -271,7 +303,7 @@ suite('StatusBarManager Fallback Display Tests', () => {
      * Validates: Requirements 4.3
      */
     suite('Property 10: Tooltip explanation', () => {
-        test('should always have tooltip for any state', async function() {
+        test('should not have tooltip by default for any state', async function() {
             this.timeout(60000);
             const numRuns = getPropertyTestRuns();
 
@@ -287,9 +319,33 @@ suite('StatusBarManager Fallback Display Tests', () => {
                     async (state: ProxyState) => {
                         statusBarManager.update(state);
 
-                        // Tooltip should always be set
+                        assert.strictEqual(mockStatusBarItem.tooltip, undefined,
+                            'Tooltip should be disabled by default');
+                    }
+                ),
+                { numRuns }
+            );
+        });
+
+        test('should always have tooltip for any state when enabled', async function() {
+            this.timeout(60000);
+            statusBarTooltipEnabled = true;
+            const numRuns = getPropertyTestRuns();
+
+            await fc.assert(
+                fc.asyncProperty(
+                    fc.record({
+                        mode: fc.constantFrom(ProxyMode.Off, ProxyMode.Manual, ProxyMode.Auto),
+                        autoModeOff: fc.boolean(),
+                        usingFallbackProxy: fc.boolean(),
+                        autoProxyUrl: fc.option(proxyUrlArb, { nil: undefined }),
+                        manualProxyUrl: fc.option(proxyUrlArb, { nil: undefined })
+                    }),
+                    async (state: ProxyState) => {
+                        statusBarManager.update(state);
+
                         assert.ok(mockStatusBarItem.tooltip !== undefined,
-                            'Tooltip should always be set');
+                            'Tooltip should be set when enabled');
                     }
                 ),
                 { numRuns }

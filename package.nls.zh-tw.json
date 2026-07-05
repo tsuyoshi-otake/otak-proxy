@@ -26,6 +26,7 @@
   "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
   "config.showProxyUrl": "在狀態列中顯示代理 URL",
   "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "啟用多個 VSCode/Cursor 執行個體之間的同步。啟用後，代理設定會在所有執行個體間共用。",
   "config.syncInterval": "同步檢查間隔（毫秒，100-5000）。檢查其他執行個體變更的頻率。",
   "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",

@@ -142,7 +142,7 @@ export class ProxyRemediationService {
 
         const diagnosticReport = await this.runDiagnosticsIfEnabled(settings);
         Logger.warn('Skipped proxy apply because another otak-proxy window owns the apply lock.');
-        await this.notifyLockSkipped(settings, options);
+        this.notifyAfterApply(() => this.notifyLockSkipped(settings, options));
         return {
             success: false,
             diagnosticReport,
@@ -209,7 +209,9 @@ export class ProxyRemediationService {
             retrySuppressed = retrySuppressed || convergence.escalated;
         }
 
-        await this.notifyDiagnosticsIfNeeded(diagnosticReport, settings, options, applyResult, retrySuppressed);
+        this.notifyAfterApply(() =>
+            this.notifyDiagnosticsIfNeeded(diagnosticReport, settings, options, applyResult, retrySuppressed)
+        );
 
         return {
             success,
@@ -219,6 +221,12 @@ export class ProxyRemediationService {
             retrySuppressed,
             lockSkipped: false
         };
+    }
+
+    private notifyAfterApply(task: () => Promise<void>): void {
+        void task().catch(error => {
+            Logger.warn('Proxy remediation notification failed:', this.redactor.redactString(String(error)));
+        });
     }
 
     private canRetry(

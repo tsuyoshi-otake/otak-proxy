@@ -15,6 +15,7 @@
   "config.enableFallback": "시스템 프록시를 감지하지 못한 경우 수동 프록시로 폴백(자동 모드 전용). 활성화하면 시스템 프록시가 없을 때 수동으로 설정한 프록시를 폴백으로 사용합니다.",
   "config.enableFallback.description": "활성화하면 자동 모드에서 시스템 프록시가 감지되지 않을 때 수동으로 설정한 프록시를 폴백으로 사용하려고 합니다.",
   "config.showProxyUrl": "상태 표시줄에 프록시 URL을 표시합니다",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "여러 VSCode/Cursor 인스턴스 간 동기화를 활성화합니다. 활성화하면 프록시 설정이 모든 인스턴스에 공유됩니다.",
   "config.syncInterval": "동기화 확인 간격(밀리초, 100-5000). 다른 인스턴스의 변경을 확인하는 빈도입니다.",
   "action.yes": "예",

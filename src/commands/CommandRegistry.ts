@@ -219,8 +219,11 @@ export class CommandRegistry {
                 this.handleMaxRetriesChange();
             }
 
-            if (e.affectsConfiguration('otakProxy.showProxyUrl')) {
-                await this.handleShowProxyUrlChange();
+            if (
+                e.affectsConfiguration('otakProxy.showProxyUrl') ||
+                e.affectsConfiguration('otakProxy.statusBarTooltip')
+            ) {
+                await this.handleStatusBarDisplayChange();
             }
         });
         context.subscriptions.push(disposable);
@@ -296,9 +299,9 @@ export class CommandRegistry {
     }
 
     /**
-     * Handle showProxyUrl configuration change
+     * Handle status bar display configuration changes
      */
-    private async handleShowProxyUrlChange(): Promise<void> {
+    private async handleStatusBarDisplayChange(): Promise<void> {
         const state = await this.commandContext.getProxyState();
         this.commandContext.updateStatusBar(state);
     }

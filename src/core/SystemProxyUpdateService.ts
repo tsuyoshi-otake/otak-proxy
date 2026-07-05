@@ -54,7 +54,7 @@ export class SystemProxyUpdateService {
         }
 
         if (previousProxy === state.autoProxyUrl && !this.shouldEnsureDisabledProxy(state)) {
-            await this.context.proxyStateManager.saveState(state);
+            await this.saveAndPublishState(state);
             return;
         }
 
@@ -69,7 +69,7 @@ export class SystemProxyUpdateService {
     }
 
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
-        await this.context.proxyStateManager.saveState(state);
+        await this.saveAndPublishState(state);
         const activeProxyUrl = state.autoProxyUrl || '';
         await applyProxyThroughContext(
             this.context,
@@ -108,7 +108,21 @@ export class SystemProxyUpdateService {
 
     private async saveDetectedProxyForNonAutoMode(state: ProxyState, detectedProxy: string | null): Promise<void> {
         state.autoProxyUrl = detectedProxy || undefined;
+        await this.saveAndPublishState(state);
+    }
+
+    private async saveAndPublishState(state: ProxyState): Promise<void> {
         await this.context.proxyStateManager.saveState(state);
+
+        if (!this.context.publishProxyState) {
+            return;
+        }
+
+        try {
+            await this.context.publishProxyState(state);
+        } catch (error) {
+            Logger.warn('Failed to publish proxy state:', error);
+        }
     }
 
     private async applyFallbackProxyState(state: ProxyState): Promise<void> {

@@ -9,6 +9,7 @@ suite('ExtensionProxyEventHandlers Tests', () => {
     let sandbox: sinon.SinonSandbox;
     let state: ProxyState;
     let saveStateStub: sinon.SinonStub;
+    let publishStateStub: sinon.SinonStub;
     let applyProxySettingsStub: sinon.SinonStub;
     let updateStatusBarStub: sinon.SinonStub;
     let context: InitializerContext;
@@ -28,6 +29,7 @@ suite('ExtensionProxyEventHandlers Tests', () => {
         saveStateStub = sandbox.stub().callsFake(async (next: ProxyState) => {
             state = { ...next };
         });
+        publishStateStub = sandbox.stub().resolves();
         applyProxySettingsStub = sandbox.stub().resolves(true);
         updateStatusBarStub = sandbox.stub();
         context = {
@@ -35,6 +37,7 @@ suite('ExtensionProxyEventHandlers Tests', () => {
                 getState: sandbox.stub().callsFake(async () => ({ ...state })),
                 saveState: saveStateStub
             },
+            publishProxyState: publishStateStub,
             applyProxySettings: applyProxySettingsStub,
             updateStatusBar: updateStatusBarStub
         } as unknown as InitializerContext;
@@ -62,8 +65,9 @@ suite('ExtensionProxyEventHandlers Tests', () => {
         assert.strictEqual(state.fallbackProxyUrl, undefined);
         assert.strictEqual(startupTestState.isPending, false);
         sinon.assert.calledOnce(saveStateStub);
+        sinon.assert.calledOnceWithExactly(publishStateStub, sinon.match({ autoModeOff: true, proxyReachable: false }));
         sinon.assert.calledWith(updateStatusBarStub, sinon.match({ autoModeOff: true, proxyReachable: false }));
         sinon.assert.calledOnceWithExactly(applyProxySettingsStub, '', false, sinon.match({ silent: true }));
-        sinon.assert.callOrder(saveStateStub, applyProxySettingsStub);
+        sinon.assert.callOrder(saveStateStub, publishStateStub, applyProxySettingsStub);
     });
 });

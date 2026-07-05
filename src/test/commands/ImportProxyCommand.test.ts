@@ -193,12 +193,53 @@ suite('ImportProxyCommand Unit Tests', () => {
         assert.strictEqual(result.success, true);
         assert.strictEqual(state.mode, ProxyMode.Auto);
         assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.proxyReachable, undefined);
+        assert.strictEqual(state.systemProxyDetected, true);
         assert.deepStrictEqual(applyCalls, [{ url: 'http://detected.example:8080', enabled: true }]);
         assert.strictEqual(counters.monitoringStarts, 1);
+        assert.strictEqual(counters.monitoringStops, 0);
         assert.ok(counters.statusBarUpdates >= 1, 'status bar should be refreshed at least once');
         const success = notifications.find(n => n.type === 'success');
         assert.ok(success, 'expected a success notification');
         assert.strictEqual(success?.key, 'message.switchedToAutoMode');
+    });
+
+    test('detected proxy + Use Auto Mode clears stale Auto OFF state and restarts monitoring', async () => {
+        detectStub.resolves('http://detected.example:8080');
+        showInformationMessageStub.resolves(i18n.t('action.useAutoMode'));
+        const { ctx, getState, applyCalls, counters } = createContext({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://old.example:8080',
+            autoModeOff: true,
+            usingFallbackProxy: true,
+            fallbackProxyUrl: 'http://fallback.example:3128',
+            proxyReachable: false,
+            lastTestResult: {
+                success: false,
+                proxyUrl: 'http://old.example:8080',
+                testUrls: ['https://example.com'],
+                errors: [{ url: 'https://example.com', message: 'timeout' }],
+                timestamp: 1234
+            },
+            lastTestTimestamp: 1234
+        });
+
+        const result = await executeImportProxy(ctx);
+        const state = getState();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.usingFallbackProxy, false);
+        assert.strictEqual(state.fallbackProxyUrl, undefined);
+        assert.strictEqual(state.proxyReachable, undefined);
+        assert.strictEqual(state.lastTestResult, undefined);
+        assert.strictEqual(state.lastTestTimestamp, undefined);
+        assert.deepStrictEqual(applyCalls, [{ url: 'http://detected.example:8080', enabled: true }]);
+        assert.strictEqual(counters.monitoringStops, 1);
+        assert.strictEqual(counters.monitoringStarts, 1);
     });
 
     test('detected proxy + Use Auto Mode with invalid URL surfaces invalidProxyUrlDetected and leaves state untouched', async () => {

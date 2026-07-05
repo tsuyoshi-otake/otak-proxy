@@ -156,11 +156,22 @@ async function handleUseAutoMode(
     detectedProxy: string
 ): Promise<CommandResult> {
     if (validateProxyUrl(detectedProxy)) {
+        const wasAutoMode = state.mode === ProxyMode.Auto;
         state.autoProxyUrl = detectedProxy;
         state.mode = ProxyMode.Auto;
+        state.autoModeOff = false;
+        state.usingFallbackProxy = false;
+        state.fallbackProxyUrl = undefined;
+        state.proxyReachable = undefined;
+        state.lastTestResult = undefined;
+        state.lastTestTimestamp = undefined;
+        state.systemProxyDetected = true;
         await ctx.saveProxyState(state);
         await ctx.applyProxySettings(detectedProxy, true);
         ctx.updateStatusBar(state);
+        if (wasAutoMode) {
+            await ctx.stopSystemProxyMonitoring();
+        }
         await ctx.startSystemProxyMonitoring();
         ctx.userNotifier.showSuccess('message.switchedToAutoMode', {
             url: sanitizeProxyUrl(detectedProxy)

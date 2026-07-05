@@ -21,6 +21,7 @@ suite('SystemProxyUpdateService Tests', () => {
     let connectionTester: ConnectionTesterStub | null;
     let applyProxyStub: sinon.SinonStub;
     let saveStateStub: sinon.SinonStub;
+    let publishStateStub: sinon.SinonStub;
     let notifyStub: sinon.SinonStub;
     let service: SystemProxyUpdateService;
 
@@ -42,6 +43,7 @@ suite('SystemProxyUpdateService Tests', () => {
         saveStateStub = sandbox.stub().callsFake(async (next: ProxyState) => {
             state = { ...next };
         });
+        publishStateStub = sandbox.stub().resolves();
         notifyStub = sandbox.stub();
 
         connectionTester = {
@@ -60,6 +62,7 @@ suite('SystemProxyUpdateService Tests', () => {
                 getState: sandbox.stub().callsFake(async () => ({ ...state })),
                 saveState: saveStateStub
             } as unknown as InitializerContext['proxyStateManager'],
+            publishProxyState: publishStateStub,
             proxyApplier: {
                 applyProxy: applyProxyStub
             } as unknown as InitializerContext['proxyApplier'],
@@ -88,6 +91,7 @@ suite('SystemProxyUpdateService Tests', () => {
 
         assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
         assert.strictEqual(state.systemProxyDetected, true);
+        sinon.assert.calledWith(publishStateStub, sinon.match({ autoProxyUrl: 'http://detected.example:8080' }));
         assert.strictEqual(state.autoModeOff, false);
         assert.strictEqual(state.usingFallbackProxy, false);
         assert.strictEqual(state.fallbackProxyUrl, undefined);

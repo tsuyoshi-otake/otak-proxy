@@ -26,6 +26,7 @@
   "config.remediationFlapWindowMs": "同一issue fingerprintでProxy修復失敗が繰り返されているか判定する時間枠。",
   "config.showProxyUrl": "ステータスバーにProxy URLを表示する",
   "config.slowDiagnosticsTtlMs": "Git、npm、Windowsコマンドなど、遅いProxy診断結果のTTL。",
+  "config.statusBarTooltip": "ステータスバーの詳細ホバーツールチップを表示する。ステータスバーにマウスを置いたままでもVS Code通知を隠さないよう、デフォルトでは無効です。",
   "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
   "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
   "config.terminalOffMaskingEnabled": "ProxyモードがOffの場合、新しく作成される統合ターミナル向けに、継承されたProxy環境変数を空値でマスクします。",

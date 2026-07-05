@@ -26,6 +26,7 @@
   "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
   "config.showProxyUrl": "Показывать URL прокси в строке состояния",
   "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "Включить синхронизацию между несколькими экземплярами VSCode/Cursor. При включении настройки прокси совместно используются всеми экземплярами.",
   "config.syncInterval": "Интервал проверки синхронизации в миллисекундах (100-5000). Как часто проверять изменения от других экземпляров.",
   "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",

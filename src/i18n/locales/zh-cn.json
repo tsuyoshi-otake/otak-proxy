@@ -15,6 +15,7 @@
   "config.enableFallback": "在未检测到系统代理时回退到手动代理（仅自动模式）。启用后，如果未检测到系统代理，扩展将尝试使用手动配置的代理作为回退。",
   "config.enableFallback.description": "启用后，在自动模式下如果未检测到系统代理，扩展将尝试使用手动配置的代理作为回退。",
   "config.showProxyUrl": "在状态栏中显示代理 URL",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
   "config.syncEnabled": "启用多个 VSCode/Cursor 实例之间的同步。启用后，代理设置将在所有实例之间共享。",
   "config.syncInterval": "同步检查间隔（毫秒，100-5000）。用于检查来自其他实例的更改的频率。",
   "action.yes": "是",
