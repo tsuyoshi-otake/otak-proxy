@@ -424,7 +424,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
     test('Property 7: Exponential backoff', async function() {
         // Make this test deterministic and fast by intercepting the internal sleep(),
         // instead of relying on real timers (which can be flaky under load).
-        this.timeout(20000);
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -736,8 +736,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 1.3
      */
     test('Property 3: Check failure continuation', async function() {
-        // Increase timeout for this test as it involves waiting for polling
-        this.timeout(20000);
+        // Validate failure handling without waiting on debounce timers.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -790,12 +790,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                         // Trigger multiple checks manually
                         for (let i = 0; i < failureCount; i++) {
-                            monitor.triggerCheck('focus');
-                            await sleep(100); // Wait for debounce and check to complete
+                            await (monitor as any).executeCheck('focus');
                         }
-
-                        // Wait for all checks to complete
-                        await sleep(300);
 
                         // Property: All failures should be logged
                         const checkHistory = testLogger.getCheckHistory();
@@ -839,8 +835,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 4.1
      */
     test('Property 9: Proxy change logging', async function() {
-        // Increase timeout for this test
-        this.timeout(20000);
+        // Validate logging directly without waiting on debounce timers.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -912,12 +908,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                         // Trigger checks for each proxy in sequence
                         for (let i = 0; i < proxySequence.length; i++) {
-                            monitor.triggerCheck('focus');
-                            await sleep(100); // Wait for debounce and check
+                            await (monitor as any).executeCheck('focus');
                         }
-
-                        // Wait for all checks to complete
-                        await sleep(300);
 
                         // Get change history
                         const changeHistory = testLogger.getChangeHistory();
@@ -972,7 +964,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 6.2, 6.3
      */
     test('Property 12: Polling interval range validation', async function() {
-        this.timeout(30000);
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1002,8 +994,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                         // Trigger a check to verify functionality
                         mockDetector.resetCheckCount();
-                        monitor.triggerCheck('focus');
-                        await sleep(200);
+                        await (monitor as any).executeCheck('focus');
 
                         // Monitor should still be functional
                         if (!monitor.getState().isActive) {
@@ -1027,7 +1018,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 6.4
      */
     test('Property 13: Immediate config update application', async function() {
-        this.timeout(60000);
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1064,8 +1055,7 @@ suite('ProxyMonitor Property-Based Tests', () => {
                         }
 
                         // Property: Trigger a check to verify the monitor is still functional
-                        monitor.triggerCheck('config');
-                        await sleep(300);
+                        await (monitor as any).executeCheck('config');
 
                         // Verify check was executed
                         const checkCount = mockDetector.getCheckCount();
@@ -1092,8 +1082,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 4.3
      */
     test('Property 10: Check execution logging', async function() {
-        // Increase timeout for this test
-        this.timeout(20000);
+        // Validate check logging directly without waiting on debounce timers.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -1152,12 +1142,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                         // Trigger multiple checks
                         for (let i = 0; i < checkCount; i++) {
-                            monitor.triggerCheck('focus');
-                            await sleep(100); // Wait for debounce and check
+                            await (monitor as any).executeCheck('focus');
                         }
-
-                        // Wait for all checks to complete
-                        await sleep(300);
 
                         // Get check history
                         const checkHistory = testLogger.getCheckHistory();
