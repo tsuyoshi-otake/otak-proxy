@@ -309,7 +309,9 @@
     "test:ci": "npm run lint && npm test",
     "test:unit": "npm run compile && node scripts/run-unit-tests.mjs",
     "test:unit:parallel": "npm run compile && cross-env OTAK_PROXY_UNIT_PARALLEL=1 node scripts/run-unit-tests.mjs",
-    "test:real-proxy": "dotenvx run -f .env.local -- cross-env MOCHA_GREP=\"Real Proxy\" vscode-test"
+    "test:real-proxy": "dotenvx run -f .env.local -- cross-env MOCHA_GREP=\"Real Proxy\" vscode-test",
+    "package:vsix": "vsce package",
+    "deploy": "vsce publish --skip-duplicate"
   },
   "devDependencies": {
     "@dotenvx/dotenvx": "^1.51.1",
@@ -321,6 +323,7 @@
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "0.0.11",
     "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.9.2",
     "cross-env": "^10.1.0",
     "eslint": "^9.19.0",
     "fast-check": "^4.3.0",
