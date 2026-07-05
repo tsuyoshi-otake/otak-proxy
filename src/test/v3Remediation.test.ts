@@ -151,6 +151,22 @@ function terminalAdvisoryIssue(): ProxyIssue {
     };
 }
 
+function reloadRequiredIssue(): ProxyIssue {
+    return {
+        id: 'vscode.reloadRequired',
+        fingerprint: 'vscode.reloadRequired:test',
+        category: 'needsReload',
+        impact: 'requiresUserDecision',
+        targetId: 'vscode.window',
+        targetHost: 'workspaceHost',
+        source: 'diagnostics',
+        capability: 'supported',
+        autoAction: 'none',
+        userAction: 'reloadWindow',
+        evidence: {}
+    };
+}
+
 suite('v3 remediation foundation', () => {
     const flapSettings: FlapTrackerSettings = {
         windowMs: 1000,
@@ -265,7 +281,7 @@ suite('v3 remediation foundation', () => {
         const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-notify-lock-test-'));
         const context = createContext(new Map());
         const diagnostics = {
-            run: async () => diagnosticReport([terminalAdvisoryIssue()])
+            run: async () => diagnosticReport([reloadRequiredIssue()])
         } as unknown as ProxyRuntimeDiagnostics;
         const service = new ProxyRemediationService(
             context,
@@ -312,6 +328,55 @@ suite('v3 remediation foundation', () => {
         } finally {
             dismissNotification();
             await applyPromise?.catch(() => undefined);
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService does not show warning notifications for existing terminal advisories', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'warnings',
+            credentialTargetPolicy: 'allowPlaintextTargets'
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-terminal-advisory-test-'));
+        const context = createContext(new Map());
+        const diagnostics = {
+            run: async () => diagnosticReport([terminalAdvisoryIssue()])
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let warningCount = 0;
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => {
+            warningCount++;
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'autoDetection' },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.diagnosticReport?.issueCount, 1);
+            assert.strictEqual(warningCount, 0, 'existing terminal advisory should remain diagnostics-only');
+        } finally {
             (vscode.window as unknown as {
                 showWarningMessage: typeof vscode.window.showWarningMessage;
             }).showWarningMessage = originalShowWarningMessage;

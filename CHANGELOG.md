@@ -1,5 +1,10 @@
 # Change Log
 
+## [3.1.5] - 2026-07-05
+
+### Fixed
+- Keep `existing terminals keep their old proxy environment` as a diagnostics advisory without showing a warning notification at the default notification level.
+
 ## [3.1.4] - 2026-07-05
 
 ### Fixed

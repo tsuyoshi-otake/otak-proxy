@@ -82,7 +82,6 @@ function isUserActionIssue(issue: ProxyIssue): boolean {
     return issue.impact === 'requiresUserDecision' ||
         issue.category === 'needsReload' ||
         issue.category === 'needsRestart' ||
-        issue.category === 'needsNewTerminal' ||
         issue.category === 'needsWindowsPermission' ||
         issue.category === 'needsCredentialConsent';
 }
