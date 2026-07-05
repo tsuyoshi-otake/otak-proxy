@@ -340,8 +340,8 @@ suite('ProxyMonitor Property-Based Tests', () => {
      * Validates: Requirements 3.1
      */
     test('Property 6: Retry count adherence', async function() {
-        // Increase timeout for this test as it involves retries with backoff
-        this.timeout(120000);
+        // Keep retry-count validation deterministic by skipping real backoff timers.
+        this.timeout(10000);
 
         await fc.assert(
             fc.asyncProperty(
@@ -385,22 +385,12 @@ suite('ProxyMonitor Property-Based Tests', () => {
 
                     failingDetector.resetAttemptCount();
 
+                    (monitor as any).sleep = async (): Promise<void> => {};
+
                     try {
-                        // Start monitoring
-                        monitor.start();
-
-                        // Trigger a check
-                        monitor.triggerCheck('focus');
-
-                        // Wait for debounce + all retries to complete
-                        // Each retry has exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
-                        // Maximum wait time for 5 retries: 100 + 200 + 400 + 800 + 1600 = 3100ms
-                        // Add buffer for initial attempt and processing
-                        const maxBackoffTime = maxRetries > 0 
-                            ? 100 * (Math.pow(2, maxRetries) - 1) 
-                            : 0;
-                        await sleep(10 + maxBackoffTime + 1000); // debounce + backoff + buffer
-
+                        // Call retry logic directly to validate attempts without debounce/polling timers.
+                        await (monitor as any).detectWithRetry('focus');
+                        
                         // Get attempt count
                         const attemptCount = failingDetector.getAttemptCount();
 
