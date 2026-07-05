@@ -26,7 +26,7 @@
   "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
   "config.showProxyUrl": "상태 표시줄에 프록시 URL을 표시합니다",
   "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
-  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "여러 VSCode/Cursor 인스턴스 간 동기화를 활성화합니다. 활성화하면 프록시 설정이 모든 인스턴스에 공유됩니다.",
   "config.syncInterval": "동기화 확인 간격(밀리초, 100-5000). 다른 인스턴스의 변경을 확인하는 빈도입니다.",
   "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",

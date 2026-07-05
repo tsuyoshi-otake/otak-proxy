@@ -5,7 +5,7 @@
 ### Fixed
 - Publish Auto monitoring state changes to the shared sync file, so failed connection tests that enter `Auto: OFF` cannot leave other windows or later reloads with stale reachable Auto state.
 - Clear stale Auto OFF/test-result fields when `otak: Import System Proxy` switches back to Auto, and restart monitoring so the newly imported proxy is tested immediately.
-- Disable the detailed status bar hover tooltip by default so it cannot cover VS Code notifications; users can re-enable it with `otakProxy.statusBarTooltip`.
+- Move otak-proxy status bar items to the left side and keep detailed hover tooltips enabled by default, so tooltips remain available without covering right-side VS Code notifications.
 
 ## [3.1.3] - 2026-07-05
 

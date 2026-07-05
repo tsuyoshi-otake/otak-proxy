@@ -68,7 +68,7 @@ export class SyncStatusProvider {
 
         // Create status bar item
         this.statusBarItem = vscode.window.createStatusBarItem(
-            vscode.StatusBarAlignment.Right,
+            vscode.StatusBarAlignment.Left,
             priority
         );
 
@@ -86,7 +86,7 @@ export class SyncStatusProvider {
         const displayState = this.calculateDisplayState(status);
         const showTooltip = vscode.workspace
             .getConfiguration('otakProxy')
-            .get<boolean>('statusBarTooltip', false);
+            .get<boolean>('statusBarTooltip', true);
 
         // Update status bar item
         this.statusBarItem.text = displayState.icon;

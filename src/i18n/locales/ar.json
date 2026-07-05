@@ -15,7 +15,7 @@
   "config.enableFallback": "تمكين العودة إلى الوكيل اليدوي عند عدم اكتشاف وكيل النظام (الوضع التلقائي فقط). عند التمكين، إذا لم يُكتشف وكيل نظام، سيحاول الامتداد استخدام الوكيل المُكوَّن يدويًا كبديل.",
   "config.enableFallback.description": "عند التمكين، إذا لم يُكتشف وكيل نظام في الوضع التلقائي، سيحاول الامتداد استخدام الوكيل المُكوَّن يدويًا كبديل.",
   "config.showProxyUrl": "إظهار عنوان الوكيل في شريط الحالة",
-  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "تمكين المزامنة بين عدة نسخ من VSCode/Cursor. عند التمكين، تُشارك إعدادات الوكيل عبر جميع النسخ.",
   "config.syncInterval": "فاصل التحقق من المزامنة بالميلي ثانية (100-5000). عدد مرات التحقق من التغييرات من النسخ الأخرى.",
   "action.yes": "نعم",

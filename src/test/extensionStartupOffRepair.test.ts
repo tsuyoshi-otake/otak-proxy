@@ -82,7 +82,7 @@ function createStatusBarItem(): vscode.StatusBarItem {
         text: '',
         tooltip: '',
         command: '',
-        alignment: vscode.StatusBarAlignment.Right,
+        alignment: vscode.StatusBarAlignment.Left,
         priority: 100,
         id: 'startup-off-repair',
         name: 'Startup Off Repair'

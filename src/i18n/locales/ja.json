@@ -15,7 +15,7 @@
   "config.enableFallback": "システムProxyが検出されない場合に手動Proxyへフォールバックする（Autoモード専用）。有効な場合、システムProxyが検出されないと手動設定されたProxyをフォールバックとして使用します。",
   "config.enableFallback.description": "有効にすると、AutoモードでシステムProxyが検出されない場合、手動で設定されたProxyをフォールバックとして使用します。",
   "config.showProxyUrl": "ステータスバーにProxy URLを表示する",
-  "config.statusBarTooltip": "ステータスバーの詳細ホバーツールチップを表示する。ステータスバーにマウスを置いたままでもVS Code通知を隠さないよう、デフォルトでは無効です。",
+  "config.statusBarTooltip": "ステータスバーの詳細ホバーツールチップを表示する。otak-proxyのステータスバー項目は左側に配置されるため、右側のVS Code通知を隠しません。",
   "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
   "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
   "action.yes": "はい",

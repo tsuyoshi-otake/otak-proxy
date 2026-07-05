@@ -26,7 +26,7 @@
   "config.remediationFlapWindowMs": "Time window used to detect repeated proxy remediation failures for the same issue fingerprint.",
   "config.showProxyUrl": "Afficher l'URL du proxy dans la barre d'état",
   "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
-  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "Activer la synchronisation entre plusieurs instances de VSCode/Cursor. Lorsque cette option est activée, les paramètres du proxy sont partagés entre toutes les instances.",
   "config.syncInterval": "Intervalle de vérification de la synchronisation en millisecondes (100-5000). Fréquence de vérification des changements provenant des autres instances.",
   "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",

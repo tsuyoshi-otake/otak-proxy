@@ -17,10 +17,11 @@ suite('SyncStatusProvider Unit Tests', () => {
     let statusProvider: SyncStatusProvider;
     let mockStatusBarItem: vscode.StatusBarItem;
     let statusBarTooltipEnabled: boolean;
+    let createStatusBarItemStub: sinon.SinonStub;
 
     setup(() => {
         sandbox = sinon.createSandbox();
-        statusBarTooltipEnabled = false;
+        statusBarTooltipEnabled = true;
         mockStatusBarItem = {
             text: '',
             tooltip: undefined,
@@ -28,7 +29,7 @@ suite('SyncStatusProvider Unit Tests', () => {
             show: sandbox.stub(),
             hide: sandbox.stub(),
             dispose: sandbox.stub(),
-            alignment: vscode.StatusBarAlignment.Right,
+            alignment: vscode.StatusBarAlignment.Left,
             priority: 99,
             id: 'sync-status',
             name: 'Sync Status',
@@ -36,7 +37,7 @@ suite('SyncStatusProvider Unit Tests', () => {
             color: undefined,
             accessibilityInformation: undefined
         } as unknown as vscode.StatusBarItem;
-        sandbox.stub(vscode.window, 'createStatusBarItem').returns(mockStatusBarItem);
+        createStatusBarItemStub = sandbox.stub(vscode.window, 'createStatusBarItem').returns(mockStatusBarItem);
         sandbox.stub(vscode.workspace, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) => {
                 if (key === 'statusBarTooltip') {
@@ -182,22 +183,11 @@ suite('SyncStatusProvider Unit Tests', () => {
      * Requirement 6.4: Detailed status on click
      */
     suite('Detailed Status (Requirement 6.4)', () => {
-        test('should not set status bar hover tooltip by default', () => {
-            const status: SyncStatus = {
-                enabled: true,
-                activeInstances: 3,
-                lastSyncTime: Date.now(),
-                lastError: null,
-                isSyncing: false
-            };
-
-            statusProvider.update(status);
-
-            assert.strictEqual(mockStatusBarItem.tooltip, undefined);
+        test('should create the sync status bar item on the left side', () => {
+            sinon.assert.calledWith(createStatusBarItemStub, vscode.StatusBarAlignment.Left, 99);
         });
 
-        test('should set status bar hover tooltip when enabled', () => {
-            statusBarTooltipEnabled = true;
+        test('should set status bar hover tooltip by default', () => {
             const status: SyncStatus = {
                 enabled: true,
                 activeInstances: 3,
@@ -209,6 +199,21 @@ suite('SyncStatusProvider Unit Tests', () => {
             statusProvider.update(status);
 
             assert.ok(mockStatusBarItem.tooltip);
+        });
+
+        test('should not set status bar hover tooltip when disabled', () => {
+            statusBarTooltipEnabled = false;
+            const status: SyncStatus = {
+                enabled: true,
+                activeInstances: 3,
+                lastSyncTime: Date.now(),
+                lastError: null,
+                isSyncing: false
+            };
+
+            statusProvider.update(status);
+
+            assert.strictEqual(mockStatusBarItem.tooltip, undefined);
         });
 
         test('should have tooltip with instance count', () => {

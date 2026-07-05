@@ -84,7 +84,7 @@ export class StatusBarManager {
     constructor(context: vscode.ExtensionContext) {
         // Create status bar item
         this.statusBarItem = vscode.window.createStatusBarItem(
-            vscode.StatusBarAlignment.Right,
+            vscode.StatusBarAlignment.Left,
             100
         );
         this.statusBarItem.command = 'otak-proxy.toggleProxy';
@@ -115,7 +115,7 @@ export class StatusBarManager {
         const i18n = I18nManager.getInstance();
         const config = vscode.workspace.getConfiguration('otakProxy');
         const showUrl = config.get<boolean>('showProxyUrl', true);
-        const showTooltip = config.get<boolean>('statusBarTooltip', false);
+        const showTooltip = config.get<boolean>('statusBarTooltip', true);
 
         // Get monitoring state and last check info
         const monitorState = this.monitorProvider?.getState() ?? null;

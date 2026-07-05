@@ -15,7 +15,7 @@
   "config.enableFallback": "未偵測到系統代理時回退到手動代理（僅自動模式）。啟用後，如未偵測到系統代理，擴充將嘗試使用手動設定的代理作為回退。",
   "config.enableFallback.description": "啟用後，在自動模式下若未偵測到系統代理，擴充將嘗試使用手動設定的代理作為回退。",
   "config.showProxyUrl": "在狀態列中顯示代理 URL",
-  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "啟用多個 VSCode/Cursor 執行個體之間的同步。啟用後，代理設定會在所有執行個體間共用。",
   "config.syncInterval": "同步檢查間隔（毫秒，100-5000）。檢查其他執行個體變更的頻率。",
   "action.yes": "是",

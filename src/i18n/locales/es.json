@@ -15,7 +15,7 @@
   "config.enableFallback": "Habilitar el uso del proxy manual como respaldo cuando no se detecta el proxy del sistema (solo modo automático). Cuando está habilitado, si no se detecta ningún proxy del sistema, la extensión intentará usar el proxy configurado manualmente como respaldo.",
   "config.enableFallback.description": "Cuando está habilitado, si no se detecta ningún proxy del sistema en modo automático, la extensión intentará usar el proxy configurado manualmente como respaldo.",
   "config.showProxyUrl": "Mostrar la URL del proxy en la barra de estado",
-  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. Disabled by default so VS Code notifications are not covered while hovering the status bar.",
+  "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "Habilitar la sincronización entre varias instancias de VSCode/Cursor. Cuando está habilitada, la configuración del proxy se comparte entre todas las instancias.",
   "config.syncInterval": "Intervalo de comprobación de sincronización en milisegundos (100-5000). Con qué frecuencia se comprueban los cambios de otras instancias.",
   "action.yes": "Sí",

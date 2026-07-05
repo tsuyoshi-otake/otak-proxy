@@ -38,7 +38,7 @@ suite('Otak Proxy Extension Test Suite @smoke', () => {
             text: '',
             tooltip: '',
             command: '',
-            alignment: vscode.StatusBarAlignment.Right,
+            alignment: vscode.StatusBarAlignment.Left,
             priority: 100,
             id: 'test-status-bar',
             name: 'Test Status Bar',
