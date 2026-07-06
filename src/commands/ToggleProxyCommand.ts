@@ -20,9 +20,25 @@ import {
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
 
-type TogglePreparationResult = 'continue' | 'handled';
-
 let toggleQueue: Promise<void> = Promise.resolve();
+
+// Guards against stacking duplicate prompts while a prior one is still
+// unanswered (e.g. the user toggles repeatedly without dismissing the
+// notification).
+let manualProxyMissingPromptInFlight = false;
+let systemProxySetupPromptInFlight = false;
+
+/**
+ * Fire a follow-up prompt/action without blocking the toggle queue. The
+ * caller must have already finalized and applied the state transition, so a
+ * slow or never-answered notification can no longer starve later toggles.
+ * Mirrors ProxyRemediationService.notifyAfterApply (see CHANGELOG 3.1.3).
+ */
+function notifyAfterApply(task: () => Promise<void>): void {
+    void task().catch(error => {
+        Logger.warn('Toggle proxy notification failed:', error);
+    });
+}
 
 function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
     target.autoProxyUrl = source.autoProxyUrl;
@@ -72,23 +88,35 @@ async function promptForManualProxy(i18n: I18nManager): Promise<'configure' | 's
     return 'cancel';
 }
 
-async function handleManualProxyMissing(
-    state: ProxyState,
-    i18n: I18nManager
-): Promise<TogglePreparationResult> {
-    const answer = await promptForManualProxy(i18n);
+/**
+ * No manual proxy URL is configured. There's nothing to switch into, so
+ * redirect to Auto OFF immediately (releasing the toggle queue) and show the
+ * "configure now?" prompt as a detached follow-up notification.
+ *
+ * NOTE: currently unreachable via the Off<->Auto toggle cycle
+ * (ProxyStateManager.getNextMode never returns ProxyMode.Manual). Kept fixed
+ * defensively for any future caller that targets Manual mode directly.
+ */
+function handleManualProxyMissing(state: ProxyState, i18n: I18nManager): void {
+    state.mode = ProxyMode.Auto;
+    state.autoModeOff = true;
 
-    if (answer === 'configure') {
-        await vscode.commands.executeCommand('otak-proxy.configureUrl');
-        return 'handled';
+    if (manualProxyMissingPromptInFlight) {
+        return;
     }
+    manualProxyMissingPromptInFlight = true;
 
-    if (answer === 'skipToAuto') {
-        state.mode = ProxyMode.Auto;
-        return 'continue';
-    }
-
-    return 'handled';
+    notifyAfterApply(async () => {
+        try {
+            const answer = await promptForManualProxy(i18n);
+            if (answer === 'configure') {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            }
+            // 'skipToAuto' / 'cancel': already redirected to Auto above; no-op.
+        } finally {
+            manualProxyMissingPromptInFlight = false;
+        }
+    });
 }
 
 async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyState, manualProxyUrl: string): Promise<void> {
@@ -145,21 +173,35 @@ async function promptForSystemProxySetup(i18n: I18nManager): Promise<'configure'
     return 'cancel';
 }
 
-async function handleSystemProxySetupPrompt(state: ProxyState, i18n: I18nManager): Promise<TogglePreparationResult> {
-    const action = await promptForSystemProxySetup(i18n);
-
-    if (action === 'configure') {
-        await vscode.commands.executeCommand('otak-proxy.configureUrl');
-        return 'handled';
-    }
-
-    if (action === 'import') {
-        await vscode.commands.executeCommand('otak-proxy.importProxy');
-        return 'handled';
-    }
-
+/**
+ * No system proxy detected and no usable manual fallback. Apply Auto OFF
+ * synchronously so the toggle queue releases immediately, then show the
+ * warning as a detached follow-up notification. Its buttons run
+ * configureUrl/importProxy directly - both commands re-read fresh state
+ * themselves, so this is safe even if further toggles happen before the
+ * user answers.
+ */
+function handleSystemProxySetupPrompt(state: ProxyState, i18n: I18nManager): void {
     setAutoModeOff(state);
-    return 'continue';
+
+    if (systemProxySetupPromptInFlight) {
+        return;
+    }
+    systemProxySetupPromptInFlight = true;
+
+    notifyAfterApply(async () => {
+        try {
+            const action = await promptForSystemProxySetup(i18n);
+            if (action === 'configure') {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            } else if (action === 'import') {
+                await vscode.commands.executeCommand('otak-proxy.importProxy');
+            }
+            // 'cancel'/dismissed: Auto OFF already applied above; nothing more to do.
+        } finally {
+            systemProxySetupPromptInFlight = false;
+        }
+    });
 }
 
 function useDetectedAutoProxy(state: ProxyState, nextMode: ProxyMode): void {
@@ -174,21 +216,21 @@ async function handleAutoModeTransition(
     state: ProxyState,
     nextMode: ProxyMode,
     i18n: I18nManager
-): Promise<TogglePreparationResult> {
+): Promise<void> {
     await ctx.checkAndUpdateSystemProxy();
     const updatedState = await ctx.getProxyState();
     copyDetectedProxyState(state, updatedState);
 
     if (state.autoProxyUrl) {
         useDetectedAutoProxy(state, nextMode);
-        return 'continue';
+        return;
     }
 
     if (await tryApplyManualFallback(ctx, state)) {
-        return 'continue';
+        return;
     }
 
-    return handleSystemProxySetupPrompt(state, i18n);
+    handleSystemProxySetupPrompt(state, i18n);
 }
 
 async function prepareNextMode(
@@ -196,17 +238,18 @@ async function prepareNextMode(
     state: ProxyState,
     nextMode: ProxyMode,
     i18n: I18nManager
-): Promise<TogglePreparationResult> {
+): Promise<void> {
     if (nextMode === ProxyMode.Manual && !state.manualProxyUrl) {
-        return handleManualProxyMissing(state, i18n);
+        handleManualProxyMissing(state, i18n);
+        return;
     }
 
     if (nextMode === ProxyMode.Auto && !state.autoProxyUrl) {
-        return handleAutoModeTransition(ctx, state, nextMode, i18n);
+        await handleAutoModeTransition(ctx, state, nextMode, i18n);
+        return;
     }
 
     state.mode = nextMode;
-    return 'continue';
 }
 
 async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<void> {
@@ -237,10 +280,7 @@ async function executeToggleProxyOnce(ctx: CommandContext): Promise<CommandResul
         const nextMode = ctx.getNextMode(currentState.mode);
         const i18n = I18nManager.getInstance();
 
-        if (await prepareNextMode(ctx, currentState, nextMode, i18n) === 'handled') {
-            return { success: true };
-        }
-
+        await prepareNextMode(ctx, currentState, nextMode, i18n);
         await applyPreparedState(ctx, currentState);
 
         return { success: true };

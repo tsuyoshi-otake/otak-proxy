@@ -1,5 +1,10 @@
 # Change Log
 
+## [3.1.6] - 2026-07-06
+
+### Fixed
+- Release the toggle command's serialization queue before showing the "no system proxy detected" warning, so an undismissed notification can no longer leave the status bar click and tooltip "Toggle Mode" link unresponsive on a fresh install (#19).
+
 ## [3.1.5] - 2026-07-05
 
 ### Fixed

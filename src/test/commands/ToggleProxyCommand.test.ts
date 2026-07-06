@@ -5,14 +5,19 @@ import * as vscode from 'vscode';
 import { executeToggleProxy } from '../../commands/ToggleProxyCommand';
 import { CommandContext } from '../../commands/types';
 import { ProxyMode, ProxyState } from '../../core/types';
+import { I18nManager } from '../../i18n/I18nManager';
 
 suite('ToggleProxyCommand Unit Tests', () => {
     let sandbox: sinon.SinonSandbox;
+    let showWarningMessageStub: sinon.SinonStub;
+    let executeCommandStub: sinon.SinonStub;
+    const i18n = I18nManager.getInstance();
 
     setup(() => {
         sandbox = sinon.createSandbox();
-        sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
-        sandbox.stub(vscode.commands, 'executeCommand').resolves();
+        i18n.initialize('en');
+        showWarningMessageStub = sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+        executeCommandStub = sandbox.stub(vscode.commands, 'executeCommand').resolves();
         sandbox.stub(vscode.workspace, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) => key === 'enableFallback' ? true : defaultValue,
             update: () => Promise.resolve(),
@@ -249,5 +254,90 @@ suite('ToggleProxyCommand Unit Tests', () => {
             { url: '', enabled: false }
         ]);
         assert.deepStrictEqual(monitorCalls, ['start', 'stop']);
+    });
+
+    test('should move to Auto OFF and release the queue even while the system-proxy warning is unanswered', async () => {
+        let resolveWarning!: (value: string | undefined) => void;
+        showWarningMessageStub.returns(new Promise<string | undefined>(resolve => {
+            resolveWarning = resolve;
+        }));
+
+        const { ctx, getState } = createContext(
+            { mode: ProxyMode.Off },
+            async () => {}
+        );
+
+        const first = await executeToggleProxy(ctx);
+        assert.strictEqual(first.success, true);
+        assert.strictEqual(getState().mode, ProxyMode.Auto);
+        assert.strictEqual(getState().autoModeOff, true);
+
+        // The warning from the first toggle is still pending (unanswered).
+        // A second toggle must still complete instead of queuing behind it.
+        const second = await executeToggleProxy(ctx);
+        assert.strictEqual(second.success, true);
+        assert.strictEqual(getState().mode, ProxyMode.Off);
+
+        resolveWarning(undefined);
+    });
+
+    test('should run configureUrl when Configure Manual is chosen on the system-proxy warning', async () => {
+        showWarningMessageStub.resolves(i18n.t('action.configureManual'));
+
+        const { ctx, getState } = createContext({ mode: ProxyMode.Off }, async () => {});
+        const result = await executeToggleProxy(ctx);
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(getState().mode, ProxyMode.Auto);
+        assert.strictEqual(getState().autoModeOff, true);
+
+        // The follow-up prompt is fire-and-forget; let its microtask chain settle.
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
+    });
+
+    test('should run importProxy when Import System is chosen on the system-proxy warning', async () => {
+        showWarningMessageStub.resolves(i18n.t('action.importSystem'));
+
+        const { ctx } = createContext({ mode: ProxyMode.Off }, async () => {});
+        await executeToggleProxy(ctx);
+
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        sinon.assert.calledWith(executeCommandStub, 'otak-proxy.importProxy');
+    });
+
+    test('should move to Auto OFF when the system-proxy warning is dismissed without an answer', async () => {
+        showWarningMessageStub.resolves(undefined);
+
+        const { ctx, getState, applyCalls } = createContext({ mode: ProxyMode.Off }, async () => {});
+        const result = await executeToggleProxy(ctx);
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(getState().mode, ProxyMode.Auto);
+        assert.strictEqual(getState().autoModeOff, true);
+        assert.deepStrictEqual(applyCalls[applyCalls.length - 1], { url: '', enabled: false });
+    });
+
+    test('should not stack duplicate system-proxy warnings while one is unanswered', async () => {
+        let resolveWarning!: (value: string | undefined) => void;
+        showWarningMessageStub.returns(new Promise<string | undefined>(resolve => {
+            resolveWarning = resolve;
+        }));
+
+        const { ctx } = createContext({ mode: ProxyMode.Off }, async () => {});
+
+        await executeToggleProxy(ctx); // Off -> Auto attempt -> warning fired (pending)
+        await executeToggleProxy(ctx); // Auto -> Off
+        await executeToggleProxy(ctx); // Off -> Auto attempt again -> warning still pending, must not stack
+
+        assert.strictEqual(showWarningMessageStub.callCount, 1);
+
+        resolveWarning(undefined);
     });
 });
