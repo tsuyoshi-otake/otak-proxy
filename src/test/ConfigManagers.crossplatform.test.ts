@@ -9,6 +9,7 @@
 import * as assert from 'assert';
 import { GitConfigManager } from '../config/GitConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
+import { PipConfigManager } from '../config/PipConfigManager';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import {
     PlatformMocker,
@@ -178,6 +179,55 @@ suite('NpmConfigManager Cross-Platform Test Suite (Task 3.2)', () => {
                 assert.ok(validErrorTypes.includes(result.errorType));
             }
         });
+    });
+});
+
+suite('PipConfigManager Cross-Platform Test Suite', () => {
+    let restorePlatform: (() => void) | null = null;
+
+    teardown(() => {
+        if (restorePlatform) {
+            restorePlatform();
+            restorePlatform = null;
+        }
+    });
+
+    test('should prefer py launcher on Windows', async () => {
+        restorePlatform = PlatformMocker.mockPlatform('win32');
+        const commands: string[] = [];
+        const manager = new PipConfigManager({
+            commandRunner: async (command) => {
+                commands.push(command);
+                throw Object.assign(new Error('ERROR: No such key - global.proxy'), {
+                    code: 1,
+                    stderr: 'ERROR: No such key - global.proxy'
+                });
+            }
+        });
+
+        const proxy = await manager.getProxy();
+
+        assert.strictEqual(proxy, null);
+        assert.strictEqual(commands[0], 'py');
+    });
+
+    test('should prefer python3 on Linux', async () => {
+        restorePlatform = PlatformMocker.mockPlatform('linux');
+        const commands: string[] = [];
+        const manager = new PipConfigManager({
+            commandRunner: async (command) => {
+                commands.push(command);
+                throw Object.assign(new Error('ERROR: No such key - global.proxy'), {
+                    code: 1,
+                    stderr: 'ERROR: No such key - global.proxy'
+                });
+            }
+        });
+
+        const proxy = await manager.getProxy();
+
+        assert.strictEqual(proxy, null);
+        assert.strictEqual(commands[0], 'python3');
     });
 });
 

@@ -4,7 +4,8 @@ import { ProxyConfigOperationOptions, ProxyConfigTarget } from './ProxyApplierTy
 
 const OPTIONAL_EXTERNAL_TOOL_TARGETS = new Set([
     'Git configuration',
-    'npm configuration'
+    'npm configuration',
+    'pip configuration'
 ]);
 
 function isOptionalToolMissing(target: ProxyConfigTarget, errorType?: string): boolean {

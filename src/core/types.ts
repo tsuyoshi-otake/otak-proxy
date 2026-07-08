@@ -48,6 +48,7 @@ export interface ProxyTestResult {
  * @property {boolean} [gitConfigured] - Whether Git proxy is configured
  * @property {boolean} [vscodeConfigured] - Whether VSCode proxy is configured
  * @property {boolean} [npmConfigured] - Whether npm proxy is configured
+ * @property {boolean} [pipConfigured] - Whether pip proxy is configured
  * @property {boolean} [systemProxyDetected] - Whether system proxy was detected
  * @property {string} [lastError] - Last error message if any
  * @property {ProxyTestResult} [lastTestResult] - Last connection test result (Feature: auto-mode-proxy-testing)
@@ -66,6 +67,7 @@ export interface ProxyState {
     gitConfigured?: boolean;
     vscodeConfigured?: boolean;
     npmConfigured?: boolean;
+    pipConfigured?: boolean;
     systemProxyDetected?: boolean;
     lastError?: string;
     // Feature: auto-mode-proxy-testing

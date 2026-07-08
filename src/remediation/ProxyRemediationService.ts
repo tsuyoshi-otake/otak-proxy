@@ -337,8 +337,9 @@ export class ProxyRemediationService {
         }
 
         const issue = report ? getHighestPriorityIssue(report.issues) : undefined;
-        const shouldWarnForApply = !applyResult.success || retrySuppressed;
         const shouldWarnForIssue = Boolean(issue && this.shouldNotifyForIssue(issue, settings));
+        const shouldWarnForApply = !applyResult.success ||
+            (retrySuppressed && shouldWarnForIssue);
 
         if (!shouldWarnForApply && !shouldWarnForIssue) {
             return;
@@ -375,10 +376,10 @@ export class ProxyRemediationService {
         }
 
         if (settings.notificationLevel === 'important') {
-            return issue.impact === 'blocksConvergence' || issue.impact === 'requiresUserDecision';
+            return isUserActionIssue(issue);
         }
 
-        return issue.impact === 'blocksConvergence' || isUserActionIssue(issue);
+        return isUserActionIssue(issue);
     }
 
     private actionLabelForIssue(issue: ProxyIssue, i18n: I18nManager): string | undefined {

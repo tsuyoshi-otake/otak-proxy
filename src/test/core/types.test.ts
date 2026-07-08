@@ -50,6 +50,7 @@ suite('Core Types Test Suite', () => {
                 gitConfigured: true,
                 vscodeConfigured: true,
                 npmConfigured: true,
+                pipConfigured: true,
                 systemProxyDetected: true,
                 lastError: 'test error'
             };
@@ -61,6 +62,7 @@ suite('Core Types Test Suite', () => {
             assert.strictEqual(state.gitConfigured, true);
             assert.strictEqual(state.vscodeConfigured, true);
             assert.strictEqual(state.npmConfigured, true);
+            assert.strictEqual(state.pipConfigured, true);
             assert.strictEqual(state.systemProxyDetected, true);
             assert.strictEqual(state.lastError, 'test error');
         });

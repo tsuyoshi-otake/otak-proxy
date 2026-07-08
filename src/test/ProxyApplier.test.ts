@@ -378,6 +378,71 @@ suite('ProxyApplier Unit Tests', () => {
         assert.strictEqual(state.npmConfigured, false);
     });
 
+    test('applyProxy invokes optional pip manager and tracks successful pip configuration', async () => {
+        let state: any = {
+            mode: 'auto',
+            gitConfigured: false,
+            vscodeConfigured: false,
+            npmConfigured: false,
+            pipConfigured: undefined
+        };
+        const stateManager = {
+            getState: async () => ({ ...state }),
+            saveState: async (nextState: any) => {
+                state = { ...nextState };
+            }
+        } as any;
+
+        const mockGitManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockVscodeManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockNpmManager = {
+            setProxy: async () => ({ success: true }),
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        let pipSetCalls = 0;
+        const mockPipManager = {
+            setProxy: async () => {
+                pipSetCalls++;
+                return { success: true };
+            },
+            unsetProxy: async () => ({ success: true })
+        } as any;
+
+        const mockNotifier = {
+            showSuccess: () => {},
+            showError: () => {},
+            showWarning: () => {}
+        } as any;
+
+        const applier = new ProxyApplier(
+            mockGitManager,
+            mockVscodeManager,
+            mockNpmManager,
+            new ProxyUrlValidator(),
+            new InputSanitizer(),
+            mockNotifier,
+            stateManager,
+            undefined,
+            mockPipManager
+        );
+
+        const result = await applier.applyProxyDetailed('http://proxy.example.com:8080', true);
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.results.pipSuccess, true);
+        assert.strictEqual(pipSetCalls, 1);
+        assert.strictEqual(state.pipConfigured, true);
+    });
+
     test('disableProxy returns false when any manager fails', async () => {
         const mockGitManager = {
             setProxy: async () => ({ success: true }),

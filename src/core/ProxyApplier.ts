@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitConfigManager } from '../config/GitConfigManager';
 import { VscodeConfigManager } from '../config/VscodeConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
+import { PipConfigManager } from '../config/PipConfigManager';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
@@ -44,7 +45,8 @@ export class ProxyApplier {
         private sanitizer: InputSanitizer,
         private userNotifier: UserNotifier,
         private stateManager?: ProxyStateManager,
-        private terminalEnvManager?: TerminalEnvConfigManager
+        private terminalEnvManager?: TerminalEnvConfigManager,
+        private pipManager?: PipConfigManager
     ) {}
 
     private isWorkspaceTrusted(): boolean {
@@ -112,6 +114,7 @@ export class ProxyApplier {
         return results.gitSuccess &&
             results.vscodeSuccess &&
             results.npmSuccess &&
+            results.pipSuccess !== false &&
             results.terminalEnvSuccess;
     }
 
@@ -248,6 +251,7 @@ export class ProxyApplier {
             gitSuccess: false,
             vscodeSuccess: false,
             npmSuccess: false,
+            pipSuccess: this.pipManager ? false : undefined,
             terminalEnvSuccess: false
         };
     }
@@ -282,6 +286,7 @@ export class ProxyApplier {
             gitSuccess: false,
             vscodeSuccess: false,
             npmSuccess: false,
+            pipSuccess: this.pipManager ? false : undefined,
             terminalEnvSuccess: true
         };
 
@@ -299,6 +304,9 @@ export class ProxyApplier {
                     break;
                 case 'npm configuration':
                     results.npmSuccess = success;
+                    break;
+                case 'pip configuration':
+                    results.pipSuccess = success;
                     break;
                 case 'Terminal environment':
                     results.terminalEnvSuccess = success;
@@ -318,6 +326,10 @@ export class ProxyApplier {
             { name: 'npm configuration', manager: this.npmManager }
         ];
 
+        if (this.pipManager) {
+            targets.push({ name: 'pip configuration', manager: this.pipManager });
+        }
+
         if (this.terminalEnvManager) {
             targets.push({ name: 'Terminal environment', manager: this.terminalEnvManager });
         }
@@ -331,6 +343,10 @@ export class ProxyApplier {
             { name: 'VSCode configuration', manager: this.vscodeManager },
             { name: 'npm configuration', manager: this.npmManager }
         ];
+
+        if (this.pipManager) {
+            targets.push({ name: 'pip configuration', manager: this.pipManager });
+        }
 
         if (this.terminalEnvManager) {
             targets.push({ name: 'Terminal environment', manager: this.terminalEnvManager });

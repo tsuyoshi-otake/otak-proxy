@@ -17,6 +17,7 @@ import { InputSanitizer } from './validation/InputSanitizer';
 import { GitConfigManager } from './config/GitConfigManager';
 import { VscodeConfigManager } from './config/VscodeConfigManager';
 import { NpmConfigManager } from './config/NpmConfigManager';
+import { PipConfigManager } from './config/PipConfigManager';
 import { TerminalEnvConfigManager } from './config/TerminalEnvConfigManager';
 import { SystemProxyDetector } from './config/SystemProxyDetector';
 import { UserNotifier } from './errors/UserNotifier';
@@ -144,7 +145,8 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         services.sanitizer,
         services.userNotifier,
         proxyStateManager,
-        services.terminalEnvManager
+        services.terminalEnvManager,
+        new PipConfigManager()
     );
     proxyRemediationService = new ProxyRemediationService(
         context,

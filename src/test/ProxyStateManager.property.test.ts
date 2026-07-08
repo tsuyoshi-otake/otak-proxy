@@ -69,6 +69,7 @@ suite('ProxyStateManager Property Tests', () => {
                     gitConfigured: fc.option(fc.boolean(), { nil: undefined }),
                     vscodeConfigured: fc.option(fc.boolean(), { nil: undefined }),
                     npmConfigured: fc.option(fc.boolean(), { nil: undefined }),
+                    pipConfigured: fc.option(fc.boolean(), { nil: undefined }),
                     systemProxyDetected: fc.option(fc.boolean(), { nil: undefined }),
                     lastError: fc.option(fc.string(), { nil: undefined })
                 }),
@@ -101,6 +102,7 @@ suite('ProxyStateManager Property Tests', () => {
                     assert.strictEqual(retrievedState.gitConfigured, state.gitConfigured);
                     assert.strictEqual(retrievedState.vscodeConfigured, state.vscodeConfigured);
                     assert.strictEqual(retrievedState.npmConfigured, state.npmConfigured);
+                    assert.strictEqual(retrievedState.pipConfigured, state.pipConfigured);
                     assert.strictEqual(retrievedState.systemProxyDetected, state.systemProxyDetected);
                     assert.strictEqual(retrievedState.lastError, state.lastError);
                 }
@@ -183,6 +185,7 @@ suite('ProxyStateManager Property Tests', () => {
                         assert.strictEqual(migratedState.gitConfigured, undefined);
                         assert.strictEqual(migratedState.vscodeConfigured, undefined);
                         assert.strictEqual(migratedState.npmConfigured, undefined);
+                        assert.strictEqual(migratedState.pipConfigured, undefined);
                         assert.strictEqual(migratedState.systemProxyDetected, undefined);
                         assert.strictEqual(migratedState.lastError, undefined);
                     } finally {

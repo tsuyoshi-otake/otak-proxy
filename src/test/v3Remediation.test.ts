@@ -385,6 +385,107 @@ suite('v3 remediation foundation', () => {
         }
     });
 
+    test('ProxyRemediationService keeps managed proxy mismatches diagnostics-only at warnings level', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'warnings',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            automaticRemediationEnabled: false
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-managed-mismatch-notify-test-'));
+        const context = createContext(new Map());
+        const diagnostics = {
+            run: async () => diagnosticReport([
+                managedConvergenceIssue('npm.managedProxyMismatch', 'npm.user.proxy')
+            ])
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let warningCount = 0;
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => {
+            warningCount++;
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'autoDetection' },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            assert.strictEqual(result.success, false);
+            assert.strictEqual(result.diagnosticReport?.issueCount, 1);
+            assert.strictEqual(warningCount, 0, 'managed proxy mismatches should not interrupt users by default');
+        } finally {
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService still warns for issues that require user action', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'warnings',
+            credentialTargetPolicy: 'allowPlaintextTargets'
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-user-action-notify-test-'));
+        const context = createContext(new Map());
+        const diagnostics = {
+            run: async () => diagnosticReport([reloadRequiredIssue()])
+        } as unknown as ProxyRuntimeDiagnostics;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Auto }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let warningCount = 0;
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => {
+            warningCount++;
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'autoDetection' },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.diagnosticReport?.issueCount, 1);
+            assert.strictEqual(warningCount, 1, 'user-action issues should still notify');
+        } finally {
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
     test('flap detection trips despite the failing target changing every attempt (#15)', async () => {
         const restoreConfig = stubOtakProxyConfiguration({
             notificationLevel: 'off',

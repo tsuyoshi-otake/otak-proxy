@@ -18,6 +18,9 @@ export async function saveProxyConfigResults(
         state.gitConfigured = nextConfiguredState(state.gitConfigured, results.gitSuccess, enabled);
         state.vscodeConfigured = nextConfiguredState(state.vscodeConfigured, results.vscodeSuccess, enabled);
         state.npmConfigured = nextConfiguredState(state.npmConfigured, results.npmSuccess, enabled);
+        if (typeof results.pipSuccess === 'boolean') {
+            state.pipConfigured = nextConfiguredState(state.pipConfigured, results.pipSuccess, enabled);
+        }
         state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
         await stateManager.saveState(state);
     } catch (error) {

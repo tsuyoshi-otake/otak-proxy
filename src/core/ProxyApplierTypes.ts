@@ -29,6 +29,7 @@ export interface ProxyConfigResults {
     gitSuccess: boolean;
     vscodeSuccess: boolean;
     npmSuccess: boolean;
+    pipSuccess?: boolean;
     terminalEnvSuccess: boolean;
 }
 

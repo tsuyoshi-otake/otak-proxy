@@ -169,6 +169,7 @@ export class ProxyStateManager implements IProxyStateManager {
             gitConfigured: undefined,
             vscodeConfigured: undefined,
             npmConfigured: undefined,
+            pipConfigured: undefined,
             systemProxyDetected: undefined,
             lastError: undefined
         };

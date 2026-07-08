@@ -42,6 +42,7 @@ suite('SharedStateFile Property-Based Tests', () => {
         gitConfigured: fc.option(fc.boolean(), { nil: undefined }),
         vscodeConfigured: fc.option(fc.boolean(), { nil: undefined }),
         npmConfigured: fc.option(fc.boolean(), { nil: undefined }),
+        pipConfigured: fc.option(fc.boolean(), { nil: undefined }),
         systemProxyDetected: fc.option(fc.boolean(), { nil: undefined }),
         proxyReachable: fc.option(fc.boolean(), { nil: undefined }),
         lastTestTimestamp: fc.option(fc.integer({ min: 0 }), { nil: undefined }),
