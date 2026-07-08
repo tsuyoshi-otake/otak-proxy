@@ -135,6 +135,27 @@ suite('InitialSetupFlow Tests', () => {
         assert.strictEqual(state.mode, ProxyMode.Off);
     });
 
+    test('stale initial setup prompt does not override a state changed by another action', async () => {
+        let resolveInitialPrompt!: (value: string) => void;
+        showInformationMessageStub.returns(new Promise(resolve => {
+            resolveInitialPrompt = resolve;
+        }));
+
+        const setup = flow.askForInitialSetup();
+        await Promise.resolve();
+
+        state = { mode: ProxyMode.Auto, autoProxyUrl: 'http://user-choice.example:8080' };
+        resolveInitialPrompt(i18n.t('action.manualSetup'));
+        await setup;
+
+        sinon.assert.notCalled(showInputBoxStub);
+        sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(applyProxyStub);
+        sinon.assert.notCalled(startSystemProxyMonitoringStub);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://user-choice.example:8080');
+    });
+
     test('user picks Skip while initial state is Auto: re-starts system proxy monitoring without touching state', async () => {
         // Edge case: the post-block at the end of askForInitialSetup re-arms monitoring
         // whenever the persisted mode is already Auto, even if the user dismissed setup.

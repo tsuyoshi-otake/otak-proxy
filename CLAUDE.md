@@ -96,14 +96,14 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
 
 ### Local Windows VM E2E verification
 - A local VMware Workstation Windows 11 verification VM is available on the developer machine:
-  - VMX: `D:\VMs\otak-proxy-win11-dev\otak-proxy-win11-dev.vmx`
+  - VMX: `E:\VMs\otak-proxy-win11-dev\otak-proxy-win11-dev.vmx`
   - Guest user: `dev`
   - WinRM endpoint used during setup: `192.168.146.129:5985` over NTLM
   - VS Code is installed in the guest; `odangoo.otak-proxy` can be installed or overwritten with `code --install-extension <vsix> --force`.
 - Do not write VM passwords, auto-logon secrets, or other credentials into repository files. Pass the VM password through `VM_PASS` in the local shell when using helper scripts.
 - Host-side WinRM helper environment:
   - Python venv: `C:\Users\developer\tmp\otak-proxy-winrm-venv`
-  - Helper scripts: `D:\VMs\otak-proxy-win11-dev\payload\pywinrm_run.py` and `D:\VMs\otak-proxy-win11-dev\payload\pywinrm_upload.py`
+  - Helper scripts: `E:\VMs\otak-proxy-win11-dev\payload\pywinrm_run.py` and `E:\VMs\otak-proxy-win11-dev\payload\pywinrm_upload.py`
 - Current intended guest shape for optional-tool verification:
   - Git is not installed or not on PATH.
   - npm/Node.js is not installed or not on PATH.

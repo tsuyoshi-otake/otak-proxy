@@ -42,6 +42,9 @@ let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
 let proxyRemediationService: ProxyRemediationService;
 
+// The first-run setup prompt is user-driven and may remain open indefinitely.
+// It must not block activation or command availability.
+let initialSetupApplication: Promise<void> = Promise.resolve();
 // The startup proxy enforcement can run a full diagnostics pass and delayed
 // retries (5s timeouts each on a broken corporate network). It must not block
 // activation, so it runs as a tracked background task. deactivate() and tests
@@ -57,6 +60,11 @@ let startupApplyRunner: (state: ProxyState, terminalEnvManager?: TerminalEnvConf
 /** Resolves when the (fire-and-forget) startup proxy enforcement has settled. */
 export function whenStartupProxyApplied(): Promise<void> {
     return startupProxyApplication;
+}
+
+/** Resolves when the first-run setup prompt/background task has settled. */
+export function whenInitialSetupCompleted(): Promise<void> {
+    return initialSetupApplication;
 }
 
 /** Test-only seam: override the startup apply to assert non-blocking activation. */
@@ -406,7 +414,7 @@ function registerAutoTestConfigListener(context: vscode.ExtensionContext): void 
  *
  * @param context - The extension context
  */
-export async function performInitialSetup(context: vscode.ExtensionContext): Promise<void> {
+export async function performInitialSetup(context: vscode.ExtensionContext): Promise<boolean> {
     try {
         const hasSetup = context.globalState.get('hasInitialSetup', false);
         if (!hasSetup) {
@@ -415,11 +423,28 @@ export async function performInitialSetup(context: vscode.ExtensionContext): Pro
                 await initializer.askForInitialSetup();
             }
             await context.globalState.update('hasInitialSetup', true);
+            return true;
         }
+        return false;
     } catch (error) {
         Logger.error('Initial setup failed:', error);
         // Continue with default state - don't throw
+        return false;
     }
+}
+
+function startInitialSetupInBackground(context: vscode.ExtensionContext, generation: number): void {
+    initialSetupApplication = (async () => {
+        const setupRan = await performInitialSetup(context);
+        if (!setupRan || generation !== activationGeneration) {
+            return;
+        }
+
+        const latestState = await proxyStateManager.getState();
+        statusBarManager.update(latestState);
+        await updateMonitoringForState(latestState);
+        await publishStartupSyncState(latestState);
+    })().catch(error => Logger.warn('Initial setup background task failed:', error));
 }
 
 /**
@@ -444,8 +469,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerExtensionCommands(context, services);
 
     statusBarManager.update(state);
-    await performInitialSetup(context);
-    state = await proxyStateManager.getState();
+    const generation = ++activationGeneration;
+    startInitialSetupInBackground(context, generation);
     state = await startSyncAndLoadSharedState(state);
 
     // Run the whole startup enforcement (apply -> monitoring -> sync) as one
@@ -454,7 +479,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // startup apply against the immediate monitoring check, whose apply lock skips
     // rather than queues) keeps them from diverging from the saved state. The
     // config listener stays synchronous: it is cheap and should be live immediately.
-    const generation = ++activationGeneration;
     startupProxyApplication = (async () => {
         // A user command (e.g. toggle) can run the moment activation resolves and
         // persist a newer state while this slow task is mid-flight. Reconcile until

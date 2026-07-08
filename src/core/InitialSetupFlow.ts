@@ -5,6 +5,7 @@ import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState } from './types';
+import { Logger } from '../utils/Logger';
 
 export class InitialSetupFlow {
     constructor(
@@ -17,6 +18,7 @@ export class InitialSetupFlow {
      */
     async askForInitialSetup(): Promise<void> {
         const state = await this.context.proxyStateManager.getState();
+        const initialStateSignature = this.setupStateSignature(state);
         const i18n = I18nManager.getInstance();
 
         const modeAnswer = await vscode.window.showInformationMessage(
@@ -26,10 +28,15 @@ export class InitialSetupFlow {
             i18n.t('action.skip')
         );
 
+        if (!await this.isSetupStateCurrent(initialStateSignature)) {
+            Logger.log('Initial setup skipped because proxy state changed while the prompt was open.');
+            return;
+        }
+
         if (modeAnswer === i18n.t('action.autoSystem')) {
-            await this.handleAutoSetup(state, i18n);
+            await this.handleAutoSetup(state, i18n, initialStateSignature);
         } else if (modeAnswer === i18n.t('action.manualSetup')) {
-            await this.handleManualSetup(state, i18n);
+            await this.handleManualSetup(state, i18n, initialStateSignature);
         }
 
         if (state.mode === ProxyMode.Auto) {
@@ -37,10 +44,42 @@ export class InitialSetupFlow {
         }
     }
 
-    private async handleAutoSetup(state: ProxyState, i18n: I18nManager): Promise<void> {
+    private setupStateSignature(state: ProxyState): string {
+        return JSON.stringify({
+            mode: state.mode,
+            manualProxyUrl: state.manualProxyUrl || '',
+            autoProxyUrl: state.autoProxyUrl || '',
+            autoModeOff: state.autoModeOff === true,
+            usingFallbackProxy: state.usingFallbackProxy === true,
+            fallbackProxyUrl: state.fallbackProxyUrl || ''
+        });
+    }
+
+    private async isSetupStateCurrent(initialStateSignature: string): Promise<boolean> {
+        const currentState = await this.context.proxyStateManager.getState();
+        return this.setupStateSignature(currentState) === initialStateSignature;
+    }
+
+    private async continueIfSetupStateCurrent(initialStateSignature: string): Promise<boolean> {
+        if (await this.isSetupStateCurrent(initialStateSignature)) {
+            return true;
+        }
+
+        Logger.log('Initial setup action skipped because proxy state changed while setup was waiting.');
+        return false;
+    }
+
+    private async handleAutoSetup(
+        state: ProxyState,
+        i18n: I18nManager,
+        initialStateSignature: string
+    ): Promise<void> {
         const detectedProxy = await detectSystemProxySettings();
 
         if (detectedProxy && validateProxyUrl(detectedProxy)) {
+            if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
+                return;
+            }
             state.autoProxyUrl = detectedProxy;
             state.mode = ProxyMode.Auto;
             await this.context.proxyStateManager.saveState(state);
@@ -59,6 +98,9 @@ export class InitialSetupFlow {
         );
 
         if (fallback === i18n.t('action.yes')) {
+            if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
+                return;
+            }
             await vscode.commands.executeCommand('otak-proxy.configureUrl');
             const updatedState = await this.context.proxyStateManager.getState();
             if (updatedState.manualProxyUrl) {
@@ -69,7 +111,11 @@ export class InitialSetupFlow {
         }
     }
 
-    private async handleManualSetup(state: ProxyState, i18n: I18nManager): Promise<void> {
+    private async handleManualSetup(
+        state: ProxyState,
+        i18n: I18nManager,
+        initialStateSignature: string
+    ): Promise<void> {
         const manualProxyUrl = await vscode.window.showInputBox({
             prompt: i18n.t('prompt.proxyUrl'),
             placeHolder: i18n.t('prompt.proxyUrlPlaceholder')
@@ -88,6 +134,10 @@ export class InitialSetupFlow {
                     'suggestion.validHostname'
                 ]
             );
+            return;
+        }
+
+        if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
             return;
         }
 
