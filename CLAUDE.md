@@ -94,6 +94,28 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
 - `OTAK_PROXY_LOG_SILENT=1`: suppresses `Logger.*` output (default for both unit tests and VS Code tests).
 - Set `OTAK_PROXY_LOG_SILENT=0` when you need verbose logs while debugging.
 
+### Local Windows VM E2E verification
+- A local VMware Workstation Windows 11 verification VM is available on the developer machine:
+  - VMX: `D:\VMs\otak-proxy-win11-dev\otak-proxy-win11-dev.vmx`
+  - Guest user: `dev`
+  - WinRM endpoint used during setup: `192.168.146.129:5985` over NTLM
+  - VS Code is installed in the guest; `odangoo.otak-proxy` can be installed or overwritten with `code --install-extension <vsix> --force`.
+- Do not write VM passwords, auto-logon secrets, or other credentials into repository files. Pass the VM password through `VM_PASS` in the local shell when using helper scripts.
+- Host-side WinRM helper environment:
+  - Python venv: `C:\Users\developer\tmp\otak-proxy-winrm-venv`
+  - Helper scripts: `D:\VMs\otak-proxy-win11-dev\payload\pywinrm_run.py` and `D:\VMs\otak-proxy-win11-dev\payload\pywinrm_upload.py`
+- Current intended guest shape for optional-tool verification:
+  - Git is not installed or not on PATH.
+  - npm/Node.js is not installed or not on PATH.
+  - Use this VM to verify that missing optional tools are treated as skipped/non-fatal while real config errors still surface.
+- Typical verification flow:
+  - Build a VSIX with `npm run package:vsix`.
+  - Upload the VSIX with `pywinrm_upload.py`.
+  - Install it in the guest with `code --install-extension <uploaded-vsix> --force`.
+  - Run an E2E script through `pywinrm_run.py`; VS Code's Electron can be used as Node by setting `ELECTRON_RUN_AS_NODE=1` when the guest has no standalone Node.js.
+  - Remove uploaded VSIX/test scripts after verification.
+- The VM IP can change if VMware networking/DHCP changes. If WinRM fails, first rediscover the guest IP from VMware/network state before changing code or tests.
+
 ### CI convenience
 - `npm run test:ci` runs lint + `npm test`.
 

@@ -2,7 +2,8 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { NpmConfigManager } from '../config/NpmConfigManager';
+import { classifyNpmConfigError, NpmConfigManager } from '../config/NpmConfigManager';
+import { PlatformMocker } from './crossPlatformMockers';
 
 suite('NpmConfigManager Test Suite', () => {
     let npmConfigManager: NpmConfigManager;
@@ -94,6 +95,40 @@ suite('NpmConfigManager Test Suite', () => {
             }
         });
 
+        (['win32', 'linux', 'darwin'] as NodeJS.Platform[]).forEach(platform => {
+            test(`should return NOT_INSTALLED when npm cannot be resolved from PATH on ${platform}`, async function() {
+                this.timeout(20000);
+                const originalPath = process.env.PATH;
+                const originalPathWindows = process.env.Path;
+                const restorePlatform = PlatformMocker.mockPlatform(platform);
+
+                try {
+                    process.env.PATH = '';
+                    process.env.Path = '';
+
+                    const manager = new NpmConfigManager(userConfigPath);
+                    const result = await manager.setProxy('http://proxy.example.com:8080');
+
+                    assert.strictEqual(result.success, false);
+                    assert.strictEqual(result.errorType, 'NOT_INSTALLED');
+                    assert.strictEqual(result.error, 'npm is not installed or not in PATH');
+                } finally {
+                    restorePlatform();
+                    if (originalPath === undefined) {
+                        delete process.env.PATH;
+                    } else {
+                        process.env.PATH = originalPath;
+                    }
+
+                    if (originalPathWindows === undefined) {
+                        delete process.env.Path;
+                    } else {
+                        process.env.Path = originalPathWindows;
+                    }
+                }
+            });
+        });
+
         test('should handle permission errors', async function() {
             this.timeout(20000);
             // This test documents the expected behavior for permission errors
@@ -125,6 +160,20 @@ suite('NpmConfigManager Test Suite', () => {
                 await npmConfigManager.unsetProxy();
             }
         });
+    });
+
+    suite('Error Classification', () => {
+        test('should classify Windows cmd missing npm output as NOT_INSTALLED', () => {
+            const result = classifyNpmConfigError({
+                message: 'Command failed: C:\\Windows\\System32\\cmd.exe /d /s /c npm config set proxy http://proxy.example.com:8080',
+                stderr: '\'npm\' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n',
+                code: 1
+            }, 5000);
+
+            assert.strictEqual(result.errorType, 'NOT_INSTALLED');
+            assert.strictEqual(result.error, 'npm is not installed or not in PATH');
+        });
+
     });
 
     suite('Round Trip', () => {

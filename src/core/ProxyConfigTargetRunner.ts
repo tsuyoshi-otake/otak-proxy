@@ -2,6 +2,15 @@ import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { Logger } from '../utils/Logger';
 import { ProxyConfigOperationOptions, ProxyConfigTarget } from './ProxyApplierTypes';
 
+const OPTIONAL_EXTERNAL_TOOL_TARGETS = new Set([
+    'Git configuration',
+    'npm configuration'
+]);
+
+function isOptionalToolMissing(target: ProxyConfigTarget, errorType?: string): boolean {
+    return errorType === 'NOT_INSTALLED' && OPTIONAL_EXTERNAL_TOOL_TARGETS.has(target.name);
+}
+
 export async function updateProxyConfigTarget(
     target: ProxyConfigTarget,
     enabled: boolean,
@@ -15,6 +24,11 @@ export async function updateProxyConfigTarget(
             : await target.manager.unsetProxy(options);
 
         if (!result.success) {
+            if (isOptionalToolMissing(target, result.errorType)) {
+                Logger.info(`${target.name} skipped:`, result.error);
+                return true;
+            }
+
             Logger.error(`${target.name} failed:`, result.error, result.errorType);
             errorAggregator.addError(target.name, result.error || `Failed to update ${target.name}`);
             return false;

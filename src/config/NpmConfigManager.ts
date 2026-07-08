@@ -1,4 +1,6 @@
 import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
@@ -25,6 +27,145 @@ export interface OperationResult {
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
 }
 
+export function classifyNpmConfigError(error: unknown, timeoutMs: number): NpmErrorClassification {
+    const details = getNpmErrorDetails(error);
+    const classifiers: NpmErrorClassifier[] = [
+        classifyNpmMissing,
+        classifyNpmPermission,
+        data => classifyNpmTimeout(data, timeoutMs),
+        classifyNpmConfig
+    ];
+
+    for (const classifier of classifiers) {
+        const classification = classifier(details);
+        if (classification) {
+            return classification;
+        }
+    }
+
+    return { errorType: 'UNKNOWN', error: details.errorMessage };
+}
+
+function getNpmErrorDetails(error: unknown): NpmErrorDetails {
+    return {
+        errorMessage: getErrorMessage(error),
+        stderr: getErrorStderr(error),
+        code: getErrorCode(error),
+        signal: getErrorSignal(error),
+        killed: wasProcessKilled(error)
+    };
+}
+
+function hasMissingExecutableSignal(value: string): boolean {
+    const lower = value.toLowerCase();
+
+    return lower.includes('enoent') ||
+        lower.includes('not found') ||
+        lower.includes('not recognized');
+}
+
+function classifyNpmMissing(details: NpmErrorDetails): NpmErrorClassification | null {
+    const combinedOutput = `${details.errorMessage}\n${details.stderr}`;
+    return details.code === 'ENOENT' ||
+        details.code === 9009 ||
+        details.code === '9009' ||
+        hasMissingExecutableSignal(combinedOutput)
+        ? { errorType: 'NOT_INSTALLED', error: 'npm is not installed or not in PATH' }
+        : null;
+}
+
+function classifyNpmPermission(details: NpmErrorDetails): NpmErrorClassification | null {
+    return details.code === 'EACCES' ||
+        details.errorMessage.includes('EACCES') ||
+        details.stderr.includes('Permission denied') ||
+        details.stderr.includes('permission')
+        ? { errorType: 'NO_PERMISSION', error: 'Permission denied when accessing npm configuration' }
+        : null;
+}
+
+function classifyNpmTimeout(details: NpmErrorDetails, timeoutMs: number): NpmErrorClassification | null {
+    return details.killed ||
+        details.errorMessage.includes('timeout') ||
+        details.signal === 'SIGTERM'
+        ? { errorType: 'TIMEOUT', error: `npm command timed out after ${timeoutMs}ms` }
+        : null;
+}
+
+function classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | null {
+    return details.stderr.includes('config') || details.errorMessage.includes('config')
+        ? { errorType: 'CONFIG_ERROR', error: 'Failed to read/write npm configuration' }
+        : null;
+}
+
+function getPathEnvValue(env: NodeJS.ProcessEnv): string {
+    return env.PATH || env.Path || '';
+}
+
+function getWindowsPathExtensions(env: NodeJS.ProcessEnv): string[] {
+    const raw = env.PATHEXT || '.COM;.EXE;.BAT;.CMD';
+    return raw
+        .split(';')
+        .map(ext => ext.trim())
+        .filter(Boolean);
+}
+
+function getCommandCandidates(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): string[] {
+    if (!isWindows || path.extname(command)) {
+        return [command];
+    }
+
+    return [command, ...getWindowsPathExtensions(env).map(ext => `${command}${ext}`)];
+}
+
+function canRunCandidate(candidatePath: string, isWindows: boolean): boolean {
+    try {
+        if (isWindows) {
+            return fs.existsSync(candidatePath);
+        }
+
+        fs.accessSync(candidatePath, fs.constants.X_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function isCommandOnPath(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): boolean {
+    const pathValue = getPathEnvValue(env);
+    if (!pathValue) {
+        return false;
+    }
+
+    const delimiter = isWindows ? ';' : ':';
+    const pathModule = isWindows ? path.win32 : path.posix;
+    const pathEntries = pathValue
+        .split(delimiter)
+        .map(entry => entry.trim())
+        .filter(Boolean);
+
+    return pathEntries.some(entry =>
+        getCommandCandidates(command, isWindows, env).some(candidate =>
+            canRunCandidate(pathModule.join(entry, candidate), isWindows)
+        )
+    );
+}
+
+function createNpmNotInstalledError(cause?: unknown): Error & {
+    code?: string;
+    stderr?: string;
+    cause?: unknown;
+} {
+    const missingError = new Error('npm is not installed or not in PATH') as Error & {
+        code?: string;
+        stderr?: string;
+        cause?: unknown;
+    };
+    missingError.code = 'ENOENT';
+    missingError.stderr = getErrorStderr(cause);
+    missingError.cause = cause;
+    return missingError;
+}
+
 /**
  * Manages npm proxy configuration with secure command execution.
  * Uses execFile() directly. On Windows, npm is a batch file (.cmd), so this
@@ -43,6 +184,12 @@ export class NpmConfigManager {
      */
     constructor(userConfigPath?: string) {
         this.userConfigPath = userConfigPath;
+    }
+
+    private ensureNpmAvailable(env: NodeJS.ProcessEnv): void {
+        if (!isCommandOnPath('npm', this.isWindows, env)) {
+            throw createNpmNotInstalledError();
+        }
     }
 
     /**
@@ -64,6 +211,7 @@ export class NpmConfigManager {
         delete env.NPM_CONFIG_HTTPS_PROXY;
 
         if (this.isWindows) {
+            this.ensureNpmAvailable(env);
             const comspec = process.env.ComSpec || 'cmd.exe';
             return execFileAsync(comspec, ['/d', '/s', '/c', 'npm', ...fullArgs], {
                 timeout: this.timeout,
@@ -73,6 +221,7 @@ export class NpmConfigManager {
             });
         }
 
+        this.ensureNpmAvailable(env);
         return execFileAsync('npm', fullArgs, {
             timeout: this.timeout,
             encoding: 'utf8',
@@ -157,72 +306,12 @@ export class NpmConfigManager {
      * @returns OperationResult with error details
      */
     private handleError(error: unknown): OperationResult {
-        const details = this.getErrorDetails(error);
-        const classification = this.classifyNpmError(details);
+        const classification = classifyNpmConfigError(error, this.timeout);
 
         return {
             success: false,
             error: classification.error,
             errorType: classification.errorType
         };
-    }
-
-    private getErrorDetails(error: unknown): NpmErrorDetails {
-        return {
-            errorMessage: getErrorMessage(error),
-            stderr: getErrorStderr(error),
-            code: getErrorCode(error),
-            signal: getErrorSignal(error),
-            killed: wasProcessKilled(error)
-        };
-    }
-
-    private classifyNpmError(details: NpmErrorDetails): NpmErrorClassification {
-        const classifiers: NpmErrorClassifier[] = [
-            data => this.classifyNpmMissing(data),
-            data => this.classifyNpmPermission(data),
-            data => this.classifyNpmTimeout(data),
-            data => this.classifyNpmConfig(data)
-        ];
-
-        for (const classifier of classifiers) {
-            const classification = classifier(details);
-            if (classification) {
-                return classification;
-            }
-        }
-
-        return { errorType: 'UNKNOWN', error: details.errorMessage };
-    }
-
-    private classifyNpmMissing(details: NpmErrorDetails): NpmErrorClassification | null {
-        return details.code === 'ENOENT' ||
-            details.errorMessage.includes('ENOENT') ||
-            details.errorMessage.includes('not found')
-            ? { errorType: 'NOT_INSTALLED', error: 'npm is not installed or not in PATH' }
-            : null;
-    }
-
-    private classifyNpmPermission(details: NpmErrorDetails): NpmErrorClassification | null {
-        return details.code === 'EACCES' ||
-            details.errorMessage.includes('EACCES') ||
-            details.stderr.includes('Permission denied') ||
-            details.stderr.includes('permission')
-            ? { errorType: 'NO_PERMISSION', error: 'Permission denied when accessing npm configuration' }
-            : null;
-    }
-
-    private classifyNpmTimeout(details: NpmErrorDetails): NpmErrorClassification | null {
-        return details.killed ||
-            details.errorMessage.includes('timeout') ||
-            details.signal === 'SIGTERM'
-            ? { errorType: 'TIMEOUT', error: `npm command timed out after ${this.timeout}ms` }
-            : null;
-    }
-
-    private classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | null {
-        return details.stderr.includes('config') || details.errorMessage.includes('config')
-            ? { errorType: 'CONFIG_ERROR', error: 'Failed to read/write npm configuration' }
-            : null;
     }
 }
