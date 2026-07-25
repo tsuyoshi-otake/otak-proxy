@@ -69,6 +69,15 @@ export interface ISharedStateFile {
      * Get the file path for external use (e.g., file watcher)
      */
     getFilePath(): string;
+
+    /**
+     * Cheap signature of the file's current on-disk revision.
+     *
+     * Lets a periodic poll skip a full read + parse when nothing has been
+     * written since the last check: one stat() instead of read + JSON.parse +
+     * sanitize, which matters because this runs on a sub-second timer.
+     */
+    getChangeSignature?(): string;
 }
 
 /**
@@ -94,6 +103,11 @@ const RENAME_RETRY_ATTEMPTS = 5;
 const RENAME_RETRY_DELAY_MS = 25;
 
 /**
+ * Signature reported by getChangeSignature() when the state file is absent.
+ */
+const MISSING_FILE_SIGNATURE = 'missing';
+
+/**
  * SharedStateFile provides atomic read/write operations for the shared state file.
  *
  * Uses write-then-rename pattern for atomic writes to prevent corruption
@@ -102,6 +116,7 @@ const RENAME_RETRY_DELAY_MS = 25;
 export class SharedStateFile implements ISharedStateFile {
     private readonly syncDir: string;
     private readonly stateFilePath: string;
+    private unknownSignatureSeq = 0;
 
     /**
      * Create a new SharedStateFile instance
@@ -270,6 +285,31 @@ export class SharedStateFile implements ISharedStateFile {
      */
     getFilePath(): string {
         return this.stateFilePath;
+    }
+
+    /**
+     * Cheap signature of the file's current on-disk revision.
+     *
+     * Returns MISSING_FILE_SIGNATURE when the file does not exist, so creation
+     * and deletion are both observed as a signature change.
+     */
+    getChangeSignature(): string {
+        try {
+            const stat = fs.statSync(this.stateFilePath, { throwIfNoEntry: false });
+            if (!stat) {
+                return MISSING_FILE_SIGNATURE;
+            }
+
+            // ino changes when an atomic rename replaces the file, which covers
+            // the case where mtime/size happen to be identical.
+            return `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+        } catch {
+            // On any stat failure return a value that can never equal a previous
+            // signature, so the caller falls back to a real read instead of
+            // silently treating the file as unchanged.
+            this.unknownSignatureSeq++;
+            return `unknown:${this.unknownSignatureSeq}`;
+        }
     }
 
     /**

@@ -20,7 +20,11 @@ import {
     ProxyDetectionResult,
     ProxyMonitorConfig
 } from './ProxyMonitorTypes';
-import { DEFAULT_PROXY_MONITOR_CONFIG, normalizeProxyMonitorConfig } from './ProxyMonitorConfig';
+import {
+    DEFAULT_PROXY_MONITOR_CONFIG,
+    deriveEffectiveProxyMonitorConfig,
+    normalizeProxyMonitorConfig
+} from './ProxyMonitorConfig';
 import { detectProxyWithRetry } from './ProxyMonitorDetection';
 
 export type { ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
@@ -42,7 +46,11 @@ export type { ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTyp
  * - 3.1-3.4: Retry logic with exponential backoff
  */
 export class ProxyMonitor extends EventEmitter {
+    /** Configured intervals, before any focus-based backoff is applied. */
+    private baseConfig: ProxyMonitorConfig;
+    /** Intervals currently in effect (baseConfig adjusted for window focus). */
     private config: ProxyMonitorConfig;
+    private windowFocused: boolean = true;
     private detector: ISystemProxyDetector;
     private logger: ProxyChangeLogger;
     private state: ProxyMonitorState;
@@ -62,8 +70,8 @@ export class ProxyMonitor extends EventEmitter {
         this.detector = detector;
         this.logger = logger;
         this.state = new ProxyMonitorState();
-        this.config = { ...DEFAULT_PROXY_MONITOR_CONFIG, ...config };
-        this.validateConfig();
+        this.baseConfig = normalizeProxyMonitorConfig({ ...DEFAULT_PROXY_MONITOR_CONFIG, ...config });
+        this.config = deriveEffectiveProxyMonitorConfig(this.baseConfig, this.windowFocused);
         this.connectionState = createProxyMonitorConnectionState(
             connectionTester,
             {
@@ -131,13 +139,37 @@ export class ProxyMonitor extends EventEmitter {
      * @param config - Partial configuration to update
      */
     updateConfig(config: Partial<ProxyMonitorConfig>): void {
-        const oldInterval = this.config.pollingInterval;
+        this.applyConfig({ ...this.baseConfig, ...config });
+    }
+
+    /**
+     * Records whether the VS Code window hosting this monitor is focused.
+     *
+     * Unfocused windows back off to longer polling and connection-test
+     * intervals; refocusing restores the configured cadence immediately.
+     *
+     * @param focused - True when the window has focus
+     */
+    setWindowFocused(focused: boolean): void {
+        if (this.windowFocused === focused) {
+            return;
+        }
+
+        this.windowFocused = focused;
+        this.applyConfig(this.baseConfig);
+    }
+
+    /**
+     * Applies a new base configuration and re-derives the effective intervals,
+     * restarting timers only when the effective values actually changed.
+     */
+    private applyConfig(nextBaseConfig: ProxyMonitorConfig): void {
         const oldConfig = this.config;
 
-        this.config = { ...this.config, ...config };
-        this.validateConfig();
+        this.baseConfig = normalizeProxyMonitorConfig(nextBaseConfig);
+        this.config = deriveEffectiveProxyMonitorConfig(this.baseConfig, this.windowFocused);
 
-        this.updatePollingInterval(oldInterval);
+        this.updatePollingInterval(oldConfig.pollingInterval);
         handleConnectionConfigChange(this.connectionState, oldConfig, this.config, this.lastProxyUrl);
     }
 
@@ -295,13 +327,6 @@ export class ProxyMonitor extends EventEmitter {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = undefined;
         }
-    }
-
-    /**
-     * Validates and constrains configuration values
-     */
-    private validateConfig(): void {
-        this.config = normalizeProxyMonitorConfig(this.config);
     }
 
     /**

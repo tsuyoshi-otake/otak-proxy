@@ -115,6 +115,13 @@ export class ProxyTestScheduler {
      * @param proxyUrl - New proxy URL
      */
     updateProxyUrl(proxyUrl: string): void {
+        // Called on every detection cycle, so only log an actual change:
+        // otherwise a stable proxy writes an identical line to the output
+        // channel forever, which is both noise and retained memory.
+        if (this.currentProxyUrl === proxyUrl) {
+            return;
+        }
+
         this.currentProxyUrl = proxyUrl;
         Logger.log(`ProxyTestScheduler proxy URL updated: ${proxyUrl}`);
     }
