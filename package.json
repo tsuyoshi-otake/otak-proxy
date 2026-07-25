@@ -299,7 +299,7 @@
     "compile": "npm run gen:nls && tsc -p ./ && node -e \"require('fs').cpSync('src/i18n/locales', 'out/i18n/locales', {recursive: true})\"",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
-    "lint": "cross-env NODE_OPTIONS=--max-old-space-size=8192 eslint src",
+    "lint": "eslint src",
     "test": "vscode-test",
     "test:fast": "cross-env OTAK_PROXY_TEST_FAST=1 vscode-test --bail",
     "test:vscode": "npm run compile && vscode-test",
