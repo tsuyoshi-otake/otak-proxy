@@ -52,6 +52,11 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private lastError: string | null = null;
     private currentState: SyncableState | null = null;
     private remoteChangeInProgress: boolean = false;
+    /**
+     * On-disk revision of the shared state file as of the last reconcile.
+     * Lets the periodic poll skip read + parse while nothing has been written.
+     */
+    private lastObservedFileSignature: string | null = null;
 
     /**
      * Create a new SyncManager
@@ -78,7 +83,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         this.timers = new SyncManagerTimers(
             this.instanceRegistry,
             this.configManager,
-            () => void this.handleRemoteChange(),
+            () => this.pollRemoteChange(),
             () => void this.refreshActiveInstances()
         );
 
@@ -301,6 +306,31 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     }
 
     /**
+     * Periodic safety-net poll for remote changes.
+     *
+     * The file watcher is the primary detection path; this poll only has to
+     * catch changes the OS never reported. Gating it on a stat() signature keeps
+     * the common (nothing changed) tick down to a single syscall instead of a
+     * full read + JSON.parse + sanitize of the shared state file.
+     */
+    private pollRemoteChange(): void {
+        const signature = this.readChangeSignature();
+        if (signature !== null && signature === this.lastObservedFileSignature) {
+            return;
+        }
+
+        void this.handleRemoteChange();
+    }
+
+    /**
+     * Read the shared state file revision signature, or null when the backing
+     * implementation does not support it (in which case polling is ungated).
+     */
+    private readChangeSignature(): string | null {
+        return this.sharedStateFile.getChangeSignature?.() ?? null;
+    }
+
+    /**
      * Handle remote state change detected by file watcher
      */
     private async handleRemoteChange(): Promise<void> {
@@ -310,6 +340,9 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
         this.remoteChangeInProgress = true;
         try {
+            // Sample the revision before reading so a write that lands mid-read
+            // is re-examined on the next poll instead of being skipped.
+            this.lastObservedFileSignature = this.readChangeSignature();
             await this.reconcileWithSharedFile();
         } catch (error) {
             Logger.error('Failed to handle remote change:', error);

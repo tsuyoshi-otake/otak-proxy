@@ -28,26 +28,21 @@ export async function detectPlatformProxyWithSource(exec: CommandExecutor): Prom
     }
 }
 
+const WINDOWS_INTERNET_SETTINGS_KEY =
+    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+
 async function detectWindowsProxy(exec: CommandExecutor): Promise<string | null> {
     try {
-        const { stdout: enabledOutput } = await exec('reg', [
-            'query',
-            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-            '/v',
-            'ProxyEnable'
-        ]);
-        const enableMatch = enabledOutput.match(/ProxyEnable\s+REG_DWORD\s+0x(\d)/);
+        // Query the whole key once: it returns both ProxyEnable and ProxyServer,
+        // so this halves the child processes spawned on every detection cycle
+        // (the only recurring process spawn in the polling loop).
+        const { stdout } = await exec('reg', ['query', WINDOWS_INTERNET_SETTINGS_KEY]);
 
+        const enableMatch = stdout.match(/ProxyEnable\s+REG_DWORD\s+0x(\d)/);
         if (!enableMatch || enableMatch[1] !== '1') {
             return null;
         }
 
-        const { stdout } = await exec('reg', [
-            'query',
-            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
-            '/v',
-            'ProxyServer'
-        ]);
         const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/);
 
         return match?.[1] ? parseWindowsProxyValue(match[1].trim()) : null;

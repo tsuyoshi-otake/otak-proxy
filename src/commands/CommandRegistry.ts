@@ -67,6 +67,8 @@ export interface CommandRegistryConfig {
     proxyMonitor: {
         updateConfig: (config: Partial<ProxyMonitorConfig>) => void;
         triggerCheck: (source: 'config' | 'network' | 'polling' | 'focus') => void;
+        /** Optional so existing test doubles do not have to implement it. */
+        setWindowFocused?: (focused: boolean) => void;
     };
     systemProxyDetector: {
         updateDetectionPriority: (priority: string[]) => void;
@@ -311,6 +313,10 @@ export class CommandRegistry {
      */
     private registerWindowFocusListener(context: vscode.ExtensionContext): void {
         const disposable = vscode.window.onDidChangeWindowState(async (windowState) => {
+            // Let the monitor slow its timers down while nobody can see this
+            // window's status bar, and speed them back up on refocus.
+            this.config.proxyMonitor.setWindowFocused?.(windowState.focused);
+
             if (windowState.focused) {
                 const state = await this.commandContext.getProxyState();
                 if (state.mode === ProxyMode.Auto) {

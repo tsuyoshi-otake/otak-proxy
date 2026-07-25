@@ -16,7 +16,13 @@ export class SyncManagerTimers {
 
     startLifecycleTimers(): void {
         this.heartbeatTimer = setInterval(() => {
-            this.instanceRegistry.updateHeartbeat();
+            // The instance list only changes when a window opens or closes, so
+            // refreshing it on the heartbeat (which already touches the registry
+            // file) is enough. Doing it on every sync tick re-read and re-parsed
+            // the registry up to once per second for no observable benefit.
+            void Promise.resolve(this.instanceRegistry.updateHeartbeat())
+                .then(() => this.onRefreshInstances())
+                .catch(() => this.onRefreshInstances());
         }, HEARTBEAT_INTERVAL);
 
         this.cleanupTimer = setInterval(() => {
@@ -36,7 +42,6 @@ export class SyncManagerTimers {
         const intervalMs = this.configManager.getSyncInterval();
         this.syncTimer = setInterval(() => {
             this.onRemotePoll();
-            this.onRefreshInstances();
         }, intervalMs);
     }
 

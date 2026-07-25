@@ -1,5 +1,18 @@
 # Change Log
 
+## [3.2.0] - 2026-07-26
+
+### Changed
+- Detect shared state file changes with OS change notifications on the sync directory instead of polling its stats every 50ms, so idle windows no longer touch the file system continuously (#24).
+- Skip the periodic sync read and JSON parse while the shared state file is unchanged, using a stat-based revision signature (#24).
+- Refresh the active instance list on the 10 second heartbeat instead of the 1 second sync tick (#24).
+- Read the Windows Internet Settings registry key once per detection cycle instead of spawning a separate `reg query` for `ProxyEnable` and `ProxyServer` (#24).
+- Back off proxy detection and connection test intervals by 4x while the window is not focused; refocusing restores the configured cadence and still triggers an immediate check (#24).
+- Log the connection test scheduler's proxy URL only when it actually changes (#24).
+
+### Fixed
+- Avoid an abort inside libuv (`fs-event.c` assertion) when the sync directory path contains an 8.3 short name such as `C:\Users\DEVELO~1`, by resolving the watched directory to its real path before watching it (#24).
+
 ## [3.1.6] - 2026-07-06
 
 ### Fixed
