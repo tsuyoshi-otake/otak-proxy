@@ -54,7 +54,28 @@ jobs:
           path: '*.vsix'
           if-no-files-found: error
 
+      # Verify both registry tokens up front so a missing secret fails the run
+      # before any partial publish.
+      - name: Check registry tokens
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::VSCE_PAT secret is required to publish to Visual Studio Marketplace."
+            exit 1
+          fi
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::OVSX_PAT secret is required to publish to the Open VSX Registry."
+            exit 1
+          fi
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
       - name: Publish to Visual Studio Marketplace
         run: npm run deploy -- --packagePath ./*.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX Registry
+        run: npm run deploy:ovsx -- ./*.vsix
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
