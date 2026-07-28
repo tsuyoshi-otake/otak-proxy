@@ -36,10 +36,18 @@ suite('InputSanitizer Test Suite', () => {
             assert.ok(result.includes('proxy.example.com'));
         });
 
-        test('should handle URL with username only', () => {
-            const result = sanitizer.maskPassword('http://user@proxy.example.com:8080');
-            assert.ok(result.includes('user'));
+        test('should mask username-only userinfo because it may be an API token', () => {
+            const result = sanitizer.maskPassword('http://ghp_SECRETTOKEN123@proxy.example.com:8080');
+            assert.ok(!result.includes('ghp_SECRETTOKEN123'));
+            assert.ok(result.includes('****'));
             assert.ok(result.includes('proxy.example.com'));
+        });
+
+        test('should mask a username-only URL embedded in an arbitrary message', () => {
+            const token = 'TOKEN_ONLY_SECRET_123';
+            const result = sanitizer.maskPassword(`connection failed via http://${token}@proxy.example.com:8080`);
+            assert.ok(!result.includes(token));
+            assert.ok(result.includes('http://****@proxy.example.com:8080'));
         });
     });
 

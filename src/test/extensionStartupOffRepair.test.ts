@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { ProxyMode } from '../core/types';
+import { publicFingerprint } from '../core/TargetOwnershipStore';
 
 const execFileAsync = promisify(execFile);
 
@@ -157,6 +158,20 @@ async function readGitProxy(env: NodeJS.ProcessEnv): Promise<string | undefined>
     }
 }
 
+function ownedGitProxyRecords(proxyUrl: string): Record<string, unknown> {
+    const ownership = (targetId: string) => ({
+        targetId,
+        targetHost: 'workspaceHost',
+        owner: 'otakProxy',
+        publicFingerprint: publicFingerprint(proxyUrl),
+        lastSuccessfulApplyAt: Date.now()
+    });
+    return {
+        'git.global.http.proxy': ownership('git.global.http.proxy'),
+        'git.global.https.proxy': ownership('git.global.https.proxy')
+    };
+}
+
 suite('Extension startup OFF self-repair', () => {
     let sandbox: sinon.SinonSandbox;
     let baseDir: string;
@@ -241,7 +256,7 @@ suite('Extension startup OFF self-repair', () => {
         await fs.rm(baseDir, { recursive: true, force: true });
     });
 
-    test('OFF startup diagnoses and clears stale Git proxy even when tracking flags are false', async () => {
+    test('OFF startup preserves stale-looking Git proxy without a matching ownership record', async () => {
         const env = { ...process.env };
         await execFileAsync('git', ['config', '--global', 'http.proxy', 'http://stale.example.com:8080'], { env });
         await execFileAsync('git', ['config', '--global', 'https.proxy', 'http://stale.example.com:8080'], { env });
@@ -263,6 +278,35 @@ suite('Extension startup OFF self-repair', () => {
         await extension.activate(createContext(baseDir, globalState));
         // The startup enforcement is now a tracked background task (issue #12);
         // await it before asserting its side effect.
+        await extension.whenStartupProxyApplied();
+
+        assert.strictEqual(await readGitProxy(env), 'http://stale.example.com:8080');
+        const persisted = globalState.get('proxyState') as { gitConfigured?: boolean; targetOutcomes?: { git?: string } };
+        assert.strictEqual(persisted.gitConfigured, false);
+        assert.strictEqual(persisted.targetOutcomes?.git, 'preservedExternal');
+    });
+
+    test('OFF startup clears a fingerprint-matching owned Git proxy even when tracking flags are false', async () => {
+        const env = { ...process.env };
+        const proxyUrl = 'http://stale.example.com:8080';
+        await execFileAsync('git', ['config', '--global', 'http.proxy', proxyUrl], { env });
+        await execFileAsync('git', ['config', '--global', 'https.proxy', proxyUrl], { env });
+        const globalState = new Map<string, unknown>([
+            ['hasInitialSetup', true],
+            ['proxyState', {
+                mode: ProxyMode.Off,
+                gitConfigured: false,
+                vscodeConfigured: false,
+                npmConfigured: false
+            }],
+            ['otakProxy.v3.localTargetOwnership', ownedGitProxyRecords(proxyUrl)]
+        ]);
+        const extension = require('../extension') as {
+            activate: (context: vscode.ExtensionContext) => Promise<void>;
+            whenStartupProxyApplied: () => Promise<void>;
+        };
+
+        await extension.activate(createContext(baseDir, globalState));
         await extension.whenStartupProxyApplied();
 
         assert.strictEqual(await readGitProxy(env), undefined);
@@ -329,7 +373,8 @@ suite('Extension startup OFF self-repair', () => {
                 gitConfigured: false,
                 vscodeConfigured: false,
                 npmConfigured: false
-            }]
+            }],
+            ['otakProxy.v3.localTargetOwnership', ownedGitProxyRecords('http://stale.example.com:8080')]
         ]);
 
         const extension = require('../extension') as {

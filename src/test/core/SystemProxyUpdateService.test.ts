@@ -111,6 +111,71 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.notCalled(notifyStub);
     });
 
+    test('Auto OFF + same detected URL: re-applies before presenting Auto ON', async () => {
+        state = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://detected.example:8080',
+            autoModeOff: true,
+            gitConfigured: false,
+            npmConfigured: false
+        };
+        detectStub.resolves('http://detected.example:8080');
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoModeOff, false);
+        sinon.assert.calledOnceWithExactly(
+            applyProxyStub,
+            'http://detected.example:8080',
+            true,
+            undefined
+        );
+        sinon.assert.calledOnce(notifyStub);
+    });
+
+    test('same URL with a known target convergence failure: re-applies', async () => {
+        state = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://detected.example:8080',
+            autoModeOff: false,
+            terminalEnvConfigured: false
+        };
+        detectStub.resolves('http://detected.example:8080');
+
+        await service.checkAndUpdateSystemProxy();
+
+        sinon.assert.calledOnce(applyProxyStub);
+    });
+
+    test('apply failure never emits a successful Auto change notification', async () => {
+        state = { mode: ProxyMode.Auto };
+        detectStub.resolves('http://detected.example:8080');
+        applyProxyStub.resolves(false);
+
+        await service.checkAndUpdateSystemProxy();
+
+        sinon.assert.calledOnce(applyProxyStub);
+        sinon.assert.notCalled(notifyStub);
+    });
+
+    test('a toggle completed during detection is not overwritten by the stale Auto snapshot', async () => {
+        let resolveDetection!: (value: string | null) => void;
+        detectStub.returns(new Promise<string | null>(resolve => {
+            resolveDetection = resolve;
+        }));
+        state = { mode: ProxyMode.Auto, autoProxyUrl: 'http://old.example:8080' };
+
+        const update = service.checkAndUpdateSystemProxy();
+        await Promise.resolve();
+        state = { mode: ProxyMode.Off };
+        resolveDetection('http://new.example:8080');
+        await update;
+
+        assert.strictEqual(state.mode, ProxyMode.Off);
+        assert.strictEqual(state.autoProxyUrl, 'http://new.example:8080');
+        sinon.assert.notCalled(applyProxyStub);
+    });
+
     test('Auto + detection fails + fallback enabled + manual reachable: switches to fallback', async () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';

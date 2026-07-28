@@ -9,6 +9,7 @@ import * as fc from 'fast-check';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../core/types';
+import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
 import { getPropertyTestRuns } from './helpers';
 import { proxyUrlArb } from './generators';
 
@@ -104,7 +105,10 @@ suite('ProxyStateManager Property Tests', () => {
                     assert.strictEqual(retrievedState.npmConfigured, state.npmConfigured);
                     assert.strictEqual(retrievedState.pipConfigured, state.pipConfigured);
                     assert.strictEqual(retrievedState.systemProxyDetected, state.systemProxyDetected);
-                    assert.strictEqual(retrievedState.lastError, state.lastError);
+                    assert.strictEqual(
+                        retrievedState.lastError,
+                        sanitizeProxyStateForPersistence(state).lastError
+                    );
                 }
             ),
             { numRuns }

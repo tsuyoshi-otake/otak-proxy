@@ -66,6 +66,21 @@ suite('ProxyChangeLogger Test Suite', () => {
             assert.ok(!history[0].newProxy!.includes('secret'));
         });
 
+        test('should mask username-only token credentials before storing history', () => {
+            const token = 'ghp_SECRETTOKEN123';
+            logger.logChange({
+                timestamp: Date.now(),
+                previousProxy: `http://${token}@old-proxy.example.com:8080`,
+                newProxy: `http://${token}@new-proxy.example.com:8080`,
+                source: 'vscode',
+                trigger: 'focus'
+            });
+
+            const serialized = JSON.stringify(logger.getChangeHistory());
+            assert.ok(!serialized.includes(token));
+            assert.ok(serialized.includes('****'));
+        });
+
         test('should handle null proxy values', () => {
             const event: ProxyChangeEvent = {
                 timestamp: Date.now(),

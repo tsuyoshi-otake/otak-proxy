@@ -40,6 +40,15 @@ export class TargetOwnershipStore {
         await this.globalState.update(OWNERSHIP_KEY, all);
     }
 
+    async remove(targetId: string): Promise<void> {
+        const all = this.getAll();
+        if (!(targetId in all)) {
+            return;
+        }
+        delete all[targetId];
+        await this.globalState.update(OWNERSHIP_KEY, all);
+    }
+
     async bootstrapFromSnapshot(
         intendedPublicValue: string,
         snapshots: readonly TargetSnapshot[],

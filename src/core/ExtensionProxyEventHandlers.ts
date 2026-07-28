@@ -19,14 +19,26 @@ export async function handleProxyChanged(
     }
 
     const previousProxy = state.autoProxyUrl;
+    const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
 
-    if (previousProxy === state.autoProxyUrl) {
+    const recoveredFromAutoOff = wasAutoModeOff && state.autoModeOff === false;
+    if (previousProxy === state.autoProxyUrl && !recoveredFromAutoOff && !hasKnownEnableFailure(state)) {
         await saveAndPublishProxyState(context, state);
         return;
     }
 
     await saveAndApplyProxyChange(context, state, result, previousProxy);
+}
+
+function hasKnownEnableFailure(state: ProxyState): boolean {
+    return [
+        state.gitConfigured,
+        state.vscodeConfigured,
+        state.npmConfigured,
+        state.pipConfigured,
+        state.terminalEnvConfigured
+    ].some(value => value === false);
 }
 
 export async function handleProxyTestComplete(

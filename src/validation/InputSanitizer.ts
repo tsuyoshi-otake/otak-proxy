@@ -7,8 +7,10 @@
  * - Error messages
  * - Any other display contexts
  *
- * Redaction overlap (#16): this is the URL-shaped, username-preserving masker for
- * the Logger/UI hot path — it emits `user:****@host` from a single proxy URL. The
+ * Redaction overlap (#16): this is the URL-shaped masker for the Logger/UI hot
+ * path. It emits `user:****@host` when a distinct password exists, and masks the
+ * username itself when userinfo contains only one component because that value
+ * is commonly an API token. The
  * broader, stricter masker for arbitrary diagnostics/remediation text is
  * {@link ../security/ProxySecretRedactor.ProxySecretRedactor}, which fully masks
  * credentials (`<credentials>@`) plus headers, tokens, and known secrets. The two
@@ -34,13 +36,22 @@ export class InputSanitizer {
         try {
             const parsed = new URL(url);
 
-            // If there's a password, mask it
+            // If there's a password, mask it while preserving the non-secret
+            // username for the established UI format.
             if (parsed.password) {
                 parsed.password = '****';
                 return parsed.toString();
             }
 
-            if (parsed.username || parsed.host) {
+            // A username-only userinfo component is frequently a bearer/API token
+            // (for example http://ghp_xxx@proxy). It cannot safely be distinguished
+            // from a human username, so mask it completely.
+            if (parsed.username) {
+                parsed.username = '****';
+                return parsed.toString();
+            }
+
+            if (parsed.host) {
                 return parsed.toString();
             }
 
@@ -65,6 +76,14 @@ export class InputSanitizer {
         const bareCredentialPattern = /(^|[\s=])([^\s@:/]+):([^\s@/]+)@/g;
         if (bareCredentialPattern.test(url)) {
             return url.replace(bareCredentialPattern, '$1$2:****@');
+        }
+
+        // Absolute URLs embedded in arbitrary log/error text can also carry a
+        // username-only token. Require an explicit scheme to avoid treating plain
+        // email addresses as credentials.
+        const usernameOnlyPattern = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+)@/gi;
+        if (usernameOnlyPattern.test(url)) {
+            return url.replace(usernameOnlyPattern, '$1****@');
         }
 
         // If no credentials found, return the original URL

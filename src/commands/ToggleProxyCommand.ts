@@ -252,18 +252,25 @@ async function prepareNextMode(
     state.mode = nextMode;
 }
 
-async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<void> {
+async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<boolean> {
     await ctx.saveProxyState(state);
     const newActiveUrl = ctx.getActiveProxyUrl(state);
 
-    ctx.updateStatusBar(state);
-    await ctx.applyProxySettings(newActiveUrl, state.mode !== ProxyMode.Off && Boolean(newActiveUrl));
+    const applied = await ctx.applyProxySettings(
+        newActiveUrl,
+        state.mode !== ProxyMode.Off && Boolean(newActiveUrl)
+    );
 
     if (state.mode === ProxyMode.Auto) {
         await ctx.startSystemProxyMonitoring();
     } else {
         await ctx.stopSystemProxyMonitoring();
     }
+
+    // ProxyApplier records per-target success/failure in state. Refresh from that
+    // authoritative result instead of presenting the pre-apply desired snapshot.
+    ctx.updateStatusBar(await ctx.getProxyState());
+    return applied;
 }
 
 /**
@@ -281,9 +288,9 @@ async function executeToggleProxyOnce(ctx: CommandContext): Promise<CommandResul
         const i18n = I18nManager.getInstance();
 
         await prepareNextMode(ctx, currentState, nextMode, i18n);
-        await applyPreparedState(ctx, currentState);
+        const applied = await applyPreparedState(ctx, currentState);
 
-        return { success: true };
+        return { success: applied };
     } catch (error) {
         Logger.error('Toggle proxy command failed:', error);
         

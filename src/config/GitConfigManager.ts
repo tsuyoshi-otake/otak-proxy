@@ -11,10 +11,17 @@ import {
     withGitConfigWriteMutex
 } from './GitConfigLocking';
 import { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
+import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 const execFileAsync = promisify(execFile);
 
 export type { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
+
+export type GitProxyKey = 'http.proxy' | 'https.proxy';
+export interface GitProxyValues {
+    'http.proxy': string | null;
+    'https.proxy': string | null;
+}
 
 /**
  * Manages Git proxy configuration with secure command execution.
@@ -80,27 +87,21 @@ export class GitConfigManager {
      * @returns Result with success status and any errors
      */
     async unsetProxy(options?: GitConfigOperationOptions): Promise<OperationResult> {
+        return this.unsetProxyKeys(['http.proxy', 'https.proxy'], options);
+    }
+
+    async unsetProxyKeys(keys: readonly GitProxyKey[], options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
             await withGitConfigWriteMutex(async () => {
-                // Unset http.proxy (git config --unset is idempotent - safe to call even if key doesn't exist)
-                try {
-                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'http.proxy'], options);
-                } catch (error) {
-                    // Ignore error if key doesn't exist (exit code 5)
-                    const code = getErrorCode(error);
-                    if (code !== 5 && code !== '5') {
-                        throw error;
-                    }
-                }
-
-                // Unset https.proxy
-                try {
-                    await this.execGitConfigWithRetry(['config', '--global', '--unset', 'https.proxy'], options);
-                } catch (error) {
-                    // Ignore error if key doesn't exist (exit code 5)
-                    const code = getErrorCode(error);
-                    if (code !== 5 && code !== '5') {
-                        throw error;
+                for (const key of keys) {
+                    try {
+                        await this.execGitConfigWithRetry(['config', '--global', '--unset', key], options);
+                    } catch (error) {
+                        // Missing keys are already converged.
+                        const code = getErrorCode(error);
+                        if (code !== 5 && code !== '5') {
+                            throw error;
+                        }
                     }
                 }
             }, options);
@@ -116,6 +117,14 @@ export class GitConfigManager {
      * @returns Current proxy URL or null if not configured
      */
     async getProxy(): Promise<string | null> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return null;
+        }
+        return inspection.values['http.proxy'] || inspection.values['https.proxy'];
+    }
+
+    async inspectProxy(): Promise<ProxyConfigInspection<GitProxyValues>> {
         try {
             // Fetch both http.proxy and https.proxy in a single Git invocation to reduce overhead.
             const { stdout } = await execFileAsync('git', ['config', '--global', '--get-regexp', '^(http|https)\\.proxy$'], {
@@ -141,17 +150,32 @@ export class GitConfigManager {
             const httpProxy = entries.find(e => e.key === 'http.proxy')?.value;
             const httpsProxy = entries.find(e => e.key === 'https.proxy')?.value;
 
-            return (httpProxy || httpsProxy) ? (httpProxy || httpsProxy)! : null;
+            return {
+                status: 'available',
+                values: {
+                    'http.proxy': httpProxy || null,
+                    'https.proxy': httpsProxy || null
+                }
+            };
         } catch (error) {
             // If no matching config exists, git returns exit code 1
             const code = getErrorCode(error);
             if (code === 1 || code === '1') {
-                return null;
+                return {
+                    status: 'available',
+                    values: { 'http.proxy': null, 'https.proxy': null }
+                };
             }
 
-            // For other errors, log but return null
-            Logger.error('Error getting Git proxy:', error);
-            return null;
+            const failure = this.handleError(error);
+            if (failure.errorType !== 'NOT_INSTALLED') {
+                Logger.error('Error getting Git proxy:', error);
+            }
+            return {
+                status: failure.errorType === 'NOT_INSTALLED' ? 'unavailable' : 'error',
+                error: failure.error,
+                errorType: failure.errorType
+            };
         }
     }
 

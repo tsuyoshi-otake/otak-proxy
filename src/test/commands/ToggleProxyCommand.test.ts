@@ -324,6 +324,21 @@ suite('ToggleProxyCommand Unit Tests', () => {
         assert.deepStrictEqual(applyCalls[applyCalls.length - 1], { url: '', enabled: false });
     });
 
+    test('should return failure when the prepared state cannot converge', async () => {
+        const { ctx, getState, applyCalls, monitorCalls } = createContext(
+            { mode: ProxyMode.Auto, autoProxyUrl: 'http://system.example.com:8080' },
+            async () => {},
+            async () => false
+        );
+
+        const result = await executeToggleProxy(ctx);
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(getState().mode, ProxyMode.Off);
+        assert.deepStrictEqual(applyCalls, [{ url: '', enabled: false }]);
+        assert.deepStrictEqual(monitorCalls, ['stop']);
+    });
+
     test('should not stack duplicate system-proxy warnings while one is unanswered', async () => {
         let resolveWarning!: (value: string | undefined) => void;
         showWarningMessageStub.returns(new Promise<string | undefined>(resolve => {

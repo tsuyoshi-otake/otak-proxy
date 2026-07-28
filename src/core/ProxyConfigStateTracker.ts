@@ -15,12 +15,31 @@ export async function saveProxyConfigResults(
 
     try {
         const state = await stateManager.getState();
-        state.gitConfigured = nextConfiguredState(state.gitConfigured, results.gitSuccess, enabled);
-        state.vscodeConfigured = nextConfiguredState(state.vscodeConfigured, results.vscodeSuccess, enabled);
-        state.npmConfigured = nextConfiguredState(state.npmConfigured, results.npmSuccess, enabled);
+        state.gitConfigured = nextConfiguredState(state.gitConfigured, results.gitSuccess, enabled, results.gitOutcome);
+        state.vscodeConfigured = nextConfiguredState(state.vscodeConfigured, results.vscodeSuccess, enabled, results.vscodeOutcome);
+        state.npmConfigured = nextConfiguredState(state.npmConfigured, results.npmSuccess, enabled, results.npmOutcome);
         if (typeof results.pipSuccess === 'boolean') {
-            state.pipConfigured = nextConfiguredState(state.pipConfigured, results.pipSuccess, enabled);
+            state.pipConfigured = nextConfiguredState(
+                state.pipConfigured,
+                results.pipSuccess,
+                enabled,
+                results.pipOutcome
+            );
         }
+        state.terminalEnvConfigured = nextConfiguredState(
+            state.terminalEnvConfigured,
+            results.terminalEnvSuccess,
+            enabled,
+            results.terminalEnvOutcome
+        );
+        state.targetOutcomes = {
+            ...state.targetOutcomes,
+            git: results.gitOutcome,
+            vscode: results.vscodeOutcome,
+            npm: results.npmOutcome,
+            pip: results.pipOutcome,
+            terminalEnv: results.terminalEnvOutcome
+        };
         state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
         await stateManager.saveState(state);
     } catch (error) {
@@ -28,9 +47,18 @@ export async function saveProxyConfigResults(
     }
 }
 
-function nextConfiguredState(previous: boolean | undefined, success: boolean, enabled: boolean): boolean | undefined {
-    if (!success) {
+function nextConfiguredState(
+    previous: boolean | undefined,
+    success: boolean,
+    enabled: boolean,
+    outcome?: ProxyConfigResults['gitOutcome']
+): boolean | undefined {
+    if (!success || outcome === 'failed' || outcome === 'skippedUnavailable') {
         return previous;
+    }
+
+    if (outcome === 'preservedExternal') {
+        return false;
     }
 
     return enabled;

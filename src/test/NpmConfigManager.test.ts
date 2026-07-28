@@ -208,5 +208,35 @@ suite('NpmConfigManager Test Suite', () => {
             const finalResult = await npmConfigManager.getProxy();
             assert.strictEqual(finalResult, null);
         });
+
+        test('should inspect and selectively clear individual proxy keys', async function() {
+            this.timeout(30000);
+            const testUrl = 'http://owned-proxy.example.com:8080';
+            const setResult = await npmConfigManager.setProxy(testUrl);
+            if (!setResult.success && setResult.errorType === 'NOT_INSTALLED') {
+                this.skip();
+                return;
+            }
+            assert.strictEqual(setResult.success, true, `Failed to set proxy: ${setResult.error}`);
+
+            const before = await npmConfigManager.inspectProxy();
+            assert.strictEqual(before.status, 'available');
+            assert.deepStrictEqual(before.values, {
+                proxy: testUrl,
+                'https-proxy': testUrl
+            });
+
+            const unsetResult = await npmConfigManager.unsetProxyKeys(['proxy']);
+            assert.strictEqual(unsetResult.success, true);
+
+            const after = await npmConfigManager.inspectProxy();
+            assert.strictEqual(after.status, 'available');
+            assert.deepStrictEqual(after.values, {
+                proxy: null,
+                'https-proxy': testUrl
+            });
+
+            await npmConfigManager.unsetProxyKeys(['https-proxy']);
+        });
     });
 });

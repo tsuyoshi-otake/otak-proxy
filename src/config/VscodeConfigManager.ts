@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Logger } from '../utils/Logger';
 import { getErrorMessage } from '../utils/ErrorUtils';
+import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 /**
  * Result of a VSCode configuration operation
@@ -52,15 +53,27 @@ export class VscodeConfigManager {
      * @returns Current proxy URL or null if not configured
      */
     async getProxy(): Promise<string | null> {
+        const inspection = await this.inspectProxy();
+        return inspection.status === 'available' ? inspection.values?.proxy ?? null : null;
+    }
+
+    async inspectProxy(): Promise<ProxyConfigInspection<{ proxy: string | null }>> {
         try {
             const config = vscode.workspace.getConfiguration('http');
             const proxy = config.get<string>('proxy');
-            
-            // Return null if proxy is empty string or undefined
-            return proxy && proxy.trim() !== '' ? proxy : null;
+
+            return {
+                status: 'available',
+                values: { proxy: proxy && proxy.trim() !== '' ? proxy : null }
+            };
         } catch (error) {
             Logger.error('Error getting VSCode proxy:', error);
-            return null;
+            const failure = this.handleError(error, 'get');
+            return {
+                status: 'error',
+                error: failure.error,
+                errorType: failure.errorType
+            };
         }
     }
 

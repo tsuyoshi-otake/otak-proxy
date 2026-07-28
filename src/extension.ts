@@ -31,6 +31,9 @@ import { SyncManager, SyncConfigManager, SyncStatusProvider, registerSyncStatusC
 import { ProxyRemediationService, ProxyApplyTrigger } from './remediation/ProxyRemediationService';
 import { ProxyApplyOptions } from './core/ProxyApplierTypes';
 import { readV3Settings } from './core/V3Settings';
+import { TargetOwnershipStore } from './core/TargetOwnershipStore';
+import { ProxyCredentialStore } from './security/ProxyCredentialStore';
+import { applyRemoteSyncState as convergeRemoteSyncState } from './sync/RemoteSyncStateApplier';
 
 // Module-level instances
 let proxyStateManager: ProxyStateManager;
@@ -42,6 +45,7 @@ let syncManager: SyncManager | null = null;
 let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
 let proxyRemediationService: ProxyRemediationService;
+let userNotifier: UserNotifier;
 
 // The first-run setup prompt is user-driven and may remain open indefinitely.
 // It must not block activation or command availability.
@@ -136,6 +140,7 @@ function createCoreServices(context: vscode.ExtensionContext): CoreServices {
 }
 
 function initializeCoreManagers(context: vscode.ExtensionContext, services: CoreServices): void {
+    userNotifier = services.userNotifier;
     proxyStateManager = new ProxyStateManager(context);
     proxyApplier = new ProxyApplier(
         new GitConfigManager(),
@@ -146,7 +151,8 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         services.userNotifier,
         proxyStateManager,
         services.terminalEnvManager,
-        new PipConfigManager()
+        new PipConfigManager(),
+        new TargetOwnershipStore(context.globalState, new ProxyCredentialStore(context.secrets))
     );
     proxyRemediationService = new ProxyRemediationService(
         context,
@@ -198,23 +204,16 @@ function initializeStatusBar(context: vscode.ExtensionContext, services: CoreSer
 
 async function applyRemoteSyncState(remoteState: ProxyState): Promise<void> {
     Logger.log('Received remote state change from another instance');
-    await proxyStateManager.saveState(remoteState);
-    const localState = await proxyStateManager.getState();
-    const activeUrl = proxyStateManager.getActiveProxyUrl(localState);
-
-    if (localState.mode !== ProxyMode.Off && activeUrl) {
-        await applyProxySafely(activeUrl, true, 'sync', { silent: true });
-    } else if (localState.mode === ProxyMode.Off) {
-        await applyProxySafely('', false, 'sync', { silent: true });
-    }
-
-    if (localState.mode === ProxyMode.Auto) {
-        await initializer.startSystemProxyMonitoring();
-    } else {
-        await initializer.stopSystemProxyMonitoring();
-    }
-
-    statusBarManager.update(localState);
+    await convergeRemoteSyncState(remoteState, {
+        saveState: state => proxyStateManager.saveState(state),
+        getState: () => proxyStateManager.getState(),
+        getActiveProxyUrl: state => proxyStateManager.getActiveProxyUrl(state),
+        applyProxy: (url, enabled) => applyProxySafely(url, enabled, 'sync', { silent: true }),
+        startMonitoring: () => initializer.startSystemProxyMonitoring(),
+        stopMonitoring: () => initializer.stopSystemProxyMonitoring(),
+        updateStatus: state => statusBarManager.update(state),
+        onApplyFailure: () => userNotifier.showWarning('remediation.notification.applyFailed')
+    });
 }
 
 function registerSyncEventHandlers(context: vscode.ExtensionContext): void {

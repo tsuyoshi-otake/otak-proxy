@@ -42,6 +42,7 @@ export class ExtensionInitializer {
     private systemProxyUpdateService: SystemProxyUpdateService;
     private systemProxyCheckInterval: NodeJS.Timeout | undefined;
     private startupTestState: StartupTestState = { isPending: false };
+    private proxyMonitorEventQueue: Promise<void> = Promise.resolve();
 
     constructor(context: InitializerContext) {
         this.context = context;
@@ -97,18 +98,18 @@ export class ExtensionInitializer {
         );
 
         // Set up proxyChanged event handler
-        this.proxyMonitor.on('proxyChanged', async (result: ProxyDetectionResult) => {
-            await handleProxyChanged(this.context, result);
+        this.proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
+            this.enqueueProxyMonitorEvent(() => handleProxyChanged(this.context, result));
         });
 
         // Feature: auto-mode-proxy-testing - Handle test complete events
-        this.proxyMonitor.on('proxyTestComplete', async (testResult: TestResult) => {
-            await handleProxyTestComplete(this.context, this.startupTestState, testResult);
+        this.proxyMonitor.on('proxyTestComplete', (testResult: TestResult) => {
+            this.enqueueProxyMonitorEvent(() => handleProxyTestComplete(this.context, this.startupTestState, testResult));
         });
 
         // Feature: auto-mode-proxy-testing - Handle state changes based on reachability
-        this.proxyMonitor.on('proxyStateChanged', async (data: { proxyUrl: string; reachable: boolean; previousState: boolean }) => {
-            await handleProxyStateChanged(this.context, data);
+        this.proxyMonitor.on('proxyStateChanged', (data: { proxyUrl: string; reachable: boolean; previousState: boolean }) => {
+            this.enqueueProxyMonitorEvent(() => handleProxyStateChanged(this.context, data));
         });
 
         // Set up allRetriesFailed event handler
@@ -120,6 +121,17 @@ export class ExtensionInitializer {
         });
 
         return this.proxyMonitor;
+    }
+
+    private enqueueProxyMonitorEvent(task: () => Promise<void>): void {
+        // EventEmitter does not await async listeners. Serialize adjacent monitor
+        // events in emission order so each read-modify-write observes the previous
+        // event's committed metadata instead of overwriting it with a stale state.
+        this.proxyMonitorEventQueue = this.proxyMonitorEventQueue
+            .then(task, task)
+            .catch(error => {
+                Logger.error('Proxy monitor event handler failed:', error);
+            });
     }
 
     /**
@@ -216,6 +228,10 @@ export class ExtensionInitializer {
             this.proxyMonitor.stop();
             Logger.info('ProxyMonitor stopped');
         }
+
+        // Events already emitted before stop still own state finalization. Wait for
+        // the serialized queue so shutdown cannot return while a stale write remains.
+        await this.proxyMonitorEventQueue;
     }
 
     /**

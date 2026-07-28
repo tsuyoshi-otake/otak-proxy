@@ -16,14 +16,18 @@ export class SystemProxyUpdateService {
      * Check and update system proxy.
      */
     async checkAndUpdateSystemProxy(): Promise<void> {
-        const state = await this.context.proxyStateManager.getState();
+        const stateBeforeDetection = await this.context.proxyStateManager.getState();
 
         const now = Date.now();
-        if (this.shouldSkipRecentNonAutoCheck(state, now)) {
+        if (this.shouldSkipRecentNonAutoCheck(stateBeforeDetection, now)) {
             return;
         }
 
         const detectedProxy = await detectSystemProxySettings();
+        // Detection can wait on several external sources. Re-read after it so a
+        // newer toggle/sync decision owns finalization instead of being overwritten
+        // by the stale pre-detection snapshot (#17, #27).
+        const state = await this.context.proxyStateManager.getState();
         state.lastSystemProxyCheck = now;
         state.systemProxyDetected = !!detectedProxy;
 
@@ -46,6 +50,7 @@ export class SystemProxyUpdateService {
 
     private async updateAutoProxyState(state: ProxyState, detectedProxy: string | null): Promise<void> {
         const previousProxy = state.autoProxyUrl;
+        const wasAutoModeOff = state.autoModeOff === true;
 
         if (detectedProxy) {
             this.applyDetectedProxyState(state, detectedProxy);
@@ -53,7 +58,12 @@ export class SystemProxyUpdateService {
             await this.applyFallbackProxyState(state);
         }
 
-        if (previousProxy === state.autoProxyUrl && !this.shouldEnsureDisabledProxy(state)) {
+        if (
+            previousProxy === state.autoProxyUrl &&
+            !wasAutoModeOff &&
+            !this.hasKnownConvergenceFailure(state, Boolean(state.autoProxyUrl)) &&
+            !this.shouldEnsureDisabledProxy(state)
+        ) {
             await this.saveAndPublishState(state);
             return;
         }
@@ -71,17 +81,31 @@ export class SystemProxyUpdateService {
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
         await this.saveAndPublishState(state);
         const activeProxyUrl = state.autoProxyUrl || '';
-        await applyProxyThroughContext(
+        const applied = await applyProxyThroughContext(
             this.context,
             activeProxyUrl,
             Boolean(activeProxyUrl),
             activeProxyUrl ? undefined : { silent: true }
         );
-        this.notifyAutoProxyChange(state, previousProxy);
+        if (applied) {
+            this.notifyAutoProxyChange(state, previousProxy);
+        }
+        this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
     }
 
     private shouldEnsureDisabledProxy(state: ProxyState): boolean {
         return !state.autoProxyUrl && state.autoModeOff === true && !state.usingFallbackProxy;
+    }
+
+    private hasKnownConvergenceFailure(state: ProxyState, enabled: boolean): boolean {
+        const observed = [
+            state.gitConfigured,
+            state.vscodeConfigured,
+            state.npmConfigured,
+            state.pipConfigured,
+            state.terminalEnvConfigured
+        ];
+        return observed.some(value => typeof value === 'boolean' && value !== enabled);
     }
 
     private notifyAutoProxyChange(state: ProxyState, previousProxy: string | undefined): void {

@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
+import { ProxyConfigInspection } from './ProxyConfigInspection';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 
 const execFileAsync = promisify(execFile);
@@ -204,13 +205,29 @@ export class PipConfigManager {
     }
 
     async getProxy(): Promise<string | null> {
+        const inspection = await this.inspectProxy();
+        return inspection.status === 'available' ? inspection.values?.proxy ?? null : null;
+    }
+
+    async inspectProxy(): Promise<ProxyConfigInspection<{ proxy: string | null }>> {
         try {
-            return await this.readProxy();
+            return {
+                status: 'available',
+                values: { proxy: await this.readProxy() }
+            };
         } catch (error) {
-            if (!isPipKeyUnsetError(error) && this.handleError(error).errorType !== 'NOT_INSTALLED') {
+            const failure = this.handleError(error);
+            if (!isPipKeyUnsetError(error) && failure.errorType !== 'NOT_INSTALLED') {
                 Logger.error('Error getting pip proxy:', error);
             }
-            return null;
+            if (isPipKeyUnsetError(error)) {
+                return { status: 'available', values: { proxy: null } };
+            }
+            return {
+                status: failure.errorType === 'NOT_INSTALLED' ? 'unavailable' : 'error',
+                error: failure.error,
+                errorType: failure.errorType
+            };
         }
     }
 

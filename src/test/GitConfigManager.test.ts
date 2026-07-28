@@ -89,5 +89,34 @@ suite('GitConfigManager Test Suite', () => {
             const finalResult = await gitConfigManager.getProxy();
             assert.strictEqual(finalResult, null);
         });
+
+        test('should inspect and selectively clear individual proxy keys', async function() {
+            const testUrl = 'http://owned-proxy.example.com:8080';
+            const setResult = await gitConfigManager.setProxy(testUrl);
+            if (!setResult.success && setResult.errorType === 'NOT_INSTALLED') {
+                this.skip();
+                return;
+            }
+            assert.strictEqual(setResult.success, true, `Failed to set proxy: ${setResult.error}`);
+
+            const before = await gitConfigManager.inspectProxy();
+            assert.strictEqual(before.status, 'available');
+            assert.deepStrictEqual(before.values, {
+                'http.proxy': testUrl,
+                'https.proxy': testUrl
+            });
+
+            const unsetResult = await gitConfigManager.unsetProxyKeys(['http.proxy']);
+            assert.strictEqual(unsetResult.success, true);
+
+            const after = await gitConfigManager.inspectProxy();
+            assert.strictEqual(after.status, 'available');
+            assert.deepStrictEqual(after.values, {
+                'http.proxy': null,
+                'https.proxy': testUrl
+            });
+
+            await gitConfigManager.unsetProxyKeys(['https.proxy']);
+        });
     });
 });

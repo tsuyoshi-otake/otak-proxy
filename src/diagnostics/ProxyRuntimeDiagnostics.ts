@@ -499,7 +499,8 @@ export class ProxyRuntimeDiagnostics {
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
         const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
         if (gitHttpProxy || gitHttpsProxy) {
-            issues.push(this.issue('git.managedProxyResidual', 'applyFailed', 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
+            const preserved = state.targetOutcomes?.git === 'preservedExternal';
+            issues.push(this.issue('git.managedProxyResidual', preserved ? 'externalOverride' : 'applyFailed', preserved ? 'advisoryResidualRisk' : 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
                 expectedSanitized: 'unset',
                 actualSanitized: gitHttpProxy ?? gitHttpsProxy,
                 source: 'git config',
@@ -517,7 +518,8 @@ export class ProxyRuntimeDiagnostics {
         const npmProxy = this.observedString(observations.npm, 'proxy');
         const npmHttpsProxy = this.observedString(observations.npm, 'httpsProxy');
         if (npmProxy || npmHttpsProxy) {
-            issues.push(this.issue('npm.managedProxyResidual', 'applyFailed', 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
+            const preserved = state.targetOutcomes?.npm === 'preservedExternal';
+            issues.push(this.issue('npm.managedProxyResidual', preserved ? 'externalOverride' : 'applyFailed', preserved ? 'advisoryResidualRisk' : 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
                 expectedSanitized: 'unset',
                 actualSanitized: npmProxy ?? npmHttpsProxy,
                 source: 'npm config',
@@ -534,7 +536,8 @@ export class ProxyRuntimeDiagnostics {
 
         const vscodeProxy = this.observedString(observations.vscode, 'proxy');
         if (vscodeProxy) {
-            issues.push(this.issue('vscode.managedProxyResidual', 'applyFailed', 'blocksConvergence', 'vscode.http.proxy', 'workspaceHost', {
+            const preserved = state.targetOutcomes?.vscode === 'preservedExternal';
+            issues.push(this.issue('vscode.managedProxyResidual', preserved ? 'externalOverride' : 'applyFailed', preserved ? 'advisoryResidualRisk' : 'blocksConvergence', 'vscode.http.proxy', 'workspaceHost', {
                 expectedSanitized: 'unset',
                 actualSanitized: vscodeProxy,
                 source: 'vscode',

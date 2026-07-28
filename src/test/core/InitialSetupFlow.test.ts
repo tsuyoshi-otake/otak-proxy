@@ -6,6 +6,7 @@ import { InitializerContext } from '../../core/ExtensionInitializerTypes';
 import { ProxyMode, ProxyState } from '../../core/types';
 import { I18nManager } from '../../i18n/I18nManager';
 import * as DetectUtils from '../../utils/SystemProxyDetectionUtils';
+import { ProxyStateManager } from '../../core/ProxyStateManager';
 
 interface RecordedApplyCall {
     url: string;
@@ -198,6 +199,19 @@ suite('InitialSetupFlow Tests', () => {
         sinon.assert.calledOnce(startSystemProxyMonitoringStub);
     });
 
+    test('Auto + valid detected proxy + apply failure: starts reconciliation but suppresses false success', async () => {
+        showInformationMessageStub.resolves(i18n.t('action.autoSystem'));
+        detectStub.resolves('http://detected.example:8080');
+        applyProxyStub.resolves(false);
+
+        await flow.askForInitialSetup();
+
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
+        assert.ok(!recordedNotifications.some(notification => notification.type === 'success'));
+        sinon.assert.calledOnce(startSystemProxyMonitoringStub);
+    });
+
     test('Auto + detected proxy with credentials: maskPassword is used in the success notification', async () => {
         showInformationMessageStub.resolves(i18n.t('action.autoSystem'));
         detectStub.resolves('http://user:secret@proxy.example:8080');
@@ -250,7 +264,7 @@ suite('InitialSetupFlow Tests', () => {
         assert.strictEqual(fallbackPromptText, i18n.t('prompt.couldNotDetect'));
     });
 
-    test('Auto + detection null + fallback "Yes" + configureUrl persists manual URL: switches to Manual, applies', async () => {
+    test('Auto + detection null + fallback "Yes" + configureUrl persists manual URL: uses Auto fallback and monitors', async () => {
         showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
         showInformationMessageStub.onSecondCall().resolves(i18n.t('action.yes'));
         detectStub.resolves(null);
@@ -268,14 +282,14 @@ suite('InitialSetupFlow Tests', () => {
         sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
         sinon.assert.calledOnce(saveStateStub);
         const saved = saveStateStub.firstCall.args[0] as ProxyState;
-        assert.strictEqual(saved.mode, ProxyMode.Manual);
+        assert.strictEqual(saved.mode, ProxyMode.Auto);
         assert.strictEqual(saved.manualProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(saved.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(saved.usingFallbackProxy, true);
         assert.deepStrictEqual(recordedApplyCalls, [
             { url: 'http://manual.example:3128', enabled: true }
         ]);
-        // The outer `state` local in askForInitialSetup is still Off (only the
-        // fallback's updatedState was mutated), so monitoring should NOT start.
-        sinon.assert.notCalled(startSystemProxyMonitoringStub);
+        sinon.assert.calledOnce(startSystemProxyMonitoringStub);
     });
 
     test('Auto + detection null + fallback "Yes" but configureUrl does not persist a manual URL: no save, no apply', async () => {
@@ -337,7 +351,7 @@ suite('InitialSetupFlow Tests', () => {
         ]);
     });
 
-    test('Manual + valid URL: saves Manual state, writes VS Code config, applies, notifies manualProxyConfigured', async () => {
+    test('Manual + valid URL: stores it as the active Auto fallback and keeps state coherent after re-read', async () => {
         showInformationMessageStub.resolves(i18n.t('action.manualSetup'));
         showInputBoxStub.resolves('http://manual.example:3128');
 
@@ -345,8 +359,12 @@ suite('InitialSetupFlow Tests', () => {
 
         sinon.assert.calledOnce(saveStateStub);
         const saved = saveStateStub.firstCall.args[0] as ProxyState;
-        assert.strictEqual(saved.mode, ProxyMode.Manual);
+        assert.strictEqual(saved.mode, ProxyMode.Auto);
         assert.strictEqual(saved.manualProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(saved.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(saved.autoModeOff, false);
+        assert.strictEqual(saved.usingFallbackProxy, true);
+        assert.strictEqual(saved.fallbackProxyUrl, 'http://manual.example:3128');
 
         sinon.assert.calledWith(getConfigurationStub, 'otakProxy');
         sinon.assert.calledOnce(configUpdateStub);
@@ -365,8 +383,22 @@ suite('InitialSetupFlow Tests', () => {
         assert.strictEqual(success?.key, 'message.manualProxyConfigured');
         assert.strictEqual(success?.params?.url, 'http://manual.example:3128');
 
-        // Manual mode must NOT start system proxy monitoring.
-        sinon.assert.notCalled(startSystemProxyMonitoringStub);
+        // The documented two-state model keeps monitoring active in Auto mode.
+        sinon.assert.calledOnce(startSystemProxyMonitoringStub);
+    });
+
+    test('Manual + valid URL + apply failure: keeps desired Auto fallback state but never reports success', async () => {
+        showInformationMessageStub.resolves(i18n.t('action.manualSetup'));
+        showInputBoxStub.resolves('http://manual.example:3128');
+        applyProxyStub.resolves(false);
+
+        await flow.askForInitialSetup();
+
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.usingFallbackProxy, true);
+        assert.ok(!recordedNotifications.some(notification => notification.type === 'success'));
+        sinon.assert.calledOnce(startSystemProxyMonitoringStub);
     });
 
     test('Manual + valid URL with credentials: VS Code config gets credential-stripped URL, apply receives the full URL', async () => {
@@ -396,5 +428,44 @@ suite('InitialSetupFlow Tests', () => {
         const success = recordedNotifications.find(n => n.type === 'success');
         const notifiedUrl = success?.params?.url ?? '';
         assert.ok(!notifiedUrl.includes('secret'), `password must be masked in notification, got: ${notifiedUrl}`);
+    });
+
+    test('integration: manual setup remains active after a real ProxyStateManager re-read', async () => {
+        const values = new Map<string, unknown>([
+            ['otakProxy.v3.schemaVersion', 3],
+            ['otakProxy.v3.migrationJournal', { schemaFrom: 3, schemaTo: 3, phase: 'completed' }],
+            ['proxyState', { mode: ProxyMode.Off }]
+        ]);
+        const secretValues = new Map<string, string>();
+        const extensionContext = {
+            globalState: {
+                get: (key: string, defaultValue?: unknown) => values.has(key) ? values.get(key) : defaultValue,
+                update: async (key: string, value: unknown) => { values.set(key, value); },
+                keys: () => [...values.keys()],
+                setKeysForSync: () => {}
+            },
+            secrets: {
+                get: async (key: string) => secretValues.get(key),
+                store: async (key: string, value: string) => { secretValues.set(key, value); },
+                delete: async (key: string) => { secretValues.delete(key); },
+                onDidChange: () => ({ dispose: () => {} })
+            },
+            subscriptions: []
+        } as unknown as vscode.ExtensionContext;
+        const realStateManager = new ProxyStateManager(extensionContext);
+        context.proxyStateManager = realStateManager;
+        flow = new InitialSetupFlow(context, startSystemProxyMonitoringStub);
+        showInformationMessageStub.resolves(i18n.t('action.manualSetup'));
+        showInputBoxStub.resolves('http://manual.example:3128');
+
+        await flow.askForInitialSetup();
+        const reread = await realStateManager.getState();
+
+        assert.strictEqual(reread.mode, ProxyMode.Auto);
+        assert.strictEqual(reread.manualProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(reread.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(reread.usingFallbackProxy, true);
+        assert.strictEqual(realStateManager.getActiveProxyUrl(reread), 'http://manual.example:3128');
+        sinon.assert.calledOnce(startSystemProxyMonitoringStub);
     });
 });

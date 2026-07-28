@@ -197,6 +197,44 @@ suite('ExtensionInitializer Connection Testing Integration', function() {
             assert.strictEqual(monitor.getState().isActive, true,
                 'ProxyMonitor should be active after starting monitoring');
         });
+
+        test('serializes adjacent test and reachability events without rolling back test metadata', async () => {
+            let persisted: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080'
+            };
+            let saveCount = 0;
+            mockStateManager.getState.callsFake(async () => ({ ...persisted }));
+            mockStateManager.saveState.callsFake(async state => {
+                saveCount++;
+                if (saveCount === 1) {
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                }
+                persisted = { ...state };
+            });
+
+            initializer = createInitializer();
+            const monitor = initializer.initializeProxyMonitor();
+            const testResult = {
+                success: false,
+                testedUrls: ['https://example.com'],
+                results: [{ url: 'https://example.com', success: false, error: 'offline' }]
+            };
+
+            monitor.emit('proxyTestComplete', testResult);
+            monitor.emit('proxyStateChanged', {
+                proxyUrl: 'http://proxy.example.com:8080',
+                reachable: false,
+                previousState: true
+            });
+            await initializer.stopSystemProxyMonitoring();
+
+            assert.strictEqual(saveCount, 2);
+            assert.deepStrictEqual(persisted.lastTestResult, testResult);
+            assert.strictEqual(typeof persisted.lastTestTimestamp, 'number');
+            assert.strictEqual(persisted.proxyReachable, false);
+            assert.strictEqual(persisted.autoModeOff, true);
+        });
     });
 
     suite('Manual connection test', () => {

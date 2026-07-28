@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { updateProxyConfigTarget } from '../core/ProxyConfigTargetRunner';
+import { updateProxyConfigTarget, updateProxyConfigTargetDetailed } from '../core/ProxyConfigTargetRunner';
 import { ProxyConfigTarget } from '../core/ProxyApplierTypes';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 
@@ -30,6 +30,24 @@ suite('ProxyConfigTargetRunner Test Suite', () => {
         const success = await updateProxyConfigTarget(target, true, proxyUrl, aggregator);
 
         assert.strictEqual(success, true);
+        assert.strictEqual(aggregator.hasErrors(), false);
+    });
+
+    test('should retain a typed unavailable outcome instead of collapsing it into configured success', async () => {
+        const aggregator = new ErrorAggregator();
+        const target = createTarget('Git configuration', {
+            success: false,
+            error: 'Git is not installed or not in PATH',
+            errorType: 'NOT_INSTALLED'
+        });
+
+        const result = await updateProxyConfigTargetDetailed(target, true, proxyUrl, aggregator);
+
+        assert.deepStrictEqual(result, {
+            success: true,
+            outcome: 'skippedUnavailable',
+            errorType: 'NOT_INSTALLED'
+        });
         assert.strictEqual(aggregator.hasErrors(), false);
     });
 

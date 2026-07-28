@@ -1,5 +1,20 @@
 # Change Log
 
+## [3.2.1] - 2026-07-28
+
+### Security
+- Redact username-only proxy userinfo, including token-style credentials such as `http://TOKEN@proxy:8080`, from logs, status details, history, persisted errors, shared state, and diagnostics (#27).
+- Remove proxy settings only when their current values still match otak-proxy ownership fingerprints; preserve externally owned or externally changed Git, npm, pip, and VS Code values (#27).
+
+### Fixed
+- Keep the proxy selected during initial setup active by storing it as the Auto fallback instead of migrating the obsolete Manual mode to an empty Auto state (#27).
+- Re-apply an unchanged detected proxy when recovering from Auto OFF or another unconverged target state, including when automatic connection testing is disabled (#27).
+- Apply synchronized Auto OFF and Off states to local targets, retain degraded state after partial failures, and include sync changes in bounded remediation retries (#27).
+- Re-read state after slow system-proxy detection and serialize adjacent monitor events so newer toggle choices and connection-test metadata are not overwritten (#27).
+- Track terminal-environment and per-target convergence explicitly, while treating unavailable optional tools as skipped rather than successfully configured (#27).
+- Report toggle and setup apply failures without first publishing a false OFF or success state (#27).
+- Use a stable Auto idle icon instead of continuously animating the status bar spinner (#27).
+
 ## [3.2.0] - 2026-07-26
 
 ### Changed

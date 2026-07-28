@@ -757,7 +757,7 @@ suite('v3 remediation foundation', () => {
         }
     });
 
-    test('ProxyRemediationService does not retry sync-applied failures', async () => {
+    test('ProxyRemediationService retries sync-applied failures once under the same flap bounds', async () => {
         const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'off' });
         const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-sync-test-'));
         const context = createContext(new Map());
@@ -784,8 +784,8 @@ suite('v3 remediation foundation', () => {
             );
 
             assert.strictEqual(result.success, false);
-            assert.strictEqual(result.retryAttempted, false);
-            assert.strictEqual(calls, 1);
+            assert.strictEqual(result.retryAttempted, true);
+            assert.strictEqual(calls, 2);
         } finally {
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });

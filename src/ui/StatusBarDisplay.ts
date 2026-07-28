@@ -15,18 +15,38 @@ export function getStatusBarDisplay(
 ): StatusBarDisplay {
     const activeUrl = getActiveProxyUrl(state);
 
+    let display: StatusBarDisplay;
     switch (state.mode) {
         case ProxyMode.Auto:
-            return getAutoDisplay(state, activeUrl, showUrl, i18n, sanitizer);
+            display = getAutoDisplay(state, activeUrl, showUrl, i18n, sanitizer);
+            break;
         case ProxyMode.Manual:
-            return getManualDisplay(activeUrl, showUrl, i18n, sanitizer);
+            display = getManualDisplay(activeUrl, showUrl, i18n, sanitizer);
+            break;
         case ProxyMode.Off:
         default:
-            return {
+            display = {
                 text: `$(circle-slash) ${i18n.t('statusbar.proxyOff')}`,
                 statusText: i18n.t('statusbar.tooltip.proxyDisabled')
             };
+            break;
     }
+
+    if (!hasConvergenceFailure(state)) {
+        return display;
+    }
+
+    return {
+        text: display.text.replace(/^\$\([^)]+\)/, '$(warning)'),
+        statusText: state.lastError ? `${display.statusText}\n${state.lastError}` : display.statusText
+    };
+}
+
+function hasConvergenceFailure(state: ProxyState): boolean {
+    return Boolean(
+        state.lastError ||
+        Object.values(state.targetOutcomes ?? {}).some(outcome => outcome === 'failed')
+    );
 }
 
 export function getUrlDisplay(
@@ -63,13 +83,13 @@ function getAutoDisplay(
     if (activeUrl) {
         const urlDisplay = getUrlDisplay(activeUrl, showUrl, i18n, sanitizer);
         return {
-            text: `$(sync~spin) ${i18n.t('statusbar.autoWithUrl', { url: urlDisplay })}`,
+            text: `$(sync) ${i18n.t('statusbar.autoWithUrl', { url: urlDisplay })}`,
             statusText: i18n.t('statusbar.tooltip.autoModeUsing', { url: urlDisplay })
         };
     }
 
     return {
-        text: `$(sync~spin) ${i18n.t('statusbar.autoNoProxy')}`,
+        text: `$(sync) ${i18n.t('statusbar.autoNoProxy')}`,
         statusText: i18n.t('statusbar.tooltip.autoModeNoProxy')
     };
 }

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { GitConfigManager } from '../config/GitConfigManager';
+import { GitConfigManager, GitProxyKey } from '../config/GitConfigManager';
 import { VscodeConfigManager } from '../config/VscodeConfigManager';
-import { NpmConfigManager } from '../config/NpmConfigManager';
+import { NpmConfigManager, NpmProxyKey } from '../config/NpmConfigManager';
 import { PipConfigManager } from '../config/PipConfigManager';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
@@ -16,9 +16,11 @@ import {
     ProxyApplyOptions,
     ProxyConfigResults,
     ProxyConfigStatusReporter,
-    ProxyConfigTarget
+    ProxyConfigTarget,
+    ProxyConfigTargetUpdateResult,
+    ProxyOwnershipInspection
 } from './ProxyApplierTypes';
-import { updateProxyConfigTarget } from './ProxyConfigTargetRunner';
+import { updateProxyConfigTargetDetailed } from './ProxyConfigTargetRunner';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
 import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
 import {
@@ -26,6 +28,8 @@ import {
     showProxyConfigured,
     showProxyDisabled
 } from './ProxyApplierNotifications';
+import { TargetOwnershipStore } from './TargetOwnershipStore';
+import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -46,7 +50,8 @@ export class ProxyApplier {
         private userNotifier: UserNotifier,
         private stateManager?: ProxyStateManager,
         private terminalEnvManager?: TerminalEnvConfigManager,
-        private pipManager?: PipConfigManager
+        private pipManager?: PipConfigManager,
+        private ownershipStore?: TargetOwnershipStore
     ) {}
 
     private isWorkspaceTrusted(): boolean {
@@ -292,24 +297,34 @@ export class ProxyApplier {
 
         for (const target of targets) {
             reportStatus?.(this.getTargetProgressKey(target, enabled));
-            const success = await updateProxyConfigTarget(target, enabled, proxyUrl, errorAggregator, {
-                onStatus: reportStatus
-            });
+            const targetResult = await this.updateTarget(
+                target,
+                enabled,
+                proxyUrl,
+                errorAggregator,
+                reportStatus
+            );
+            const success = targetResult.success;
             switch (target.name) {
                 case 'Git configuration':
                     results.gitSuccess = success;
+                    results.gitOutcome = targetResult.outcome;
                     break;
                 case 'VSCode configuration':
                     results.vscodeSuccess = success;
+                    results.vscodeOutcome = targetResult.outcome;
                     break;
                 case 'npm configuration':
                     results.npmSuccess = success;
+                    results.npmOutcome = targetResult.outcome;
                     break;
                 case 'pip configuration':
                     results.pipSuccess = success;
+                    results.pipOutcome = targetResult.outcome;
                     break;
                 case 'Terminal environment':
                     results.terminalEnvSuccess = success;
+                    results.terminalEnvOutcome = targetResult.outcome;
                     break;
                 default:
                     break;
@@ -319,15 +334,126 @@ export class ProxyApplier {
         return results;
     }
 
+    private async updateTarget(
+        target: ProxyConfigTarget,
+        enabled: boolean,
+        proxyUrl: string,
+        errorAggregator: ErrorAggregator,
+        reportStatus?: ProxyConfigStatusReporter
+    ): Promise<ProxyConfigTargetUpdateResult> {
+        const options = { onStatus: reportStatus };
+        if (!enabled && this.ownershipStore && target.ownership) {
+            return this.disableOwnedTarget(target, errorAggregator, options);
+        }
+
+        const result = await updateProxyConfigTargetDetailed(
+            target,
+            enabled,
+            proxyUrl,
+            errorAggregator,
+            options
+        );
+        if (enabled && result.outcome === 'configured' && this.ownershipStore && target.ownership) {
+            await this.markTargetOwned(target, proxyUrl);
+        }
+        return result;
+    }
+
+    private async markTargetOwned(target: ProxyConfigTarget, proxyUrl: string): Promise<void> {
+        const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl;
+        await this.ownershipStore!.bootstrapFromSnapshot(
+            publicUrl,
+            target.ownership!.targets.map(entry => ({
+                targetId: entry.targetId,
+                targetHost: entry.targetHost,
+                value: publicUrl
+            })),
+            proxyUrl
+        );
+    }
+
+    private async disableOwnedTarget(
+        target: ProxyConfigTarget,
+        errorAggregator: ErrorAggregator,
+        options: { onStatus?: ProxyConfigStatusReporter }
+    ): Promise<ProxyConfigTargetUpdateResult> {
+        let inspection: ProxyOwnershipInspection;
+        try {
+            inspection = await target.ownership!.inspect();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errorAggregator.addError(target.name, message);
+            return { success: false, outcome: 'failed' };
+        }
+
+        if (inspection.status === 'unavailable') {
+            Logger.info(`${target.name} cleanup skipped:`, inspection.error);
+            return { success: true, outcome: 'skippedUnavailable', errorType: inspection.errorType };
+        }
+        if (inspection.status === 'error') {
+            errorAggregator.addError(target.name, inspection.error || `Failed to inspect ${target.name}`);
+            return { success: false, outcome: 'failed', errorType: inspection.errorType };
+        }
+
+        const ownedTargetIds: string[] = [];
+        let preservedExternal = false;
+        for (const observation of inspection.observations ?? []) {
+            if (!observation.value) {
+                // An absent value is converged. Drop stale ownership so a future
+                // external value equal to an old proxy cannot be deleted by mistake.
+                await this.ownershipStore!.remove(observation.targetId);
+                continue;
+            }
+
+            const owned = await this.ownershipStore!.isOwnedByOtakProxy(
+                observation.targetId,
+                observation.value,
+                hasProxyCredentials(observation.value)
+            );
+            if (owned) {
+                ownedTargetIds.push(observation.targetId);
+            } else {
+                preservedExternal = true;
+                Logger.info(`${target.name} value preserved because ownership did not match: ${observation.targetId}`);
+            }
+        }
+
+        if (ownedTargetIds.length === 0) {
+            return {
+                success: true,
+                outcome: preservedExternal ? 'preservedExternal' : 'cleared'
+            };
+        }
+
+        try {
+            const result = await target.ownership!.unsetTargets(ownedTargetIds, options);
+            if (!result.success) {
+                errorAggregator.addError(target.name, result.error || `Failed to clear ${target.name}`);
+                return { success: false, outcome: 'failed', errorType: result.errorType };
+            }
+            for (const targetId of ownedTargetIds) {
+                await this.ownershipStore!.remove(targetId);
+            }
+            return {
+                success: true,
+                outcome: preservedExternal ? 'preservedExternal' : 'cleared'
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errorAggregator.addError(target.name, message);
+            return { success: false, outcome: 'failed' };
+        }
+    }
+
     private getApplyTargets(): ProxyConfigTarget[] {
         const targets: ProxyConfigTarget[] = [
-            { name: 'VSCode configuration', manager: this.vscodeManager },
-            { name: 'Git configuration', manager: this.gitManager },
-            { name: 'npm configuration', manager: this.npmManager }
+            this.vscodeTarget(),
+            this.gitTarget(),
+            this.npmTarget()
         ];
 
         if (this.pipManager) {
-            targets.push({ name: 'pip configuration', manager: this.pipManager });
+            targets.push(this.pipTarget());
         }
 
         if (this.terminalEnvManager) {
@@ -339,13 +465,13 @@ export class ProxyApplier {
 
     private getDisableTargets(): ProxyConfigTarget[] {
         const targets: ProxyConfigTarget[] = [
-            { name: 'Git configuration', manager: this.gitManager },
-            { name: 'VSCode configuration', manager: this.vscodeManager },
-            { name: 'npm configuration', manager: this.npmManager }
+            this.gitTarget(),
+            this.vscodeTarget(),
+            this.npmTarget()
         ];
 
         if (this.pipManager) {
-            targets.push({ name: 'pip configuration', manager: this.pipManager });
+            targets.push(this.pipTarget());
         }
 
         if (this.terminalEnvManager) {
@@ -353,5 +479,104 @@ export class ProxyApplier {
         }
 
         return targets;
+    }
+
+    private gitTarget(): ProxyConfigTarget {
+        const ids: Record<GitProxyKey, string> = {
+            'http.proxy': 'git.global.http.proxy',
+            'https.proxy': 'git.global.https.proxy'
+        };
+        return {
+            name: 'Git configuration',
+            manager: this.gitManager,
+            ownership: {
+                targets: Object.values(ids).map(targetId => ({ targetId, targetHost: 'workspaceHost' })),
+                inspect: async () => {
+                    const result = await this.gitManager.inspectProxy();
+                    return {
+                        status: result.status,
+                        error: result.error,
+                        errorType: result.errorType,
+                        observations: result.values
+                            ? (Object.keys(ids) as GitProxyKey[]).map(key => ({ targetId: ids[key], value: result.values![key] }))
+                            : undefined
+                    };
+                },
+                unsetTargets: (targetIds, options) => this.gitManager.unsetProxyKeys(
+                    (Object.keys(ids) as GitProxyKey[]).filter(key => targetIds.includes(ids[key])),
+                    options
+                )
+            }
+        };
+    }
+
+    private npmTarget(): ProxyConfigTarget {
+        const ids: Record<NpmProxyKey, string> = {
+            proxy: 'npm.user.proxy',
+            'https-proxy': 'npm.user.https-proxy'
+        };
+        return {
+            name: 'npm configuration',
+            manager: this.npmManager,
+            ownership: {
+                targets: Object.values(ids).map(targetId => ({ targetId, targetHost: 'workspaceHost' })),
+                inspect: async () => {
+                    const result = await this.npmManager.inspectProxy();
+                    return {
+                        status: result.status,
+                        error: result.error,
+                        errorType: result.errorType,
+                        observations: result.values
+                            ? (Object.keys(ids) as NpmProxyKey[]).map(key => ({ targetId: ids[key], value: result.values![key] }))
+                            : undefined
+                    };
+                },
+                unsetTargets: targetIds => this.npmManager.unsetProxyKeys(
+                    (Object.keys(ids) as NpmProxyKey[]).filter(key => targetIds.includes(ids[key]))
+                )
+            }
+        };
+    }
+
+    private vscodeTarget(): ProxyConfigTarget {
+        const targetId = 'vscode.http.proxy';
+        return {
+            name: 'VSCode configuration',
+            manager: this.vscodeManager,
+            ownership: {
+                targets: [{ targetId, targetHost: 'workspaceHost' }],
+                inspect: async () => {
+                    const result = await this.vscodeManager.inspectProxy();
+                    return {
+                        status: result.status,
+                        error: result.error,
+                        errorType: result.errorType,
+                        observations: result.values ? [{ targetId, value: result.values.proxy }] : undefined
+                    };
+                },
+                unsetTargets: () => this.vscodeManager.unsetProxy()
+            }
+        };
+    }
+
+    private pipTarget(): ProxyConfigTarget {
+        const targetId = 'pip.user.global.proxy';
+        return {
+            name: 'pip configuration',
+            manager: this.pipManager!,
+            ownership: {
+                targets: [{ targetId, targetHost: 'workspaceHost' }],
+                inspect: async () => {
+                    const result = await this.pipManager!.inspectProxy();
+                    return {
+                        status: result.status,
+                        error: result.error,
+                        errorType: result.errorType,
+                        observations: result.values ? [{ targetId, value: result.values.proxy }] : undefined
+                    };
+                },
+                unsetTargets: () => this.pipManager!.unsetProxy()
+            }
+        };
     }
 }

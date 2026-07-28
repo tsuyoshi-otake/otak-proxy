@@ -3,11 +3,10 @@ import * as vscode from 'vscode';
 import { ProxyDiagnosticReport, ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../i18n/I18nManager';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
-import { publicFingerprint, TargetOwnershipStore } from '../core/TargetOwnershipStore';
+import { publicFingerprint } from '../core/TargetOwnershipStore';
 import { ProxyState } from '../core/types';
 import { getHighestPriorityIssue, ProxyIssue } from '../core/v3Types';
 import { readV3Settings, V3Settings } from '../core/V3Settings';
-import { ProxyCredentialStore } from '../security/ProxyCredentialStore';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { Logger } from '../utils/Logger';
@@ -91,7 +90,6 @@ export class ProxyRemediationService {
     private readonly flapTracker: FlapTracker;
     private readonly diagnostics: ProxyRuntimeDiagnostics;
     private readonly sleep: (ms: number) => Promise<void>;
-    private readonly ownershipStore: TargetOwnershipStore;
     private readonly redactor = new ProxySecretRedactor();
 
     constructor(
@@ -103,10 +101,6 @@ export class ProxyRemediationService {
         this.flapTracker = options.flapTracker ?? new FlapTracker(context.globalState);
         this.diagnostics = options.diagnostics ?? new ProxyRuntimeDiagnostics(context, stateProvider);
         this.sleep = options.sleep ?? defaultSleep;
-        this.ownershipStore = new TargetOwnershipStore(
-            context.globalState,
-            new ProxyCredentialStore(context.secrets)
-        );
     }
 
     async applyWithSafety(
@@ -198,7 +192,6 @@ export class ProxyRemediationService {
         const success = applyResult.success && !convergenceIssue;
         if (success) {
             await this.flapTracker.reset(fingerprint);
-            await this.markOwnershipFromSuccessfulApply(proxyUrl, applyResult.enabled);
         } else if (!applyResult.success && (retryAttempted || retrySuppressed)) {
             const convergence = await this.flapTracker.recordNonConvergence(
                 fingerprint,
@@ -235,7 +228,6 @@ export class ProxyRemediationService {
     ): boolean {
         return settings.automaticRemediationEnabled &&
             settings.automaticRetryEnabled &&
-            options.trigger !== 'sync' &&
             applyResult.errors.length > 0;
     }
 
@@ -298,7 +290,6 @@ export class ProxyRemediationService {
     ): boolean {
         return settings.automaticRemediationEnabled &&
             settings.automaticRetryEnabled &&
-            options.trigger !== 'sync' &&
             applyResult.success;
     }
 
@@ -474,37 +465,6 @@ export class ProxyRemediationService {
             await vscode.commands.executeCommand('otak-proxy.diagnoseProxy');
         }
         return false;
-    }
-
-    private async markOwnershipFromSuccessfulApply(proxyUrl: string, enabled: boolean): Promise<void> {
-        const targets = this.getWriteTargets();
-        const now = Date.now();
-
-        if (!enabled) {
-            for (const target of targets) {
-                await this.ownershipStore.update({
-                    targetId: target.targetId,
-                    targetHost: target.targetHost,
-                    owner: 'otakProxy',
-                    publicFingerprint: publicFingerprint(''),
-                    lastSuccessfulApplyAt: now,
-                    lastObservedHash: publicFingerprint(''),
-                    lastObservedAt: now
-                });
-            }
-            return;
-        }
-
-        const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl;
-        await this.ownershipStore.bootstrapFromSnapshot(
-            publicUrl,
-            targets.map(target => ({
-                targetId: target.targetId,
-                targetHost: target.targetHost,
-                value: publicUrl
-            })),
-            proxyUrl
-        );
     }
 
     private applyFailureFingerprint(

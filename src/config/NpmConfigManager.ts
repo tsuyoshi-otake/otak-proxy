@@ -4,6 +4,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
+import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 const execFileAsync = promisify(execFile);
 
@@ -25,6 +26,20 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
+}
+
+export type NpmProxyKey = 'proxy' | 'https-proxy';
+export interface NpmProxyValues {
+    proxy: string | null;
+    'https-proxy': string | null;
+}
+
+function normalizeNpmValue(value: unknown): string | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    const trimmed = (typeof value === 'string' ? value : String(value)).trim();
+    return trimmed === '' || trimmed === 'undefined' || trimmed === 'null' ? null : trimmed;
 }
 
 export function classifyNpmConfigError(error: unknown, timeoutMs: number): NpmErrorClassification {
@@ -254,10 +269,15 @@ export class NpmConfigManager {
      * @returns Result with success status and any errors
      */
     async unsetProxy(): Promise<OperationResult> {
+        return this.unsetProxyKeys(['proxy', 'https-proxy']);
+    }
+
+    async unsetProxyKeys(keys: readonly NpmProxyKey[]): Promise<OperationResult> {
         try {
-            // Prefer deleting keys to keep npmrc clean. Deletion is idempotent on modern npm.
-            await this.execNpm(['config', 'delete', 'proxy']);
-            await this.execNpm(['config', 'delete', 'https-proxy']);
+            for (const key of keys) {
+                // Prefer deleting keys to keep npmrc clean. Deletion is idempotent.
+                await this.execNpm(['config', 'delete', key]);
+            }
 
             return { success: true };
         } catch (error) {
@@ -270,33 +290,34 @@ export class NpmConfigManager {
      * @returns Current proxy URL or null if not configured
      */
     async getProxy(): Promise<string | null> {
-        try {
-            const normalizeValue = (value: unknown): string | null => {
-                if (value === undefined || value === null) {
-                    return null;
-                }
-                const str = typeof value === 'string' ? value : String(value);
-                const trimmed = str.trim();
-                // npm returns 'null' or 'undefined' as a string when config doesn't exist
-                if (trimmed === '' || trimmed === 'undefined' || trimmed === 'null') {
-                    return null;
-                }
-                return trimmed;
-            };
-
-            // Prefer HTTP proxy setting, but fall back to https-proxy if only that is configured.
-            const { stdout: proxyStdout } = await this.execNpm(['config', 'get', 'proxy']);
-            const proxy = normalizeValue(proxyStdout);
-            if (proxy !== null) {
-                return proxy;
-            }
-
-            const { stdout: httpsProxyStdout } = await this.execNpm(['config', 'get', 'https-proxy']);
-            return normalizeValue(httpsProxyStdout);
-        } catch (error) {
-            // For errors, log but return null
-            Logger.error('Error getting npm proxy:', error);
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
             return null;
+        }
+        return inspection.values.proxy || inspection.values['https-proxy'];
+    }
+
+    async inspectProxy(): Promise<ProxyConfigInspection<NpmProxyValues>> {
+        try {
+            const { stdout: proxyStdout } = await this.execNpm(['config', 'get', 'proxy']);
+            const { stdout: httpsProxyStdout } = await this.execNpm(['config', 'get', 'https-proxy']);
+            return {
+                status: 'available',
+                values: {
+                    proxy: normalizeNpmValue(proxyStdout),
+                    'https-proxy': normalizeNpmValue(httpsProxyStdout)
+                }
+            };
+        } catch (error) {
+            const failure = this.handleError(error);
+            if (failure.errorType !== 'NOT_INSTALLED') {
+                Logger.error('Error getting npm proxy:', error);
+            }
+            return {
+                status: failure.errorType === 'NOT_INSTALLED' ? 'unavailable' : 'error',
+                error: failure.error,
+                errorType: failure.errorType
+            };
         }
     }
 

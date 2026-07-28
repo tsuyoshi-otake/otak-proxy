@@ -1,7 +1,9 @@
 import { ProxyState, ProxyTestResult } from '../core/types';
 import { InputSanitizer } from '../validation/InputSanitizer';
+import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 
 const sanitizer = new InputSanitizer();
+const redactor = new ProxySecretRedactor();
 
 export function hasProxyCredentials(url: string): boolean {
     try {
@@ -38,7 +40,10 @@ function sanitizeOptionalMessage(message: string | undefined): string | undefine
     if (!message) {
         return message;
     }
-    return sanitizer.maskPassword(message);
+    // State error fields are arbitrary text, not a single display URL. Use the
+    // strict redactor so username-only tokens and embedded credentials cannot
+    // reach globalState or shared sync files.
+    return redactor.redactString(message);
 }
 
 export function sanitizeProxyTestResultForPersistence(result: ProxyTestResult | undefined): ProxyTestResult | undefined {

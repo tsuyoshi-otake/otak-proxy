@@ -39,7 +39,11 @@ export class InitialSetupFlow {
             await this.handleManualSetup(state, i18n, initialStateSignature);
         }
 
-        if (state.mode === ProxyMode.Auto) {
+        // Some setup branches (notably configureUrl fallback) operate on a state
+        // re-read after the command completes. Use the committed state, not the
+        // stale object captured before the prompt, to finalize monitoring.
+        const committedState = await this.context.proxyStateManager.getState();
+        if (committedState.mode === ProxyMode.Auto) {
             await this.startSystemProxyMonitoring();
         }
     }
@@ -80,14 +84,15 @@ export class InitialSetupFlow {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
                 return;
             }
-            state.autoProxyUrl = detectedProxy;
-            state.mode = ProxyMode.Auto;
+            this.useAutoProxy(state, detectedProxy, false);
             await this.context.proxyStateManager.saveState(state);
-            await applyProxyThroughContext(this.context, detectedProxy, true);
-            this.context.userNotifier.showSuccess(
-                'message.usingSystemProxy',
-                { url: this.context.sanitizer.maskPassword(detectedProxy) }
-            );
+            const applied = await applyProxyThroughContext(this.context, detectedProxy, true);
+            if (applied) {
+                this.context.userNotifier.showSuccess(
+                    'message.usingSystemProxy',
+                    { url: this.context.sanitizer.maskPassword(detectedProxy) }
+                );
+            }
             return;
         }
 
@@ -104,7 +109,7 @@ export class InitialSetupFlow {
             await vscode.commands.executeCommand('otak-proxy.configureUrl');
             const updatedState = await this.context.proxyStateManager.getState();
             if (updatedState.manualProxyUrl) {
-                updatedState.mode = ProxyMode.Manual;
+                this.useAutoProxy(updatedState, updatedState.manualProxyUrl, true);
                 await this.context.proxyStateManager.saveState(updatedState);
                 await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
             }
@@ -142,7 +147,7 @@ export class InitialSetupFlow {
         }
 
         state.manualProxyUrl = manualProxyUrl;
-        state.mode = ProxyMode.Manual;
+        this.useAutoProxy(state, manualProxyUrl, true);
         await this.context.proxyStateManager.saveState(state);
 
         await vscode.workspace.getConfiguration('otakProxy').update(
@@ -151,10 +156,20 @@ export class InitialSetupFlow {
             vscode.ConfigurationTarget.Global
         );
 
-        await applyProxyThroughContext(this.context, manualProxyUrl, true);
-        this.context.userNotifier.showSuccess(
-            'message.manualProxyConfigured',
-            { url: this.context.sanitizer.maskPassword(manualProxyUrl) }
-        );
+        const applied = await applyProxyThroughContext(this.context, manualProxyUrl, true);
+        if (applied) {
+            this.context.userNotifier.showSuccess(
+                'message.manualProxyConfigured',
+                { url: this.context.sanitizer.maskPassword(manualProxyUrl) }
+            );
+        }
+    }
+
+    private useAutoProxy(state: ProxyState, proxyUrl: string, fallback: boolean): void {
+        state.mode = ProxyMode.Auto;
+        state.autoProxyUrl = proxyUrl;
+        state.autoModeOff = false;
+        state.usingFallbackProxy = fallback;
+        state.fallbackProxyUrl = fallback ? proxyUrl : undefined;
     }
 }

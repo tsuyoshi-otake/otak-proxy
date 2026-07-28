@@ -481,6 +481,62 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
+    test('ProxyRuntimeDiagnostics treats ownership-preserved residuals as advisory external overrides', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const externalProxy = 'http://external.example.com:8080';
+        const restoreConfig = stubConfiguration('', externalProxy, 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Off,
+                    gitConfigured: false,
+                    npmConfigured: false,
+                    vscodeConfigured: false,
+                    targetOutcomes: {
+                        git: 'preservedExternal',
+                        npm: 'preservedExternal',
+                        vscode: 'preservedExternal'
+                    }
+                }),
+                {
+                    commandRunner: async (command, args) => {
+                        if (command === 'git' && (args.includes('http.proxy') || args.includes('https.proxy'))) {
+                            return { stdout: `${externalProxy}\n`, stderr: '' };
+                        }
+                        if (command === 'git') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (command === 'netsh') {
+                            return { stdout: 'Current WinHTTP proxy settings:\r\n    Direct access (no proxy server).\r\n', stderr: '' };
+                        }
+                        if (command === 'reg') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (args.includes('proxy') || args.includes('https-proxy')) {
+                            return { stdout: `${externalProxy}\n`, stderr: '' };
+                        }
+                        if (args.includes('registry')) {
+                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const residuals = report.issues.filter(issue => issue.id.endsWith('.managedProxyResidual'));
+            assert.strictEqual(residuals.length, 3);
+            assert.ok(residuals.every(issue => issue.category === 'externalOverride'));
+            assert.ok(residuals.every(issue => issue.impact === 'advisoryResidualRisk'));
+            assert.ok(!report.issues.some(issue => issue.impact === 'blocksConvergence'));
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('ProxyRuntimeDiagnostics reports managed proxy mismatches when Auto is on', async () => {
         const store: Store = new Map();
         const secrets = new Map<string, string>();
