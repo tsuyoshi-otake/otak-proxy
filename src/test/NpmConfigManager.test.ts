@@ -2,7 +2,11 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { classifyNpmConfigError, NpmConfigManager } from '../config/NpmConfigManager';
+import {
+    classifyNpmConfigError,
+    NPM_CONFIG_COMMAND_TIMEOUT_MS,
+    NpmConfigManager
+} from '../config/NpmConfigManager';
 import { PlatformMocker } from './crossPlatformMockers';
 
 suite('NpmConfigManager Test Suite', () => {
@@ -31,7 +35,7 @@ suite('NpmConfigManager Test Suite', () => {
         });
 
         test('setProxy should return OperationResult', async function() {
-            this.timeout(20000);
+            this.timeout(45000);
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
             assert.ok(result);
             assert.ok(typeof result.success === 'boolean');
@@ -43,14 +47,14 @@ suite('NpmConfigManager Test Suite', () => {
         });
 
         test('unsetProxy should return OperationResult', async function() {
-            this.timeout(20000);
+            this.timeout(45000);
             const result = await npmConfigManager.unsetProxy();
             assert.ok(result);
             assert.ok(typeof result.success === 'boolean');
         });
 
         test('getProxy should return string or null', async function() {
-            this.timeout(20000);
+            this.timeout(45000);
             const result = await npmConfigManager.getProxy();
             assert.ok(result === null || typeof result === 'string');
         });
@@ -58,7 +62,7 @@ suite('NpmConfigManager Test Suite', () => {
 
     suite('Error Handling', () => {
         test('should handle errors gracefully', async function() {
-            this.timeout(20000);
+            this.timeout(45000);
             // This test verifies that errors are caught and returned as OperationResult
             // rather than throwing exceptions
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
@@ -130,7 +134,7 @@ suite('NpmConfigManager Test Suite', () => {
         });
 
         test('should handle permission errors', async function() {
-            this.timeout(20000);
+            this.timeout(45000);
             // This test documents the expected behavior for permission errors
             // In real scenarios, this would be tested with mocking
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
@@ -146,13 +150,13 @@ suite('NpmConfigManager Test Suite', () => {
         });
 
         test('should handle timeout errors', async function() {
-            this.timeout(20000);
+            this.timeout(45000);
             // This test documents the expected behavior for timeout errors
             // In real scenarios, this would be tested with mocking
             const result = await npmConfigManager.setProxy('http://proxy.example.com:8080');
-            
+
             if (!result.success && result.errorType === 'TIMEOUT') {
-                assert.strictEqual(result.error, 'npm command timed out after 5 seconds');
+                assert.strictEqual(result.error, `npm command timed out after ${NPM_CONFIG_COMMAND_TIMEOUT_MS}ms`);
             }
             
             // Clean up if successful
@@ -163,6 +167,18 @@ suite('NpmConfigManager Test Suite', () => {
     });
 
     suite('Error Classification', () => {
+        test('uses the load-tolerant npm command timeout in timeout errors', () => {
+            const result = classifyNpmConfigError({
+                message: 'Command timed out',
+                killed: true,
+                signal: 'SIGTERM'
+            }, NPM_CONFIG_COMMAND_TIMEOUT_MS);
+
+            assert.strictEqual(NPM_CONFIG_COMMAND_TIMEOUT_MS, 15000);
+            assert.strictEqual(result.errorType, 'TIMEOUT');
+            assert.strictEqual(result.error, 'npm command timed out after 15000ms');
+        });
+
         test('should classify Windows cmd missing npm output as NOT_INSTALLED', () => {
             const result = classifyNpmConfigError({
                 message: 'Command failed: C:\\Windows\\System32\\cmd.exe /d /s /c npm config set proxy http://proxy.example.com:8080',
@@ -178,8 +194,8 @@ suite('NpmConfigManager Test Suite', () => {
 
     suite('Round Trip', () => {
         test('should set and get proxy correctly', async function() {
-            // Worst case: 6 npm commands * 5s each + overhead
-            this.timeout(45000);
+            // Worst case: 8 npm commands * 15s each + overhead
+            this.timeout(135000);
             // Skip this test if npm is not installed
             const testUrl = 'http://test-proxy.example.com:8080';
             
@@ -210,7 +226,8 @@ suite('NpmConfigManager Test Suite', () => {
         });
 
         test('should inspect and selectively clear individual proxy keys', async function() {
-            this.timeout(30000);
+            // Worst case: 8 npm commands * 15s each + overhead
+            this.timeout(135000);
             const testUrl = 'http://owned-proxy.example.com:8080';
             const setResult = await npmConfigManager.setProxy(testUrl);
             if (!setResult.success && setResult.errorType === 'NOT_INSTALLED') {

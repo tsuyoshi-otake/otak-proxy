@@ -63,6 +63,7 @@ const RETRYABLE_CONVERGENCE_ISSUE_IDS = new Set([
     'npm.managedProxyMismatch',
     'vscode.managedProxyMismatch'
 ]);
+const RETRYABLE_APPLY_ERROR_TYPES = new Set(['TIMEOUT', 'LOCKED']);
 
 function defaultSleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -171,7 +172,12 @@ export class ProxyRemediationService {
             }
         }
 
-        let diagnosticReport = await this.runDiagnosticsIfEnabled(settings, true);
+        // A failed apply may be a permanent configuration error. Reusing the
+        // slow-diagnostics cache in that case avoids starting another batch of
+        // external commands immediately after the failure. Successful applies
+        // and actual retries still need a fresh convergence observation.
+        const refreshDiagnostics = applyResult.success || retryAttempted;
+        let diagnosticReport = await this.runDiagnosticsIfEnabled(settings, refreshDiagnostics);
         const convergenceRetry = await this.retryOnceForConvergenceIssue(
             proxyUrl,
             enabled,
@@ -228,7 +234,10 @@ export class ProxyRemediationService {
     ): boolean {
         return settings.automaticRemediationEnabled &&
             settings.automaticRetryEnabled &&
-            applyResult.errors.length > 0;
+            applyResult.errors.some(error =>
+                typeof error.errorType === 'string' &&
+                RETRYABLE_APPLY_ERROR_TYPES.has(error.errorType)
+            );
     }
 
     private async retryOnceForConvergenceIssue(

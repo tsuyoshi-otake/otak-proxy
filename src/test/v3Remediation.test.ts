@@ -254,7 +254,7 @@ suite('v3 remediation foundation', () => {
                 async (url) => {
                     calls.push(url);
                     return calls.length === 1
-                        ? detailedResult(false, [{ target: 'npm configuration', message: 'timeout' }])
+                        ? detailedResult(false, [{ target: 'npm configuration', message: 'timeout', errorType: 'TIMEOUT' }])
                         : detailedResult(true);
                 }
             );
@@ -267,6 +267,51 @@ suite('v3 remediation foundation', () => {
                 'http://alice:s3cr3t@proxy.example.com:8080',
                 'http://alice:s3cr3t@proxy.example.com:8080'
             ]);
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService does not retry permanent configuration failures', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            automaticRemediationEnabled: true,
+            automaticRetryEnabled: true,
+            remediationDelayedRetryMs: 0
+        });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-no-retry-config-test-'));
+        const context = createContext(new Map());
+        let calls = 0;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService: new ApplyLockService({ baseDir }),
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async () => {
+                    calls += 1;
+                    return detailedResult(false, [{
+                        target: 'npm configuration',
+                        message: 'configuration is invalid',
+                        errorType: 'CONFIG_ERROR'
+                    }]);
+                }
+            );
+
+            assert.strictEqual(result.success, false);
+            assert.strictEqual(result.retryAttempted, false);
+            assert.strictEqual(calls, 1);
         } finally {
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });
@@ -521,7 +566,7 @@ suite('v3 remediation foundation', () => {
                     'http://proxy.example.com:8080',
                     true,
                     { trigger: 'autoDetection' },
-                    async () => detailedResult(false, [{ target, message: 'stomped' }])
+                    async () => detailedResult(false, [{ target, message: 'stomped', errorType: 'LOCKED' }])
                 ));
             }
 
@@ -570,7 +615,7 @@ suite('v3 remediation foundation', () => {
                     `http://prior-${i}.example.com:8080`,
                     false,
                     { trigger: 'autoDetection' },
-                    async (_url, enabled) => detailedResult(false, [{ target: 'git config', message: 'stomped' }], enabled)
+                    async (_url, enabled) => detailedResult(false, [{ target: 'git config', message: 'stomped', errorType: 'LOCKED' }], enabled)
                 ));
             }
 
@@ -779,7 +824,7 @@ suite('v3 remediation foundation', () => {
                 { trigger: 'sync', silent: true },
                 async () => {
                     calls += 1;
-                    return detailedResult(false, [{ target: 'Git configuration', message: 'locked' }]);
+                    return detailedResult(false, [{ target: 'Git configuration', message: 'locked', errorType: 'LOCKED' }]);
                 }
             );
 

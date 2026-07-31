@@ -93,7 +93,8 @@ suite('ProxyConfigTargetRunner Test Suite', () => {
         assert.strictEqual(aggregator.hasErrors(), true);
         assert.deepStrictEqual(aggregator.getErrors(), [{
             operation: 'npm configuration',
-            error: 'Failed to read/write npm configuration'
+            error: 'Failed to read/write npm configuration',
+            errorType: 'CONFIG_ERROR'
         }]);
     });
 
@@ -111,7 +112,8 @@ suite('ProxyConfigTargetRunner Test Suite', () => {
         assert.strictEqual(aggregator.hasErrors(), true);
         assert.deepStrictEqual(aggregator.getErrors(), [{
             operation: 'pip configuration',
-            error: 'Failed to read/write pip configuration'
+            error: 'Failed to read/write pip configuration',
+            errorType: 'CONFIG_ERROR'
         }]);
     });
 

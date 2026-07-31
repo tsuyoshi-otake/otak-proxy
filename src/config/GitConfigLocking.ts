@@ -4,12 +4,13 @@ import * as path from 'path';
 import { getErrorCode, getErrorMessage, getErrorStderr } from '../utils/ErrorUtils';
 import { Logger } from '../utils/Logger';
 import { GitConfigOperationOptions } from './GitConfigTypes';
+import { GIT_CONFIG_MUTEX_STALE_MS, GIT_CONFIG_MUTEX_TIMEOUT_MS } from './ConfigCommandTimeouts';
 
 export const GIT_CONFIG_LOCK_RETRY_DELAYS_MS = [50, 100, 200, 400] as const;
 
 const mutexFilePath = path.join(os.tmpdir(), 'otak-proxy.gitconfig.mutex');
-const MUTEX_TIMEOUT_MS = 5000;
-const MUTEX_STALE_MS = 30000;
+const MUTEX_TIMEOUT_MS = GIT_CONFIG_MUTEX_TIMEOUT_MS;
+const MUTEX_STALE_MS = GIT_CONFIG_MUTEX_STALE_MS;
 const MUTEX_RETRY_DELAY_MS = 25;
 
 export async function sleep(ms: number): Promise<void> {

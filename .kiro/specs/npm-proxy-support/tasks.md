@@ -9,7 +9,7 @@
   - `src/config/NpmConfigManager.ts`ファイルを作成
   - OperationResultインターフェースを定義（GitConfigManagerと同じ構造）
   - NpmConfigManagerクラスの基本構造を実装
-  - タイムアウト設定（5秒）を定義
+  - タイムアウト設定（15秒）を定義
   - _要件: 1.1, 2.1, 3.1, 4.3, 4.4_
 
 - [x] 1.1 setProxy()メソッドの実装

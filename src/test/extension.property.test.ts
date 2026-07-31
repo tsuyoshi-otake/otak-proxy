@@ -413,7 +413,7 @@ suite('Extension Integration Property-Based Tests', () => {
             { errorMessage: 'ENOENT', expectedSuggestion: 'https://nodejs.org/' },
             { errorMessage: 'not found', expectedSuggestion: 'https://nodejs.org/' },
             { errorMessage: 'Permission denied when accessing npm configuration', expectedSuggestion: 'permissions' },
-            { errorMessage: 'npm command timed out after 5 seconds', expectedSuggestion: 'npm config list' },
+            { errorMessage: 'npm command timed out after 15000ms', expectedSuggestion: 'npm config list' },
             { errorMessage: 'Failed to read/write npm configuration', expectedSuggestion: 'npm config' },
         ];
 

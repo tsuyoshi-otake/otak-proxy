@@ -11,11 +11,13 @@ import {
     withGitConfigWriteMutex
 } from './GitConfigLocking';
 import { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
+import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 const execFileAsync = promisify(execFile);
 
 export type { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
+export const GIT_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
 export type GitProxyKey = 'http.proxy' | 'https.proxy';
 export interface GitProxyValues {
@@ -28,7 +30,7 @@ export interface GitProxyValues {
  * Uses execFile() instead of exec() to prevent shell interpretation and command injection.
  */
 export class GitConfigManager {
-    private readonly timeout: number = 5000; // 5 seconds timeout
+    private readonly timeout: number = GIT_CONFIG_COMMAND_TIMEOUT_MS;
 
     private async execGitConfigWithRetry(args: string[], options?: GitConfigOperationOptions): Promise<void> {
         for (let attempt = 0; ; attempt++) {

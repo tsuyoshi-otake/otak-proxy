@@ -29,6 +29,16 @@ suite('ErrorAggregator Test Suite', () => {
             aggregator.addError('VSCode configuration', 'Permission denied');
             assert.strictEqual(aggregator.hasErrors(), true);
         });
+
+        test('should preserve structured error types for remediation decisions', () => {
+            aggregator.addError('npm configuration', 'npm command timed out after 15000ms', 'TIMEOUT');
+
+            assert.deepStrictEqual(aggregator.getErrors(), [{
+                operation: 'npm configuration',
+                error: 'npm command timed out after 15000ms',
+                errorType: 'TIMEOUT'
+            }]);
+        });
     });
 
     suite('formatErrors()', () => {

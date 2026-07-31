@@ -275,7 +275,8 @@ export class ProxyApplier {
             results,
             errors: errorAggregator.getErrors().map(error => ({
                 target: error.operation,
-                message: this.sanitizer.maskPassword(error.error)
+                message: this.sanitizer.maskPassword(error.error),
+                errorType: error.errorType
             }))
         };
     }
@@ -391,7 +392,7 @@ export class ProxyApplier {
             return { success: true, outcome: 'skippedUnavailable', errorType: inspection.errorType };
         }
         if (inspection.status === 'error') {
-            errorAggregator.addError(target.name, inspection.error || `Failed to inspect ${target.name}`);
+            errorAggregator.addError(target.name, inspection.error || `Failed to inspect ${target.name}`, inspection.errorType);
             return { success: false, outcome: 'failed', errorType: inspection.errorType };
         }
 
@@ -428,7 +429,7 @@ export class ProxyApplier {
         try {
             const result = await target.ownership!.unsetTargets(ownedTargetIds, options);
             if (!result.success) {
-                errorAggregator.addError(target.name, result.error || `Failed to clear ${target.name}`);
+                errorAggregator.addError(target.name, result.error || `Failed to clear ${target.name}`, result.errorType);
                 return { success: false, outcome: 'failed', errorType: result.errorType };
             }
             for (const targetId of ownedTargetIds) {

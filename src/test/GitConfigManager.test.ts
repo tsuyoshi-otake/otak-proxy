@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { GitConfigManager } from '../config/GitConfigManager';
+import { GIT_CONFIG_COMMAND_TIMEOUT_MS, GitConfigManager } from '../config/GitConfigManager';
 
 suite('GitConfigManager Test Suite', () => {
     let gitConfigManager: GitConfigManager;
@@ -9,9 +9,13 @@ suite('GitConfigManager Test Suite', () => {
     });
 
     suite('Basic Operations', () => {
-        test('should create GitConfigManager instance', () => {
-            assert.ok(gitConfigManager);
-        });
+    test('should create GitConfigManager instance', () => {
+        assert.ok(gitConfigManager);
+    });
+
+    test('uses the shared high-load command timeout', () => {
+        assert.strictEqual(GIT_CONFIG_COMMAND_TIMEOUT_MS, 15000);
+    });
 
         test('setProxy should return OperationResult', async () => {
             const result = await gitConfigManager.setProxy('http://proxy.example.com:8080');

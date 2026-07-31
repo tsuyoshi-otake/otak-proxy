@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
+import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 
@@ -46,6 +47,8 @@ export interface PipConfigManagerOptions {
     candidates?: PipCommandCandidate[];
     timeoutMs?: number;
 }
+
+export const PIP_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
 const defaultCommandRunner: PipCommandRunner = async (command, args, options) => {
     return await execFileAsync(command, args, options);
@@ -173,7 +176,7 @@ export class PipConfigManager {
     private readonly commandRunner: PipCommandRunner;
 
     constructor(options: PipConfigManagerOptions = {}) {
-        this.timeout = options.timeoutMs ?? 5000;
+        this.timeout = options.timeoutMs ?? PIP_CONFIG_COMMAND_TIMEOUT_MS;
         this.candidates = options.candidates ?? defaultCandidates(process.platform === 'win32');
         this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     }

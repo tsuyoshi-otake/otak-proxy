@@ -62,6 +62,13 @@ interface SlowDiagnosticsCache {
     windows?: { observation: unknown; issues: ProxyIssue[] };
 }
 
+type NpmDiagnosticValues = {
+    proxy?: unknown;
+    'https-proxy'?: unknown;
+    noproxy?: unknown;
+    registry?: unknown;
+};
+
 const defaultCommandRunner: CommandRunner = async (command, args) => execFileAsync(command, args, {
     timeout: 5000,
     encoding: 'utf8',
@@ -81,8 +88,12 @@ function sanitizeConfigInspect(inspect: unknown): unknown {
     return output;
 }
 
-function normalizeNpmValue(value: string): string | undefined {
-    const trimmed = value.trim();
+function normalizeNpmValue(value: unknown): string | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    const trimmed = Array.isArray(value) ? value.join(',').trim() : String(value).trim();
     return trimmed && trimmed !== 'undefined' && trimmed !== 'null' ? trimmed : undefined;
 }
 
@@ -107,6 +118,7 @@ export class ProxyRuntimeDiagnostics {
     private readonly commandRunner: CommandRunner;
     private readonly windowsDiagnostics: WindowsProxyDiagnostics;
     private slowCache: SlowDiagnosticsCache | undefined;
+    private slowDiagnosticsInFlight: Promise<SlowDiagnosticsCache> | undefined;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -221,8 +233,32 @@ export class ProxyRuntimeDiagnostics {
             return this.slowCache;
         }
 
+        // Multiple apply/monitor paths can request a fresh report at the same
+        // time. Share one collection so a load spike does not multiply Git,
+        // npm, and Windows diagnostic processes.
+        if (this.slowDiagnosticsInFlight) {
+            return this.slowDiagnosticsInFlight;
+        }
+
+        const collection = this.collectSlowDiagnosticsFresh(executionContext, settings.slowDiagnosticsTtlMs, now);
+        this.slowDiagnosticsInFlight = collection;
+        try {
+            return await collection;
+        } finally {
+            if (this.slowDiagnosticsInFlight === collection) {
+                this.slowDiagnosticsInFlight = undefined;
+            }
+        }
+    }
+
+    private async collectSlowDiagnosticsFresh(
+        executionContext: ExecutionContext,
+        slowDiagnosticsTtlMs: number,
+        now: number
+    ): Promise<SlowDiagnosticsCache> {
+
         const cache: SlowDiagnosticsCache = {
-            expiresAt: now + settings.slowDiagnosticsTtlMs,
+            expiresAt: now + slowDiagnosticsTtlMs,
             canUseChildProcess: executionContext.canUseChildProcess,
             canReadWindowsRegistry: executionContext.canReadWindowsRegistry,
             workspaceHostKind: executionContext.workspaceHostKind
@@ -374,12 +410,11 @@ export class ProxyRuntimeDiagnostics {
     }
 
     private async collectNpmDiagnostics(): Promise<{ observation: Record<string, unknown>; issues: ProxyIssue[] }> {
-        const [proxy, httpsProxy, noproxy, registry] = (await Promise.all([
-            this.readNpmConfig('proxy'),
-            this.readNpmConfig('https-proxy'),
-            this.readNpmConfig('noproxy'),
-            this.readNpmConfig('registry')
-        ])).map(value => normalizeNpmValue(value ?? ''));
+        const values = await this.readNpmConfigValues();
+        const proxy = normalizeNpmValue(values.proxy);
+        const httpsProxy = normalizeNpmValue(values['https-proxy']);
+        const noproxy = normalizeNpmValue(values.noproxy);
+        const registry = normalizeNpmValue(values.registry);
         const observation = { proxy, httpsProxy, noproxy, registry };
         const issues: ProxyIssue[] = [];
 
@@ -611,17 +646,17 @@ export class ProxyRuntimeDiagnostics {
         }
     }
 
-    private async readNpmConfig(key: string): Promise<string | undefined> {
+    private async readNpmConfigValues(): Promise<NpmDiagnosticValues> {
         try {
             if (process.platform === 'win32') {
                 const comspec = process.env.ComSpec || 'cmd.exe';
-                const { stdout } = await this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', 'config', 'get', key]);
-                return stdout.trim();
+                const { stdout } = await this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', 'config', 'list', '--json']);
+                return JSON.parse(stdout) as NpmDiagnosticValues;
             }
-            const { stdout } = await this.commandRunner('npm', ['config', 'get', key]);
-            return stdout.trim();
+            const { stdout } = await this.commandRunner('npm', ['config', 'list', '--json']);
+            return JSON.parse(stdout) as NpmDiagnosticValues;
         } catch {
-            return undefined;
+            return {};
         }
     }
 

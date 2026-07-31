@@ -198,9 +198,9 @@ suite('ProxyApplier Unit Tests', () => {
         assert.strictEqual(disableCalled, true, 'Empty URL should trigger disableProxy');
     });
 
-    test('applyProxy returns false when any manager fails', async () => {
+    test('applyProxyDetailed preserves typed manager failures for remediation', async () => {
         const mockGitManager = {
-            setProxy: async () => ({ success: false, error: 'Git failed' }),
+            setProxy: async () => ({ success: false, error: 'Git failed', errorType: 'TIMEOUT' }),
             unsetProxy: async () => ({ success: true })
         } as any;
         
@@ -232,8 +232,9 @@ suite('ProxyApplier Unit Tests', () => {
             mockNotifier
         );
         
-        const result = await applier.applyProxy('http://proxy.example.com:8080', true);
-        assert.strictEqual(result, false, 'applyProxy should return false when any manager fails');
+        const result = await applier.applyProxyDetailed('http://proxy.example.com:8080', true);
+        assert.strictEqual(result.success, false, 'applyProxyDetailed should fail when any manager fails');
+        assert.strictEqual(result.errors[0].errorType, 'TIMEOUT');
         assert.strictEqual(errorShown, true, 'Error should be shown when manager fails');
     });
 

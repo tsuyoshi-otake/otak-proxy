@@ -54,7 +54,7 @@ export interface OperationResult {
 }
 
 export class NpmConfigManager {
-    private readonly timeout: number = 5000; // 5秒タイムアウト
+    private readonly timeout: number = 15000; // 15秒タイムアウト
 
     /**
      * npmのproxy設定を適用（http-proxyとhttps-proxy）
@@ -201,7 +201,7 @@ export interface OperationResult {
 
 - `NOT_INSTALLED`: npmがインストールされていない、またはPATHに存在しない
 - `NO_PERMISSION`: npm設定ファイルへのアクセス権限がない
-- `TIMEOUT`: npmコマンドが5秒以内に完了しなかった
+- `TIMEOUT`: npmコマンドが15秒以内に完了しなかった
 - `CONFIG_ERROR`: npm設定の読み書きに失敗
 - `UNKNOWN`: その他のエラー
 
@@ -288,7 +288,7 @@ NpmConfigManagerは以下のエラータイプを識別し、適切なエラー�
 
 3. **TIMEOUT**
    - 検出条件: タイムアウト、`SIGTERM`シグナル
-   - エラーメッセージ: "npm command timed out after 5 seconds"
+   - エラーメッセージ: "npm command timed out after 15000ms"
    - 提案:
      - "Check if npm is responding correctly"
      - "Try running 'npm config list' manually to verify npm works"
@@ -450,10 +450,10 @@ await execFileAsync('npm', ['config', 'set', 'http-proxy', url], {
 
 ### タイムアウト設定
 
-GitConfigManagerと同じ5秒のタイムアウトを使用します：
+GitConfigManagerと共有する15秒のタイムアウトを使用します：
 
 ```typescript
-private readonly timeout: number = 5000; // 5秒
+private readonly timeout: number = 15000; // 15秒
 ```
 
 ### 設定の確認
@@ -496,7 +496,7 @@ private async hasConfig(key: string): Promise<boolean> {
 
 ### タイムアウト保護
 
-- すべてのnpmコマンドに5秒のタイムアウト
+- すべてのnpmコマンドに15秒の上限付きタイムアウト
 - ハングアップを防止
 - タイムアウトエラーを適切に処理
 

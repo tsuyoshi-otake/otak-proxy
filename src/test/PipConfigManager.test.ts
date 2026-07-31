@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import {
     classifyPipConfigError,
+    PIP_CONFIG_COMMAND_TIMEOUT_MS,
     PipCommandRunner,
     PipConfigManager
 } from '../config/PipConfigManager';
@@ -60,6 +61,24 @@ suite('PipConfigManager Test Suite', () => {
             command: 'python3',
             args: ['-m', 'pip', 'config', '--user', 'set', 'global.proxy', 'http://proxy.example.com:8080']
         }]);
+    });
+
+    test('uses the shared high-load command timeout by default', async () => {
+        let observedTimeout: number | undefined;
+        const runner: PipCommandRunner = async (_command, _args, options) => {
+            observedTimeout = options.timeout;
+            return { stdout: 'Writing to user config\n', stderr: '' };
+        };
+        const manager = new PipConfigManager({
+            commandRunner: runner,
+            candidates: [{ command: 'python3', argsPrefix: ['-m', 'pip'] }]
+        });
+
+        const result = await manager.setProxy('http://proxy.example.com:8080');
+
+        assert.deepStrictEqual(result, { success: true });
+        assert.strictEqual(observedTimeout, PIP_CONFIG_COMMAND_TIMEOUT_MS);
+        assert.strictEqual(observedTimeout, 15000);
     });
 
     test('getProxy should return null when global.proxy is not configured', async () => {

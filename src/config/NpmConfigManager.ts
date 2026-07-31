@@ -4,9 +4,18 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
+import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * npm on Windows starts through cmd.exe and npm.cmd before Node.js executes.
+ * Under CPU, disk, or antivirus load that startup can exceed five seconds even
+ * when npm is healthy. Keep the timeout bounded, but allow enough scheduler
+ * headroom to avoid reporting a transient timeout as a configuration failure.
+ */
+export const NPM_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
 interface NpmErrorDetails {
     errorMessage: string;
@@ -190,7 +199,7 @@ function createNpmNotInstalledError(cause?: unknown): Error & {
  * Note: npm 11.x uses 'proxy' instead of 'http-proxy' for HTTP proxy settings.
  */
 export class NpmConfigManager {
-    private readonly timeout: number = 5000; // 5 seconds timeout
+    private readonly timeout: number = NPM_CONFIG_COMMAND_TIMEOUT_MS;
     private readonly isWindows: boolean = process.platform === 'win32';
     private readonly userConfigPath?: string;
 

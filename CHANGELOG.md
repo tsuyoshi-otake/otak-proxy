@@ -6,6 +6,10 @@
 - Redact username-only proxy userinfo, including token-style credentials such as `http://TOKEN@proxy:8080`, from logs, status details, history, persisted errors, shared state, and diagnostics (#27).
 - Remove proxy settings only when their current values still match otak-proxy ownership fingerprints; preserve externally owned or externally changed Git, npm, pip, and VS Code values (#27).
 
+### Changed
+- Use a bounded 15-second command deadline for Git, npm, and pip configuration writes, with a longer Git lock wait for busy hosts.
+- Coalesce concurrent npm runtime diagnostics into one `npm config list --json` read to avoid spawning duplicate npm processes.
+
 ### Fixed
 - Keep the proxy selected during initial setup active by storing it as the Auto fallback instead of migrating the obsolete Manual mode to an empty Auto state (#27).
 - Re-apply an unchanged detected proxy when recovering from Auto OFF or another unconverged target state, including when automatic connection testing is disabled (#27).
@@ -13,6 +17,7 @@
 - Re-read state after slow system-proxy detection and serialize adjacent monitor events so newer toggle choices and connection-test metadata are not overwritten (#27).
 - Track terminal-environment and per-target convergence explicitly, while treating unavailable optional tools as skipped rather than successfully configured (#27).
 - Report toggle and setup apply failures without first publishing a false OFF or success state (#27).
+- Retry remediation only for transient timeout or lock failures, while preserving structured configuration error types through aggregation.
 - Use a stable Auto idle icon instead of continuously animating the status bar spinner (#27).
 
 ## [3.2.0] - 2026-07-26

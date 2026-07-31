@@ -51,7 +51,7 @@ export async function updateProxyConfigTargetDetailed(
             }
 
             Logger.error(`${target.name} failed:`, result.error, result.errorType);
-            errorAggregator.addError(target.name, result.error || `Failed to update ${target.name}`);
+            errorAggregator.addError(target.name, result.error || `Failed to update ${target.name}`, result.errorType);
             return { success: false, outcome: 'failed', errorType: result.errorType };
         }
 

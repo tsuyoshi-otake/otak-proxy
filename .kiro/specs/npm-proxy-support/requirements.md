@@ -55,7 +55,7 @@
 1. WHEN npmにproxy URLを設定する前に THEN システムはProxyUrlValidatorを使用してURLを検証する
 2. WHEN npmの設定をログに出力する THEN システムはInputSanitizerを使用してクレデンシャルをマスクする
 3. WHEN npmコマンドを実行する THEN システムはexecFile()を使用してコマンドインジェクションを防止する
-4. WHEN npm設定にタイムアウトを設定する THEN システムは5秒のタイムアウトを適用する
+4. WHEN npm設定にタイムアウトを設定する THEN システムは15秒の上限付きタイムアウトを適用する
 
 ### 要件 5
 

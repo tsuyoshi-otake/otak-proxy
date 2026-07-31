@@ -6,20 +6,33 @@ import {
 
 export type { AggregatedErrorDisplayParts } from './ErrorAggregatorDisplay';
 
+export interface AggregatedError {
+  operation: string;
+  error: string;
+  errorType?: string;
+}
+
 /**
  * ErrorAggregator collects multiple configuration errors so callers can report
  * all failures together instead of stopping at the first one.
  */
 export class ErrorAggregator {
   private errors: Map<string, string> = new Map();
+  private errorTypes: Map<string, string> = new Map();
 
   /**
    * Adds an error to the collection
    * @param operation - Which operation failed (e.g., "Git configuration", "VSCode configuration")
    * @param error - Error details
+   * @param errorType - Structured error classification for retry decisions
    */
-  addError(operation: string, error: string): void {
+  addError(operation: string, error: string, errorType?: string): void {
     this.errors.set(operation, error);
+    if (errorType) {
+      this.errorTypes.set(operation, errorType);
+    } else {
+      this.errorTypes.delete(operation);
+    }
   }
 
   /**
@@ -30,8 +43,13 @@ export class ErrorAggregator {
     return this.errors.size > 0;
   }
 
-  getErrors(): Array<{ operation: string; error: string }> {
-    return Array.from(this.errors.entries()).map(([operation, error]) => ({ operation, error }));
+  getErrors(): AggregatedError[] {
+    return Array.from(this.errors.entries()).map(([operation, error]) => {
+      const errorType = this.errorTypes.get(operation);
+      return errorType
+        ? { operation, error, errorType }
+        : { operation, error };
+    });
   }
 
   /**
@@ -55,5 +73,6 @@ export class ErrorAggregator {
    */
   clear(): void {
     this.errors.clear();
+    this.errorTypes.clear();
   }
 }
