@@ -100,6 +100,19 @@ function stubConfiguration(proxyUrl: string, httpProxy?: string, proxySupport = 
     };
 }
 
+// #28 consolidated npm diagnostics into a single `npm config list --json`
+// read (spawned through %ComSpec% on Windows, so `command` may be cmd.exe
+// with npm inside the args). Fake runners answer that one call with the
+// JSON a scenario needs.
+function isNpmConfigListCall(command: string, args: string[]): boolean {
+    return (command === 'npm' || args.includes('npm')) &&
+        args.includes('config') && args.includes('list') && args.includes('--json');
+}
+
+function npmConfigListStdout(values: Record<string, string>): { stdout: string; stderr: string } {
+    return { stdout: `${JSON.stringify(values)}\n`, stderr: '' };
+}
+
 suite('v3 Phase 1 diagnostics foundation', () => {
     test('redacts URL, header, base64, npm token, stderr, and control-character secret forms', () => {
         const redactor = new ProxySecretRedactor();
@@ -397,13 +410,10 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                         if (command === 'git') {
                             return { stdout: args.includes('--get-regexp') ? 'remote.origin.proxy http://other.example:8080\n' : '', stderr: '' };
                         }
-                        if (args.includes('noproxy')) {
-                            return { stdout: '.example.com\n', stderr: '' };
+                        if (isNpmConfigListCall(command, args)) {
+                            return npmConfigListStdout({ noproxy: '.example.com', registry: 'https://registry.npmjs.org/' });
                         }
-                        if (args.includes('registry')) {
-                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
-                        }
-                        return { stdout: 'undefined\n', stderr: '' };
+                        return { stdout: '', stderr: '' };
                     }
                 }
             );
@@ -458,13 +468,14 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                         if (command === 'reg') {
                             return { stdout: '', stderr: '' };
                         }
-                        if (args.includes('proxy') || args.includes('https-proxy')) {
-                            return { stdout: `${retainedProxy}\n`, stderr: '' };
+                        if (isNpmConfigListCall(command, args)) {
+                            return npmConfigListStdout({
+                                proxy: retainedProxy,
+                                'https-proxy': retainedProxy,
+                                registry: 'https://registry.npmjs.org/'
+                            });
                         }
-                        if (args.includes('registry')) {
-                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
-                        }
-                        return { stdout: 'undefined\n', stderr: '' };
+                        return { stdout: '', stderr: '' };
                     }
                 }
             );
@@ -515,13 +526,14 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                         if (command === 'reg') {
                             return { stdout: '', stderr: '' };
                         }
-                        if (args.includes('proxy') || args.includes('https-proxy')) {
-                            return { stdout: `${externalProxy}\n`, stderr: '' };
+                        if (isNpmConfigListCall(command, args)) {
+                            return npmConfigListStdout({
+                                proxy: externalProxy,
+                                'https-proxy': externalProxy,
+                                registry: 'https://registry.npmjs.org/'
+                            });
                         }
-                        if (args.includes('registry')) {
-                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
-                        }
-                        return { stdout: 'undefined\n', stderr: '' };
+                        return { stdout: '', stderr: '' };
                     }
                 }
             );
@@ -567,13 +579,14 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                         if (command === 'reg') {
                             return { stdout: '', stderr: '' };
                         }
-                        if (args.includes('proxy') || args.includes('https-proxy')) {
-                            return { stdout: 'http://stale.example.com:8080\n', stderr: '' };
+                        if (isNpmConfigListCall(command, args)) {
+                            return npmConfigListStdout({
+                                proxy: 'http://stale.example.com:8080',
+                                'https-proxy': 'http://stale.example.com:8080',
+                                registry: 'https://registry.npmjs.org/'
+                            });
                         }
-                        if (args.includes('registry')) {
-                            return { stdout: 'https://registry.npmjs.org/\n', stderr: '' };
-                        }
-                        return { stdout: 'undefined\n', stderr: '' };
+                        return { stdout: '', stderr: '' };
                     }
                 }
             );
@@ -732,6 +745,11 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         const restoreConfig = stubConfiguration('', undefined, 'on');
         const inFlight = { git: 0, npm: 0 };
         const maxInFlight = { git: 0, npm: 0 };
+        // Since #28 there is exactly ONE npm invocation (`npm config list
+        // --json`) per collection, so npm cannot overlap itself; the invariant
+        // is that the npm read runs alongside the git reads instead of after
+        // them.
+        let npmOverlappedGit = false;
         try {
             const diagnostics = new ProxyRuntimeDiagnostics(
                 context,
@@ -744,6 +762,9 @@ suite('v3 Phase 1 diagnostics foundation', () => {
                         if (family) {
                             inFlight[family] += 1;
                             maxInFlight[family] = Math.max(maxInFlight[family], inFlight[family]);
+                            if (inFlight.git > 0 && inFlight.npm > 0) {
+                                npmOverlappedGit = true;
+                            }
                         }
                         await new Promise(resolve => setTimeout(resolve, 25));
                         if (family) {
@@ -757,7 +778,8 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             await diagnostics.run({ bypassSlowCache: true });
 
             assert.ok(maxInFlight.git >= 2, `git config reads must overlap, saw max in-flight ${maxInFlight.git}`);
-            assert.ok(maxInFlight.npm >= 2, `npm config reads must overlap, saw max in-flight ${maxInFlight.npm}`);
+            assert.ok(maxInFlight.npm >= 1, 'the npm config list read must run');
+            assert.ok(npmOverlappedGit, 'the npm config read must overlap the git reads, not run after them');
         } finally {
             restoreConfig();
         }
