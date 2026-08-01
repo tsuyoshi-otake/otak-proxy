@@ -1,5 +1,15 @@
 # Change Log
 
+## [3.2.2] - 2026-08-01
+
+### Fixed
+- Stop re-detecting the extension's own VS Code `http.proxy` write as a system proxy in Auto mode, which shadowed platform detection and kept the status bar arrow spinning after the real proxy disappeared (#23, #29). Detection provenance is now tracked, and the self-written value is suppressed only when it provably matches the applied proxy; the new `otakProxy.ignoreSelfWrittenVSCodeProxy` setting can disable the suppression.
+- Wait out another window's apply lock with a bounded retry schedule (~7.75s) instead of skipping the write on the first contended acquire, so the losing window converges normally in multi-window use (#30).
+
+### Changed
+- Remove the "another window is already applying proxy settings" warning. After the bounded wait, a warning is shown only when fresh diagnostics still report an issue that blocks convergence, rate-limited per issue (#30).
+- Replace the stale UI screenshot in the README with an ASCII status bar reference (#31).
+
 ## [3.2.1] - 2026-07-28
 
 ### Security
