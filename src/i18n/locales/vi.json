@@ -9,6 +9,7 @@
   "config.proxyUrl": "URL máy chủ proxy (ví dụ: http://proxy.example.com:8080) dùng cho cài đặt proxy của VS Code, Git, npm và terminal tích hợp",
   "config.pollingInterval": "Khoảng thời gian thăm dò ở chế độ Tự động (giây, 10-300). Tần suất kiểm tra thay đổi proxy hệ thống.",
   "config.detectionSourcePriority": "Thứ tự ưu tiên nguồn phát hiện proxy. Các nguồn sẽ được thử theo thứ tự cho đến khi một nguồn thành công.",
+  "config.ignoreSelfWrittenVSCodeProxy": "Bỏ qua cài đặt http.proxy của VS Code khi nó trùng với proxy mà chính tiện ích mở rộng này đã áp dụng, để giá trị tự ghi không bị phát hiện lại như proxy hệ thống.",
   "config.maxRetries": "Số lần thử lại tối đa khi phát hiện proxy thất bại.",
   "config.testInterval": "Khoảng thời gian kiểm tra kết nối proxy (giây, chỉ chế độ Tự động). Phạm vi: 30-600 giây. Mặc định: 60 giây.",
   "config.autoTestEnabled": "Bật kiểm tra kết nối proxy tự động trong chế độ Tự động. Khi bật, kết nối proxy sẽ được kiểm tra định kỳ.",

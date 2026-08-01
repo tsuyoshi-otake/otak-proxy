@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "状態変更後と診断コマンド実行時に、読み取り専用のProxy診断を有効にします。",
   "config.enableFallback": "システムProxyが検出されない場合に手動Proxyへフォールバックする（Autoモード専用）。有効な場合、システムProxyが検出されないと手動設定されたProxyをフォールバックとして使用します。",
   "config.hostUserLockEnabled": "Git、npm、VS Code、ターミナル環境変数などのホスト/ユーザー単位ターゲットを書き込む前に、複数ウィンドウ間ロックを使用します。",
+  "config.ignoreSelfWrittenVSCodeProxy": "この拡張機能自身が適用したプロキシと一致する VS Code の http.proxy 設定を検出対象から除外し、自身の書き込みをシステムプロキシとして再検出しないようにします。",
   "config.legacyEnvFirstAutoDetection": "process環境変数のProxyを現在のプラットフォーム設定より先に見る、v2互換のAuto検出順を維持します。",
   "config.maxRetries": "Proxy検出が失敗した場合の最大リトライ回数。",
   "config.notificationCooldownMs": "同一Proxy診断issueについて次の通知を表示するまでの最小間隔。",

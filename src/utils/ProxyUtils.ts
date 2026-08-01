@@ -3,7 +3,7 @@
  * @description Compatibility entrypoint for proxy URL validation, sanitization, testing, and detection.
  */
 
-export { detectSystemProxySettings } from './SystemProxyDetectionUtils';
+export { detectSystemProxySettings, detectSystemProxySettingsWithSource } from './SystemProxyDetectionUtils';
 export {
     getDefaultAutoTimeout,
     getDefaultManualTimeout,

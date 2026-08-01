@@ -9,6 +9,7 @@
   "config.proxyUrl": "URL del servidor proxy (por ejemplo, http://proxy.example.com:8080) para la configuración de proxy de VSCode, Git, npm y la terminal integrada",
   "config.pollingInterval": "Intervalo de sondeo del modo automático en segundos (10-300). Con qué frecuencia se comprueban los cambios del proxy del sistema.",
   "config.detectionSourcePriority": "Orden de prioridad de las fuentes de detección de proxy. Las fuentes se prueban en orden hasta que una tenga éxito.",
+  "config.ignoreSelfWrittenVSCodeProxy": "Ignorar la configuración http.proxy de VS Code cuando coincida con el proxy aplicado por esta propia extensión, para que su propia escritura no se vuelva a detectar como proxy del sistema.",
   "config.maxRetries": "Número máximo de reintentos para la detección del proxy cuando falla.",
   "config.testInterval": "Intervalo de prueba de conexión del proxy en segundos (solo modo automático). Rango: 30-600 segundos. Predeterminado: 60 segundos.",
   "config.autoTestEnabled": "Habilitar la prueba automática de conexión del proxy en modo automático. Cuando está habilitada, la conectividad del proxy se prueba periódicamente.",

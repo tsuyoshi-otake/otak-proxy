@@ -20,6 +20,7 @@ import { NpmConfigManager } from './config/NpmConfigManager';
 import { PipConfigManager } from './config/PipConfigManager';
 import { TerminalEnvConfigManager } from './config/TerminalEnvConfigManager';
 import { SystemProxyDetector } from './config/SystemProxyDetector';
+import { getSystemProxyDetector } from './utils/ProxyUtilityInstances';
 import { UserNotifier } from './errors/UserNotifier';
 import { Logger } from './utils/Logger';
 import { ProxyMonitor } from './monitoring/ProxyMonitor';
@@ -127,15 +128,15 @@ function createCoreServices(context: vscode.ExtensionContext): CoreServices {
             description: 'Managed by otak-proxy for newly created terminals.'
         })
         : undefined;
-    const detectionSourcePriority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
-
     return {
         config,
         sanitizer,
         terminalEnvManager,
         userNotifier: new UserNotifier(),
         proxyChangeLogger: new ProxyChangeLogger(sanitizer),
-        systemProxyDetector: new SystemProxyDetector(detectionSourcePriority)
+        // Shared singleton: detection helpers (detectSystemProxySettings*) use the
+        // same instance, so echo suppression (#29) covers every detection path.
+        systemProxyDetector: getSystemProxyDetector()
     };
 }
 
@@ -158,6 +159,23 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         context,
         () => proxyStateManager.getState()
     );
+
+    // Let detection recognize the value this extension itself wrote into
+    // VS Code's http.proxy so it is not re-detected as a system proxy (#29).
+    services.systemProxyDetector.setAppliedProxyProvider(async () => {
+        const state = await proxyStateManager.getState();
+        if (state.mode !== ProxyMode.Auto || !state.autoProxyUrl) {
+            return undefined;
+        }
+        let source: string | undefined = state.lastDetectionSource;
+        // States saved before 3.2.2 lack provenance; an engaged fallback is
+        // still unambiguous, so derive it. Everything else stays undefined
+        // (= never suppressed) to protect hand-set http.proxy values.
+        if (!source && state.usingFallbackProxy && state.fallbackProxyUrl === state.autoProxyUrl) {
+            source = 'fallback';
+        }
+        return { url: state.autoProxyUrl, source };
+    });
 
     initializer = new ExtensionInitializer({
         extensionContext: context,

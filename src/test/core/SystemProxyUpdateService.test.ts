@@ -30,7 +30,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state = { mode: ProxyMode.Auto };
         configValues = { enableFallback: true };
 
-        detectStub = sandbox.stub(DetectUtils, 'detectSystemProxySettings');
+        detectStub = sandbox.stub(DetectUtils, 'detectSystemProxySettingsWithSource');
         getConfigStub = sandbox.stub(vscode.workspace, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) =>
                 Object.prototype.hasOwnProperty.call(configValues, key) ? configValues[key] : defaultValue,
@@ -85,12 +85,13 @@ suite('SystemProxyUpdateService Tests', () => {
 
     test('Auto + detection success: updates state, applies, and notifies', async () => {
         state.mode = ProxyMode.Auto;
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
         assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
         assert.strictEqual(state.systemProxyDetected, true);
+        assert.strictEqual(state.lastDetectionSource, 'windows');
         sinon.assert.calledWith(publishStateStub, sinon.match({ autoProxyUrl: 'http://detected.example:8080' }));
         assert.strictEqual(state.autoModeOff, false);
         assert.strictEqual(state.usingFallbackProxy, false);
@@ -102,7 +103,7 @@ suite('SystemProxyUpdateService Tests', () => {
     test('Auto + detection success + same as before: saves state but does not re-apply or notify', async () => {
         state.mode = ProxyMode.Auto;
         state.autoProxyUrl = 'http://detected.example:8080';
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -119,7 +120,7 @@ suite('SystemProxyUpdateService Tests', () => {
             gitConfigured: false,
             npmConfigured: false
         };
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -140,7 +141,7 @@ suite('SystemProxyUpdateService Tests', () => {
             autoModeOff: false,
             terminalEnvConfigured: false
         };
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -149,7 +150,7 @@ suite('SystemProxyUpdateService Tests', () => {
 
     test('apply failure never emits a successful Auto change notification', async () => {
         state = { mode: ProxyMode.Auto };
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
         applyProxyStub.resolves(false);
 
         await service.checkAndUpdateSystemProxy();
@@ -159,8 +160,8 @@ suite('SystemProxyUpdateService Tests', () => {
     });
 
     test('a toggle completed during detection is not overwritten by the stale Auto snapshot', async () => {
-        let resolveDetection!: (value: string | null) => void;
-        detectStub.returns(new Promise<string | null>(resolve => {
+        let resolveDetection!: (value: { proxyUrl: string | null; source: string | null }) => void;
+        detectStub.returns(new Promise<{ proxyUrl: string | null; source: string | null }>(resolve => {
             resolveDetection = resolve;
         }));
         state = { mode: ProxyMode.Auto, autoProxyUrl: 'http://old.example:8080' };
@@ -168,7 +169,7 @@ suite('SystemProxyUpdateService Tests', () => {
         const update = service.checkAndUpdateSystemProxy();
         await Promise.resolve();
         state = { mode: ProxyMode.Off };
-        resolveDetection('http://new.example:8080');
+        resolveDetection({ proxyUrl: 'http://new.example:8080', source: 'windows' });
         await update;
 
         assert.strictEqual(state.mode, ProxyMode.Off);
@@ -180,7 +181,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
         configValues.enableFallback = true;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
         connectionTester!.testProxyAuto.resolves({
             success: true,
             proxyUrl: 'http://manual.example:3128',
@@ -195,6 +196,7 @@ suite('SystemProxyUpdateService Tests', () => {
         assert.strictEqual(state.usingFallbackProxy, true);
         assert.strictEqual(state.fallbackProxyUrl, 'http://manual.example:3128');
         assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.lastDetectionSource, 'fallback');
         sinon.assert.calledWith(applyProxyStub, 'http://manual.example:3128', true);
         sinon.assert.calledWith(notifyStub, 'fallback.usingManualProxy', sinon.match.any);
     });
@@ -203,7 +205,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
         configValues.enableFallback = true;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
         connectionTester!.testProxyAuto.resolves({
             success: false,
             proxyUrl: 'http://manual.example:3128',
@@ -218,13 +220,14 @@ suite('SystemProxyUpdateService Tests', () => {
         assert.strictEqual(state.autoModeOff, true);
         assert.strictEqual(state.usingFallbackProxy, false);
         assert.strictEqual(state.fallbackProxyUrl, undefined);
+        assert.strictEqual(state.lastDetectionSource, undefined);
     });
 
     test('Auto + detection fails + fallback disabled: enters autoModeOff without testing manual', async () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
         configValues.enableFallback = false;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -242,7 +245,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.mode = ProxyMode.Auto;
         state.autoProxyUrl = 'http://detected.example:8080';
         configValues.enableFallback = false;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -261,7 +264,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.vscodeConfigured = false;
         state.npmConfigured = false;
         configValues.enableFallback = false;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -274,7 +277,7 @@ suite('SystemProxyUpdateService Tests', () => {
     test('Auto + detection fails + no manualProxyUrl: enters autoModeOff', async () => {
         state.mode = ProxyMode.Auto;
         configValues.enableFallback = true;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -288,7 +291,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
         configValues.enableFallback = true;
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
         connectionTester = null;
 
         await service.checkAndUpdateSystemProxy();
@@ -304,7 +307,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.autoProxyUrl = 'http://manual.example:3128';
         state.usingFallbackProxy = true;
         state.fallbackProxyUrl = 'http://manual.example:3128';
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -330,7 +333,7 @@ suite('SystemProxyUpdateService Tests', () => {
         state.mode = ProxyMode.Manual;
         state.autoProxyUrl = 'http://old.example:8080';
         state.lastSystemProxyCheck = Date.now() - 10 * 60_000;
-        detectStub.resolves('http://fresh.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://fresh.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -343,7 +346,7 @@ suite('SystemProxyUpdateService Tests', () => {
     test('Non-Auto + no autoProxyUrl: detection runs even with recent timestamp', async () => {
         state.mode = ProxyMode.Off;
         state.lastSystemProxyCheck = Date.now() - 30_000;
-        detectStub.resolves('http://detected.example:8080');
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -355,7 +358,7 @@ suite('SystemProxyUpdateService Tests', () => {
     test('Non-Auto + detection null: stores undefined for autoProxyUrl', async () => {
         state.mode = ProxyMode.Manual;
         state.manualProxyUrl = 'http://manual.example:3128';
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
 
         await service.checkAndUpdateSystemProxy();
 
@@ -366,7 +369,7 @@ suite('SystemProxyUpdateService Tests', () => {
     test('getConfiguration is queried with otakProxy scope', async () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
-        detectStub.resolves(null);
+        detectStub.resolves({ proxyUrl: null, source: null });
 
         await service.checkAndUpdateSystemProxy();
 

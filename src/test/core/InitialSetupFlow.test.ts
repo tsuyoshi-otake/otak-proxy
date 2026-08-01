@@ -77,7 +77,13 @@ suite('InitialSetupFlow Tests', () => {
             recordedNotifications.push({ type: 'error', key, suggestions });
         });
 
-        detectStub = sandbox.stub(DetectUtils, 'detectSystemProxySettings');
+        // The flow now consumes the WithSource variant; adapt so the existing
+        // string/null-based stubbing below keeps working.
+        detectStub = sandbox.stub();
+        sandbox.stub(DetectUtils, 'detectSystemProxySettingsWithSource').callsFake(async () => {
+            const url = await detectStub();
+            return { proxyUrl: url ?? null, source: url ? 'windows' : null };
+        });
         showInformationMessageStub = sandbox.stub(vscode.window, 'showInformationMessage');
         showInputBoxStub = sandbox.stub(vscode.window, 'showInputBox');
         executeCommandStub = sandbox.stub(vscode.commands, 'executeCommand').resolves();

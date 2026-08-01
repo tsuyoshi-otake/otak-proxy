@@ -38,6 +38,14 @@ export interface ProxyTestResult {
 }
 
 /**
+ * Source that produced the currently applied Auto proxy URL.
+ * Persisted so detection can tell its own VS Code `http.proxy` write apart
+ * from a value that was already there (undefined = unknown provenance,
+ * e.g. state saved by an older version — treated as "do not suppress").
+ */
+export type AppliedProxySource = 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | 'fallback';
+
+/**
  * Proxy state interface representing the current proxy configuration
  *
  * @interface ProxyState
@@ -83,6 +91,7 @@ export interface ProxyState {
     autoModeOff?: boolean;               // Auto Mode OFF state (waiting for proxy)
     lastSystemProxyUrl?: string;         // Last detected system proxy URL
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
+    lastDetectionSource?: AppliedProxySource; // Provenance of autoProxyUrl (issue #29 echo suppression)
 }
 
 export interface IProxyStateManager {

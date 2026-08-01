@@ -9,6 +9,7 @@
   "config.proxyUrl": "VSCode, Git, npm ve entegre terminal proxy ayarları için proxy sunucusu URL'si (ör. http://proxy.example.com:8080)",
   "config.pollingInterval": "Saniye cinsinden Otomatik mod yoklama aralığı (10-300). Sistem proxy değişikliklerinin ne sıklıkta denetleneceği.",
   "config.detectionSourcePriority": "Proxy algılama kaynakları için öncelik sırası. Kaynaklar biri başarılı olana kadar sırayla denenir.",
+  "config.ignoreSelfWrittenVSCodeProxy": "VS Code'un http.proxy ayarı bu uzantının kendisinin uyguladığı proxy ile eşleştiğinde yok sayılır; böylece kendi yazdığı değer yeniden sistem proxy'si olarak algılanmaz.",
   "config.maxRetries": "Proxy algılama başarısız olduğunda yapılacak en fazla yeniden deneme sayısı.",
   "config.testInterval": "Saniye cinsinden proxy bağlantı testi aralığı (yalnızca Otomatik mod). Aralık: 30-600 saniye. Varsayılan: 60 saniye.",
   "config.autoTestEnabled": "Otomatik modda otomatik proxy bağlantı testini etkinleştirin. Etkinleştirildiğinde proxy bağlantısı düzenli olarak test edilir.",
