@@ -26,7 +26,14 @@ otak-proxy lets you flip between Auto and Off from the status bar, follows your 
 
 Working behind a corporate proxy usually means editing several configuration files by hand: VS Code settings, the Git config, the npm config, and the environment variables your terminals inherit. Keeping them aligned, and remembering to turn them all off again, is tedious and error-prone. **otak-proxy reduces the workflow to a single status-bar click after initial setup** and keeps VS Code, Git, npm, and new integrated terminals in step, with an Auto mode that follows your system proxy in the background.
 
-![otak-proxy](images/otak-proxy.png)
+```text
+  VS Code status bar (left side)
+  ─────────────────────────────────────────────────────────────────
+  …  ⟳ Auto: http://proxy.example.com:8080  │  ⚠ 0  ⓘ 0  │  main …
+  ─────────────────────────────────────────────────────────────────
+     ▲ one click cycles Off ↔ Auto and updates VS Code, Git, npm,
+       and new integrated terminals together
+```
 
 ## Quick Start
 
@@ -67,20 +74,37 @@ The configured URL is used as an Auto fallback when the system proxy is unavaila
 
 Click the proxy indicator to cycle through states:
 
-```
-Off -> Auto -> Off
+```text
+         click              click
+  ┌─────┐ ────▶ ┌──────┐ ────▶ ┌─────┐
+  │ Off │        │ Auto │        │ Off │  …
+  └─────┘        └──────┘        └─────┘
 ```
 
-Older saved Manual states are migrated to Auto when loaded. A configured proxy URL can still be used as the Auto fallback.
+There is **no separate Manual mode**: a URL entered via `otak: Configure Manual Proxy` is stored as the **Auto fallback**, used when no system proxy can be detected. Older saved Manual states are migrated to Auto when loaded.
 
 ### Status Indicators
 
-- `Proxy: Off` — Proxy is disabled
-- `Auto: http://...` — Synced with the system proxy
-- `Auto (Fallback): http://...` — The system proxy is unavailable; using the configured fallback proxy
-- `Auto: OFF` — No proxy is currently available
+```text
+  ┌──────────────────────────────────────────┐
+  │ ⊘ Proxy: Off                             │  proxy disabled; managed settings cleared
+  ├──────────────────────────────────────────┤
+  │ ⟳ Auto: http://proxy.example.com:8080    │  following the detected system proxy
+  ├──────────────────────────────────────────┤
+  │ ⌁ Auto (Fallback): http://192.168.1.2:88 │  no system proxy; using your configured
+  │                                          │  fallback URL (plug icon)
+  ├──────────────────────────────────────────┤
+  │ ⊘ Auto: OFF                              │  no reachable proxy right now; retested
+  │                                          │  automatically in the background
+  ├──────────────────────────────────────────┤
+  │ ⚠ Auto: http://proxy.example.com:8080    │  last apply failed on some target —
+  │                                          │  hover for details
+  └──────────────────────────────────────────┘
+```
 
-When `otakProxy.showProxyUrl` is `false`, the URL is replaced with `Configured` (for example, `Auto: Configured`).
+The glyphs above stand for the VS Code codicons `$(circle-slash)` (⊘), `$(sync)` (⟳), `$(plug)` (⌁), and `$(warning)` (⚠).
+
+When `otakProxy.showProxyUrl` is `false`, the URL is replaced with `Configured` (for example, `Auto: Configured`). Set it back to `true` — or use the "Show URL" link in the tooltip — to display the address.
 The detailed status bar hover tooltip remains enabled by default. The otak-proxy status bar items are placed on the left side so their tooltips do not cover right-side VS Code notifications. Set `otakProxy.statusBarTooltip` to `false` to hide hover tooltips.
 
 ### Auto Detection Scope
