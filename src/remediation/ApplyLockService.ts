@@ -42,6 +42,18 @@ export interface ApplyLockServiceOptions {
     now?: () => number;
 }
 
+export interface WithLocksOptions {
+    /**
+     * Fixed wait schedule applied when a lock is held by another window: wait
+     * retryDelaysMs[0], re-try the acquire, wait retryDelaysMs[1], ... The
+     * index is shared across all targets, so the total added wait is bounded
+     * by the schedule's sum regardless of how many targets are contended.
+     * Default [] preserves the historical single-attempt behavior (#30).
+     */
+    retryDelaysMs?: readonly number[];
+    sleep?: (ms: number) => Promise<void>;
+}
+
 function stableUserName(): string {
     try {
         return os.userInfo().username;
@@ -162,8 +174,11 @@ export class ApplyLockService {
     async withLocks<T>(
         targets: readonly ApplyLockRequest[],
         ttlMs: number,
-        task: () => Promise<T>
+        task: () => Promise<T>,
+        options: WithLocksOptions = {}
     ): Promise<{ acquired: true; value: T } | { acquired: false; failed: ApplyLockAcquireResult }> {
+        const retryDelaysMs = options.retryDelaysMs ?? [];
+        const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
         const acquired: ApplyLockHandle[] = [];
         // The critical section (diagnostics passes, delayed retries) can
         // legitimately outlive ttlMs. Keep the lease alive while the task runs
@@ -176,8 +191,17 @@ export class ApplyLockService {
         }, renewEveryMs);
         renewTimer.unref?.();
         try {
+            let delayIndex = 0;
             for (const target of [...targets].sort((a, b) => a.targetId.localeCompare(b.targetId))) {
-                const result = await this.tryAcquire(target, ttlMs);
+                let result = await this.tryAcquire(target, ttlMs);
+                // Only contention ('held') is worth waiting out — the usual
+                // holder is another window finishing the same convergence and
+                // releasing within a few seconds. ioError won't heal by waiting.
+                while (!result.acquired && result.reason === 'held' && delayIndex < retryDelaysMs.length) {
+                    await sleep(retryDelaysMs[delayIndex]);
+                    delayIndex += 1;
+                    result = await this.tryAcquire(target, ttlMs);
+                }
                 if (!result.acquired || !result.handle) {
                     return { acquired: false, failed: result };
                 }

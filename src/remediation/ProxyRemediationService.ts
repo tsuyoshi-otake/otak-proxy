@@ -54,6 +54,10 @@ interface ConvergenceRetryResult {
 }
 
 const DEFAULT_LOCK_TTL_MS = 30000;
+// Bounded wait for another window's convergence to finish before giving up on
+// the apply lock (#30). Fixed schedule (not deadline-based) so tests can drive
+// it deterministically with an injected sleep; sums to ~7.75s.
+const LOCK_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000, 2000, 2000];
 const CREDENTIAL_TARGET_CONSENT_KEY = 'otakProxy.v3.credentialTargetConsent';
 const RETRYABLE_CONVERGENCE_ISSUE_IDS = new Set([
     'git.managedProxyResidual',
@@ -129,14 +133,21 @@ export class ProxyRemediationService {
             return await task();
         }
 
-        const lockResult = await this.lockService.withLocks(targets, DEFAULT_LOCK_TTL_MS, task);
+        const lockResult = await this.lockService.withLocks(targets, DEFAULT_LOCK_TTL_MS, task, {
+            retryDelaysMs: LOCK_RETRY_DELAYS_MS,
+            sleep: this.sleep
+        });
         if (lockResult.acquired) {
             return lockResult.value;
         }
 
-        const diagnosticReport = await this.runDiagnosticsIfEnabled(settings);
-        Logger.warn('Skipped proxy apply because another otak-proxy window owns the apply lock.');
-        this.notifyAfterApply(() => this.notifyLockSkipped(settings, options));
+        // Fresh diagnostics AFTER the bounded wait: by now the winning window
+        // has normally finished converging, so a cached pre-wait report would
+        // report stale divergence and re-trigger the very notification #30
+        // removes.
+        const diagnosticReport = await this.runDiagnosticsIfEnabled(settings, true);
+        Logger.warn('Skipped proxy apply because another otak-proxy window still owns the apply lock after the bounded wait.');
+        this.notifyAfterApply(() => this.notifyLockDivergenceIfNeeded(diagnosticReport, settings, options));
         return {
             success: false,
             diagnosticReport,
@@ -402,20 +413,36 @@ export class ProxyRemediationService {
         }
     }
 
-    private async notifyLockSkipped(settings: V3Settings, options: SafeProxyApplyOptions): Promise<void> {
+    private async notifyLockDivergenceIfNeeded(
+        report: ProxyDiagnosticReport | undefined,
+        settings: V3Settings,
+        options: SafeProxyApplyOptions
+    ): Promise<void> {
         if (options.silent || settings.notificationLevel === 'off') {
             return;
         }
 
-        const i18n = I18nManager.getInstance();
-        const fingerprint = 'apply-lock-skipped';
-        if (!(await this.flapTracker.shouldNotify(fingerprint, flapSettings(settings)))) {
+        // Losing the lock race is not user-actionable: the winning window
+        // converges the machine to the same shared state in almost every case,
+        // so a "this window skipped the write" warning is pure noise (#30).
+        // Only surface a notification when post-wait diagnostics still see an
+        // issue that blocks convergence — that is a real divergence the user
+        // may need to look at.
+        const issue = getHighestPriorityIssue(
+            report?.issues.filter(candidate => candidate.impact === 'blocksConvergence') ?? []
+        );
+        if (!issue) {
             return;
         }
 
+        if (!(await this.flapTracker.shouldNotify(issue.fingerprint, flapSettings(settings)))) {
+            return;
+        }
+
+        const i18n = I18nManager.getInstance();
         const showDetails = i18n.t('action.showDetails');
         const action = await vscode.window.showWarningMessage(
-            i18n.t('remediation.notification.lockSkipped'),
+            i18n.t('remediation.notification.issueDetected'),
             showDetails
         );
         if (action === showDetails) {
