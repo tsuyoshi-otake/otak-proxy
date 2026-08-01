@@ -66,6 +66,11 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
   - Generated from `src/i18n/locales/*.json` via `npm run gen:nls`
   - Do not edit `package.nls*.json` by hand
 
+## Docs Policy (README / steering)
+- Status bar illustrations in docs are ASCII diagrams, not UI screenshots. Screenshots go stale silently; ASCII diagrams are diffable and reviewed with the code.
+- When changing status bar text/icons (`src/ui/StatusBarDisplay.ts` or `statusbar.*` strings in `src/i18n/locales/en.json`), update the ASCII state diagrams in `README.md` in the same change.
+- The toggle is two-state (Off ↔ Auto). Manual is not a mode: a URL from `otak: Configure Manual Proxy` is the Auto fallback. Docs must not describe a 3-mode toggle.
+
 ### VS Code extension-host tests
 - Default behavior: run only VS Code-dependent tests (auto-detected by scanning built `out/test/**/*.test.js` for `import/require('vscode')`).
 - Override: set `OTAK_PROXY_VSCODE_TEST_ALL=1` to run all tests under the VS Code host.
