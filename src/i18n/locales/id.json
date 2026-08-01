@@ -9,6 +9,7 @@
   "config.proxyUrl": "URL server proxy (mis., http://proxy.example.com:8080) untuk pengaturan proxy VSCode, Git, npm, dan terminal terintegrasi",
   "config.pollingInterval": "Interval polling mode Auto dalam detik (10-300). Seberapa sering memeriksa perubahan proxy sistem.",
   "config.detectionSourcePriority": "Urutan prioritas untuk sumber deteksi proxy. Sumber dicoba secara berurutan hingga salah satu berhasil.",
+  "config.ignoreSelfWrittenVSCodeProxy": "Abaikan pengaturan http.proxy VS Code saat cocok dengan proxy yang diterapkan oleh ekstensi ini sendiri, agar nilai yang ditulisnya tidak terdeteksi ulang sebagai proxy sistem.",
   "config.maxRetries": "Jumlah maksimum percobaan ulang untuk deteksi proxy ketika gagal.",
   "config.testInterval": "Interval uji koneksi proxy dalam detik (hanya mode Auto). Rentang: 30-600 detik. Default: 60 detik.",
   "config.autoTestEnabled": "Aktifkan pengujian koneksi proxy otomatis dalam mode Auto. Saat diaktifkan, konektivitas proxy diuji secara berkala.",

@@ -9,8 +9,8 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, type ProxyState } from '../core/types';
-import { validateProxyUrl, sanitizeProxyUrl, testProxyConnection, detectSystemProxySettings } from '../utils/ProxyUtils';
+import { ProxyMode, type AppliedProxySource, type ProxyState } from '../core/types';
+import { validateProxyUrl, sanitizeProxyUrl, testProxyConnection, detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
@@ -28,13 +28,15 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
     try {
         const i18n = I18nManager.getInstance();
         
-        const detectedProxy = await vscode.window.withProgress({
+        const detected = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: i18n.t('message.detectingSystemProxy'),
             cancellable: false
         }, async () => {
-            return await detectSystemProxySettings();
+            return await detectSystemProxySettingsWithSource();
         });
+        const detectedProxy = detected.proxyUrl;
+        const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
 
         const state = await ctx.getProxyState();
 
@@ -50,9 +52,9 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
             );
 
             if (action === i18n.t('action.testFirst')) {
-                return await handleTestFirst(ctx, state, detectedProxy, i18n);
+                return await handleTestFirst(ctx, state, detectedProxy, detectedSource, i18n);
             } else if (action === i18n.t('action.useAutoMode')) {
-                return await handleUseAutoMode(ctx, state, detectedProxy);
+                return await handleUseAutoMode(ctx, state, detectedProxy, detectedSource);
             } else if (action === i18n.t('action.saveAsManual')) {
                 return await handleSaveAsManual(ctx, state, detectedProxy);
             }
@@ -99,6 +101,7 @@ async function handleTestFirst(
     ctx: CommandContext,
     state: ProxyState,
     detectedProxy: string,
+    detectedSource: AppliedProxySource | undefined,
     i18n: I18nManager
 ): Promise<CommandResult> {
     const testResult = await vscode.window.withProgress({
@@ -118,7 +121,7 @@ async function handleTestFirst(
         );
 
         if (useAction === i18n.t('action.useAutoMode')) {
-            return await handleUseAutoMode(ctx, state, detectedProxy);
+            return await handleUseAutoMode(ctx, state, detectedProxy, detectedSource);
         } else if (useAction === i18n.t('action.saveAsManual')) {
             return await handleSaveAsManual(ctx, state, detectedProxy);
         }
@@ -153,7 +156,8 @@ async function handleTestFirst(
 async function handleUseAutoMode(
     ctx: CommandContext,
     state: ProxyState,
-    detectedProxy: string
+    detectedProxy: string,
+    detectedSource: AppliedProxySource | undefined
 ): Promise<CommandResult> {
     if (validateProxyUrl(detectedProxy)) {
         const wasAutoMode = state.mode === ProxyMode.Auto;
@@ -162,6 +166,7 @@ async function handleUseAutoMode(
         state.autoModeOff = false;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
+        state.lastDetectionSource = detectedSource;
         state.proxyReachable = undefined;
         state.lastTestResult = undefined;
         state.lastTestTimestamp = undefined;

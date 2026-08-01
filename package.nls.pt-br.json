@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
   "config.enableFallback": "Ativar fallback para o proxy manual quando nenhum proxy do sistema for detectado (somente no modo automático). Quando ativado, se nenhum proxy do sistema for detectado, a extensão tentará usar o proxy configurado manualmente como fallback.",
   "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.ignoreSelfWrittenVSCodeProxy": "Ignorar a configuração http.proxy do VS Code quando corresponder ao proxy aplicado pela própria extensão, para que sua própria gravação não seja detectada novamente como proxy do sistema.",
   "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
   "config.maxRetries": "Número máximo de tentativas de detecção de proxy quando ela falha.",
   "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",

@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
   "config.enableFallback": "未偵測到系統代理時回退到手動代理（僅自動模式）。啟用後，如未偵測到系統代理，擴充將嘗試使用手動設定的代理作為回退。",
   "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.ignoreSelfWrittenVSCodeProxy": "當 VS Code 的 http.proxy 設定與本延伸模組自身套用的代理一致時將其忽略，避免把自身寫入的值再次偵測為系統代理。",
   "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
   "config.maxRetries": "代理偵測失敗時的最大重試次數。",
   "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",

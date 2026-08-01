@@ -18,6 +18,13 @@ export async function handleProxyChanged(
         return;
     }
 
+    // With echo suppression (#29) the monitor reports "no system proxy" while
+    // the fallback proxy is engaged — that is the expected steady state, not a
+    // removal. Disabling here would tear down the working fallback.
+    if (!result.proxyUrl && state.usingFallbackProxy && state.fallbackProxyUrl) {
+        return;
+    }
+
     const previousProxy = state.autoProxyUrl;
     const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
@@ -99,6 +106,18 @@ async function saveAndPublishProxyState(context: InitializerContext, state: Prox
 
 function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetectionResult): void {
     state.autoProxyUrl = result.proxyUrl || undefined;
+
+    if (result.proxyUrl) {
+        if (result.proxyUrl !== state.fallbackProxyUrl) {
+            state.usingFallbackProxy = false;
+            state.fallbackProxyUrl = undefined;
+            state.lastDetectionSource = result.source ?? undefined;
+        }
+        // Detected URL equals the engaged fallback URL: keep the fallback
+        // flags and its 'fallback' provenance untouched.
+    } else {
+        state.lastDetectionSource = undefined;
+    }
 
     if (result.testResult) {
         state.lastTestResult = result.testResult as ProxyTestResult;

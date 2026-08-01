@@ -9,6 +9,7 @@
   "config.proxyUrl": "VS Code, Git, npm 및 통합 터미널 프록시 설정에 사용할 프록시 서버 URL(예: http://proxy.example.com:8080)",
   "config.pollingInterval": "자동 모드 폴링 간격(초, 10-300). 시스템 프록시 변경을 확인하는 빈도입니다.",
   "config.detectionSourcePriority": "프록시 감지 소스 우선순위. 지정된 순서대로 시도하여 하나가 성공할 때까지 진행합니다.",
+  "config.ignoreSelfWrittenVSCodeProxy": "이 확장 프로그램이 직접 적용한 프록시와 일치하는 VS Code의 http.proxy 설정을 무시하여, 자체 기록이 시스템 프록시로 다시 감지되지 않도록 합니다.",
   "config.maxRetries": "프록시 감지가 실패했을 때의 최대 재시도 횟수입니다.",
   "config.testInterval": "프록시 연결 테스트 간격(초, 자동 모드 전용). 범위: 30-600초. 기본값: 60초.",
   "config.autoTestEnabled": "자동 모드에서 프록시 연결 자동 테스트를 활성화합니다. 활성화하면 주기적으로 프록시 연결을 테스트합니다.",

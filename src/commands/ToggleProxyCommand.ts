@@ -51,6 +51,7 @@ function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
     target.usingFallbackProxy = source.usingFallbackProxy;
     target.fallbackProxyUrl = source.fallbackProxyUrl;
     target.autoModeOff = source.autoModeOff;
+    target.lastDetectionSource = source.lastDetectionSource;
 }
 
 function setAutoModeOff(state: ProxyState): void {
@@ -59,6 +60,7 @@ function setAutoModeOff(state: ProxyState): void {
     state.autoModeOff = true;
     state.usingFallbackProxy = false;
     state.fallbackProxyUrl = undefined;
+    state.lastDetectionSource = undefined;
 }
 
 async function testFallbackProxy(proxyUrl: string): Promise<ProxyTestResult> {
@@ -125,6 +127,7 @@ async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyStat
     state.usingFallbackProxy = true;
     state.fallbackProxyUrl = manualProxyUrl;
     state.autoProxyUrl = manualProxyUrl;
+    state.lastDetectionSource = 'fallback';
 
     const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
     Logger.log(`Fallback to Manual Proxy: ${sanitizedManualProxyUrl}`);

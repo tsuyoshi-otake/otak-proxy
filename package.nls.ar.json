@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
   "config.enableFallback": "تمكين العودة إلى الوكيل اليدوي عند عدم اكتشاف وكيل النظام (الوضع التلقائي فقط). عند التمكين، إذا لم يُكتشف وكيل نظام، سيحاول الامتداد استخدام الوكيل المُكوَّن يدويًا كبديل.",
   "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.ignoreSelfWrittenVSCodeProxy": "تجاهل إعداد http.proxy في VS Code عندما يطابق الوكيل الذي طبّقه هذا الامتداد بنفسه، حتى لا يُعاد اكتشاف ما كتبه على أنه وكيل نظام.",
   "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
   "config.maxRetries": "الحد الأقصى لعدد محاولات إعادة اكتشاف الوكيل عند الفشل.",
   "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",

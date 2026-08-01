@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { I18nManager } from '../i18n/I18nManager';
-import { detectSystemProxySettings, validateProxyUrl } from '../utils/ProxyUtils';
+import { detectSystemProxySettingsWithSource, validateProxyUrl } from '../utils/ProxyUtils';
 import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
-import { ProxyMode, ProxyState } from './types';
+import { AppliedProxySource, ProxyMode, ProxyState } from './types';
 import { Logger } from '../utils/Logger';
 
 export class InitialSetupFlow {
@@ -78,13 +78,14 @@ export class InitialSetupFlow {
         i18n: I18nManager,
         initialStateSignature: string
     ): Promise<void> {
-        const detectedProxy = await detectSystemProxySettings();
+        const detected = await detectSystemProxySettingsWithSource();
+        const detectedProxy = detected.proxyUrl;
 
         if (detectedProxy && validateProxyUrl(detectedProxy)) {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
                 return;
             }
-            this.useAutoProxy(state, detectedProxy, false);
+            this.useAutoProxy(state, detectedProxy, false, detected.source ?? undefined);
             await this.context.proxyStateManager.saveState(state);
             const applied = await applyProxyThroughContext(this.context, detectedProxy, true);
             if (applied) {
@@ -165,11 +166,17 @@ export class InitialSetupFlow {
         }
     }
 
-    private useAutoProxy(state: ProxyState, proxyUrl: string, fallback: boolean): void {
+    private useAutoProxy(
+        state: ProxyState,
+        proxyUrl: string,
+        fallback: boolean,
+        detectedSource?: AppliedProxySource
+    ): void {
         state.mode = ProxyMode.Auto;
         state.autoProxyUrl = proxyUrl;
         state.autoModeOff = false;
         state.usingFallbackProxy = fallback;
         state.fallbackProxyUrl = fallback ? proxyUrl : undefined;
+        state.lastDetectionSource = fallback ? 'fallback' : detectedSource;
     }
 }

@@ -24,7 +24,13 @@ suite('ImportProxyCommand Unit Tests', () => {
         // Force English so we can match action strings deterministically
         i18n.initialize('en');
 
-        detectStub = sandbox.stub(DetectUtils, 'detectSystemProxySettings');
+        // The command now consumes the WithSource variant; adapt so the
+        // existing string/null-based stubbing below keeps working.
+        detectStub = sandbox.stub();
+        sandbox.stub(DetectUtils, 'detectSystemProxySettingsWithSource').callsFake(async () => {
+            const url = await detectStub();
+            return { proxyUrl: url ?? null, source: url ? 'windows' : null };
+        });
         testProxyStub = sandbox.stub(ConnectionTest, 'testProxyConnection');
         showInformationMessageStub = sandbox.stub(vscode.window, 'showInformationMessage');
         showWarningMessageStub = sandbox.stub(vscode.window, 'showWarningMessage');

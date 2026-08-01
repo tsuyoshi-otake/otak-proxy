@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
   "config.enableFallback": "जब सिस्टम proxy का पता न चले तो मैनुअल proxy पर फ़ॉलबैक सक्षम करें (केवल ऑटो मोड)। सक्षम होने पर, यदि कोई सिस्टम proxy नहीं मिलता, तो एक्सटेंशन फ़ॉलबैक के रूप में मैन्युअल रूप से कॉन्फ़िगर किए गए proxy का उपयोग करने का प्रयास करेगा।",
   "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.ignoreSelfWrittenVSCodeProxy": "VS Code की http.proxy सेटिंग को अनदेखा करें जब वह इस एक्सटेंशन द्वारा स्वयं लागू किए गए proxy से मेल खाती हो, ताकि उसका अपना लिखा मान सिस्टम proxy के रूप में फिर से डिटेक्ट न हो।",
   "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
   "config.maxRetries": "विफल होने पर proxy डिटेक्शन के लिए पुनः प्रयासों की अधिकतम संख्या।",
   "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",

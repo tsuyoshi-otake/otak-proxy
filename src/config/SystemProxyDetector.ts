@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
 import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
+import { getProxyPublicUrl } from '../utils/ProxyStateSanitizer';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,6 +22,22 @@ export interface ProxyDetectionWithSource {
 }
 
 /**
+ * The proxy URL currently applied by this extension, with the provenance
+ * of that URL. `source` is undefined when provenance is unknown (state
+ * persisted by an older extension version).
+ */
+export interface AppliedProxyInfo {
+    url: string;
+    source?: string;
+}
+
+/**
+ * Supplies the currently applied proxy so detection can recognize its own
+ * VS Code `http.proxy` write (issue #29 echo suppression).
+ */
+export type AppliedProxyProvider = () => Promise<AppliedProxyInfo | undefined>;
+
+/**
  * SystemProxyDetector handles detection of system proxy settings across different platforms.
  * It validates detected proxy URLs and provides graceful fallback when detection fails.
  *
@@ -34,10 +51,19 @@ export class SystemProxyDetector {
     private validator: ProxyUrlValidator;
     private detectionSourcePriority: string[];
     private readonly timeoutMs = 5000;
+    private appliedProxyProvider?: AppliedProxyProvider;
 
     constructor(detectionSourcePriority?: string[]) {
         this.validator = new ProxyUrlValidator();
         this.detectionSourcePriority = detectionSourcePriority || ['environment', 'vscode', 'platform'];
+    }
+
+    /**
+     * Registers the provider used to recognize the extension's own
+     * VS Code `http.proxy` write during detection (issue #29).
+     */
+    setAppliedProxyProvider(provider: AppliedProxyProvider | undefined): void {
+        this.appliedProxyProvider = provider;
     }
 
     private async exec(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -114,8 +140,14 @@ export class SystemProxyDetector {
         switch (source) {
             case 'environment':
                 return this.validateSourceResult(this.detectFromEnvironment(), 'environment', 'Environment');
-            case 'vscode':
-                return this.validateSourceResult(this.detectFromVSCode(), 'vscode', 'VSCode');
+            case 'vscode': {
+                const result = this.validateSourceResult(this.detectFromVSCode(), 'vscode', 'VSCode');
+                if (result.proxyUrl && await this.isSelfWrittenVSCodeValue(result.proxyUrl)) {
+                    Logger.info('Ignoring VSCode http.proxy: it matches the proxy this extension applied (echo suppression)');
+                    return { proxyUrl: null, source: null };
+                }
+                return result;
+            }
             case 'platform':
                 return this.validatePlatformResult(await detectPlatformProxyWithSource((command, args) => this.exec(command, args)));
             default:
@@ -152,6 +184,48 @@ export class SystemProxyDetector {
 
         Logger.warn('Platform proxy failed validation:', result.proxyUrl);
         return { proxyUrl: null, source: null };
+    }
+
+    /**
+     * Decides whether a `http.proxy` value read from VS Code settings is an
+     * echo of the proxy this extension itself applied (issue #29).
+     *
+     * Suppression requires ALL of:
+     * - the escape-hatch setting `otakProxy.ignoreSelfWrittenVSCodeProxy` is not false,
+     * - a registered provider reports a currently applied proxy,
+     * - its provenance is known and is NOT 'vscode' (undefined provenance may be a
+     *   hand-set `http.proxy` that predates this extension — never suppress those),
+     * - the candidate equals the applied URL in credential-stripped public form.
+     */
+    private async isSelfWrittenVSCodeValue(candidate: string): Promise<boolean> {
+        if (!this.appliedProxyProvider || !this.isEchoSuppressionEnabled()) {
+            return false;
+        }
+
+        try {
+            const applied = await this.appliedProxyProvider();
+            if (!applied?.url || !applied.source || applied.source === 'vscode') {
+                return false;
+            }
+
+            const candidatePublic = getProxyPublicUrl(candidate) ?? candidate;
+            const appliedPublic = getProxyPublicUrl(applied.url) ?? applied.url;
+            return candidatePublic === appliedPublic;
+        } catch (error) {
+            Logger.warn('Applied proxy provider failed; skipping echo suppression:', error);
+            return false;
+        }
+    }
+
+    private isEchoSuppressionEnabled(): boolean {
+        try {
+            const value = vscode.workspace.getConfiguration('otakProxy').get<boolean>('ignoreSelfWrittenVSCodeProxy', true);
+            // Unit tests run against a vscode shim whose get() ignores the
+            // default argument, so undefined must mean "enabled".
+            return value !== false;
+        } catch {
+            return true;
+        }
     }
 
     /**

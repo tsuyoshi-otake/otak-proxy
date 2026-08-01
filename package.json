@@ -117,6 +117,12 @@
           "scope": "machine",
           "description": "%config.detectionSourcePriority%"
         },
+        "otakProxy.ignoreSelfWrittenVSCodeProxy": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "%config.ignoreSelfWrittenVSCodeProxy%"
+        },
         "otakProxy.maxRetries": {
           "type": "number",
           "default": 3,

@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
   "config.enableFallback": "Включить резервный переход на ручной прокси, если системный прокси не обнаружен (только автоматический режим). При включении, если системный прокси не обнаружен, расширение попытается использовать настроенный вручную прокси в качестве резервного.",
   "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.ignoreSelfWrittenVSCodeProxy": "Игнорировать параметр http.proxy VS Code, если он совпадает с прокси, применённым самим расширением, чтобы собственная запись не определялась повторно как системный прокси.",
   "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
   "config.maxRetries": "Максимальное число повторных попыток обнаружения прокси при сбое.",
   "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",

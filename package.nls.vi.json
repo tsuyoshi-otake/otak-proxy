@@ -14,6 +14,7 @@
   "config.diagnosticsEnabled": "Enable read-only proxy diagnostics after state changes and when running the diagnose command.",
   "config.enableFallback": "Bật dự phòng sang proxy thủ công khi không phát hiện được proxy hệ thống (chỉ chế độ Tự động). Khi bật, nếu không phát hiện proxy hệ thống, tiện ích sẽ thử dùng proxy thủ công đã cấu hình làm dự phòng.",
   "config.hostUserLockEnabled": "Use cross-window locks before writing host/user proxy targets such as Git, npm, VS Code, and terminal environment mutators.",
+  "config.ignoreSelfWrittenVSCodeProxy": "Bỏ qua cài đặt http.proxy của VS Code khi nó trùng với proxy mà chính tiện ích mở rộng này đã áp dụng, để giá trị tự ghi không bị phát hiện lại như proxy hệ thống.",
   "config.legacyEnvFirstAutoDetection": "Keep the v2-compatible Auto detection order that checks process environment proxy variables before current platform settings.",
   "config.maxRetries": "Số lần thử lại tối đa khi phát hiện proxy thất bại.",
   "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",

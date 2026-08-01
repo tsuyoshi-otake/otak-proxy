@@ -9,6 +9,7 @@
   "config.proxyUrl": "用於 VS Code、Git、npm 以及整合式終端機代理設定的代理伺服器 URL（例如：http://proxy.example.com:8080）",
   "config.pollingInterval": "自動模式輪詢間隔（秒，10-300）。檢查系統代理變更的頻率。",
   "config.detectionSourcePriority": "代理偵測來源的優先順序。依序嘗試，直到成功為止。",
+  "config.ignoreSelfWrittenVSCodeProxy": "當 VS Code 的 http.proxy 設定與本延伸模組自身套用的代理一致時將其忽略，避免把自身寫入的值再次偵測為系統代理。",
   "config.maxRetries": "代理偵測失敗時的最大重試次數。",
   "config.testInterval": "代理連線測試間隔（秒，僅自動模式）。範圍：30-600 秒。預設：60 秒。",
   "config.autoTestEnabled": "在自動模式啟用自動代理連線測試。啟用後會定期測試代理連通性。",
