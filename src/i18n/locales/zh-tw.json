@@ -251,7 +251,6 @@
   "action.reloadWindow": "Reload Window",
   "remediation.notification.applyFailed": "Proxy settings did not fully apply. otak-proxy recorded sanitized diagnostics.",
   "remediation.notification.issueDetected": "Proxy diagnostics found a setting that may require your attention.",
-  "remediation.notification.lockSkipped": "Another otak-proxy window is already applying proxy settings. This window skipped the write.",
   "action.allowPlaintextWrite": "Allow Plaintext Write",
   "remediation.notification.credentialConsentRequired": "This proxy URL contains credentials. Applying it may write credentials to plaintext target config files such as settings.json, .gitconfig, or .npmrc.",
   "command.resetWinHttpProxy": "otak: Reset WinHTTP Proxy",

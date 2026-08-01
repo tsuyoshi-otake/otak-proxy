@@ -251,7 +251,6 @@
   "action.reloadWindow": "ウィンドウをリロード",
   "remediation.notification.applyFailed": "Proxy設定を完全には適用できませんでした。otak-proxyはサニタイズ済み診断を記録しました。",
   "remediation.notification.issueDetected": "Proxy診断で確認が必要な可能性のある設定が見つかりました。",
-  "remediation.notification.lockSkipped": "別のotak-proxyウィンドウがProxy設定を適用中です。このウィンドウでは書き込みをスキップしました。",
   "action.allowPlaintextWrite": "平文書き込みを許可",
   "remediation.notification.credentialConsentRequired": "このProxy URLには認証情報が含まれています。適用すると settings.json、.gitconfig、.npmrc などの平文設定ファイルへ認証情報を書き込む可能性があります。",
   "command.resetWinHttpProxy": "otak: WinHTTP Proxyをリセット",

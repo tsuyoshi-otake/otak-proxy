@@ -889,7 +889,11 @@ suite('v3 remediation foundation', () => {
             async () => ({ mode: ProxyMode.Manual }),
             {
                 lockService,
-                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                // The bounded lock wait (#30) runs through the injected sleep;
+                // the lock stays held the whole time, so the apply must still
+                // be skipped — just without real-time delays in the test.
+                sleep: async () => {}
             }
         );
 
@@ -908,6 +912,169 @@ suite('v3 remediation foundation', () => {
             assert.strictEqual(result.lockSkipped, true);
             assert.strictEqual(calls, 0);
         } finally {
+            await lockService.release(held.handle);
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('ProxyRemediationService proceeds when the lock is released during the bounded wait (#30)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'off' });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-lock-wait-test-'));
+        const context = createContext(new Map());
+        const lockService = new ApplyLockService({ baseDir });
+        const held = await lockService.tryAcquire({
+            targetId: 'git.global.http.proxy',
+            targetHost: 'workspaceHost',
+            scope: 'hostUser'
+        }, 30000);
+        assert.ok(held.acquired && held.handle);
+
+        let calls = 0;
+        let released = false;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService,
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                // The "other window" finishes its convergence during the first
+                // wait slot and releases the lock.
+                sleep: async () => {
+                    if (!released && held.handle) {
+                        released = true;
+                        await lockService.release(held.handle);
+                    }
+                }
+            }
+        );
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async () => {
+                    calls += 1;
+                    return detailedResult(true);
+                }
+            );
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.lockSkipped, false);
+            assert.strictEqual(calls, 1);
+        } finally {
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('a lock skip with converged post-wait diagnostics stays silent (#30)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'warnings' });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-lock-silent-test-'));
+        const context = createContext(new Map());
+        const lockService = new ApplyLockService({ baseDir });
+        const held = await lockService.tryAcquire({
+            targetId: 'git.global.http.proxy',
+            targetHost: 'workspaceHost',
+            scope: 'hostUser'
+        }, 30000);
+        assert.ok(held.acquired && held.handle);
+
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService,
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let warningCount = 0;
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => {
+            warningCount++;
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            assert.strictEqual(result.lockSkipped, true);
+            assert.strictEqual(
+                warningCount, 0,
+                'losing the lock race with clean diagnostics must not surface a notification'
+            );
+        } finally {
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
+            await lockService.release(held.handle);
+            restoreConfig();
+            await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    test('a lock skip with a persistent convergence blocker warns once (#30)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'warnings' });
+        const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'otak-proxy-lock-diverged-test-'));
+        const context = createContext(new Map());
+        const lockService = new ApplyLockService({ baseDir });
+        const held = await lockService.tryAcquire({
+            targetId: 'git.global.http.proxy',
+            targetHost: 'workspaceHost',
+            scope: 'hostUser'
+        }, 30000);
+        assert.ok(held.acquired && held.handle);
+
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService,
+                diagnostics: {
+                    run: async () => diagnosticReport([
+                        managedConvergenceIssue('git.managedProxyMismatch', 'git.global.http.proxy')
+                    ])
+                } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let warningCount = 0;
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => {
+            warningCount++;
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            assert.strictEqual(result.lockSkipped, true);
+            assert.strictEqual(
+                warningCount, 1,
+                'a convergence blocker that survives the bounded wait is real divergence and must warn'
+            );
+        } finally {
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
             await lockService.release(held.handle);
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });
