@@ -211,10 +211,9 @@ export class I18nManager {
     private substituteParams(message: string, params: Record<string, string>): string {
         let result = message;
         for (const [key, value] of Object.entries(params)) {
-            const placeholder = `{${key}}`;
-            // Escape special regex characters in the placeholder
-            const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            result = result.replace(new RegExp(escapedPlaceholder, 'g'), value);
+            // Literal split/join instead of a dynamically built RegExp: the placeholder
+            // needs no escaping and `$`-sequences in the value stay literal.
+            result = result.split(`{${key}}`).join(value);
         }
         return result;
     }
