@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getErrorCode } from '../utils/ErrorUtils';
@@ -42,7 +43,7 @@ export class InstanceRegistryStore {
     }
 
     async writeLockFile(lockFile: InstancesLockFile): Promise<void> {
-        const tempPath = `${this.lockFilePath}.${this.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+        const tempPath = `${this.lockFilePath}.${this.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
         const content = JSON.stringify(lockFile, null, 2);
 
         fs.writeFileSync(tempPath, content, 'utf-8');

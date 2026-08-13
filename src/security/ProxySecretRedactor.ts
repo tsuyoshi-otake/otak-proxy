@@ -16,8 +16,9 @@ function uniqueSecrets(secrets: readonly string[]): string[] {
     return [...new Set(secrets.filter(secret => secret.length > 0))];
 }
 
-function escapeRegExp(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Literal (non-regex) global replace: no dynamic RegExp, no `$`-pattern surprises. */
+function replaceAllLiteral(haystack: string, needle: string, replacement: string): string {
+    return haystack.split(needle).join(replacement);
 }
 
 function encodedForms(secret: string): string[] {
@@ -60,7 +61,7 @@ export class ProxySecretRedactor {
             .replace(BARE_CREDENTIAL_PATTERN, '$1<credentials>@');
 
         for (const secret of uniqueSecrets(knownSecrets.flatMap(encodedForms))) {
-            redacted = redacted.replace(new RegExp(escapeRegExp(secret), 'g'), '<redacted>');
+            redacted = replaceAllLiteral(redacted, secret, '<redacted>');
         }
 
         return redacted.replace(CONTROL_CHAR_PATTERN, char => {

@@ -245,7 +245,9 @@ function substituteParams(message: string, params?: Record<string, string>): str
 
   let result = message;
   for (const [key, value] of Object.entries(params)) {
-    result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+    // Literal split/join instead of a dynamically built RegExp: the placeholder
+    // needs no escaping and `$`-sequences in the value stay literal.
+    result = result.split(`{${key}}`).join(value);
   }
   return result;
 }

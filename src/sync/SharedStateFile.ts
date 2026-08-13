@@ -12,6 +12,7 @@
  * - Graceful failure handling (5.5)
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProxyState, ProxyTestResult } from '../core/types';
@@ -181,7 +182,7 @@ export class SharedStateFile implements ISharedStateFile {
     async write(state: SharedState): Promise<void> {
         const tempPath = path.join(
             this.syncDir,
-            `${STATE_FILE_NAME}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}${TEMP_FILE_SUFFIX}`
+            `${STATE_FILE_NAME}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}${TEMP_FILE_SUFFIX}`
         );
         try {
             // Ensure sync directory exists

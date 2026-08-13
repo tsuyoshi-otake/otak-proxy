@@ -23,10 +23,22 @@ const DEFAULT_RUNNER: CommandRunner = async (command, args) => execFileAsync(com
     windowsHide: true
 });
 
+/**
+ * `<name>    REG_<TYPE>    <value>` as printed by `reg query`. Static (no value name
+ * interpolated into a regex) and free of ambiguous quantifiers, so untrusted registry
+ * output cannot steer the pattern.
+ */
+const REG_VALUE_LINE_PATTERN = /^\s*(\S+)\s+REG_\w+\s+(.+)$/i;
+
 function parseRegValue(stdout: string, name: string): string | undefined {
-    const pattern = new RegExp(`\\b${name}\\s+REG_\\w+\\s+(.+)`, 'i');
-    const match = stdout.match(pattern);
-    return match?.[1]?.trim();
+    const target = name.toLowerCase();
+    for (const line of stdout.split(/\r?\n/)) {
+        const match = REG_VALUE_LINE_PATTERN.exec(line);
+        if (match && match[1].toLowerCase() === target) {
+            return match[2].trim();
+        }
+    }
+    return undefined;
 }
 
 type WinHttpParse = Pick<WindowsProxyObservation, 'winHttpProxy' | 'winHttpBypass' | 'winHttpParseStatus'>;
