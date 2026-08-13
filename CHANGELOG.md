@@ -1,5 +1,14 @@
 # Change Log
 
+## [3.2.3] - 2026-08-13
+
+### Security
+- Reject invisible Unicode code points - variation selectors, tag characters, bidi overrides, zero-width and other non-printing characters - across the sources, every non-ignored repository file, and the compiled artifacts that ship (#37). The GlassWorm campaign hid extension payloads in exactly these code points, which no amount of code review catches; the check now runs as part of `npm run lint` and again before the VSIX is packaged.
+- Derive the multi-window temp file suffixes and the instance id fallback from `crypto.randomBytes` instead of `Math.random` (#38).
+
+### Changed
+- Replace dynamically constructed regular expressions in the secret redactor, in message parameter substitution, and in Windows registry parsing with literal or static equivalents (#38). Redacted output, substituted messages, and parsed registry values are unchanged; parameter values containing `$`-sequences are now substituted literally instead of being treated as replacement patterns.
+
 ## [3.2.2] - 2026-08-01
 
 ### Fixed
