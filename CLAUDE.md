@@ -60,6 +60,18 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
 - When omitting real-machine E2E, record the reason, substitute verification evidence, and residual risk in the tracking Issue or release record. Do not describe the omitted matrix as passed.
 - When real-machine E2E is performed, cover the relevant normal and failure scenarios, record the pre-test state, use temporary profiles/config files where possible, and explicitly restore or verify cleanup after the test.
 
+## Supply-Chain Lint (Invisible Unicode / GlassWorm)
+This extension publishes to the Visual Studio Marketplace **and** the Open VSX Registry, which is the channel the GlassWorm worm used to ship payloads hidden in invisible Unicode code points. Hidden code cannot be caught by reading a diff, so it is checked mechanically.
+
+- Detector (single source of truth): `scripts/lib/invisible-unicode.mjs` — plain ESM, no build step, because both consumers run before `tsc`.
+- Consumers:
+  - ESLint rule `otak/no-invisible-unicode` (`eslint-rules/no-invisible-unicode.mjs`) — inline editor feedback for `src/**`.
+  - `npm run lint:unicode` — every tracked *and* new non-ignored file (JSON, Markdown, workflows, scripts). Part of `npm run lint`, so it gates CI.
+  - `npm run lint:unicode:dist` — the compiled artifacts that actually ship. Runs in the publish workflow before `vsce package`, so a payload injected into `out/**` is caught even when the sources are clean.
+- Exemptions are deliberate and narrow: a BOM at offset 0, and a single emoji presentation selector (U+FE0E/U+FE0F) directly after an emoji or keycap base. Runs of two or more selectors are always rejected — byte smuggling produces runs.
+- Never write a literal invisible character into a test fixture; build it with `String.fromCodePoint` so the file itself stays clean and a reviewer can tell a fixture from a real payload.
+- Adding an exemption requires a comment in `scripts/lib/invisible-unicode.mjs` explaining why the character is legitimate.
+
 ## Localization Source Of Truth
 - UI/runtime messages: `src/i18n/locales/*.json`
 - VS Code contributed strings (`package.json` placeholders like `%command.toggleProxy%`):

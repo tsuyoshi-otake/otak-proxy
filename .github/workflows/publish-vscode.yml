@@ -44,6 +44,11 @@ jobs:
       - name: Smoke tests
         run: xvfb-run -a npm run test:smoke
 
+      # The sources were scanned by "Lint"; this scans what is actually shipped, so a
+      # payload injected into the build output is caught before it reaches a registry.
+      - name: Scan shipped artifacts for invisible Unicode
+        run: npm run lint:unicode:dist
+
       - name: Package VSIX
         run: npm run package:vsix
 
