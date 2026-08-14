@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "suite": "failure-injection",
-  "startedAt": "2026-08-14T16:26:24.769Z",
-  "completedAt": "2026-08-14T16:26:24.972Z",
+  "startedAt": "2026-08-14T16:38:40.494Z",
+  "completedAt": "2026-08-14T16:38:40.696Z",
   "command": [
     "C:\\Program Files\\nodejs\\node.exe",
     "node_modules\\mocha\\bin\\mocha.js",

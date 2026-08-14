@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260814163845847-PBT-CAL-001-22020-8-b9709ca2",
+  "propertyId": "PBT-CAL-001",
+  "status": "calibrated",
+  "seed": 999983,
+  "path": "0:0",
+  "numRuns": 1,
+  "numSkips": 0,
+  "numShrinks": 1,
+  "generatorVersion": "calibration-v1",
+  "counterexample": [
+    {
+      "mode": "auto",
+      "autoModeOff": true,
+      "autoProxyUrl": "safe://proxy/xx"
+    }
+  ],
+  "counterexamplePath": "0:0",
+  "failure": "property failed",
+  "requirements": [
+    "DVA-3.1",
+    "DVA-3.2",
+    "DVA-3.3",
+    "DVA-3.4",
+    "DVA-3.5",
+    "DVA-3.6",
+    "DVA-3.7"
+  ],
+  "tool": {
+    "name": "fast-check",
+    "version": "4.x"
+  },
+  "source": {
+    "commit": "working-tree",
+    "worktreeFingerprint": "30f65be17a5524c2"
+  },
+  "redaction": "safe-token-v1"
+}

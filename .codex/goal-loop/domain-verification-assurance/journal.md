@@ -31,3 +31,9 @@
 - Release iteration 3 fail: `v3.2.4` のLinux publish workflow（run 31818783246）はregistry公開前のUnit testsで `ORC-SYNC-005` に失敗した。証拠: remote timestamp `now + 30_001` は、SUTが別途採取した時刻との差が1 ms以上になると30秒許容範囲内になる。
 - Investigate: `ConflictResolver` は自身の `Date.now()` と30秒のdrift上限を使う。テストが時計を固定せず最大値+1を渡すと、scheduler遅延で非決定的になる。
 - Iteration 3 fix/pass: 値を `now + 60_000` にして上限外を明示した。`npm run test:domain-oracle`、`npm run verify:assurance`、runner cleanupは終了コード0。`v3.2.4` tagは不変の失敗記録として保持し、修正済み成果物は `v3.2.5` として公開する。
+
+## 2026-08-15 release-3.2.6
+
+- Release iteration 4 fail: `v3.2.5` のLinux publish workflow（run 31819660784）はregistry公開前のUnit testsで `ApplyLockService lease renewal` に失敗した。証拠: competitorがrenew中の一時的な不完全JSONを読み、`ioError`を返した。
+- Investigate: `tryAcquire` はexclusive create失敗後にrecordを1回読み、read/JSON parse失敗を直ちに`ioError`へ変換していた。renewのin-place writeと重なると有効なlockを安全に判定できない。
+- Iteration 4 fix/pass: lock pathが存在する間は`held`としてfail closedし、releaseとreadの間にlockが消えた場合だけexclusive createを1回再試行する。決定的なpartial-record回帰試験を追加。`npm run test:unit:parallel` は727+25 passing、`npm run verify:assurance` とrunner cleanupは終了コード0。`v3.2.5` tagは不変の失敗記録として保持し、修正済み成果物は `v3.2.6` として公開する。

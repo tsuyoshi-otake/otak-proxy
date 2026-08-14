@@ -117,7 +117,21 @@ export class ApplyLockService {
 
         const holder = await this.readLock(lockPath);
         if (!holder) {
-            return { acquired: false, reason: 'ioError' };
+            // A peer may be renewing its lease with an in-place write at this
+            // exact instant. If a lock path still exists but is temporarily
+            // unreadable, fail closed: it is safer to report contention than
+            // to mistake a live lock for an I/O failure or reclaim it.
+            if (await this.lockPathExists(lockPath)) {
+                return { acquired: false, reason: 'held' };
+            }
+
+            // The holder may have released between our failed exclusive create
+            // and read. Retry the create once so a vanished lock does not turn
+            // into a spurious I/O error.
+            const createdAfterRelease = await this.tryCreateLock(lockPath, record);
+            return createdAfterRelease
+                ? { acquired: true, handle: { target, token, path: lockPath } }
+                : { acquired: false, reason: 'held' };
         }
 
         if (holder.expiresAt > this.now()) {
@@ -238,6 +252,15 @@ export class ApplyLockService {
             return JSON.parse(raw) as ApplyLockRecord;
         } catch {
             return undefined;
+        }
+    }
+
+    private async lockPathExists(lockPath: string): Promise<boolean> {
+        try {
+            await fs.access(lockPath);
+            return true;
+        } catch {
+            return false;
         }
     }
 

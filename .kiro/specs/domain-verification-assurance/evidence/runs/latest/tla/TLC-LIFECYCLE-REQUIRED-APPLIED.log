@@ -1,5 +1,5 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 0 and seed 2026081503 with 1 worker on 16 cores with 14014MB heap and 64MB offheap memory [pid: 2108] (Windows 11 10.0 amd64, Microsoft 11.0.31 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 0 and seed 2026081503 with 1 worker on 16 cores with 14014MB heap and 64MB offheap memory [pid: 40496] (Windows 11 10.0 amd64, Microsoft 11.0.31 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file C:\Codes\tsuyoshi-otake\otak-proxy\formal\ProxyLifecycle.tla
 Parsing file C:\Users\developer\AppData\Local\Temp\Naturals.tla
 Parsing file C:\Users\developer\AppData\Local\Temp\FiniteSets.tla
@@ -8,9 +8,9 @@ Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module ProxyLifecycle
-Starting... (2026-08-15 01:26:49)
+Starting... (2026-08-15 01:39:00)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-15 01:26:50.
+Finished computing initial states: 1 distinct state generated at 2026-08-15 01:39:01.
 Error: Invariant NeverApplied is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -60,4 +60,4 @@ State 4: <Complete line 63, col 5 to line 71, col 74 of module ProxyLifecycle>
 10 states generated, 8 distinct states found, 3 states left on queue.
 The depth of the complete state graph search is 4.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 4 and the 95th percentile is 4).
-Finished in 00s at (2026-08-15 01:26:50)
+Finished in 00s at (2026-08-15 01:39:01)

@@ -1,5 +1,10 @@
 # Change Log
 
+## [3.2.6] - 2026-08-15
+
+### Fixed
+- Treat a lock file observed while a peer renews its lease as held until it can be read safely, preventing a concurrent apply attempt from reporting a spurious I/O error during an active lock (#42).
+
 ## [3.2.5] - 2026-08-15
 
 ### Fixed

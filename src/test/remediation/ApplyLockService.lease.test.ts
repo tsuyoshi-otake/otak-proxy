@@ -71,4 +71,20 @@ suite('ApplyLockService lease renewal', () => {
         const afterRelease = await competitor.tryAcquire(target, ttlMs);
         assert.strictEqual(afterRelease.acquired, true, 'lock must be free after withLocks returns');
     });
+
+    test('an unreadable lock during renewal is conservatively treated as held', async () => {
+        const holder = new ApplyLockService({ baseDir });
+        const competitor = new ApplyLockService({ baseDir });
+        const acquired = await holder.tryAcquire(target, 300);
+        assert.ok(acquired.acquired && acquired.handle, 'holder must acquire the lock');
+
+        // Models the brief invalid JSON window created by an in-place lease
+        // renewal write. A competitor must never classify that live path as a
+        // reusable or failed lock.
+        await fs.writeFile(acquired.handle.path, '{', 'utf8');
+        const observed = await competitor.tryAcquire(target, 300);
+
+        assert.strictEqual(observed.acquired, false);
+        assert.strictEqual(observed.reason, 'held');
+    });
 });

@@ -1,7 +1,7 @@
 # 敵対的再監査・リリース判定
 
 - 判定: **CONDITIONAL-GO**
-- 実行記録: 2026-08-14T16:26:56.746Z
+- 実行記録: 2026-08-14T16:39:07.231Z
 - C2: 100%
 - mutation: 100%（surviving 0、equivalent 0）
 - TLC: allPassed=true
