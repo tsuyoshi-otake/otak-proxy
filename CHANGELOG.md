@@ -1,5 +1,13 @@
 # Change Log
 
+## [3.2.4] - 2026-08-15
+
+### Fixed
+- Prevent a delayed proxy-detection completion from an earlier monitor lifecycle from publishing a stale result after the monitor has been stopped or restarted (#42).
+
+### Changed
+- Add independently defined domain decision oracles, deterministic property-test seed and counterexample replay, atomic-condition coverage, mutation analysis, protocol-compatible boundary contracts, deterministic failure injection, and TLA+/TLC lifecycle and sync verification evidence (#42).
+
 ## [3.2.3] - 2026-08-13
 
 ### Security

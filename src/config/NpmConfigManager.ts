@@ -9,6 +9,30 @@ import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 const execFileAsync = promisify(execFile);
 
+export interface NpmCommandOptions {
+    timeout: number;
+    encoding: 'utf8';
+    env: NodeJS.ProcessEnv;
+    windowsHide?: boolean;
+}
+
+export type NpmCommandRunner = (
+    command: string,
+    args: string[],
+    options: NpmCommandOptions
+) => Promise<{ stdout: string; stderr: string }>;
+
+export interface NpmConfigManagerOptions {
+    commandRunner?: NpmCommandRunner;
+    isWindows?: boolean;
+    env?: NodeJS.ProcessEnv;
+    commandAvailable?: (env: NodeJS.ProcessEnv) => boolean;
+}
+
+const defaultCommandRunner: NpmCommandRunner = async (command, args, options) => {
+    return await execFileAsync(command, args, options);
+};
+
 /**
  * npm on Windows starts through cmd.exe and npm.cmd before Node.js executes.
  * Under CPU, disk, or antivirus load that startup can exceed five seconds even
@@ -200,18 +224,25 @@ function createNpmNotInstalledError(cause?: unknown): Error & {
  */
 export class NpmConfigManager {
     private readonly timeout: number = NPM_CONFIG_COMMAND_TIMEOUT_MS;
-    private readonly isWindows: boolean = process.platform === 'win32';
+    private readonly isWindows: boolean;
     private readonly userConfigPath?: string;
+    private readonly commandRunner: NpmCommandRunner;
+    private readonly baseEnv: NodeJS.ProcessEnv;
+    private readonly commandAvailable: (env: NodeJS.ProcessEnv) => boolean;
 
     /**
      * @param userConfigPath Optional override for npm user config file (useful for tests).
      */
-    constructor(userConfigPath?: string) {
+    constructor(userConfigPath?: string, options: NpmConfigManagerOptions = {}) {
         this.userConfigPath = userConfigPath;
+        this.commandRunner = options.commandRunner ?? defaultCommandRunner;
+        this.isWindows = options.isWindows ?? process.platform === 'win32';
+        this.baseEnv = options.env ?? process.env;
+        this.commandAvailable = options.commandAvailable ?? (env => isCommandOnPath('npm', this.isWindows, env));
     }
 
     private ensureNpmAvailable(env: NodeJS.ProcessEnv): void {
-        if (!isCommandOnPath('npm', this.isWindows, env)) {
+        if (!this.commandAvailable(env)) {
             throw createNpmNotInstalledError();
         }
     }
@@ -227,7 +258,7 @@ export class NpmConfigManager {
         // override values stored in npmrc files. In practice these env vars can leak into
         // VS Code test runs (for example via npx), making get/set behavior non-deterministic.
         // We remove them so we can reliably manage and read the persisted npm config.
-        const env: NodeJS.ProcessEnv = { ...process.env };
+        const env: NodeJS.ProcessEnv = { ...this.baseEnv };
         delete env.npm_config_proxy;
         delete env.npm_config_https_proxy;
         // Windows env names are case-insensitive, but Node may surface them in different cases.
@@ -236,8 +267,8 @@ export class NpmConfigManager {
 
         if (this.isWindows) {
             this.ensureNpmAvailable(env);
-            const comspec = process.env.ComSpec || 'cmd.exe';
-            return execFileAsync(comspec, ['/d', '/s', '/c', 'npm', ...fullArgs], {
+            const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe';
+            return this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', ...fullArgs], {
                 timeout: this.timeout,
                 encoding: 'utf8',
                 env,
@@ -246,7 +277,7 @@ export class NpmConfigManager {
         }
 
         this.ensureNpmAvailable(env);
-        return execFileAsync('npm', fullArgs, {
+        return this.commandRunner('npm', fullArgs, {
             timeout: this.timeout,
             encoding: 'utf8',
             env

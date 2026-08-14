@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "sourceOfTruth": [
+    ".kiro/steering/product.md",
+    ".kiro/specs/domain-verification-assurance/requirements.md"
+  ],
+  "historicalConflicts": [
+    {
+      "id": "HIST-MANUAL-001",
+      "subject": "Manual mode",
+      "decision": "現行のモード遷移は Off と Auto の二状態であり、manualProxyUrl は Auto のfallback入力として扱う。",
+      "rationale": "現行steeringのプロダクト方針を優先する。"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "DOM-MODE",
+      "name": "モード遷移と有効URL選択",
+      "releaseCritical": true,
+      "implementation": [
+        "src/core/ProxyStateManager.ts#getActiveProxyUrl",
+        "src/core/ProxyStateManager.ts#getNextMode"
+      ],
+      "requirements": ["DVA-1.1", "DVA-1.2", "DVA-2.1", "DVA-2.4", "DVA-4.1", "DVA-5.7"],
+      "oracleCases": ["ORC-MODE-001", "ORC-MODE-002", "ORC-MODE-003", "ORC-MODE-004"],
+      "properties": ["PBT-MODE-001"],
+      "boundaries": ["BND-GSTATE", "BND-SECRET"]
+    },
+    {
+      "id": "DOM-APPLY",
+      "name": "apply状態集約と検出/fallback判断",
+      "releaseCritical": true,
+      "implementation": [
+        "src/core/v3Types.ts#deriveRuntimeApplyState",
+        "src/core/SystemProxyUpdateService.ts#checkAndUpdateSystemProxy"
+      ],
+      "requirements": ["DVA-2.3", "DVA-2.4", "DVA-4.1", "DVA-5.7", "DVA-8.3"],
+      "oracleCases": ["ORC-APPLY-001", "ORC-APPLY-002", "ORC-APPLY-003", "ORC-APPLY-004", "ORC-APPLY-005"],
+      "properties": ["PBT-APPLY-001"],
+      "boundaries": ["BND-PROXY", "BND-VSCODE", "BND-TIMER"]
+    },
+    {
+      "id": "DOM-TARGET",
+      "name": "target別set/clear/skip/fail結果",
+      "releaseCritical": true,
+      "implementation": [
+        "src/core/ProxyConfigTargetRunner.ts#updateProxyConfigTargetDetailed",
+        "src/core/ProxyConfigStateTracker.ts#saveProxyConfigResults"
+      ],
+      "requirements": ["DVA-2.4", "DVA-4.1", "DVA-5.7", "DVA-7.6", "DVA-8.3"],
+      "oracleCases": ["ORC-TARGET-001", "ORC-TARGET-002", "ORC-TARGET-003", "ORC-TARGET-004"],
+      "properties": ["PBT-TARGET-001"],
+      "boundaries": ["BND-CLI", "BND-VSCODE"]
+    },
+    {
+      "id": "DOM-SYNC",
+      "name": "競合解決と再主張",
+      "releaseCritical": true,
+      "implementation": [
+        "src/sync/ConflictResolver.ts#resolve",
+        "src/sync/SyncReconciler.ts#reconcileSharedState"
+      ],
+      "requirements": ["DVA-2.4", "DVA-3.4", "DVA-4.1", "DVA-5.7", "DVA-8.5"],
+      "oracleCases": ["ORC-SYNC-001", "ORC-SYNC-002", "ORC-SYNC-003", "ORC-SYNC-004", "ORC-SYNC-005", "ORC-SYNC-006", "ORC-SYNC-007"],
+      "properties": ["PBT-SYNC-001"],
+      "boundaries": ["BND-SHARED-FS", "BND-REGISTRY", "BND-TIMER"]
+    },
+    {
+      "id": "DOM-LIFECYCLE",
+      "name": "開始、停止、cancel及び遅延完了",
+      "releaseCritical": true,
+      "implementation": [
+        "src/monitoring/ProxyMonitor.ts#start",
+        "src/monitoring/ProxyMonitor.ts#stop",
+        "src/sync/SyncManager.ts#start",
+        "src/sync/SyncManager.ts#stop"
+      ],
+      "requirements": ["DVA-3.4", "DVA-6.4", "DVA-6.5", "DVA-8.6"],
+      "oracleCases": ["ORC-LIFECYCLE-001"],
+      "properties": ["PBT-LIFECYCLE-001"],
+      "boundaries": ["BND-TIMER", "BND-PROXY", "BND-SHARED-FS"]
+    },
+    {
+      "id": "DOM-RECOVERY",
+      "name": "共有状態、lease、crash/restartからの復旧",
+      "releaseCritical": true,
+      "implementation": [
+        "src/sync/SharedStateFile.ts",
+        "src/sync/InstanceRegistryStore.ts",
+        "src/remediation/ApplyLockService.ts"
+      ],
+      "requirements": ["DVA-6.3", "DVA-8.7", "DVA-8.8", "DVA-8.9"],
+      "oracleCases": ["ORC-RECOVERY-001"],
+      "properties": ["PBT-RECOVERY-001"],
+      "boundaries": ["BND-SHARED-FS", "BND-REGISTRY", "BND-APPLY-LOCK"]
+    }
+  ],
+  "boundaries": [
+    {"id": "BND-GSTATE", "owner": "ProxyStateManager", "kind": "VS Code globalState", "persistence": "sanitized state"},
+    {"id": "BND-SECRET", "owner": "ProxyCredentialStore", "kind": "VS Code SecretStorage", "persistence": "credentials only"},
+    {"id": "BND-VSCODE", "owner": "config/core", "kind": "VS Code API", "persistence": "configuration and events"},
+    {"id": "BND-CLI", "owner": "*ConfigManager", "kind": "child process", "persistence": "external CLI configuration"},
+    {"id": "BND-SHARED-FS", "owner": "SharedStateFile", "kind": "filesystem", "persistence": "shared sync state"},
+    {"id": "BND-REGISTRY", "owner": "InstanceRegistryStore", "kind": "filesystem mutex", "persistence": "instance ownership"},
+    {"id": "BND-APPLY-LOCK", "owner": "ApplyLockService", "kind": "filesystem lease", "persistence": "apply ownership"},
+    {"id": "BND-PROXY", "owner": "detector/connection tester", "kind": "network/proxy", "persistence": "none"},
+    {"id": "BND-TIMER", "owner": "monitor/sync/remediation", "kind": "scheduler", "persistence": "in-flight lifecycle"}
+  ]
+}

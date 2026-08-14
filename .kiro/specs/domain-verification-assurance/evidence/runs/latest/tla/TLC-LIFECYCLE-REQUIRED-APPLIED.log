@@ -1,0 +1,63 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 2026081503 with 1 worker on 16 cores with 14014MB heap and 64MB offheap memory [pid: 46600] (Windows 11 10.0 amd64, Microsoft 11.0.31 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file C:\Codes\tsuyoshi-otake\otak-proxy\formal\ProxyLifecycle.tla
+Parsing file C:\Users\developer\AppData\Local\Temp\Naturals.tla
+Parsing file C:\Users\developer\AppData\Local\Temp\FiniteSets.tla
+Parsing file C:\Users\developer\AppData\Local\Temp\Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module ProxyLifecycle
+Starting... (2026-08-15 00:56:18)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-08-15 00:56:18.
+Error: Invariant NeverApplied is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pending = (a1 :> FALSE)
+/\ completedEpoch = (a1 :> 0)
+/\ attempts = (a1 :> 0)
+/\ logicalTime = 0
+/\ phase = (a1 :> "Idle")
+/\ pulse = 0
+/\ resourceUse = 0
+/\ checkEpoch = (a1 :> 0)
+/\ effectEpoch = (a1 :> 0)
+
+State 2: <Start line 46, col 5 to line 50, col 102 of module ProxyLifecycle>
+/\ pending = (a1 :> FALSE)
+/\ completedEpoch = (a1 :> 0)
+/\ attempts = (a1 :> 0)
+/\ logicalTime = 0
+/\ phase = (a1 :> "Running")
+/\ pulse = 0
+/\ resourceUse = 0
+/\ checkEpoch = (a1 :> 0)
+/\ effectEpoch = (a1 :> 0)
+
+State 3: <BeginCheck line 53, col 5 to line 60, col 78 of module ProxyLifecycle>
+/\ pending = (a1 :> TRUE)
+/\ completedEpoch = (a1 :> 0)
+/\ attempts = (a1 :> 0)
+/\ logicalTime = 0
+/\ phase = (a1 :> "Checking")
+/\ pulse = 0
+/\ resourceUse = 1
+/\ checkEpoch = (a1 :> 0)
+/\ effectEpoch = (a1 :> 0)
+
+State 4: <Complete line 63, col 5 to line 71, col 74 of module ProxyLifecycle>
+/\ pending = (a1 :> FALSE)
+/\ completedEpoch = (a1 :> 0)
+/\ attempts = (a1 :> 0)
+/\ logicalTime = 0
+/\ phase = (a1 :> "Applied")
+/\ pulse = 0
+/\ resourceUse = 0
+/\ checkEpoch = (a1 :> 0)
+/\ effectEpoch = (a1 :> 0)
+
+10 states generated, 8 distinct states found, 3 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 4 and the 95th percentile is 4).
+Finished in 00s at (2026-08-15 00:56:18)

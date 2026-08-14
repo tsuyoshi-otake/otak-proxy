@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260814152927682-PBT-TARGET-001-18788-4-a14dbd6c",
+  "propertyId": "PBT-TARGET-001",
+  "status": "passed",
+  "seed": 32452843,
+  "path": null,
+  "numRuns": 50,
+  "numSkips": 0,
+  "numShrinks": 0,
+  "generatorVersion": "target-v1",
+  "counterexample": null,
+  "counterexamplePath": null,
+  "failure": null,
+  "requirements": [
+    "DVA-3.1",
+    "DVA-3.2",
+    "DVA-3.3",
+    "DVA-3.4",
+    "DVA-3.5",
+    "DVA-3.6",
+    "DVA-3.7"
+  ],
+  "tool": {
+    "name": "fast-check",
+    "version": "4.x"
+  },
+  "source": {
+    "commit": "working-tree",
+    "worktreeFingerprint": "30f65be17a5524c2"
+  },
+  "redaction": "safe-token-v1"
+}

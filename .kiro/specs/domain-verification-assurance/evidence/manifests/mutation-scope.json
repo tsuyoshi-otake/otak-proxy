@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "tool": {
+    "name": "otak-proxy deterministic source mutation harness",
+    "version": "1"
+  },
+  "selectionRationale": "各ドメイン決定表、永続化境界、ライフサイクル境界に対応する比較・否定・分岐反転を、隔離済みコンパイル出力に一変異ずつ適用する。全リポジトリを網羅する主張ではない。",
+  "mutants": [
+    {
+      "id": "MNT-MODE-001",
+      "source": "src/core/ProxyStateManager.ts",
+      "from": "state.autoModeOff === true",
+      "to": "state.autoModeOff !== true",
+      "operator": "EqualityOperatorReplacement",
+      "requirements": ["DVA-2.2", "DVA-2.4"],
+      "tests": ["ORC-MODE-003", "PBT-MODE-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-APPLY-001",
+      "source": "src/core/v3Types.ts",
+      "from": "!attemptedWrite",
+      "to": "attemptedWrite",
+      "operator": "UnaryOperatorRemoval",
+      "requirements": ["DVA-2.2", "DVA-8.3"],
+      "tests": ["ORC-APPLY-001", "PBT-APPLY-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-APPLY-002",
+      "source": "src/core/v3Types.ts",
+      "from": "convergedRequiredTargets === totalRequiredTargets",
+      "to": "convergedRequiredTargets !== totalRequiredTargets",
+      "operator": "EqualityOperatorReplacement",
+      "requirements": ["DVA-2.4", "DVA-8.3"],
+      "tests": ["ORC-APPLY-002", "ORC-APPLY-003", "PBT-APPLY-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-APPLY-003",
+      "source": "src/core/v3Types.ts",
+      "from": "convergedRequiredTargets > 0",
+      "to": "convergedRequiredTargets === 0",
+      "operator": "RelationalOperatorReplacement",
+      "requirements": ["DVA-2.4", "DVA-8.3"],
+      "tests": ["ORC-APPLY-003", "ORC-APPLY-005", "PBT-APPLY-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-TARGET-001",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "from": "!result.success",
+      "to": "result.success",
+      "operator": "UnaryOperatorRemoval",
+      "requirements": ["DVA-4.1", "DVA-7.6"],
+      "tests": ["ORC-TARGET-001", "ORC-TARGET-002", "PBT-TARGET-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-TARGET-002",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "from": "isOptionalToolMissing(target, result.errorType)",
+      "to": "!isOptionalToolMissing(target, result.errorType)",
+      "operator": "UnaryOperatorInsertion",
+      "requirements": ["DVA-4.2", "DVA-7.6"],
+      "tests": ["ORC-TARGET-001", "ORC-TARGET-002", "PBT-TARGET-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-SYNC-001",
+      "source": "src/sync/ConflictResolver.ts",
+      "from": "remote.timestamp > local.timestamp",
+      "to": "remote.timestamp < local.timestamp",
+      "operator": "RelationalOperatorReplacement",
+      "requirements": ["DVA-3.4", "DVA-8.5"],
+      "tests": ["ORC-SYNC-001", "ORC-SYNC-002", "PBT-SYNC-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-SYNC-002",
+      "source": "src/sync/ConflictResolver.ts",
+      "from": "local.timestamp > remote.timestamp",
+      "to": "local.timestamp < remote.timestamp",
+      "operator": "RelationalOperatorReplacement",
+      "requirements": ["DVA-3.4", "DVA-8.5"],
+      "tests": ["ORC-SYNC-001", "ORC-SYNC-002", "PBT-SYNC-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-SYNC-003",
+      "source": "src/sync/ConflictResolver.ts",
+      "from": "!remoteValid && localValid",
+      "to": "remoteValid && localValid",
+      "operator": "UnaryOperatorRemoval",
+      "requirements": ["DVA-3.4", "DVA-8.5"],
+      "tests": ["ORC-SYNC-005", "ORC-SYNC-007", "PBT-SYNC-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-SYNC-004",
+      "source": "src/sync/ConflictResolver.ts",
+      "from": "!localValid && remoteValid",
+      "to": "localValid && remoteValid",
+      "operator": "UnaryOperatorRemoval",
+      "requirements": ["DVA-3.4", "DVA-8.5"],
+      "tests": ["ORC-SYNC-006", "PBT-SYNC-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-LIFECYCLE-001",
+      "source": "src/monitoring/ProxyMonitor.ts",
+      "from": "!this.isCurrentLifecycle(epoch)",
+      "to": "this.isCurrentLifecycle(epoch)",
+      "operator": "UnaryOperatorRemoval",
+      "requirements": ["DVA-4.5", "DVA-9.3"],
+      "tests": ["PBT-LIFECYCLE-001", "F-CANCEL-001"],
+      "equivalence": null
+    },
+    {
+      "id": "MNT-PERSIST-001",
+      "source": "src/sync/SharedStateFile.ts",
+      "from": "attempt < RENAME_RETRY_ATTEMPTS - 1",
+      "to": "attempt >= RENAME_RETRY_ATTEMPTS - 1",
+      "operator": "RelationalOperatorReplacement",
+      "requirements": ["DVA-4.2", "DVA-4.4", "DVA-7.2"],
+      "tests": ["F-PERSIST-RETRY-001", "CT-STATE-001"],
+      "equivalence": null
+    }
+  ]
+}

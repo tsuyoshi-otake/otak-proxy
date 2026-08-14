@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "suite": "domain-oracle",
+  "startedAt": "2026-08-14T15:55:45.532Z",
+  "completedAt": "2026-08-14T15:55:45.676Z",
+  "command": [
+    "C:\\Program Files\\nodejs\\node.exe",
+    "node_modules\\mocha\\bin\\mocha.js",
+    "--ui",
+    "tdd",
+    "--require",
+    "scripts\\vscode-shim.cjs",
+    "--exit",
+    "--timeout",
+    "120000",
+    "out\\test\\assurance\\DomainOracle.examples.test.js"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "host": "ppc1a9700x"
+}

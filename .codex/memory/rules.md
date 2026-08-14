@@ -1,0 +1,4 @@
+# 検証済みのプロジェクト規則
+
+- `[lifecycle]` `ProxyMonitor` の開始・停止境界をまたいで完了する非同期検出結果は、世代（epoch）を照合して破棄する。古いライフサイクルの結果を新しいライフサイクルへ公開してはならない。検証: `F-CANCEL-001` と `npm run verify:assurance`（2026-08-15）。
+- `[assurance]` リリース判断用の統合証跡は `npm run verify:assurance` で生成し、各テスト実行後に `scripts/assurance/cleanup-test-processes.mjs` が runner survivor 0 件を記録する。検証: `assurance-run.json` の `allPassed=true`（2026-08-15）。

@@ -82,6 +82,19 @@ export interface ISharedStateFile {
 }
 
 /**
+ * Narrow filesystem protocol used by SharedStateFile. The default is Node's
+ * `fs` module; tests can inject deterministic ENOSPC/EACCES/rename faults
+ * without changing production source or the surrounding process filesystem.
+ */
+export type SharedStateFileSystem = Pick<typeof fs,
+    'existsSync' | 'readFileSync' | 'writeFileSync' | 'renameSync' | 'unlinkSync' | 'readdirSync' | 'mkdirSync' | 'statSync'>;
+
+export interface SharedStateFileOptions {
+    fileSystem?: SharedStateFileSystem;
+    sleep?: (ms: number) => Promise<void>;
+}
+
+/**
  * Sync directory name
  */
 const SYNC_DIR_NAME = 'otak-proxy-sync';
@@ -117,6 +130,8 @@ const MISSING_FILE_SIGNATURE = 'missing';
 export class SharedStateFile implements ISharedStateFile {
     private readonly syncDir: string;
     private readonly stateFilePath: string;
+    private readonly fileSystem: SharedStateFileSystem;
+    private readonly sleep: (ms: number) => Promise<void>;
     private unknownSignatureSeq = 0;
 
     /**
@@ -124,9 +139,11 @@ export class SharedStateFile implements ISharedStateFile {
      *
      * @param baseDir Base directory (typically globalStorageUri.fsPath)
      */
-    constructor(baseDir: string) {
+    constructor(baseDir: string, options: SharedStateFileOptions = {}) {
         this.syncDir = path.join(baseDir, SYNC_DIR_NAME);
         this.stateFilePath = path.join(this.syncDir, STATE_FILE_NAME);
+        this.fileSystem = options.fileSystem ?? fs;
+        this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
     }
 
     /**
@@ -137,12 +154,12 @@ export class SharedStateFile implements ISharedStateFile {
     async read(): Promise<SharedState | null> {
         try {
             // Check if file exists
-            if (!fs.existsSync(this.stateFilePath)) {
+            if (!this.fileSystem.existsSync(this.stateFilePath)) {
                 return null;
             }
 
             // Read file content
-            const content = fs.readFileSync(this.stateFilePath, 'utf-8');
+            const content = this.fileSystem.readFileSync(this.stateFilePath, 'utf-8');
 
             // Handle empty file
             if (!content || content.trim() === '') {
@@ -192,12 +209,12 @@ export class SharedStateFile implements ISharedStateFile {
             const content = JSON.stringify(this.sanitizeSharedState(state), null, 2);
 
             // Write to temp file first
-            fs.writeFileSync(tempPath, content, 'utf-8');
+            this.fileSystem.writeFileSync(tempPath, content, 'utf-8');
 
             // Atomic rename (this is the key to atomic writes)
             for (let attempt = 0; attempt < RENAME_RETRY_ATTEMPTS; attempt++) {
                 try {
-                    fs.renameSync(tempPath, this.stateFilePath);
+                    this.fileSystem.renameSync(tempPath, this.stateFilePath);
                     return;
                 } catch (error) {
                     const code = getErrorCode(error);
@@ -205,7 +222,7 @@ export class SharedStateFile implements ISharedStateFile {
                     if (!shouldRetry) {
                         throw error;
                     }
-                    await new Promise(resolve => setTimeout(resolve, RENAME_RETRY_DELAY_MS));
+                    await this.sleep(RENAME_RETRY_DELAY_MS);
                 }
             }
 
@@ -214,8 +231,8 @@ export class SharedStateFile implements ISharedStateFile {
 
             // Clean up temp file if it exists
             try {
-                if (fs.existsSync(tempPath)) {
-                    fs.unlinkSync(tempPath);
+                if (this.fileSystem.existsSync(tempPath)) {
+                    this.fileSystem.unlinkSync(tempPath);
                 }
             } catch {
                 // Ignore cleanup errors
@@ -229,7 +246,7 @@ export class SharedStateFile implements ISharedStateFile {
      * Check if state file exists
      */
     async exists(): Promise<boolean> {
-        return fs.existsSync(this.stateFilePath);
+        return this.fileSystem.existsSync(this.stateFilePath);
     }
 
     /**
@@ -246,27 +263,27 @@ export class SharedStateFile implements ISharedStateFile {
 
         try {
             // Check if state file exists
-            if (fs.existsSync(this.stateFilePath)) {
+            if (this.fileSystem.existsSync(this.stateFilePath)) {
                 // Try to read it
                 const state = await this.read();
 
                 if (state === null) {
                     // File exists but is corrupted - delete it
                     Logger.info('Recovering from corrupted state file');
-                    fs.unlinkSync(this.stateFilePath);
+                    this.fileSystem.unlinkSync(this.stateFilePath);
                     recovered = true;
                 }
             }
 
             // Clean up any temp files
-            if (fs.existsSync(this.syncDir)) {
-                const files = fs.readdirSync(this.syncDir);
+            if (this.fileSystem.existsSync(this.syncDir)) {
+                const files = this.fileSystem.readdirSync(this.syncDir);
                 for (const file of files) {
                     if (!file.includes(TEMP_FILE_SUFFIX)) {
                         continue;
                     }
                     try {
-                        fs.unlinkSync(path.join(this.syncDir, file));
+                        this.fileSystem.unlinkSync(path.join(this.syncDir, file));
                         recovered = true;
                     } catch {
                         // Ignore cleanup errors
@@ -296,7 +313,7 @@ export class SharedStateFile implements ISharedStateFile {
      */
     getChangeSignature(): string {
         try {
-            const stat = fs.statSync(this.stateFilePath, { throwIfNoEntry: false });
+            const stat = this.fileSystem.statSync(this.stateFilePath, { throwIfNoEntry: false });
             if (!stat) {
                 return MISSING_FILE_SIGNATURE;
             }
@@ -324,8 +341,8 @@ export class SharedStateFile implements ISharedStateFile {
      * Ensure the sync directory exists
      */
     private async ensureSyncDir(): Promise<void> {
-        if (!fs.existsSync(this.syncDir)) {
-            fs.mkdirSync(this.syncDir, { recursive: true });
+        if (!this.fileSystem.existsSync(this.syncDir)) {
+            this.fileSystem.mkdirSync(this.syncDir, { recursive: true });
         }
     }
 

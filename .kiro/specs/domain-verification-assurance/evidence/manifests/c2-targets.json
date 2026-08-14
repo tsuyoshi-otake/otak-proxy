@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "instrumentation": "TypeScript AST transform into an isolated temporary output. Production source and out/ are never rewritten.",
+  "targets": [
+    {
+      "id": "C2-MODE",
+      "source": "src/core/ProxyStateManager.ts",
+      "symbols": ["getActiveProxyUrl", "getNextMode"],
+      "requirements": ["DVA-4.1", "DVA-4.2", "DVA-4.3", "DVA-4.6", "DVA-4.7"]
+    },
+    {
+      "id": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbols": ["deriveRuntimeApplyState"],
+      "requirements": ["DVA-4.1", "DVA-4.2", "DVA-4.3", "DVA-4.6", "DVA-4.7"]
+    },
+    {
+      "id": "C2-TARGET",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "symbols": ["updateProxyConfigTargetDetailed"],
+      "requirements": ["DVA-4.1", "DVA-4.2", "DVA-4.3", "DVA-4.6", "DVA-4.7"]
+    },
+    {
+      "id": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbols": ["resolve"],
+      "requirements": ["DVA-4.1", "DVA-4.2", "DVA-4.3", "DVA-4.6", "DVA-4.7"]
+    }
+  ],
+  "infeasible": []
+}

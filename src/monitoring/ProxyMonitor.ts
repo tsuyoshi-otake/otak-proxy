@@ -58,6 +58,9 @@ export class ProxyMonitor extends EventEmitter {
     private debounceTimer?: NodeJS.Timeout;
     private lastProxyUrl: string | null = null;
     private isCheckInProgress: boolean = false;
+    /** Invalidates callbacks that started under an earlier start/stop lifecycle. */
+    private lifecycleEpoch: number = 0;
+    private inFlightEpoch: number | null = null;
     private connectionState: ProxyMonitorConnectionState;
 
     constructor(
@@ -91,6 +94,7 @@ export class ProxyMonitor extends EventEmitter {
             return; // Already running
         }
 
+        this.lifecycleEpoch++;
         this.state.setActive(true);
         this.setupPolling();
         Logger.info('ProxyMonitor started');
@@ -103,7 +107,10 @@ export class ProxyMonitor extends EventEmitter {
      * Clears all timers and stops scheduler
      */
     stop(): void {
+        this.lifecycleEpoch++;
         this.state.setActive(false);
+        this.isCheckInProgress = false;
+        this.inFlightEpoch = null;
         this.clearPolling();
         this.clearDebounce();
         stopConnectionScheduler(this.connectionState);
@@ -188,15 +195,27 @@ export class ProxyMonitor extends EventEmitter {
      * @param trigger - The trigger source
      */
     private async executeCheck(trigger: ProxyCheckTrigger): Promise<ProxyDetectionResult> {
-        if (this.isCheckInProgress) {
+        const epoch = this.lifecycleEpoch;
+        if (this.isCheckInProgress && this.inFlightEpoch === epoch) {
             return this.createInProgressResult();
         }
 
         this.isCheckInProgress = true;
+        this.inFlightEpoch = epoch;
         this.state.recordCheckStart();
 
         try {
             const result = await this.detectWithRetry(trigger);
+            // A detector may resolve after stop() or after a newer start(). Its
+            // observation is diagnostic only; it must not publish state/events
+            // into the newer lifecycle.
+            if (!this.isCurrentLifecycle(epoch)) {
+                return {
+                    ...result,
+                    success: false,
+                    error: 'Check result discarded after lifecycle stop'
+                };
+            }
             await handleConnectionDetectionResult(
                 this.connectionState,
                 result,
@@ -212,8 +231,20 @@ export class ProxyMonitor extends EventEmitter {
             return result;
 
         } finally {
-            this.isCheckInProgress = false;
+            if (this.inFlightEpoch === epoch) {
+                this.isCheckInProgress = false;
+                this.inFlightEpoch = null;
+            }
         }
+    }
+
+    private isCurrentLifecycle(epoch: number): boolean {
+        // Some focused unit-level callers invoke the check operation directly
+        // without first starting polling.  Epoch equality is the lifecycle
+        // ownership proof: start() and stop() both advance it, so a late result
+        // from an earlier active lifecycle is still discarded without treating
+        // an explicitly direct diagnostic check as stopped.
+        return this.lifecycleEpoch === epoch;
     }
 
     private updatePollingInterval(oldInterval: number): void {

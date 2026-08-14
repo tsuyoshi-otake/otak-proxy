@@ -55,10 +55,7 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
 
 ### Risk-based Proxy Behavior Verification
 - For changes that affect proxy detection, proxy application/removal, diagnostics, remediation, credentials, Git/npm/VS Code config writers, terminal environment handling, startup behavior, or toggle behavior, always run integration-level and unit-level tests for both happy paths and error paths. Include successful writes/removals, unavailable tools, permission/config failures, stale settings, credential-bearing proxy URLs, and concurrency or rapid-toggle cases when relevant.
-- Run real-machine E2E verification when the change depends on operating-system behavior, real command-line tools, permissions, persistent user configuration, cross-process behavior, or another property that cannot be represented with sufficient confidence by isolated tests and the VS Code extension host.
-- Real-machine E2E may be omitted when deterministic unit, integration, and extension-host tests cover the affected state transitions, normal and failure outcomes, redaction, ownership boundaries, recovery, and concurrency, and the release owner explicitly accepts the remaining environment-specific risk.
-- When omitting real-machine E2E, record the reason, substitute verification evidence, and residual risk in the tracking Issue or release record. Do not describe the omitted matrix as passed.
-- When real-machine E2E is performed, cover the relevant normal and failure scenarios, record the pre-test state, use temporary profiles/config files where possible, and explicitly restore or verify cleanup after the test.
+- Validate operating-system and external-tool boundaries with deterministic protocol-compatible integration tests and isolated VS Code extension-host tests. Record any behavior that is outside those controlled test environments as a residual-risk assumption rather than treating it as tested.
 
 ## Supply-Chain Lint (Invisible Unicode / GlassWorm)
 This extension publishes to the Visual Studio Marketplace **and** the Open VSX Registry, which is the channel the GlassWorm worm used to ship payloads hidden in invisible Unicode code points. Hidden code cannot be caught by reading a diff, so it is checked mechanically.
@@ -111,28 +108,6 @@ This extension publishes to the Visual Studio Marketplace **and** the Open VSX R
 ### Log noise control
 - `OTAK_PROXY_LOG_SILENT=1`: suppresses `Logger.*` output (default for both unit tests and VS Code tests).
 - Set `OTAK_PROXY_LOG_SILENT=0` when you need verbose logs while debugging.
-
-### Local Windows VM E2E verification
-- A local VMware Workstation Windows 11 verification VM is available on the developer machine:
-  - VMX: `E:\VMs\otak-proxy-win11-dev\otak-proxy-win11-dev.vmx`
-  - Guest user: `dev`
-  - WinRM endpoint used during setup: `192.168.146.129:5985` over NTLM
-  - VS Code is installed in the guest; `odangoo.otak-proxy` can be installed or overwritten with `code --install-extension <vsix> --force`.
-- Do not write VM passwords, auto-logon secrets, or other credentials into repository files. Pass the VM password through `VM_PASS` in the local shell when using helper scripts.
-- Host-side WinRM helper environment:
-  - Python venv: `C:\Users\developer\tmp\otak-proxy-winrm-venv`
-  - Helper scripts: `E:\VMs\otak-proxy-win11-dev\payload\pywinrm_run.py` and `E:\VMs\otak-proxy-win11-dev\payload\pywinrm_upload.py`
-- Current intended guest shape for optional-tool verification:
-  - Git is not installed or not on PATH.
-  - npm/Node.js is not installed or not on PATH.
-  - Use this VM to verify that missing optional tools are treated as skipped/non-fatal while real config errors still surface.
-- Typical verification flow:
-  - Build a VSIX with `npm run package:vsix`.
-  - Upload the VSIX with `pywinrm_upload.py`.
-  - Install it in the guest with `code --install-extension <uploaded-vsix> --force`.
-  - Run an E2E script through `pywinrm_run.py`; VS Code's Electron can be used as Node by setting `ELECTRON_RUN_AS_NODE=1` when the guest has no standalone Node.js.
-  - Remove uploaded VSIX/test scripts after verification.
-- The VM IP can change if VMware networking/DHCP changes. If WinRM fails, first rediscover the guest IP from VMware/network state before changing code or tests.
 
 ### CI convenience
 - `npm run test:ci` runs lint + `npm test`.

@@ -1,0 +1,592 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-14T16:08:47.756Z",
+  "decision": "CONDITIONAL-GO",
+  "enforceReleaseGate": false,
+  "technicalGates": [
+    {
+      "id": "GATE-COMMANDS",
+      "passed": true,
+      "detail": "全必須コマンドが終了コード0で完了"
+    },
+    {
+      "id": "GATE-PROCESS-CLEANUP",
+      "passed": true,
+      "detail": "最終runner-survivors=0 の証跡"
+    },
+    {
+      "id": "GATE-C2",
+      "passed": true,
+      "detail": "feasible C2=100%, unobserved=0"
+    },
+    {
+      "id": "GATE-MUTATION",
+      "passed": true,
+      "detail": "score=100%, survived=0, equivalent=0"
+    },
+    {
+      "id": "GATE-TLA",
+      "passed": true,
+      "detail": "allPassed=true, models=7"
+    },
+    {
+      "id": "GATE-TRACEABILITY",
+      "passed": true,
+      "detail": "integrityProblems=0"
+    },
+    {
+      "id": "GATE-RELEASE-CRITICAL-SCOPE",
+      "passed": true,
+      "detail": "未検証のacceptance requirementなし"
+    },
+    {
+      "id": "GATE-FRESHNESS",
+      "passed": true,
+      "detail": "C2/mutation/TLA+のsource hashが現在の入力と一致"
+    }
+  ],
+  "summary": {
+    "allTechnicalGatesPassed": true,
+    "allGatesPassed": true,
+    "c2FeasiblePercent": 100,
+    "mutationScore": 100,
+    "survivingMutants": 0,
+    "equivalentMutants": 0,
+    "tlcAllPassed": true,
+    "traceabilityIntegrityProblems": 0,
+    "traceabilityStatusCounts": {
+      "verified": 44,
+      "partial": 46,
+      "unverified": 0
+    },
+    "unverifiedRequirements": [],
+    "staleEvidence": []
+  },
+  "provenance": {
+    "gitHead": "f41358e97710e42afd099f1413a56c4b35713fab",
+    "workingTree": [
+      "M .vscode/settings.json",
+      " M CLAUDE.md",
+      " M package.json",
+      " M package.nls.ar.json",
+      " M package.nls.de.json",
+      " M package.nls.es.json",
+      " M package.nls.fr.json",
+      " M package.nls.hi.json",
+      " M package.nls.id.json",
+      " M package.nls.it.json",
+      " M package.nls.ja.json",
+      " M package.nls.json",
+      " M package.nls.ko.json",
+      " M package.nls.pt-br.json",
+      " M package.nls.ru.json",
+      " M package.nls.tr.json",
+      " M package.nls.vi.json",
+      " M package.nls.zh-cn.json",
+      " M package.nls.zh-tw.json",
+      " M src/config/GitConfigManager.ts",
+      " M src/config/NpmConfigManager.ts",
+      " M src/monitoring/ProxyMonitor.ts",
+      " M src/sync/SharedStateFile.ts",
+      "?? .codex/",
+      "?? .kiro/specs/domain-verification-assurance/",
+      "?? formal/",
+      "?? scripts/assurance/",
+      "?? src/test/assurance/"
+    ],
+    "evidenceRoot": ".kiro\\specs\\domain-verification-assurance\\evidence\\runs\\latest",
+    "assuranceRunGeneratedAt": "2026-08-14T15:56:24.770Z"
+  },
+  "adversarialFindings": [
+    {
+      "severity": "medium",
+      "requirement": "DVA-1.5",
+      "detail": "不一致は未発生であり、実不一致の最小再現記録はcalibration以外では未取得。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-2.3",
+      "detail": "代表的な無効／境界値はあるが、全入力形式の無効値体系は未網羅。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-2.4",
+      "detail": "オラクルは許可／禁止副作用を定義するが、全SUT adapterが実副作用列を返して比較する構造ではない。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-2.6",
+      "detail": "不一致分類の自動artifactは未実装。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-3.7",
+      "detail": "runId/atomic writeは実装済みだが、並列競合を専用負荷テストしていない。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-7.1",
+      "detail": "port化した境界はGit/npm/shared filesystemに限定される。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-7.2",
+      "detail": "CLI、VS Code storage、shared filesystem、local proxyのプロトコル互換境界を検査する。watch/pollと多actorの実filesystem競合は未再現として残す。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-7.4",
+      "detail": "実filesystemのatomic write/rename/破損復旧は確認済みだが、watch/pollと多actor競合の実filesystem結合は未実施。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-7.5",
+      "detail": "CLI、VS Code storage、shared filesystem、local proxyのプロトコル互換境界を検査する。watch/pollと多actorの実filesystem競合は未再現として残す。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-7.6",
+      "detail": "CLI、VS Code storage、shared filesystem、local proxyのプロトコル互換境界を検査する。watch/pollと多actorの実filesystem競合は未再現として残す。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-7.7",
+      "detail": "CLI、VS Code storage、shared filesystem、local proxyのプロトコル互換境界を検査する。watch/pollと多actorの実filesystem競合は未再現として残す。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.1",
+      "detail": "テスト内注入は決定的だが、共通FaultPlan台帳／解除条件の実装は未完了。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.2",
+      "detail": "主要な0/1/上限境界はPBT/TLAで扱うが、全資源型のmax-1/max/max+1は未実施。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.3",
+      "detail": "決定的fault injectionで資源、retry、部分失敗、event、cancel、crash/restartを検査する。未実装の資源型とprovider固有の故障形は残存リスクとして明示する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.4",
+      "detail": "retry上限、backoff、成功時resetは確認済み。Retry-After provider契約は未再現。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.5",
+      "detail": "決定的fault injectionで資源、retry、部分失敗、event、cancel、crash/restartを検査する。未実装の資源型とprovider固有の故障形は残存リスクとして明示する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.6",
+      "detail": "stop後の遅延完了とproxy timeoutは確認済みだが、全cancel/timeout所有者を網羅していない。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.7",
+      "detail": "決定的fault injectionで資源、retry、部分失敗、event、cancel、crash/restartを検査する。未実装の資源型とprovider固有の故障形は残存リスクとして明示する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.8",
+      "detail": "ENOSPC/EACCESは確認済み。EMFILE、lock枯渇、queue上限の実装結合注入は未実施。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.9",
+      "detail": "決定的fault injectionで資源、retry、部分失敗、event、cancel、crash/restartを検査する。未実装の資源型とprovider固有の故障形は残存リスクとして明示する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-8.10",
+      "detail": "決定的fault injectionで資源、retry、部分失敗、event、cancel、crash/restartを検査する。未実装の資源型とprovider固有の故障形は残存リスクとして明示する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.1",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.2",
+      "detail": "複数actor/in-flight/event競合はモデル化済み。複数targetと全永続境界の状態は未抽象化。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.3",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.4",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.5",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.6",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.7",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-9.8",
+      "detail": "実装非依存のlifecycle/sync有限抽象。targetごとの永続境界モデルは次段階。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.1",
+      "detail": "固定seedのTLC BFS、Safety/Liveness/deadlock、期待反例到達性を記録する。無制限定数とcredential値は未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.2",
+      "detail": "固定seedのTLC BFS、Safety/Liveness/deadlock、期待反例到達性を記録する。無制限定数とcredential値は未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.3",
+      "detail": "固定seedのTLC BFS、Safety/Liveness/deadlock、期待反例到達性を記録する。無制限定数とcredential値は未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.4",
+      "detail": "actor/retry/resource/timeは変化させたが、target数の定数行列は未実装。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.5",
+      "detail": "resource/epoch/単調replica/禁止状態を検査。credential値と実lock相互排他はTLAで未モデル化。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.6",
+      "detail": "Checking→Applied/Stopped/Failed/Crashedとsync収束を検査。partial/awaitingUser/cancelled全terminal集合は未モデル化。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.7",
+      "detail": "TLC deadlock検査は有効だが、抽象モデルはPulse Actionでterminalを進行可能に表現する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.8",
+      "detail": "固定seedのTLC BFS、Safety/Liveness/deadlock、期待反例到達性を記録する。無制限定数とcredential値は未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.9",
+      "detail": "固定seedのTLC BFS、Safety/Liveness/deadlock、期待反例到達性を記録する。無制限定数とcredential値は未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-10.10",
+      "detail": "固定seedのTLC BFS、Safety/Liveness/deadlock、期待反例到達性を記録する。無制限定数とcredential値は未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.1",
+      "detail": "機械検査可能な対応表と敵対的再監査を生成する。release gateは制御済み検証の結果と明示した残存リスクに基づき判定する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.2",
+      "detail": "機械検査可能な対応表と敵対的再監査を生成する。release gateは制御済み検証の結果と明示した残存リスクに基づき判定する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.3",
+      "detail": "機械検査可能な対応表と敵対的再監査を生成する。release gateは制御済み検証の結果と明示した残存リスクに基づき判定する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.4",
+      "detail": "機械検査可能な対応表と敵対的再監査を生成する。release gateは制御済み検証の結果と明示した残存リスクに基づき判定する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.5",
+      "detail": "C2/mutation及びSafety gateの実行結果は敵対的監査で判定する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.7",
+      "detail": "有限探索とtest doubleの抽象化差はCONDITIONAL-GOの残存リスクとして監査結果へ記録する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "requirement": "DVA-12.8",
+      "detail": "機械検査可能な対応表と敵対的再監査を生成する。release gateは制御済み検証の結果と明示した残存リスクに基づき判定する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "category": "environment-harness",
+      "detail": "VS Code host実行時のharness診断は environment-observations.md に記録した。テスト結果とcleanupは成功したが、ランチャー更新時に再確認する。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "category": "model-abstraction",
+      "detail": "TLA+ は有限actor/時刻/resource/epoch/queueの抽象であり、無制限の値空間、credential値、実lock相互排他、全永続化targetは未探索。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    },
+    {
+      "severity": "medium",
+      "category": "environment-assumption",
+      "detail": "sync livenessは信頼配送（MaxDrops=0）と明示したweak fairnessの仮定に依存する。loss-boundary反例はこの依存を確認している。",
+      "impact": "保証の一般化範囲が狭く、特定環境又は未探索入力で差異が生じうる。",
+      "likelihood": "有限探索外、provider差、又は未再現の故障条件で発現しうる。",
+      "detectability": "運用監視、既存の診断、又は追加の境界テストで検出可能だが、現行gateだけでは完全ではない。",
+      "mitigation": "抽象化差を監視し、対象が変わる際は境界テスト／TLC定数行列を拡張して再監査する。",
+      "owner": "release owner と対象コンポーネントのmaintainer"
+    }
+  ]
+}

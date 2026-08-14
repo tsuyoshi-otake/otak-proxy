@@ -16,6 +16,26 @@ import { ProxyConfigInspection } from './ProxyConfigInspection';
 
 const execFileAsync = promisify(execFile);
 
+export interface GitCommandOptions {
+    timeout: number;
+    encoding: 'utf8';
+}
+
+export type GitCommandRunner = (
+    command: string,
+    args: string[],
+    options: GitCommandOptions
+) => Promise<{ stdout: string; stderr: string }>;
+
+export interface GitConfigManagerOptions {
+    commandRunner?: GitCommandRunner;
+    timeoutMs?: number;
+}
+
+const defaultCommandRunner: GitCommandRunner = async (command, args, options) => {
+    return await execFileAsync(command, args, options);
+};
+
 export type { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
 export const GIT_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
@@ -30,12 +50,18 @@ export interface GitProxyValues {
  * Uses execFile() instead of exec() to prevent shell interpretation and command injection.
  */
 export class GitConfigManager {
-    private readonly timeout: number = GIT_CONFIG_COMMAND_TIMEOUT_MS;
+    private readonly timeout: number;
+    private readonly commandRunner: GitCommandRunner;
+
+    constructor(options: GitConfigManagerOptions = {}) {
+        this.timeout = options.timeoutMs ?? GIT_CONFIG_COMMAND_TIMEOUT_MS;
+        this.commandRunner = options.commandRunner ?? defaultCommandRunner;
+    }
 
     private async execGitConfigWithRetry(args: string[], options?: GitConfigOperationOptions): Promise<void> {
         for (let attempt = 0; ; attempt++) {
             try {
-                await execFileAsync('git', args, {
+                await this.commandRunner('git', args, {
                     timeout: this.timeout,
                     encoding: 'utf8'
                 });
@@ -129,7 +155,7 @@ export class GitConfigManager {
     async inspectProxy(): Promise<ProxyConfigInspection<GitProxyValues>> {
         try {
             // Fetch both http.proxy and https.proxy in a single Git invocation to reduce overhead.
-            const { stdout } = await execFileAsync('git', ['config', '--global', '--get-regexp', '^(http|https)\\.proxy$'], {
+            const { stdout } = await this.commandRunner('git', ['config', '--global', '--get-regexp', '^(http|https)\\.proxy$'], {
                 timeout: this.timeout,
                 encoding: 'utf8'
             });

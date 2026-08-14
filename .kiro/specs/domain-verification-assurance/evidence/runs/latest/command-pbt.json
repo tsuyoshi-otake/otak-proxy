@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "suite": "pbt",
+  "startedAt": "2026-08-14T15:55:50.262Z",
+  "completedAt": "2026-08-14T15:55:50.503Z",
+  "command": [
+    "C:\\Program Files\\nodejs\\node.exe",
+    "node_modules\\mocha\\bin\\mocha.js",
+    "--ui",
+    "tdd",
+    "--require",
+    "scripts\\vscode-shim.cjs",
+    "--exit",
+    "--timeout",
+    "120000",
+    "out\\test\\assurance\\DomainOracle.property.test.js"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "host": "ppc1a9700x"
+}

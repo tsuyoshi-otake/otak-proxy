@@ -1,0 +1,398 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-14T15:56:13.920Z",
+  "tool": {
+    "name": "otak-proxy deterministic source mutation harness",
+    "version": "1",
+    "node": "v26.2.0",
+    "timeoutMs": 60000,
+    "execution": "one isolated compiled-output mutant per Node process",
+    "scopeSha256": "b97903afea9594a3ceca2399b66e82349c85459d838af31880bb725d65968fc5"
+  },
+  "selectionRationale": "各ドメイン決定表、永続化境界、ライフサイクル境界に対応する比較・否定・分岐反転を、隔離済みコンパイル出力に一変異ずつ適用する。全リポジトリを網羅する主張ではない。",
+  "tests": [
+    "out\\test\\assurance\\DomainOracle.examples.test.js",
+    "out\\test\\assurance\\DomainOracle.property.test.js",
+    "out\\test\\assurance\\ExternalBoundary.contract.test.js",
+    "out\\test\\assurance\\FailureInjection.integration.test.js"
+  ],
+  "command": [
+    "C:\\Program Files\\nodejs\\node.exe",
+    "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\node_modules\\mocha\\bin\\mocha.js",
+    "--ui",
+    "tdd",
+    "--require",
+    "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\vscode-shim.cjs",
+    "--exit",
+    "--timeout",
+    "60000",
+    "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\out\\test\\assurance\\DomainOracle.examples.test.js",
+    "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\out\\test\\assurance\\DomainOracle.property.test.js",
+    "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\out\\test\\assurance\\ExternalBoundary.contract.test.js",
+    "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\out\\test\\assurance\\FailureInjection.integration.test.js"
+  ],
+  "totalMutants": 12,
+  "classificationCounts": {
+    "killed": 12,
+    "survived": 0,
+    "timeout": 0,
+    "no-coverage": 0,
+    "compile-error": 0,
+    "ignored": 0,
+    "equivalent": 0,
+    "invalid": 0
+  },
+  "killed": 12,
+  "survived": 0,
+  "equivalent": 0,
+  "timeout": 0,
+  "noCoverage": 0,
+  "compileError": 0,
+  "ignored": 0,
+  "unclassified": 0,
+  "rawMutationScore": 100,
+  "adjustedMutationScore": 100,
+  "mutationScore": 100,
+  "survivingMutants": [],
+  "equivalentMutants": [],
+  "timeoutMutants": [],
+  "noCoverageMutants": [],
+  "compileErrorMutants": [],
+  "ignoredMutants": [],
+  "invalidMutants": [],
+  "survivorAnalysis": [],
+  "mutants": [
+    {
+      "id": "MNT-MODE-001",
+      "source": "src/core/ProxyStateManager.ts",
+      "sourceSha256": "26990967be6045b0fd408cf4edf95641b1fa3c41e4c1be0cc7dd266c3188a02f",
+      "compiledPath": "out/core/ProxyStateManager.js",
+      "operator": "EqualityOperatorReplacement",
+      "from": "state.autoModeOff === true",
+      "to": "state.autoModeOff !== true",
+      "requirements": [
+        "DVA-2.2",
+        "DVA-2.4"
+      ],
+      "tests": [
+        "ORC-MODE-003",
+        "PBT-MODE-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 2,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "w a non-Error value and it remains a target failure.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    √ ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    √ ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (85ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  44 passing (132ms)\n  2 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-MODE-002: Auto mode returns a detected or fallback URL when Auto is enabled.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ ''\n- 'safe://proxy/a'\n\n      + expected - actual\n\n      +safe://proxy/a\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:61:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-MODE-003: Auto OFF suppresses every candidate URL.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'safe://proxy/a'\n- ''\n\n      + expected - actual\n\n      -safe://proxy/a\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:61:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:09.332Z",
+      "completedAt": "2026-08-14T15:56:09.757Z"
+    },
+    {
+      "id": "MNT-APPLY-001",
+      "source": "src/core/v3Types.ts",
+      "sourceSha256": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "compiledPath": "out/core/v3Types.js",
+      "operator": "UnaryOperatorRemoval",
+      "from": "!attemptedWrite",
+      "to": "attemptedWrite",
+      "requirements": [
+        "DVA-2.2",
+        "DVA-8.3"
+      ],
+      "tests": [
+        "ORC-APPLY-001",
+        "PBT-APPLY-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 4,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "PLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (72ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  42 passing (119ms)\n  4 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-APPLY-002: All required targets converge without a blocking issue.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'diagnosed'\n- 'applied'\n\n      + expected - actual\n\n      -diagnosed\n      +applied\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-APPLY-003: At least one, but not every, required target converges.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'diagnosed'\n- 'partial'\n\n      + expected - actual\n\n      -diagnosed\n      +partial\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  3) Assurance: independent domain oracle examples\n       ORC-APPLY-004: There are no required targets and no user decision can make progress.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'diagnosed'\n- 'failed'\n\n      + expected - actual\n\n      -diagnosed\n      +failed\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  4) Assurance: independent domain oracle examples\n       ORC-APPLY-005: A blocking issue prevents success even when every required target reported convergence.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'diagnosed'\n- 'partial'\n\n      + expected - actual\n\n      -diagnosed\n      +partial\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:09.759Z",
+      "completedAt": "2026-08-14T15:56:10.126Z"
+    },
+    {
+      "id": "MNT-APPLY-002",
+      "source": "src/core/v3Types.ts",
+      "sourceSha256": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "compiledPath": "out/core/v3Types.js",
+      "operator": "EqualityOperatorReplacement",
+      "from": "convergedRequiredTargets === totalRequiredTargets",
+      "to": "convergedRequiredTargets !== totalRequiredTargets",
+      "requirements": [
+        "DVA-2.4",
+        "DVA-8.3"
+      ],
+      "tests": [
+        "ORC-APPLY-002",
+        "ORC-APPLY-003",
+        "PBT-APPLY-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 1,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "onverges.\n    √ ORC-APPLY-004: There are no required targets and no user decision can make progress.\n    √ ORC-APPLY-005: A blocking issue prevents success even when every required target reported convergence.\n    √ ORC-TARGET-001: An optional external tool is not installed.\n    √ ORC-TARGET-002: A required target reports a configuration error.\n    √ ORC-TARGET-003: A target accepts a clear request.\n    √ ORC-TARGET-004: A dependency can throw a non-Error value and it remains a target failure.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    √ ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    √ ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (80ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  45 passing (128ms)\n  1 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-APPLY-002: All required targets converge without a blocking issue.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'partial'\n- 'applied'\n\n      + expected - actual\n\n      -partial\n      +applied\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:10.129Z",
+      "completedAt": "2026-08-14T15:56:10.499Z"
+    },
+    {
+      "id": "MNT-APPLY-003",
+      "source": "src/core/v3Types.ts",
+      "sourceSha256": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "compiledPath": "out/core/v3Types.js",
+      "operator": "RelationalOperatorReplacement",
+      "from": "convergedRequiredTargets > 0",
+      "to": "convergedRequiredTargets === 0",
+      "requirements": [
+        "DVA-2.4",
+        "DVA-8.3"
+      ],
+      "tests": [
+        "ORC-APPLY-003",
+        "ORC-APPLY-005",
+        "PBT-APPLY-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 2,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "e.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    √ ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    √ ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (72ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  44 passing (117ms)\n  2 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-APPLY-003: At least one, but not every, required target converges.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'failed'\n- 'partial'\n\n      + expected - actual\n\n      -failed\n      +partial\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-APPLY-005: A blocking issue prevents success even when every required target reported convergence.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'failed'\n- 'partial'\n\n      + expected - actual\n\n      -failed\n      +partial\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:78:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:10.501Z",
+      "completedAt": "2026-08-14T15:56:10.873Z"
+    },
+    {
+      "id": "MNT-TARGET-001",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "sourceSha256": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "compiledPath": "out/core/ProxyConfigTargetRunner.js",
+      "operator": "UnaryOperatorRemoval",
+      "from": "!result.success",
+      "to": "result.success",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-7.6"
+      ],
+      "tests": [
+        "ORC-TARGET-001",
+        "ORC-TARGET-002",
+        "PBT-TARGET-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 5,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "ervable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (71ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    5) F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  41 passing (119ms)\n  5 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-TARGET-001: An optional external tool is not installed.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   outcome: 'configured',\n-   outcome: 'skippedUnavailable',\n    success: true\n  }\n\n      + expected - actual\n\n       {\n      -  \"outcome\": \"configured\"\n      +  \"outcome\": \"skippedUnavailable\"\n         \"success\": true\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:87:20)\n\n  2) Assurance: independent domain oracle examples\n       ORC-TARGET-002: A required target reports a configuration error.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   outcome: 'configured',\n+   success: true\n-   outcome: 'failed',\n-   success: false\n  }\n\n      + expected - actual\n\n       {\n      -  \"outcome\": \"configured\"\n      -  \"success\": true\n      +  \"outcome\": \"failed\"\n      +  \"success\": false\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:87:20)\n\n  3) Assurance: independent domain oracle examples\n       ORC-TARGET-003: A target accepts a clear request.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   outcome: 'failed',\n+   success: false\n-   outcome: 'cleared',\n-   success: true\n  }\n\n      + expected - actual\n\n       {\n      -  \"outcome\": \"failed\"\n      -  \"success\": false\n      +  \"outcome\": \"cleared\"\n      +  \"success\": true\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:87:20)\n\n  4) Assurance: external-boundary contracts\n       CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   outcome: 'configured',\n-   errorType: 'NOT_INSTALLED',\n-   outcome: 'skippedUnavailable',\n    success: true\n  }\n\n      + expected - actual\n\n       {\n      -  \"outcome\": \"configured\"\n      +  \"errorType\": \"NOT_INSTALLED\"\n      +  \"outcome\": \"skippedUnavailable\"\n         \"success\": true\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\ExternalBoundary.contract.test.js:245:16)\n\n  5) Assurance: deterministic failure injection and recovery\n       F-PARTIAL-001: one target failure stays visible while other target results remain terminal:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   errorType: undefined,\n+   outcome: 'failed',\n+   success: false\n-   outcome: 'configured',\n-   success: true\n  }\n\n      + expected - actual\n\n       {\n      -  \"errorType\": [undefined]\n      -  \"outcome\": \"failed\"\n      -  \"success\": false\n      +  \"outcome\": \"configured\"\n      +  \"success\": true\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\FailureInjection.integration.test.js:136:16)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:10.875Z",
+      "completedAt": "2026-08-14T15:56:11.245Z"
+    },
+    {
+      "id": "MNT-TARGET-002",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "sourceSha256": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "compiledPath": "out/core/ProxyConfigTargetRunner.js",
+      "operator": "UnaryOperatorInsertion",
+      "from": "isOptionalToolMissing(target, result.errorType)",
+      "to": "!isOptionalToolMissing(target, result.errorType)",
+      "requirements": [
+        "DVA-4.2",
+        "DVA-7.6"
+      ],
+      "tests": [
+        "ORC-TARGET-001",
+        "ORC-TARGET-002",
+        "PBT-TARGET-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 4,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "out and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    3) CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (73ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    4) F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  42 passing (121ms)\n  4 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-TARGET-001: An optional external tool is not installed.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   outcome: 'failed',\n+   success: false\n-   outcome: 'skippedUnavailable',\n-   success: true\n  }\n\n      + expected - actual\n\n       {\n      -  \"outcome\": \"failed\"\n      -  \"success\": false\n      +  \"outcome\": \"skippedUnavailable\"\n      +  \"success\": true\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:87:20)\n\n  2) Assurance: independent domain oracle examples\n       ORC-TARGET-002: A required target reports a configuration error.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   outcome: 'skippedUnavailable',\n+   success: true\n-   outcome: 'failed',\n-   success: false\n  }\n\n      + expected - actual\n\n       {\n      -  \"outcome\": \"skippedUnavailable\"\n      -  \"success\": true\n      +  \"outcome\": \"failed\"\n      +  \"success\": false\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:87:20)\n\n  3) Assurance: external-boundary contracts\n       CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    errorType: 'NOT_INSTALLED',\n+   outcome: 'failed',\n+   success: false\n-   outcome: 'skippedUnavailable',\n-   success: true\n  }\n\n      + expected - actual\n\n       {\n         \"errorType\": \"NOT_INSTALLED\"\n      -  \"outcome\": \"failed\"\n      -  \"success\": false\n      +  \"outcome\": \"skippedUnavailable\"\n      +  \"success\": true\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\ExternalBoundary.contract.test.js:245:16)\n\n  4) Assurance: deterministic failure injection and recovery\n       F-PARTIAL-001: one target failure stays visible while other target results remain terminal:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n    errorType: 'CONFIG_ERROR',\n+   outcome: 'skippedUnavailable',\n+   success: true\n-   outcome: 'failed',\n-   success: false\n  }\n\n      + expected - actual\n\n       {\n         \"errorType\": \"CONFIG_ERROR\"\n      -  \"outcome\": \"skippedUnavailable\"\n      -  \"success\": true\n      +  \"outcome\": \"failed\"\n      +  \"success\": false\n       }\n      \n      at Context.<anonymous> (out\\test\\assurance\\FailureInjection.integration.test.js:137:16)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:11.248Z",
+      "completedAt": "2026-08-14T15:56:11.618Z"
+    },
+    {
+      "id": "MNT-SYNC-001",
+      "source": "src/sync/ConflictResolver.ts",
+      "sourceSha256": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "compiledPath": "out/sync/ConflictResolver.js",
+      "operator": "RelationalOperatorReplacement",
+      "from": "remote.timestamp > local.timestamp",
+      "to": "remote.timestamp < local.timestamp",
+      "requirements": [
+        "DVA-3.4",
+        "DVA-8.5"
+      ],
+      "tests": [
+        "ORC-SYNC-001",
+        "ORC-SYNC-002",
+        "PBT-SYNC-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 2,
+      "signal": null,
+      "error": null,
+      "stdoutTail": " dependency can throw a non-Error value and it remains a target failure.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    1) ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    2) ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (77ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  44 passing (125ms)\n  2 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-SYNC-002: A remote event is older than a valid local revision.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'local'\n\n      + expected - actual\n\n      -remote\n      +local\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'local'\n\n      + expected - actual\n\n      -remote\n      +local\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:139:16)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:11.620Z",
+      "completedAt": "2026-08-14T15:56:12.004Z"
+    },
+    {
+      "id": "MNT-SYNC-002",
+      "source": "src/sync/ConflictResolver.ts",
+      "sourceSha256": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "compiledPath": "out/sync/ConflictResolver.js",
+      "operator": "RelationalOperatorReplacement",
+      "from": "local.timestamp > remote.timestamp",
+      "to": "local.timestamp < remote.timestamp",
+      "requirements": [
+        "DVA-3.4",
+        "DVA-8.5"
+      ],
+      "tests": [
+        "ORC-SYNC-001",
+        "ORC-SYNC-002",
+        "PBT-SYNC-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 2,
+      "signal": null,
+      "error": null,
+      "stdoutTail": " dependency can throw a non-Error value and it remains a target failure.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    1) ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    2) ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (73ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  44 passing (121ms)\n  2 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-SYNC-002: A remote event is older than a valid local revision.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'local'\n\n      + expected - actual\n\n      -remote\n      +local\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'local'\n\n      + expected - actual\n\n      -remote\n      +local\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:139:16)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:12.007Z",
+      "completedAt": "2026-08-14T15:56:12.393Z"
+    },
+    {
+      "id": "MNT-SYNC-003",
+      "source": "src/sync/ConflictResolver.ts",
+      "sourceSha256": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "compiledPath": "out/sync/ConflictResolver.js",
+      "operator": "UnaryOperatorRemoval",
+      "from": "!remoteValid && localValid",
+      "to": "remoteValid && localValid",
+      "requirements": [
+        "DVA-3.4",
+        "DVA-8.5"
+      ],
+      "tests": [
+        "ORC-SYNC-005",
+        "ORC-SYNC-007",
+        "PBT-SYNC-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 5,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "CLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (84ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    5) F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  41 passing (133ms)\n  5 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-SYNC-001: A remote revision has a newer valid logical timestamp.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'local' !== 'remote'\n\n      + expected - actual\n\n      -local\n      +remote\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-SYNC-003: The same logical write is delivered again.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'local' !== 'none'\n\n      + expected - actual\n\n      -local\n      +none\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  3) Assurance: independent domain oracle examples\n       ORC-SYNC-004: Two different instances use the same timestamp.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'local' !== 'remote'\n\n      + expected - actual\n\n      -local\n      +remote\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  4) Assurance: independent domain oracle examples\n       ORC-SYNC-005: a future remote timestamp is rejected:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'local'\n\n      + expected - actual\n\n      -remote\n      +local\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:111:16)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  5) Assurance: deterministic failure injection and recovery\n       F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n10 !== 20\n\n      + expected - actual\n\n      -10\n      +20\n      \n      at Context.<anonymous> (out\\test\\assurance\\FailureInjection.integration.test.js:200:16)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:12.395Z",
+      "completedAt": "2026-08-14T15:56:12.781Z"
+    },
+    {
+      "id": "MNT-SYNC-004",
+      "source": "src/sync/ConflictResolver.ts",
+      "sourceSha256": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "compiledPath": "out/sync/ConflictResolver.js",
+      "operator": "UnaryOperatorRemoval",
+      "from": "!localValid && remoteValid",
+      "to": "localValid && remoteValid",
+      "requirements": [
+        "DVA-3.4",
+        "DVA-8.5"
+      ],
+      "tests": [
+        "ORC-SYNC-006",
+        "PBT-SYNC-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 3,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "06: a future local timestamp is rejected in favor of a valid remote state\n    √ ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (83ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  43 passing (130ms)\n  3 failing\n\n  1) Assurance: independent domain oracle examples\n       ORC-SYNC-002: A remote event is older than a valid local revision.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'local'\n\n      + expected - actual\n\n      -remote\n      +local\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  2) Assurance: independent domain oracle examples\n       ORC-SYNC-003: The same logical write is delivered again.:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'remote' !== 'none'\n\n      + expected - actual\n\n      -remote\n      +none\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:96:20)\n      at process.processImmediate (node:internal/timers:504:21)\n\n  3) Assurance: independent domain oracle examples\n       ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'local' !== 'remote'\n\n      + expected - actual\n\n      -local\n      +remote\n      \n      at Context.<anonymous> (out\\test\\assurance\\DomainOracle.examples.test.js:125:16)\n      at process.processImmediate (node:internal/timers:504:21)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:12.784Z",
+      "completedAt": "2026-08-14T15:56:13.155Z"
+    },
+    {
+      "id": "MNT-LIFECYCLE-001",
+      "source": "src/monitoring/ProxyMonitor.ts",
+      "sourceSha256": "b120926eb829fd0c407e202a04b5f87db08b485e1c90e211a8fad90a633ef3f9",
+      "compiledPath": "out/monitoring/ProxyMonitor.js",
+      "operator": "UnaryOperatorRemoval",
+      "from": "!this.isCurrentLifecycle(epoch)",
+      "to": "this.isCurrentLifecycle(epoch)",
+      "requirements": [
+        "DVA-4.5",
+        "DVA-9.3"
+      ],
+      "tests": [
+        "PBT-LIFECYCLE-001",
+        "F-CANCEL-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 1,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "king issue.\n    √ ORC-APPLY-003: At least one, but not every, required target converges.\n    √ ORC-APPLY-004: There are no required targets and no user decision can make progress.\n    √ ORC-APPLY-005: A blocking issue prevents success even when every required target reported convergence.\n    √ ORC-TARGET-001: An optional external tool is not installed.\n    √ ORC-TARGET-002: A required target reports a configuration error.\n    √ ORC-TARGET-003: A target accepts a clear request.\n    √ ORC-TARGET-004: A dependency can throw a non-Error value and it remains a target failure.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    √ ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    √ ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (85ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    √ F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    1) F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  45 passing (134ms)\n  1 failing\n\n  1) Assurance: deterministic failure injection and recovery\n       F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop:\n\n      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\ntrue !== false\n\n      + expected - actual\n\n      -true\n      +false\n      \n      at Context.<anonymous> (out\\test\\assurance\\FailureInjection.integration.test.js:224:16)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:13.157Z",
+      "completedAt": "2026-08-14T15:56:13.532Z"
+    },
+    {
+      "id": "MNT-PERSIST-001",
+      "source": "src/sync/SharedStateFile.ts",
+      "sourceSha256": "e58fdb17f6b63e792734a4764d85b2f9074ca76e2e832029d01a9a4784a75b11",
+      "compiledPath": "out/sync/SharedStateFile.js",
+      "operator": "RelationalOperatorReplacement",
+      "from": "attempt < RENAME_RETRY_ATTEMPTS - 1",
+      "to": "attempt >= RENAME_RETRY_ATTEMPTS - 1",
+      "requirements": [
+        "DVA-4.2",
+        "DVA-4.4",
+        "DVA-7.2"
+      ],
+      "tests": [
+        "F-PERSIST-RETRY-001",
+        "CT-STATE-001"
+      ],
+      "equivalence": null,
+      "status": "killed",
+      "loaded": true,
+      "exitCode": 1,
+      "signal": null,
+      "error": null,
+      "stdoutTail": "ets and no user decision can make progress.\n    √ ORC-APPLY-005: A blocking issue prevents success even when every required target reported convergence.\n    √ ORC-TARGET-001: An optional external tool is not installed.\n    √ ORC-TARGET-002: A required target reports a configuration error.\n    √ ORC-TARGET-003: A target accepts a clear request.\n    √ ORC-TARGET-004: A dependency can throw a non-Error value and it remains a target failure.\n    √ ORC-SYNC-001: A remote revision has a newer valid logical timestamp.\n    √ ORC-SYNC-002: A remote event is older than a valid local revision.\n    √ ORC-SYNC-003: The same logical write is delivered again.\n    √ ORC-SYNC-004: Two different instances use the same timestamp.\n    √ ORC-SYNC-005: a future remote timestamp is rejected\n    √ ORC-SYNC-006: a future local timestamp is rejected in favor of a valid remote state\n    √ ORC-SYNC-007: two future timestamps remain outside the valid-time ordering domain\n    √ ORC-LIFECYCLE-001: late completion after stop cannot re-enable effects\n    √ ORC-RECOVERY-001: crash, restart and recovery restore a distinct recovered terminal state\n    √ negative control: an implementation that ignores Auto OFF is rejected\n    √ negative control: a stale remote winner is rejected\n\n  Assurance: persisted property-based tests\n    √ PBT-MODE-001: canonical mode decisions agree with the SUT for every stored seed\n    √ PBT-APPLY-001: required-target aggregation agrees with the independent table\n    √ PBT-TARGET-001: optional-tool skip and failure stay distinguishable\n    √ PBT-SYNC-001: duplicate and reordered logical writes never choose a stale winner\n    √ PBT-LIFECYCLE-001: a stop or cancel at the end of an event sequence forbids later effects\n    √ PBT-RECOVERY-001: crash/restart/recover returns to a running state without permitting a pre-restart completion\n    √ PBT-CAL-001: known-bad Auto OFF behavior fails, shrinks, and replays\n\n  Assurance: external-boundary contracts\n    √ CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract\n    √ CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering\n    √ CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol\n    √ CT-OPTIONAL-001: optional missing Git is skipped while a real configuration error remains failed\n    √ CT-VSCODE-001: Memento, SecretStorage, Configuration event and EnvironmentVariableCollection preserve their observable contracts\n    √ CT-STATE-001: real filesystem write/rename preserves state and corrupt state is recoverable\n    √ CT-PROXY-001: local protocol-compatible proxy reports success, refusal, close and timeout deterministically (86ms)\n\n  Assurance: deterministic failure injection and recovery\n    √ F-RESOURCE-001: ENOSPC and EACCES produce an explicit filesystem failure with no durable state\n    1) F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears\n    √ F-PARTIAL-001: one target failure stays visible while other target results remain terminal\n    √ F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound\n    √ F-EVENT-001: duplicate, missing and reordered sync events converge to the newest state\n    √ F-CANCEL-001: ProxyMonitor discards an in-flight completion after stop\n    √ F-CRASH-001: corrupt shared state and stale lease recover after restart\n\n\n  45 passing (131ms)\n  1 failing\n\n  1) Assurance: deterministic failure injection and recovery\n       F-PERSIST-RETRY-001: EPERM rename retries are bounded and recover after the fault clears:\n     Error: injected EPERM\n      at errno (out\\test\\assurance\\FailureInjection.integration.test.js:59:26)\n      at Object.renameSync (out\\test\\assurance\\FailureInjection.integration.test.js:99:31)\n      at SharedStateFile.write (out\\sync\\SharedStateFile.js:159:37)\n      at async Context.<anonymous> (out\\test\\assurance\\FailureInjection.integration.test.js:107:13)\n\n\n\n",
+      "stderrTail": "",
+      "startedAt": "2026-08-14T15:56:13.535Z",
+      "completedAt": "2026-08-14T15:56:13.918Z"
+    }
+  ]
+}

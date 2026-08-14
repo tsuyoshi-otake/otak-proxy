@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "runs": [],
+  "note": "公式証跡は verify:assurance がredactionと追跡表検査に成功したrunだけを追加する。"
+}

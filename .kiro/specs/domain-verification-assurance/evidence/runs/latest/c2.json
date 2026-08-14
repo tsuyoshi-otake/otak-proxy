@@ -1,0 +1,566 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-14T15:56:04.895Z",
+  "instrumentation": "AST transform to temporary output only",
+  "typescriptVersion": "5.7.3",
+  "rawC2": 100,
+  "feasibleC2": 100,
+  "totalConditions": 24,
+  "feasibleConditions": 24,
+  "unobserved": [],
+  "conditions": [
+    {
+      "id": "C2-MODE-4842055c5a9a",
+      "group": "C2-MODE",
+      "source": "src/core/ProxyStateManager.ts",
+      "symbol": [
+        "getActiveProxyUrl",
+        "getNextMode"
+      ],
+      "start": 4780,
+      "end": 4806,
+      "expression": "state.autoModeOff === true",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "26990967be6045b0fd408cf4edf95641b1fa3c41e4c1be0cc7dd266c3188a02f",
+      "trueCount": 22,
+      "falseCount": 13,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-46c8aeac4e95",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 5926,
+      "end": 5941,
+      "expression": "!attemptedWrite",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 30,
+      "falseCount": 25,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-8806ee9bf5c2",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 5960,
+      "end": 6021,
+      "expression": "issues.some(issue => issue.impact === 'requiresUserDecision')",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 12,
+      "falseCount": 18,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-99e0dbb83532",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 6069,
+      "end": 6095,
+      "expression": "totalRequiredTargets === 0",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 7,
+      "falseCount": 18,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-1ae4a6d51faf",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 6114,
+      "end": 6175,
+      "expression": "issues.some(issue => issue.impact === 'requiresUserDecision')",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 4,
+      "falseCount": 3,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-5e2049811bc3",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 6309,
+      "end": 6358,
+      "expression": "convergedRequiredTargets === totalRequiredTargets",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 4,
+      "falseCount": 14,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-6b3822e71c13",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 6362,
+      "end": 6379,
+      "expression": "!hasBlockingIssue",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 3,
+      "falseCount": 1,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-a6a84522dd07",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 6424,
+      "end": 6452,
+      "expression": "convergedRequiredTargets > 0",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 7,
+      "falseCount": 8,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-APPLY-bcc706913f0d",
+      "group": "C2-APPLY",
+      "source": "src/core/v3Types.ts",
+      "symbol": [
+        "deriveRuntimeApplyState"
+      ],
+      "start": 6497,
+      "end": 6558,
+      "expression": "issues.some(issue => issue.impact === 'requiresUserDecision')",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "0c451e09131f2ff86b759b25da3c14a35c767ccdd9a192315bd62599bb9351bf",
+      "trueCount": 1,
+      "falseCount": 7,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-TARGET-08a2870734fd",
+      "group": "C2-TARGET",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "symbol": [
+        "updateProxyConfigTargetDetailed"
+      ],
+      "start": 1219,
+      "end": 1226,
+      "expression": "enabled",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "trueCount": 23,
+      "falseCount": 31,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-TARGET-cbf28a8e22b0",
+      "group": "C2-TARGET",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "symbol": [
+        "updateProxyConfigTargetDetailed"
+      ],
+      "start": 1359,
+      "end": 1374,
+      "expression": "!result.success",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "trueCount": 26,
+      "falseCount": 4,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-TARGET-c2716413ecaf",
+      "group": "C2-TARGET",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "symbol": [
+        "updateProxyConfigTargetDetailed"
+      ],
+      "start": 1394,
+      "end": 1441,
+      "expression": "isOptionalToolMissing(target, result.errorType)",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "trueCount": 8,
+      "falseCount": 18,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-TARGET-fe307919b358",
+      "group": "C2-TARGET",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "symbol": [
+        "updateProxyConfigTargetDetailed"
+      ],
+      "start": 1975,
+      "end": 1982,
+      "expression": "enabled",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "trueCount": 2,
+      "falseCount": 2,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-TARGET-c12cc64d5765",
+      "group": "C2-TARGET",
+      "source": "src/core/ProxyConfigTargetRunner.ts",
+      "symbol": [
+        "updateProxyConfigTargetDetailed"
+      ],
+      "start": 2060,
+      "end": 2082,
+      "expression": "error instanceof Error",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "b4c355a71dde4e55aabe35940ac388f7b009c1d2560409d6fbd5901df9e26780",
+      "trueCount": 11,
+      "falseCount": 13,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-8027e89aa362",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 3098,
+      "end": 3110,
+      "expression": "sameInstance",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 8,
+      "falseCount": 22,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-52901de041c1",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 3371,
+      "end": 3383,
+      "expression": "!remoteValid",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 2,
+      "falseCount": 55,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-fcd062835fae",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 3387,
+      "end": 3397,
+      "expression": "localValid",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 1,
+      "falseCount": 1,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-873ee4003780",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 3859,
+      "end": 3870,
+      "expression": "!localValid",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 2,
+      "falseCount": 54,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-51276a7b9737",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 3874,
+      "end": 3885,
+      "expression": "remoteValid",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 1,
+      "falseCount": 1,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-4416c585da8d",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 4320,
+      "end": 4352,
+      "expression": "local.version === remote.version",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 6,
+      "falseCount": 49,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-a585bb909421",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 4369,
+      "end": 4405,
+      "expression": "local.timestamp === remote.timestamp",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 2,
+      "falseCount": 4,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-31abdee380c0",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 4422,
+      "end": 4460,
+      "expression": "local.instanceId === remote.instanceId",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 1,
+      "falseCount": 1,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-d10d9ec8aeed",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 4873,
+      "end": 4907,
+      "expression": "remote.timestamp > local.timestamp",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 26,
+      "falseCount": 28,
+      "unobservedCount": 0,
+      "feasible": true
+    },
+    {
+      "id": "C2-SYNC-db8d8d4051dc",
+      "group": "C2-SYNC",
+      "source": "src/sync/ConflictResolver.ts",
+      "symbol": [
+        "resolve"
+      ],
+      "start": 5165,
+      "end": 5199,
+      "expression": "local.timestamp > remote.timestamp",
+      "requirements": [
+        "DVA-4.1",
+        "DVA-4.2",
+        "DVA-4.3",
+        "DVA-4.6",
+        "DVA-4.7"
+      ],
+      "sourceHash": "cd6f6c36f8ef8349c4124bc983902b4dc4acc3e4951864f567565afc9e6545cb",
+      "trueCount": 26,
+      "falseCount": 2,
+      "unobservedCount": 0,
+      "feasible": true
+    }
+  ]
+}

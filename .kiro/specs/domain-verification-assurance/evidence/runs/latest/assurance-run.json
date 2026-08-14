@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-14T15:56:24.770Z",
+  "host": "ppc1a9700x",
+  "node": "v26.2.0",
+  "npmCli": "..\\..\\..\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+  "evidenceRoot": ".kiro\\specs\\domain-verification-assurance\\evidence\\runs\\latest",
+  "commandTimeoutMs": 360000,
+  "checks": [
+    {
+      "id": "lint",
+      "startedAt": "2026-08-14T15:52:34.295Z",
+      "completedAt": "2026-08-14T15:52:38.277Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "lint"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "unit",
+      "startedAt": "2026-08-14T15:52:38.277Z",
+      "completedAt": "2026-08-14T15:54:27.989Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:unit"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "unit:process-cleanup",
+      "startedAt": "2026-08-14T15:54:27.989Z",
+      "completedAt": "2026-08-14T15:54:28.814Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "vscode-host",
+      "startedAt": "2026-08-14T15:54:28.814Z",
+      "completedAt": "2026-08-14T15:55:41.050Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "test"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "vscode-host:process-cleanup",
+      "startedAt": "2026-08-14T15:55:41.051Z",
+      "completedAt": "2026-08-14T15:55:41.942Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "domain-oracle",
+      "startedAt": "2026-08-14T15:55:41.943Z",
+      "completedAt": "2026-08-14T15:55:45.693Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:domain-oracle"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "domain-oracle:process-cleanup",
+      "startedAt": "2026-08-14T15:55:45.693Z",
+      "completedAt": "2026-08-14T15:55:46.506Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "pbt-replay",
+      "startedAt": "2026-08-14T15:55:46.506Z",
+      "completedAt": "2026-08-14T15:55:50.622Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:pbt:replay"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "pbt-replay:process-cleanup",
+      "startedAt": "2026-08-14T15:55:50.622Z",
+      "completedAt": "2026-08-14T15:55:51.405Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "contracts",
+      "startedAt": "2026-08-14T15:55:51.405Z",
+      "completedAt": "2026-08-14T15:55:55.537Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:contracts"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "contracts:process-cleanup",
+      "startedAt": "2026-08-14T15:55:55.537Z",
+      "completedAt": "2026-08-14T15:55:56.435Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "failure-injection",
+      "startedAt": "2026-08-14T15:55:56.435Z",
+      "completedAt": "2026-08-14T15:56:00.059Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:failure-injection"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "failure-injection:process-cleanup",
+      "startedAt": "2026-08-14T15:56:00.059Z",
+      "completedAt": "2026-08-14T15:56:00.850Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "c2",
+      "startedAt": "2026-08-14T15:56:00.850Z",
+      "completedAt": "2026-08-14T15:56:04.918Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "coverage:c2"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "c2:process-cleanup",
+      "startedAt": "2026-08-14T15:56:04.918Z",
+      "completedAt": "2026-08-14T15:56:05.741Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "mutation",
+      "startedAt": "2026-08-14T15:56:05.741Z",
+      "completedAt": "2026-08-14T15:56:13.936Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "mutation:domain"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "mutation:process-cleanup",
+      "startedAt": "2026-08-14T15:56:13.936Z",
+      "completedAt": "2026-08-14T15:56:14.726Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "tla",
+      "startedAt": "2026-08-14T15:56:14.726Z",
+      "completedAt": "2026-08-14T15:56:23.735Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "verify:tla"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "traceability",
+      "startedAt": "2026-08-14T15:56:23.736Z",
+      "completedAt": "2026-08-14T15:56:23.976Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "verify:traceability"
+      ],
+      "timeoutMs": 360000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "final-process-cleanup",
+      "startedAt": "2026-08-14T15:56:23.976Z",
+      "completedAt": "2026-08-14T15:56:24.770Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    },
+    {
+      "id": "adversarial-audit",
+      "startedAt": "2026-08-14T15:56:24.775Z",
+      "completedAt": "2026-08-14T15:56:24.880Z",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\run-adversarial-audit.mjs"
+      ],
+      "timeoutMs": 60000,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "error": null,
+      "passed": true
+    }
+  ],
+  "failedChecks": [],
+  "allPassed": true
+}
