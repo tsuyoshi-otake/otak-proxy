@@ -89,7 +89,10 @@ suite('Assurance: independent domain oracle examples', () => {
         const now = Date.now();
         const input = {
             localTimestamp: now,
-            remoteTimestamp: now + 30_001,
+            // The resolver samples its own clock. Keep this well beyond the
+            // 30-second contract limit so scheduler latency cannot turn this
+            // future-timestamp rejection case into an in-boundary value.
+            remoteTimestamp: now + 60_000,
             localInstanceId: 'local',
             remoteInstanceId: 'remote',
             localVersion: 1,

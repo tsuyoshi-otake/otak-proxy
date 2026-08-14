@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-14T15:56:24.770Z",
+  "generatedAt": "2026-08-14T16:26:56.746Z",
   "host": "ppc1a9700x",
   "node": "v26.2.0",
   "npmCli": "..\\..\\..\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -9,8 +9,8 @@
   "checks": [
     {
       "id": "lint",
-      "startedAt": "2026-08-14T15:52:34.295Z",
-      "completedAt": "2026-08-14T15:52:38.277Z",
+      "startedAt": "2026-08-14T16:22:35.212Z",
+      "completedAt": "2026-08-14T16:22:38.755Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -26,8 +26,8 @@
     },
     {
       "id": "unit",
-      "startedAt": "2026-08-14T15:52:38.277Z",
-      "completedAt": "2026-08-14T15:54:27.989Z",
+      "startedAt": "2026-08-14T16:22:38.755Z",
+      "completedAt": "2026-08-14T16:24:37.505Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -43,8 +43,8 @@
     },
     {
       "id": "unit:process-cleanup",
-      "startedAt": "2026-08-14T15:54:27.989Z",
-      "completedAt": "2026-08-14T15:54:28.814Z",
+      "startedAt": "2026-08-14T16:24:37.506Z",
+      "completedAt": "2026-08-14T16:24:38.555Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -58,8 +58,8 @@
     },
     {
       "id": "vscode-host",
-      "startedAt": "2026-08-14T15:54:28.814Z",
-      "completedAt": "2026-08-14T15:55:41.050Z",
+      "startedAt": "2026-08-14T16:24:38.555Z",
+      "completedAt": "2026-08-14T16:25:59.268Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -74,8 +74,8 @@
     },
     {
       "id": "vscode-host:process-cleanup",
-      "startedAt": "2026-08-14T15:55:41.051Z",
-      "completedAt": "2026-08-14T15:55:41.942Z",
+      "startedAt": "2026-08-14T16:25:59.268Z",
+      "completedAt": "2026-08-14T16:26:00.428Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -89,8 +89,8 @@
     },
     {
       "id": "domain-oracle",
-      "startedAt": "2026-08-14T15:55:41.943Z",
-      "completedAt": "2026-08-14T15:55:45.693Z",
+      "startedAt": "2026-08-14T16:26:00.428Z",
+      "completedAt": "2026-08-14T16:26:06.255Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -106,8 +106,8 @@
     },
     {
       "id": "domain-oracle:process-cleanup",
-      "startedAt": "2026-08-14T15:55:45.693Z",
-      "completedAt": "2026-08-14T15:55:46.506Z",
+      "startedAt": "2026-08-14T16:26:06.255Z",
+      "completedAt": "2026-08-14T16:26:07.343Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -121,8 +121,8 @@
     },
     {
       "id": "pbt-replay",
-      "startedAt": "2026-08-14T15:55:46.506Z",
-      "completedAt": "2026-08-14T15:55:50.622Z",
+      "startedAt": "2026-08-14T16:26:07.343Z",
+      "completedAt": "2026-08-14T16:26:14.082Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -138,8 +138,8 @@
     },
     {
       "id": "pbt-replay:process-cleanup",
-      "startedAt": "2026-08-14T15:55:50.622Z",
-      "completedAt": "2026-08-14T15:55:51.405Z",
+      "startedAt": "2026-08-14T16:26:14.082Z",
+      "completedAt": "2026-08-14T16:26:15.098Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -153,8 +153,8 @@
     },
     {
       "id": "contracts",
-      "startedAt": "2026-08-14T15:55:51.405Z",
-      "completedAt": "2026-08-14T15:55:55.537Z",
+      "startedAt": "2026-08-14T16:26:15.098Z",
+      "completedAt": "2026-08-14T16:26:19.675Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -170,8 +170,8 @@
     },
     {
       "id": "contracts:process-cleanup",
-      "startedAt": "2026-08-14T15:55:55.537Z",
-      "completedAt": "2026-08-14T15:55:56.435Z",
+      "startedAt": "2026-08-14T16:26:19.675Z",
+      "completedAt": "2026-08-14T16:26:20.556Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -185,8 +185,8 @@
     },
     {
       "id": "failure-injection",
-      "startedAt": "2026-08-14T15:55:56.435Z",
-      "completedAt": "2026-08-14T15:56:00.059Z",
+      "startedAt": "2026-08-14T16:26:20.556Z",
+      "completedAt": "2026-08-14T16:26:24.992Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -202,8 +202,8 @@
     },
     {
       "id": "failure-injection:process-cleanup",
-      "startedAt": "2026-08-14T15:56:00.059Z",
-      "completedAt": "2026-08-14T15:56:00.850Z",
+      "startedAt": "2026-08-14T16:26:24.992Z",
+      "completedAt": "2026-08-14T16:26:25.847Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -217,8 +217,8 @@
     },
     {
       "id": "c2",
-      "startedAt": "2026-08-14T15:56:00.850Z",
-      "completedAt": "2026-08-14T15:56:04.918Z",
+      "startedAt": "2026-08-14T16:26:25.847Z",
+      "completedAt": "2026-08-14T16:26:31.866Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -234,8 +234,8 @@
     },
     {
       "id": "c2:process-cleanup",
-      "startedAt": "2026-08-14T15:56:04.918Z",
-      "completedAt": "2026-08-14T15:56:05.741Z",
+      "startedAt": "2026-08-14T16:26:31.866Z",
+      "completedAt": "2026-08-14T16:26:33.099Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -249,8 +249,8 @@
     },
     {
       "id": "mutation",
-      "startedAt": "2026-08-14T15:56:05.741Z",
-      "completedAt": "2026-08-14T15:56:13.936Z",
+      "startedAt": "2026-08-14T16:26:33.099Z",
+      "completedAt": "2026-08-14T16:26:44.789Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -266,8 +266,8 @@
     },
     {
       "id": "mutation:process-cleanup",
-      "startedAt": "2026-08-14T15:56:13.936Z",
-      "completedAt": "2026-08-14T15:56:14.726Z",
+      "startedAt": "2026-08-14T16:26:44.789Z",
+      "completedAt": "2026-08-14T16:26:45.707Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -281,8 +281,8 @@
     },
     {
       "id": "tla",
-      "startedAt": "2026-08-14T15:56:14.726Z",
-      "completedAt": "2026-08-14T15:56:23.735Z",
+      "startedAt": "2026-08-14T16:26:45.707Z",
+      "completedAt": "2026-08-14T16:26:55.480Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -298,8 +298,8 @@
     },
     {
       "id": "traceability",
-      "startedAt": "2026-08-14T15:56:23.736Z",
-      "completedAt": "2026-08-14T15:56:23.976Z",
+      "startedAt": "2026-08-14T16:26:55.480Z",
+      "completedAt": "2026-08-14T16:26:55.756Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Users\\developer\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
@@ -315,8 +315,8 @@
     },
     {
       "id": "final-process-cleanup",
-      "startedAt": "2026-08-14T15:56:23.976Z",
-      "completedAt": "2026-08-14T15:56:24.770Z",
+      "startedAt": "2026-08-14T16:26:55.756Z",
+      "completedAt": "2026-08-14T16:26:56.746Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\cleanup-test-processes.mjs"
@@ -330,8 +330,8 @@
     },
     {
       "id": "adversarial-audit",
-      "startedAt": "2026-08-14T15:56:24.775Z",
-      "completedAt": "2026-08-14T15:56:24.880Z",
+      "startedAt": "2026-08-14T16:26:56.751Z",
+      "completedAt": "2026-08-14T16:26:56.906Z",
       "command": [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Codes\\tsuyoshi-otake\\otak-proxy\\scripts\\assurance\\run-adversarial-audit.mjs"

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "suite": "contracts",
-  "startedAt": "2026-08-14T15:55:55.227Z",
-  "completedAt": "2026-08-14T15:55:55.518Z",
+  "startedAt": "2026-08-14T16:26:19.375Z",
+  "completedAt": "2026-08-14T16:26:19.656Z",
   "command": [
     "C:\\Program Files\\nodejs\\node.exe",
     "node_modules\\mocha\\bin\\mocha.js",

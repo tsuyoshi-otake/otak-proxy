@@ -25,3 +25,9 @@
 - Iteration 2 pass: C1–C8を直接実行して確認。`npm run verify:assurance`、`npm run test:unit:parallel`、`npm run lint:unicode`、`npm run verify:traceability`、`npm run audit:assurance`、プロセス再検査はすべて終了コード0だった。
 - Independent verifier: 現行の開発者ポリシーがsubagent起動を許可していないため、独立fresh-context verifierは利用不可。各rubricのVerifyを主担当が直接実行した。
 - Terminal state: pass。C2は24/24、mutationは12/12 killed、TLCは7/7、traceabilityはunverified 0、runner-survivorsは0。外部VM E2Eはユーザー指示により対象外であり、成功として主張しない。
+
+## 2026-08-15 release-3.2.5
+
+- Release iteration 3 fail: `v3.2.4` のLinux publish workflow（run 31818783246）はregistry公開前のUnit testsで `ORC-SYNC-005` に失敗した。証拠: remote timestamp `now + 30_001` は、SUTが別途採取した時刻との差が1 ms以上になると30秒許容範囲内になる。
+- Investigate: `ConflictResolver` は自身の `Date.now()` と30秒のdrift上限を使う。テストが時計を固定せず最大値+1を渡すと、scheduler遅延で非決定的になる。
+- Iteration 3 fix/pass: 値を `now + 60_000` にして上限外を明示した。`npm run test:domain-oracle`、`npm run verify:assurance`、runner cleanupは終了コード0。`v3.2.4` tagは不変の失敗記録として保持し、修正済み成果物は `v3.2.5` として公開する。

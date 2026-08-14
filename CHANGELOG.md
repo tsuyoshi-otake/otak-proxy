@@ -1,5 +1,10 @@
 # Change Log
 
+## [3.2.5] - 2026-08-15
+
+### Fixed
+- Make the logical-clock future-timestamp rejection test robust to the resolver sampling its own clock, while keeping the tested value clearly outside the 30-second contract bound (#42).
+
 ## [3.2.4] - 2026-08-15
 
 ### Fixed
