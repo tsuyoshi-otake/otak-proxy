@@ -214,10 +214,14 @@ suite('NpmConfigManager Test Suite', () => {
             const result = await manager.setProxy(url);
             assert.strictEqual(result.success, true, result.error);
             assert.ok(calls.length >= 1);
+            const setCalls = calls.filter(call => call.args.includes('set'));
+            assert.ok(setCalls.length >= 1);
             for (const call of calls) {
                 assert.strictEqual(isCmdExecutable(call.command), false, 'Windows npm must not start cmd.exe');
                 assert.ok(!call.args.includes('/c'), 'Windows npm must not use cmd /c');
                 assert.ok(!call.args.includes('/s'), 'Windows npm must not use cmd /s');
+            }
+            for (const call of setCalls) {
                 assert.ok(call.args.includes(url), 'proxy URL must remain a single argv element');
             }
         });

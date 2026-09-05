@@ -110,13 +110,23 @@ suite('GitConfigManager Test Suite', () => {
         test('unsetProxy still clears leftover https.proxy', async () => {
             const calls: Array<string[]> = [];
             const leftover = 'http://leftover-https.example.com:8080';
+            let leftoverPresent = true;
             const manager = new GitConfigManager({
                 commandRunner: async (_command, args) => {
                     calls.push(args);
+                    if (args.includes('--unset-all') && args.includes(GIT_LEGACY_NON_ROUTING_PROXY_KEY)) {
+                        leftoverPresent = false;
+                        return { stdout: '', stderr: '' };
+                    }
                     if (args.includes('--get-regexp')) {
-                        return { stdout: `${GIT_LEGACY_NON_ROUTING_PROXY_KEY} ${leftover}\n`, stderr: '' };
+                        return leftoverPresent
+                            ? { stdout: `${GIT_LEGACY_NON_ROUTING_PROXY_KEY} ${leftover}\n`, stderr: '' }
+                            : { stdout: '', stderr: '' };
                     }
                     if (args.includes('--get-all') && args.includes(GIT_LEGACY_NON_ROUTING_PROXY_KEY)) {
+                        if (!leftoverPresent) {
+                            throw Object.assign(new Error('missing'), { code: 1 });
+                        }
                         return { stdout: `${leftover}\n`, stderr: '' };
                     }
                     if (args.includes('--get-all')) {

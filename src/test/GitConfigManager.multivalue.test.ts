@@ -144,10 +144,12 @@ suite('GitConfigManager multi-value exit 5 (#44)', () => {
 
             const result = await manager.setProxy('http://proxy.example:8080');
             assert.strictEqual(result.success, true);
-            assert.deepStrictEqual(calls, [
-                ['config', '--global', '--replace-all', 'http.proxy', 'http://proxy.example:8080'],
-                ['config', '--global', '--replace-all', 'https.proxy', 'http://proxy.example:8080']
-            ]);
+            assert.ok(calls.some(args =>
+                args.includes('--replace-all') &&
+                args.includes('http.proxy') &&
+                args.includes('http://proxy.example:8080')
+            ));
+            assert.ok(!calls.some(args => args.includes('--replace-all') && args.includes('https.proxy')));
         });
     });
 
@@ -252,7 +254,7 @@ suite('GitConfigManager multi-value exit 5 (#44)', () => {
             const https = (await isolated.git(['config', '--global', '--get-all', 'https.proxy']))
                 .stdout.trim().split(/\r?\n/).filter(Boolean);
             assert.deepStrictEqual(http, [OWNED]);
-            assert.deepStrictEqual(https, [OWNED]);
+            assert.deepStrictEqual(https, []);
         });
 
         test('credential-bearing multi-values do not appear in the operation result', async function() {
