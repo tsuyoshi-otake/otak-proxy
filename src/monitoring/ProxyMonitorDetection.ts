@@ -32,6 +32,8 @@ export async function detectProxyWithRetry(
             return {
                 proxyUrl: detection.proxyUrl,
                 source: detection.source as ProxyDetectionResult['source'],
+                kind: detection.kind,
+                capability: detection.capability,
                 timestamp: Date.now(),
                 success: true
             };
@@ -56,7 +58,7 @@ export async function detectProxyWithRetry(
 
 async function detectProxy(
     detector: ISystemProxyDetector
-): Promise<{ proxyUrl: string | null; source: string | null }> {
+): Promise<Pick<ProxyDetectionResult, 'proxyUrl' | 'source' | 'kind' | 'capability'>> {
     if (detector.detectSystemProxyWithSource) {
         return await detector.detectSystemProxyWithSource();
     }

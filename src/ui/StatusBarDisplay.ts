@@ -1,4 +1,5 @@
 import { ProxyMode, ProxyState } from '../core/types';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { I18nManager } from '../i18n/I18nManager';
 import { InputSanitizer } from '../validation/InputSanitizer';
 
@@ -72,11 +73,29 @@ function getAutoDisplay(
         };
     }
 
+    const unsupportedKind = state.lastDetectionCapability === 'unsupported' &&
+        (state.lastDetectionKind === 'pac' || state.lastDetectionKind === 'wpad')
+        ? unsupportedAutoConfigKindLabel(state.lastDetectionKind)
+        : undefined;
+
     if (state.usingFallbackProxy && state.fallbackProxyUrl) {
         const fallbackDisplay = getUrlDisplay(state.fallbackProxyUrl, showUrl, i18n, sanitizer);
+        if (unsupportedKind) {
+            return {
+                text: `$(plug) ${i18n.t('statusbar.autoFallbackIgnoringAutoConfig', { kind: unsupportedKind, url: fallbackDisplay })}`,
+                statusText: i18n.t('statusbar.tooltip.autoFallbackIgnoringAutoConfig', { kind: unsupportedKind, url: fallbackDisplay })
+            };
+        }
         return {
             text: `$(plug) ${i18n.t('statusbar.autoFallback', { url: fallbackDisplay })}`,
             statusText: i18n.t('statusbar.tooltip.autoFallback', { url: fallbackDisplay })
+        };
+    }
+
+    if (unsupportedKind) {
+        return {
+            text: `$(warning) ${i18n.t('statusbar.autoUnsupported', { kind: unsupportedKind })}`,
+            statusText: i18n.t('statusbar.tooltip.autoUnsupported', { kind: unsupportedKind })
         };
     }
 

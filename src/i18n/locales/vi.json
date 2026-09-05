@@ -297,5 +297,16 @@
   "diagnose.reason.winhttpParseUnavailable": "không thể phân tích đầu ra proxy WinHTTP",
   "diagnose.reason.wininetPac": "một URL tự động cấu hình proxy (PAC) đã được cấu hình",
   "diagnose.reason.gitReadUnavailable": "không thể đọc cấu hình git",
-  "migration.credentialsDropped": "otak-proxy không thể di chuyển {count} thông tin đăng nhập proxy trùng lặp sang bộ lưu trữ an toàn trong quá trình nâng cấp lên v3. Hãy nhập lại nếu một proxy ngừng xác thực."
+  "migration.credentialsDropped": "otak-proxy không thể di chuyển {count} thông tin đăng nhập proxy trùng lặp sang bộ lưu trữ an toàn trong quá trình nâng cấp lên v3. Hãy nhập lại nếu một proxy ngừng xác thực.",
+  "statusbar.autoUnsupported": "Auto: {kind} unsupported",
+  "statusbar.autoFallbackIgnoringAutoConfig": "Auto (Fallback, ignoring {kind}): {url}",
+  "statusbar.tooltip.autoUnsupported": "Auto Mode - System proxy auto-config ({kind}) was detected but is not supported",
+  "statusbar.tooltip.autoFallbackIgnoringAutoConfig": "Auto Mode - Ignoring unsupported system auto-config ({kind}); using manual fallback: {url}",
+  "warning.unsupportedAutoConfig": "System proxy auto-config ({kind}) was detected but is not supported. Configure a manual fallback URL to apply a proxy.",
+  "fallback.ignoringAutoConfig": "Ignoring unsupported system auto-config ({kind}); using manual fallback: {url}",
+  "diagnose.reason.wininetWpad": "Windows automatic proxy detection is enabled and cannot be resolved",
+  "diagnose.reason.gnomeAuto": "GNOME proxy mode is auto-config and cannot be applied",
+  "diagnose.reason.macosPac": "a macOS automatic proxy URL is configured and cannot be applied",
+  "diagnose.target.linuxGnome": "GNOME proxy",
+  "diagnose.target.macosNetwork": "macOS network proxy"
 }

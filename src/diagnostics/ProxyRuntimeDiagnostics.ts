@@ -13,6 +13,7 @@ import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostic
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
+import { createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -175,6 +176,7 @@ export class ProxyRuntimeDiagnostics {
             npm: slowDiagnostics.npm?.observation,
             vscode: vscodeDiagnostics.observation
         }));
+        issues.push(...this.collectUnsupportedAutoConfigFromState(state, issues));
 
         const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
@@ -427,6 +429,43 @@ export class ProxyRuntimeDiagnostics {
         }
 
         return { observation, issues };
+    }
+
+    /**
+     * Surfaces Auto's last unsupported PAC/WPAD observation on Diagnose so the
+     * two paths share kind/capability. Windows already emits the same issue from
+     * WinINet observation, so skip duplicates.
+     */
+    private collectUnsupportedAutoConfigFromState(state: ProxyState, existing: readonly ProxyIssue[]): ProxyIssue[] {
+        if (state.lastDetectionCapability !== 'unsupported') {
+            return [];
+        }
+        const kind = state.lastDetectionKind;
+        if (kind !== 'pac' && kind !== 'wpad') {
+            return [];
+        }
+
+        const source = state.lastDetectionSource;
+        const spec = source === 'windows' && kind === 'wpad'
+            ? { id: 'windows.wininet.wpad', targetId: 'windows.wininet', targetHost: 'windowsHost' as const, origin: 'registry' }
+            : source === 'windows'
+                ? { id: 'windows.wininet.pac', targetId: 'windows.wininet', targetHost: 'windowsHost' as const, origin: 'registry' }
+                : source === 'linux'
+                    ? { id: 'linux.gnome.auto', targetId: 'linux.gnome', targetHost: 'workspaceHost' as const, origin: 'gsettings' }
+                    : source === 'macos'
+                        ? { id: 'macos.autoproxy.pac', targetId: 'macos.network', targetHost: 'workspaceHost' as const, origin: 'networksetup' }
+                        : undefined;
+        if (!spec || existing.some(issue => issue.id === spec.id)) {
+            return [];
+        }
+
+        return [createUnsupportedAutoConfigIssue({
+            id: spec.id,
+            targetId: spec.targetId,
+            targetHost: spec.targetHost,
+            source: spec.origin,
+            kind
+        })];
     }
 
     private collectManagedConvergenceIssues(

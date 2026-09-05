@@ -297,5 +297,16 @@
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP प्रॉक्सी आउटपुट का विश्लेषण नहीं किया जा सका",
   "diagnose.reason.wininetPac": "एक प्रॉक्सी ऑटो-कॉन्फ़िग (PAC) URL कॉन्फ़िगर है",
   "diagnose.reason.gitReadUnavailable": "git कॉन्फ़िगरेशन पढ़ा नहीं जा सका",
-  "migration.credentialsDropped": "otak-proxy v3 अपग्रेड के दौरान {count} डुप्लिकेट प्रॉक्सी क्रेडेंशियल को सुरक्षित संग्रहण में माइग्रेट नहीं कर सका। यदि कोई प्रॉक्सी प्रमाणीकरण करना बंद कर दे तो उन्हें फिर से दर्ज करें।"
+  "migration.credentialsDropped": "otak-proxy v3 अपग्रेड के दौरान {count} डुप्लिकेट प्रॉक्सी क्रेडेंशियल को सुरक्षित संग्रहण में माइग्रेट नहीं कर सका। यदि कोई प्रॉक्सी प्रमाणीकरण करना बंद कर दे तो उन्हें फिर से दर्ज करें।",
+  "statusbar.autoUnsupported": "Auto: {kind} unsupported",
+  "statusbar.autoFallbackIgnoringAutoConfig": "Auto (Fallback, ignoring {kind}): {url}",
+  "statusbar.tooltip.autoUnsupported": "Auto Mode - System proxy auto-config ({kind}) was detected but is not supported",
+  "statusbar.tooltip.autoFallbackIgnoringAutoConfig": "Auto Mode - Ignoring unsupported system auto-config ({kind}); using manual fallback: {url}",
+  "warning.unsupportedAutoConfig": "System proxy auto-config ({kind}) was detected but is not supported. Configure a manual fallback URL to apply a proxy.",
+  "fallback.ignoringAutoConfig": "Ignoring unsupported system auto-config ({kind}); using manual fallback: {url}",
+  "diagnose.reason.wininetWpad": "Windows automatic proxy detection is enabled and cannot be resolved",
+  "diagnose.reason.gnomeAuto": "GNOME proxy mode is auto-config and cannot be applied",
+  "diagnose.reason.macosPac": "a macOS automatic proxy URL is configured and cannot be applied",
+  "diagnose.target.linuxGnome": "GNOME proxy",
+  "diagnose.target.macosNetwork": "macOS network proxy"
 }

@@ -42,7 +42,8 @@ suite('ExtensionProxyEventHandlers Tests', () => {
             applyProxySettings: applyProxySettingsStub,
             updateStatusBar: updateStatusBarStub,
             userNotifier: {
-                showSuccess: sandbox.stub()
+                showSuccess: sandbox.stub(),
+                showWarning: sandbox.stub()
             },
             sanitizer: {
                 maskPassword: (url: string) => url
@@ -148,5 +149,32 @@ suite('ExtensionProxyEventHandlers Tests', () => {
         assert.strictEqual(state.autoProxyUrl, undefined);
         assert.strictEqual(state.lastDetectionSource, undefined);
         sinon.assert.calledWith(applyProxySettingsStub, '', false);
+    });
+
+    test('unsupported PAC detection does not apply none', async () => {
+        state = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://old-proxy.example.com:8080',
+            usingFallbackProxy: false,
+            lastDetectionSource: 'windows'
+        };
+        const result: ProxyDetectionResult = {
+            proxyUrl: null,
+            source: 'windows',
+            kind: 'pac',
+            capability: 'unsupported',
+            timestamp: Date.now(),
+            success: true
+        };
+
+        await handleProxyChanged(context, result);
+
+        assert.strictEqual(state.autoProxyUrl, 'http://old-proxy.example.com:8080');
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.systemProxyDetected, true);
+        assert.strictEqual(state.lastDetectionKind, 'pac');
+        assert.strictEqual(state.lastDetectionCapability, 'unsupported');
+        sinon.assert.notCalled(applyProxySettingsStub);
+        sinon.assert.calledOnce(saveStateStub);
     });
 });

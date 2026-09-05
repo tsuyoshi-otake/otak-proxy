@@ -31,7 +31,9 @@ const TARGET_LABEL_KEYS: Record<string, string> = {
     'diagnostics.childProcess': 'diagnose.target.diagnosticsChildProcess',
     'windows': 'diagnose.target.windows',
     'windows.winhttp': 'diagnose.target.windowsWinhttp',
-    'windows.wininet': 'diagnose.target.windowsWininet'
+    'windows.wininet': 'diagnose.target.windowsWininet',
+    'linux.gnome': 'diagnose.target.linuxGnome',
+    'macos.network': 'diagnose.target.macosNetwork'
 };
 
 function targetLabel(issue: ProxyIssue): string {
@@ -55,6 +57,12 @@ function issueReasonKey(issue: ProxyIssue): string | undefined {
             return 'diagnose.reason.winhttpParseUnavailable';
         case 'windows.wininet.pac':
             return 'diagnose.reason.wininetPac';
+        case 'windows.wininet.wpad':
+            return 'diagnose.reason.wininetWpad';
+        case 'linux.gnome.auto':
+            return 'diagnose.reason.gnomeAuto';
+        case 'macos.autoproxy.pac':
+            return 'diagnose.reason.macosPac';
         case 'git.readUnavailable':
             return 'diagnose.reason.gitReadUnavailable';
         case 'vscode.proxySupport.off':

@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
+import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
@@ -31,14 +33,14 @@ export class SystemProxyUpdateService {
         // by the stale pre-detection snapshot (#17, #27).
         const state = await this.context.proxyStateManager.getState();
         state.lastSystemProxyCheck = now;
-        state.systemProxyDetected = !!detectedProxy;
+        state.systemProxyDetected = !!detectedProxy || isUnsupportedAutoConfig(detected);
 
         if (state.mode === ProxyMode.Auto) {
-            await this.updateAutoProxyState(state, detectedProxy, detectedSource);
+            await this.updateAutoProxyState(state, detected);
             return;
         }
 
-        await this.saveDetectedProxyForNonAutoMode(state, detectedProxy, detectedSource);
+        await this.saveDetectedProxyForNonAutoMode(state, detected, detectedProxy, detectedSource);
     }
 
     private shouldSkipRecentNonAutoCheck(state: ProxyState, now: number): boolean {
@@ -52,15 +54,26 @@ export class SystemProxyUpdateService {
 
     private async updateAutoProxyState(
         state: ProxyState,
-        detectedProxy: string | null,
-        detectedSource: AppliedProxySource | undefined
+        detected: ProxyDetectionWithSource
     ): Promise<void> {
         const previousProxy = state.autoProxyUrl;
         const wasAutoModeOff = state.autoModeOff === true;
+        const previousKind = state.lastDetectionKind;
+        const detectedProxy = detected.proxyUrl;
+        const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
 
         if (detectedProxy) {
             this.applyDetectedProxyState(state, detectedProxy, detectedSource);
+        } else if (isUnsupportedAutoConfig(detected)) {
+            await this.applyUnsupportedAutoConfigState(state, detected);
+            if (!state.usingFallbackProxy) {
+                await this.saveAndPublishState(state);
+                this.notifyUnsupportedAutoConfig(state, previousKind);
+                this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
+                return;
+            }
         } else {
+            this.clearAutoConfigMetadata(state);
             await this.applyFallbackProxyState(state);
         }
 
@@ -87,6 +100,53 @@ export class SystemProxyUpdateService {
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         state.lastDetectionSource = detectedSource;
+        state.lastDetectionKind = 'singleProxy';
+        state.lastDetectionCapability = 'supported';
+    }
+
+    private async applyUnsupportedAutoConfigState(
+        state: ProxyState,
+        detected: ProxyDetectionWithSource
+    ): Promise<void> {
+        state.systemProxyDetected = true;
+        state.autoModeOff = false;
+        state.lastDetectionKind = detected.kind;
+        state.lastDetectionCapability = detected.capability;
+        state.lastDetectionSource = detected.source ?? undefined;
+
+        const config = vscode.workspace.getConfiguration('otakProxy');
+        const fallbackEnabled = config.get<boolean>('enableFallback', true);
+
+        if (fallbackEnabled && state.manualProxyUrl && await this.isFallbackReachable(state.manualProxyUrl)) {
+            state.autoProxyUrl = state.manualProxyUrl;
+            state.usingFallbackProxy = true;
+            state.fallbackProxyUrl = state.manualProxyUrl;
+            Logger.log(`Ignoring unsupported auto-config (${detected.kind}); using fallback proxy`);
+            return;
+        }
+
+        state.usingFallbackProxy = false;
+        state.fallbackProxyUrl = undefined;
+        // Keep any previously applied URL. Do not apply none — PAC is not "no proxy".
+        Logger.log(`System auto-config detected but unsupported (${detected.kind})`);
+    }
+
+    private clearAutoConfigMetadata(state: ProxyState): void {
+        state.lastDetectionKind = 'direct';
+        state.lastDetectionCapability = 'supported';
+    }
+
+    private notifyUnsupportedAutoConfig(
+        state: ProxyState,
+        previousKind: ProxyState['lastDetectionKind']
+    ): void {
+        if (previousKind === 'pac' || previousKind === 'wpad') {
+            return;
+        }
+        this.context.userNotifier.showWarning(
+            'warning.unsupportedAutoConfig',
+            { kind: unsupportedAutoConfigKindLabel(state.lastDetectionKind) }
+        );
     }
 
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
@@ -129,6 +189,16 @@ export class SystemProxyUpdateService {
         }
 
         if (state.usingFallbackProxy) {
+            if (state.lastDetectionCapability === 'unsupported') {
+                this.context.userNotifier.showSuccess(
+                    'fallback.ignoringAutoConfig',
+                    {
+                        kind: unsupportedAutoConfigKindLabel(state.lastDetectionKind),
+                        url: this.context.sanitizer.maskPassword(state.autoProxyUrl!)
+                    }
+                );
+                return;
+            }
             this.context.userNotifier.showSuccess(
                 'fallback.usingManualProxy',
                 { url: this.context.sanitizer.maskPassword(state.autoProxyUrl!) }
@@ -143,11 +213,23 @@ export class SystemProxyUpdateService {
 
     private async saveDetectedProxyForNonAutoMode(
         state: ProxyState,
+        detected: ProxyDetectionWithSource,
         detectedProxy: string | null,
         detectedSource: AppliedProxySource | undefined
     ): Promise<void> {
+        if (isUnsupportedAutoConfig(detected)) {
+            state.autoProxyUrl = undefined;
+            state.lastDetectionSource = detected.source ?? undefined;
+            state.lastDetectionKind = detected.kind;
+            state.lastDetectionCapability = detected.capability;
+            await this.saveAndPublishState(state);
+            return;
+        }
+
         state.autoProxyUrl = detectedProxy || undefined;
         state.lastDetectionSource = detectedProxy ? detectedSource : undefined;
+        state.lastDetectionKind = detectedProxy ? 'singleProxy' : 'direct';
+        state.lastDetectionCapability = 'supported';
         await this.saveAndPublishState(state);
     }
 

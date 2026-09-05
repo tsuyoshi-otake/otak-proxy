@@ -1,3 +1,5 @@
+import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { Logger } from '../utils/Logger';
 import { TestResult } from '../utils/ProxyUtils';
@@ -15,6 +17,11 @@ export async function handleProxyChanged(
 ): Promise<void> {
     const state = await context.proxyStateManager.getState();
     if (state.mode !== ProxyMode.Auto) {
+        return;
+    }
+
+    if (isUnsupportedAutoConfig(result)) {
+        await recordUnsupportedAutoConfig(context, state, result);
         return;
     }
 
@@ -36,6 +43,31 @@ export async function handleProxyChanged(
     }
 
     await saveAndApplyProxyChange(context, state, result, previousProxy);
+}
+
+async function recordUnsupportedAutoConfig(
+    context: InitializerContext,
+    state: ProxyState,
+    result: ProxyDetectionResult
+): Promise<void> {
+    const previousKind = state.lastDetectionKind;
+    state.systemProxyDetected = true;
+    state.autoModeOff = false;
+    state.lastDetectionKind = result.kind;
+    state.lastDetectionCapability = result.capability;
+    if (result.source) {
+        state.lastDetectionSource = result.source;
+    }
+
+    await saveAndPublishProxyState(context, state);
+    context.updateStatusBar?.(state);
+
+    if (previousKind !== 'pac' && previousKind !== 'wpad') {
+        context.userNotifier.showWarning(
+            'warning.unsupportedAutoConfig',
+            { kind: unsupportedAutoConfigKindLabel(result.kind) }
+        );
+    }
 }
 
 function hasKnownEnableFailure(state: ProxyState): boolean {
@@ -108,6 +140,8 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
     state.autoProxyUrl = result.proxyUrl || undefined;
 
     if (result.proxyUrl) {
+        state.lastDetectionKind = result.kind ?? 'singleProxy';
+        state.lastDetectionCapability = result.capability ?? 'supported';
         if (result.proxyUrl !== state.fallbackProxyUrl) {
             state.usingFallbackProxy = false;
             state.fallbackProxyUrl = undefined;
@@ -117,6 +151,8 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
         // flags and its 'fallback' provenance untouched.
     } else {
         state.lastDetectionSource = undefined;
+        state.lastDetectionKind = 'direct';
+        state.lastDetectionCapability = 'supported';
     }
 
     if (result.testResult) {

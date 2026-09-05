@@ -92,6 +92,9 @@ export interface ProxyState {
     lastSystemProxyUrl?: string;         // Last detected system proxy URL
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
     lastDetectionSource?: AppliedProxySource; // Provenance of autoProxyUrl (issue #29 echo suppression)
+    // v3 ProxyValueKind / ProxyCapability. Optional so older persisted state stays valid.
+    lastDetectionKind?: 'direct' | 'singleProxy' | 'perSchemeProxy' | 'pac' | 'wpad' | 'unknown';
+    lastDetectionCapability?: 'supported' | 'unsupported' | 'readOnly' | 'parseUnavailable' | 'permissionRequired';
 }
 
 export interface IProxyStateManager {
