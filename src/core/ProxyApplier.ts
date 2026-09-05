@@ -397,6 +397,7 @@ export class ProxyApplier {
         }
 
         const ownedTargetIds: string[] = [];
+        const ownedObservations: NonNullable<ProxyOwnershipInspection['observations']> = [];
         let preservedExternal = false;
         for (const observation of inspection.observations ?? []) {
             if (!observation.value) {
@@ -413,6 +414,7 @@ export class ProxyApplier {
             );
             if (owned) {
                 ownedTargetIds.push(observation.targetId);
+                ownedObservations.push(observation);
             } else {
                 preservedExternal = true;
                 Logger.info(`${target.name} value preserved because ownership did not match: ${observation.targetId}`);
@@ -427,7 +429,10 @@ export class ProxyApplier {
         }
 
         try {
-            const result = await target.ownership!.unsetTargets(ownedTargetIds, options);
+            const result = await target.ownership!.unsetTargets(ownedTargetIds, {
+                ...options,
+                ownedObservations
+            });
             if (!result.success) {
                 errorAggregator.addError(target.name, result.error || `Failed to clear ${target.name}`, result.errorType);
                 return { success: false, outcome: 'failed', errorType: result.errorType };
@@ -494,19 +499,37 @@ export class ProxyApplier {
                 targets: Object.values(ids).map(targetId => ({ targetId, targetHost: 'workspaceHost' })),
                 inspect: async () => {
                     const result = await this.gitManager.inspectProxy();
+                    const keys = Object.keys(ids) as GitProxyKey[];
                     return {
                         status: result.status,
                         error: result.error,
                         errorType: result.errorType,
-                        observations: result.values
-                            ? (Object.keys(ids) as GitProxyKey[]).map(key => ({ targetId: ids[key], value: result.values![key] }))
+                        observations: result.values || result.allValues
+                            ? keys.flatMap(key => {
+                                const listed = result.allValues?.[key];
+                                if (listed && listed.length > 0) {
+                                    return listed.map(value => ({ targetId: ids[key], value }));
+                                }
+                                return [{ targetId: ids[key], value: result.values?.[key] ?? null }];
+                            })
                             : undefined
                     };
                 },
-                unsetTargets: (targetIds, options) => this.gitManager.unsetProxyKeys(
-                    (Object.keys(ids) as GitProxyKey[]).filter(key => targetIds.includes(ids[key])),
-                    options
-                )
+                unsetTargets: (targetIds, options) => {
+                    const keys = (Object.keys(ids) as GitProxyKey[]).filter(key => targetIds.includes(ids[key]));
+                    const exactValues: Partial<Record<GitProxyKey, string[]>> = {};
+                    for (const observation of options?.ownedObservations ?? []) {
+                        const key = (Object.keys(ids) as GitProxyKey[]).find(candidate => ids[candidate] === observation.targetId);
+                        if (!key || !observation.value || !targetIds.includes(observation.targetId)) {
+                            continue;
+                        }
+                        exactValues[key] = [...(exactValues[key] ?? []), observation.value];
+                    }
+                    return this.gitManager.unsetProxyKeys(keys, {
+                        onStatus: options?.onStatus,
+                        exactValues: Object.keys(exactValues).length > 0 ? exactValues : undefined
+                    });
+                }
             }
         };
     }

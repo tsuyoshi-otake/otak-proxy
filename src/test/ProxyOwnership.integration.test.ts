@@ -21,8 +21,20 @@ interface FakeTargetSet {
 }
 
 class FakeGitManager {
-    values: Record<GitProxyKey, string | null> = { 'http.proxy': null, 'https.proxy': null };
+    values: Record<GitProxyKey, string | string[] | null> = { 'http.proxy': null, 'https.proxy': null };
     unsetCalls: GitProxyKey[][] = [];
+
+    private list(key: GitProxyKey): string[] {
+        const value = this.values[key];
+        if (value === null || value === undefined) {
+            return [];
+        }
+        return Array.isArray(value) ? value : [value];
+    }
+
+    private first(key: GitProxyKey): string | null {
+        return this.list(key)[0] ?? null;
+    }
 
     async setProxy(url: string) {
         this.values['http.proxy'] = url;
@@ -30,12 +42,29 @@ class FakeGitManager {
         return { success: true };
     }
     async unsetProxy() { return this.unsetProxyKeys(['http.proxy', 'https.proxy']); }
-    async unsetProxyKeys(keys: readonly GitProxyKey[]) {
+    async unsetProxyKeys(keys: readonly GitProxyKey[], options?: { exactValues?: Partial<Record<GitProxyKey, readonly string[]>> }) {
         this.unsetCalls.push([...keys]);
-        keys.forEach(key => { this.values[key] = null; });
+        for (const key of keys) {
+            const exact = options?.exactValues?.[key];
+            if (exact && exact.length > 0) {
+                const remaining = this.list(key).filter(value => !exact.includes(value));
+                this.values[key] = remaining.length === 0 ? null : remaining.length === 1 ? remaining[0] : remaining;
+                continue;
+            }
+            if (this.list(key).length > 1) {
+                return { success: false, error: 'Git key has multiple values', errorType: 'CONFIG_ERROR' };
+            }
+            this.values[key] = null;
+        }
         return { success: true };
     }
-    async inspectProxy() { return { status: 'available' as const, values: { ...this.values } }; }
+    async inspectProxy() {
+        return {
+            status: 'available' as const,
+            values: { 'http.proxy': this.first('http.proxy'), 'https.proxy': this.first('https.proxy') },
+            allValues: { 'http.proxy': this.list('http.proxy'), 'https.proxy': this.list('https.proxy') }
+        };
+    }
 }
 
 class FakeNpmManager {
@@ -258,5 +287,23 @@ suite('Ownership-safe proxy disable integration', () => {
             ['http.proxy', 'https.proxy'],
             ['https.proxy']
         ]);
+    });
+
+    test('clears only the owned Git multi-value and leaves the external value', async () => {
+        const targets = createTargets();
+        const applier = createApplier(targets, createOwnershipStore());
+        const proxyUrl = 'http://proxy.example:8080';
+        const externalUrl = 'http://external.example:8080';
+        assert.strictEqual((await applier.applyProxyDetailed(proxyUrl, true, { silent: true })).success, true);
+
+        targets.git.values['http.proxy'] = [proxyUrl, externalUrl];
+
+        const result = await applier.disableProxyDetailed({ silent: true });
+
+        assert.strictEqual(result.success, true);
+        assert.deepStrictEqual(targets.git.unsetCalls, [['http.proxy', 'https.proxy']]);
+        assert.deepStrictEqual(targets.git.values['http.proxy'], externalUrl);
+        assert.strictEqual(targets.git.values['https.proxy'], null);
+        assert.strictEqual(result.results.gitOutcome, 'preservedExternal');
     });
 });

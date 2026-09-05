@@ -89,6 +89,7 @@ const hermeticEnv = {
 // keeping the rest parallel for speed.
 const serialBasenames = new Set([
   'GitConfigManager.test.js',
+  'GitConfigManager.multivalue.test.js',
   'NpmConfigManager.test.js',
   'NpmConfigManager.property.test.js',
 ]);
