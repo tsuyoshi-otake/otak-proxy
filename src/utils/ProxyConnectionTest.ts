@@ -1,7 +1,12 @@
 import * as http from 'http';
 import * as net from 'net';
 import { Logger } from './Logger';
-import { TestOptions, TestResult, TestUrlError } from './ProxyTestTypes';
+import {
+    classifyConnectError,
+    classifyConnectStatus,
+    summarizeFailedProxyTest
+} from './ProxyTestFailure';
+import { ProxyTestFailureKind, TestOptions, TestResult, TestUrlError } from './ProxyTestTypes';
 import {
     DEFAULT_AUTO_TIMEOUT,
     DEFAULT_MANUAL_TIMEOUT,
@@ -10,6 +15,7 @@ import {
 import {
     buildConnectRequestOptions,
     createProxyConnectRequest,
+    formatConnectDestination,
     formatConnectFailure,
     isConnectResponseSuccessful
 } from './ProxyConnectRequest';
@@ -49,7 +55,10 @@ async function testProxyConnectionSequential(
         errors,
         proxyUrl,
         timestamp: Date.now(),
-        duration: Date.now() - startTime
+        duration: Date.now() - startTime,
+        ...(success
+            ? { proxyEndpointOk: true }
+            : summarizeFailedProxyTest(errors, testUrls))
     });
 
     try {
@@ -65,7 +74,7 @@ async function testProxyConnectionSequential(
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         Logger.error('Proxy test error:', errorMsg);
-        errors.push({ url: 'Proxy test', message: errorMsg });
+        errors.push({ url: 'Proxy test', message: errorMsg, failureKind: classifyConnectError(error instanceof Error ? error : errorMsg) });
         return finalize(false);
     }
 }
@@ -82,7 +91,11 @@ async function testSingleProxyUrl(
         return await createProxyConnectionAttempt(proxyParsed, testUrl, timeout, errors, requestOptions);
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({ url: testUrl, message: errorMsg });
+        errors.push({
+            url: testUrl,
+            message: errorMsg,
+            failureKind: classifyConnectError(error instanceof Error ? error : errorMsg)
+        });
         return false;
     }
 }
@@ -98,35 +111,50 @@ function createProxyConnectionAttempt(
         const req = createProxyConnectRequest(proxyParsed, requestOptions);
         let requestSettled = false;
 
-        const finish = (success: boolean, error?: string) => {
+        const finish = (success: boolean, error?: string, failureKind?: ProxyTestFailureKind) => {
             if (requestSettled) {
                 return;
             }
 
             requestSettled = true;
+            if (watchdog) {
+                clearTimeout(watchdog);
+            }
             if (error) {
-                errors.push({ url: testUrl, message: error });
+                Logger.error('Proxy CONNECT failed:', formatConnectDestination(requestOptions), error);
+                errors.push({ url: testUrl, message: error, failureKind });
             }
             resolve(success);
         };
 
+        const watchdog = setTimeout(() => {
+            try {
+                req.destroy();
+            } catch {
+                // Ignore destroy errors
+            }
+            finish(false, `Connection timeout (${timeout}ms)`, 'timeout');
+        }, timeout);
+        req.setTimeout(timeout);
         req.on('connect', (response, socket) => {
             destroySocket(socket);
             req.destroy();
 
+            const connected = isConnectResponseSuccessful(response);
             finish(
-                isConnectResponseSuccessful(response),
-                isConnectResponseSuccessful(response) ? undefined : formatConnectFailure(response)
+                connected,
+                connected ? undefined : formatConnectFailure(response),
+                connected ? undefined : classifyConnectStatus(response.statusCode ?? 0)
             );
         });
 
         req.on('error', (error: Error) => {
-            finish(false, error.message || 'Connection failed');
+            finish(false, error.message || 'Connection failed', classifyConnectError(error));
         });
 
         req.on('timeout', () => {
             req.destroy();
-            finish(false, `Connection timeout (${timeout}ms)`);
+            finish(false, `Connection timeout (${timeout}ms)`, 'timeout');
         });
 
         req.end();
@@ -187,12 +215,18 @@ export async function testProxyConnectionParallel(
         let completedCount = 0;
         let overallTimer: ReturnType<typeof setTimeout> | null = null;
 
-        const finalize = (result: Omit<TestResult, 'timestamp' | 'duration'>): TestResult => ({
-            ...result,
-            errors: [...result.errors],
-            timestamp: Date.now(),
-            duration: Date.now() - startTime
-        });
+        const finalize = (result: Omit<TestResult, 'timestamp' | 'duration'>): TestResult => {
+            const classified = result.success
+                ? { proxyEndpointOk: true as const }
+                : summarizeFailedProxyTest(result.errors, result.testUrls);
+            return {
+                ...result,
+                ...classified,
+                errors: [...result.errors],
+                timestamp: Date.now(),
+                duration: Date.now() - startTime
+            };
+        };
 
         const destroyOutstanding = () => {
             for (const req of requests) {
@@ -231,7 +265,13 @@ export async function testProxyConnectionParallel(
                 }
             };
 
-            const onTestResult = (testUrl: string, success: boolean, error?: string) => {
+            const onTestResult = (
+                testUrl: string,
+                success: boolean,
+                error?: string,
+                requestOptions?: http.RequestOptions,
+                failureKind?: ProxyTestFailureKind
+            ) => {
                 if (settled) {
                     return;
                 }
@@ -249,7 +289,12 @@ export async function testProxyConnectionParallel(
                 }
 
                 if (error) {
-                    errors.push({ url: testUrl, message: error });
+                    if (requestOptions) {
+                        Logger.error('Proxy CONNECT failed:', formatConnectDestination(requestOptions), error);
+                    } else {
+                        Logger.error('Proxy CONNECT failed:', error);
+                    }
+                    errors.push({ url: testUrl, message: error, failureKind });
                 }
 
                 resolveIfAllDone();
@@ -262,6 +307,7 @@ export async function testProxyConnectionParallel(
 
                     const req = createProxyConnectRequest(proxyParsed, requestOptions);
                     requests.push(req);
+                    req.setTimeout(timeout);
 
                     req.on('connect', (response, socket) => {
                         try {
@@ -274,12 +320,24 @@ export async function testProxyConnectionParallel(
                         if (isConnectResponseSuccessful(response)) {
                             onTestResult(testUrl, true);
                         } else {
-                            onTestResult(testUrl, false, formatConnectFailure(response));
+                            onTestResult(
+                                testUrl,
+                                false,
+                                formatConnectFailure(response),
+                                requestOptions,
+                                classifyConnectStatus(response.statusCode ?? 0)
+                            );
                         }
                     });
 
                     req.on('error', (error: Error) => {
-                        onTestResult(testUrl, false, error.message || 'Connection failed');
+                        onTestResult(
+                            testUrl,
+                            false,
+                            error.message || 'Connection failed',
+                            requestOptions,
+                            classifyConnectError(error)
+                        );
                     });
 
                     req.on('timeout', () => {
@@ -288,13 +346,19 @@ export async function testProxyConnectionParallel(
                         } catch {
                             // Ignore destroy errors
                         }
-                        onTestResult(testUrl, false, `Connection timeout (${timeout}ms)`);
+                        onTestResult(testUrl, false, `Connection timeout (${timeout}ms)`, requestOptions, 'timeout');
                     });
 
                     req.end();
                 } catch (error) {
                     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-                    onTestResult(testUrl, false, errorMsg);
+                    onTestResult(
+                        testUrl,
+                        false,
+                        errorMsg,
+                        undefined,
+                        classifyConnectError(error instanceof Error ? error : errorMsg)
+                    );
                 }
             }
         });
@@ -304,7 +368,11 @@ export async function testProxyConnectionParallel(
                 if (settled) {
                     return;
                 }
-                errors.push({ url: 'All tests', message: `Overall timeout (${timeout}ms)` });
+                errors.push({
+                    url: 'All tests',
+                    message: `Overall timeout (${timeout}ms)`,
+                    failureKind: 'timeout'
+                });
                 resolve(done({
                     success: false,
                     proxyUrl,
@@ -318,14 +386,19 @@ export async function testProxyConnectionParallel(
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         Logger.error('Proxy parallel test error:', errorMsg);
-        errors.push({ url: 'Proxy test', message: errorMsg });
+        errors.push({
+            url: 'Proxy test',
+            message: errorMsg,
+            failureKind: classifyConnectError(error instanceof Error ? error : errorMsg)
+        });
         return {
             success: false,
             proxyUrl,
             testUrls,
             errors,
             timestamp: Date.now(),
-            duration: Date.now() - startTime
+            duration: Date.now() - startTime,
+            ...summarizeFailedProxyTest(errors, testUrls)
         };
     }
 }

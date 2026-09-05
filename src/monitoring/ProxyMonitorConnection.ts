@@ -1,5 +1,6 @@
 import { Logger } from '../utils/Logger';
-import { TestResult } from '../utils/ProxyUtils';
+import { LogicalGeneration } from '../core/LogicalGeneration';
+import { isProxyEndpointReachable, isProxyEndpointUnreachable, TestResult } from '../utils/ProxyUtils';
 import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { ProxyTestScheduler } from './ProxyTestScheduler';
 import { ProxyCheckTrigger, ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
@@ -15,6 +16,7 @@ export interface ProxyMonitorConnectionState {
     lastProxyReachable: boolean;
     lastConnectionTestAt: number | null;
     events: ProxyMonitorConnectionEvents;
+    captureGeneration?: () => Promise<LogicalGeneration | undefined>;
 }
 
 export function createProxyMonitorConnectionState(
@@ -27,8 +29,25 @@ export function createProxyMonitorConnectionState(
         scheduler: tester ? new ProxyTestScheduler(tester, initialConfig.connectionTestInterval) : undefined,
         lastProxyReachable: false,
         lastConnectionTestAt: null,
-        events
+        events,
+        captureGeneration: undefined
     };
+}
+
+async function stampTestGeneration(
+    state: ProxyMonitorConnectionState,
+    result: TestResult
+): Promise<TestResult> {
+    if (result.startedGeneration || !state.captureGeneration) {
+        return result;
+    }
+
+    try {
+        const startedGeneration = await state.captureGeneration();
+        return startedGeneration ? { ...result, startedGeneration } : result;
+    } catch {
+        return result;
+    }
 }
 
 function shouldUseConnectionScheduler(
@@ -222,7 +241,7 @@ function recordScheduledTestResult(
     state.lastConnectionTestAt = testResult.timestamp ?? Date.now();
 
     const effectiveProxyUrl = testResult.proxyUrl ?? proxyUrl;
-    updateReachabilityState(state, effectiveProxyUrl, testResult.success);
+    updateReachabilityState(state, effectiveProxyUrl, isProxyEndpointReachable(testResult));
 }
 
 function canTestDetectedProxy(
@@ -271,7 +290,7 @@ async function runConnectionTestIfNeeded(
         return;
     }
 
-    const testResult = await state.tester!.testProxyAuto(result.proxyUrl!);
+    const testResult = await stampTestGeneration(state, await state.tester!.testProxyAuto(result.proxyUrl!));
     recordConnectionTestResult(state, result, testResult);
 }
 
@@ -306,14 +325,16 @@ function recordConnectionTestResult(
 ): void {
     state.lastConnectionTestAt = testResult.timestamp ?? Date.now();
     result.testResult = testResult;
-    result.proxyReachable = testResult.success;
+    result.proxyReachable = isProxyEndpointReachable(testResult);
     state.events.onTestComplete(testResult);
 
-    if (!testResult.success) {
-        Logger.warn(`Proxy ${result.proxyUrl} detected but not reachable`);
+    if (isProxyEndpointUnreachable(testResult)) {
+        Logger.warn(`Proxy ${result.proxyUrl} detected but endpoint is unreachable`);
+    } else if (!testResult.success) {
+        Logger.warn(`Proxy ${result.proxyUrl} canary failed (${testResult.failureKind ?? 'unknown'})`);
     }
 
-    updateReachabilityState(state, result.proxyUrl!, testResult.success);
+    updateReachabilityState(state, result.proxyUrl!, isProxyEndpointReachable(testResult));
 }
 
 function updateReachabilityState(

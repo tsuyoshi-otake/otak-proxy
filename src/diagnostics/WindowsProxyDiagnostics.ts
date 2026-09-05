@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ProxyIssue } from '../core/v3Types';
-import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +15,7 @@ export interface WindowsProxyObservation {
     winInetProxyServer?: string;
     winInetAutoConfigUrl?: string;
     winInetProxyOverride?: string;
+    winInetAutoDetect?: boolean;
 }
 
 const DEFAULT_RUNNER: CommandRunner = async (command, args) => execFileAsync(command, args, {
@@ -143,8 +144,6 @@ export function parseWinHttpShowProxy(output: string): Pick<WindowsProxyObservat
 }
 
 export class WindowsProxyDiagnostics {
-    private readonly redactor = new ProxySecretRedactor();
-
     constructor(
         private readonly runner: CommandRunner = DEFAULT_RUNNER,
         // Injectable so the win32-only control flow can be exercised on any CI OS.
@@ -183,20 +182,24 @@ export class WindowsProxyDiagnostics {
         }
 
         if (observation.winInetAutoConfigUrl) {
-            issues.push({
+            issues.push(createUnsupportedAutoConfigIssue({
                 id: 'windows.wininet.pac',
-                fingerprint: `windows.wininet.pac:${observation.winInetAutoConfigUrl}`,
-                category: 'info',
-                impact: 'informational',
                 targetId: 'windows.wininet',
                 targetHost: 'windowsHost',
-                actualSanitized: this.redactor.redactString(observation.winInetAutoConfigUrl),
                 source: 'registry',
-                capability: 'readOnly',
-                autoAction: 'none',
-                userAction: 'showDetails',
-                evidence: { autoConfigUrl: this.redactor.redactString(observation.winInetAutoConfigUrl) }
-            });
+                kind: 'pac',
+                autoConfigUrl: observation.winInetAutoConfigUrl
+            }));
+        } else if (observation.winInetAutoDetect) {
+            // Registry AutoDetect bit only — not a lab-confirmed WPAD effective path.
+            issues.push(createUnsupportedAutoConfigIssue({
+                id: 'windows.wininet.wpad',
+                targetId: 'windows.wininet',
+                targetHost: 'windowsHost',
+                source: 'registry',
+                kind: 'wpad',
+                evidence: { observation: 'registry AutoDetect' }
+            }));
         }
 
         return issues;
@@ -242,17 +245,19 @@ export class WindowsProxyDiagnostics {
         // whole Internet Settings key with `/v *` — that key holds many unrelated
         // values which future debug logging of the raw output could expose (#16).
         const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
-        const [proxyEnable, proxyServer, autoConfigUrl, proxyOverride] = await Promise.all([
+        const [proxyEnable, proxyServer, autoConfigUrl, proxyOverride, autoDetect] = await Promise.all([
             this.readWinInetValue(key, 'ProxyEnable'),
             this.readWinInetValue(key, 'ProxyServer'),
             this.readWinInetValue(key, 'AutoConfigURL'),
-            this.readWinInetValue(key, 'ProxyOverride')
+            this.readWinInetValue(key, 'ProxyOverride'),
+            this.readWinInetValue(key, 'AutoDetect')
         ]);
         return {
             winInetProxyEnable: proxyEnable !== undefined ? proxyEnable.endsWith('1') : undefined,
             winInetProxyServer: proxyServer,
             winInetAutoConfigUrl: autoConfigUrl,
-            winInetProxyOverride: proxyOverride
+            winInetProxyOverride: proxyOverride,
+            winInetAutoDetect: autoDetect !== undefined ? /0x0*1\b/i.test(autoDetect) || autoDetect === '1' : undefined
         };
     }
 

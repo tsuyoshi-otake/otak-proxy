@@ -1,8 +1,11 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
+import { resolveNpmInvocation } from '../utils/NpmInvocation';
 import { ProxyMode, ProxyState } from '../core/types';
 import {
+    createApplyBlockedIssue,
+    deriveRuntimeApplyStateFromProxyState,
     ExecutionContext,
     getHighestPriorityIssue,
     ProxyIssue,
@@ -11,8 +14,14 @@ import {
 import { ExecutionContextDetector } from './ExecutionContextDetector';
 import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostics';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
-import { splitProxyUrl } from '../security/ProxyCredentialStore';
+import { ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
+import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { normalizeProxyForComparison } from '../utils/ProxyUrlIdentity';
+import { isPerSchemeProxy } from '../config/DetectedProxyValue';
+import { splitCapabilityIssues } from '../core/ProxyTargetCapability';
+import { createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
+import { buildConnectionTestObservation } from '../utils/ProxyTestFailure';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -136,6 +145,12 @@ export class ProxyRuntimeDiagnostics {
         const issues: ProxyIssue[] = [];
         const observations: Record<string, unknown> = {};
 
+        const applyBlocked = this.collectApplyBlocked(state);
+        if (applyBlocked) {
+            observations.applyBlocked = applyBlocked.evidence.applyBlocked;
+            issues.push(applyBlocked);
+        }
+
         const vscodeDiagnostics = this.collectVSCodeDiagnostics();
         observations.vscode = vscodeDiagnostics.observation;
         issues.push(...vscodeDiagnostics.issues);
@@ -170,11 +185,20 @@ export class ProxyRuntimeDiagnostics {
             }));
         }
 
+        issues.push(...await this.collectCredentialIssues(state));
+
         issues.push(...this.collectManagedConvergenceIssues(state, {
             git: slowDiagnostics.git?.observation,
             npm: slowDiagnostics.npm?.observation,
             vscode: vscodeDiagnostics.observation
         }));
+        issues.push(...this.collectSplitProxyIssues(state));
+        issues.push(...this.collectUnsupportedAutoConfigFromState(state, issues));
+
+        const connectionTest = buildConnectionTestObservation(state.lastTestResult);
+        if (connectionTest) {
+            observations.connectionTest = connectionTest;
+        }
 
         const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
@@ -182,7 +206,7 @@ export class ProxyRuntimeDiagnostics {
 
         return {
             generatedAt: new Date().toISOString(),
-            runtimeState: 'diagnosed',
+            runtimeState: deriveRuntimeApplyStateFromProxyState(state),
             executionContext,
             issueCount: sanitizedIssues.length,
             highestPriorityCategory: highest?.category,
@@ -195,6 +219,8 @@ export class ProxyRuntimeDiagnostics {
         const values = [
             state.manualProxyUrl,
             state.autoProxyUrl,
+            state.autoHttpProxyUrl,
+            state.autoHttpsProxyUrl,
             state.lastSystemProxyUrl,
             state.fallbackProxyUrl
         ];
@@ -362,10 +388,18 @@ export class ProxyRuntimeDiagnostics {
             }));
         }
 
+        const ownedVars = Object.keys(mutators).sort();
+        const maskedVars = ownedVars.filter(name => {
+            const mutator = mutators[name];
+            return typeof mutator === 'object' && mutator !== null && (mutator as { value?: unknown }).value === '';
+        });
+
         return {
             observation: {
                 inheritedEnv,
                 mutators,
+                ownedVars,
+                maskedVars,
                 terminalCount: vscode.window.terminals.length,
                 collectionPersistent: collection?.persistent,
                 collectionDescription: collection?.description?.toString()
@@ -385,17 +419,26 @@ export class ProxyRuntimeDiagnostics {
         observation.httpProxy = httpProxy.value;
         observation.legacyHttpsProxy = httpsProxy.value;
         observation.overrides = overrides.value;
-        // Only the two --get reads feed convergence checking; the regexp read
-        // only informs git.effectiveOverride. Flag a convergence-blocking read
-        // failure so the managed-mismatch check can skip an unreadable value
-        // instead of treating it as "unset" (#16).
-        observation.readFailed = Boolean(httpProxy.readFailed || httpsProxy.readFailed);
+        observation.routingKey = 'http.proxy';
+        observation.routingCapability = 'lossy-single-http.proxy';
+        observation.httpsProxyWritten = false;
+        observation.legacyHttpsProxyRole = 'non-routing';
+        observation.requestedProxyKind = 'singleProxy';
+        // Only `http.proxy` feeds routing convergence. `https.proxy` is leftover
+        // and is not a second routing plane; a leftover read failure must not
+        // look like "routing unset" (#16, #55).
+        observation.readFailed = Boolean(httpProxy.readFailed);
 
         if (httpsProxy.value) {
-            issues.push(this.issue('git.legacyHttpsProxy', 'info', 'informational', 'git.global.https.proxy', 'workspaceHost', {
+            issues.push(this.issue('git.legacyHttpsProxy', 'capabilityUnavailable', 'informational', 'git.global.https.proxy', 'workspaceHost', {
                 source: 'git config',
-                capability: 'readOnly',
-                evidence: { legacyHttpsProxy: httpsProxy.value }
+                capability: 'unsupported',
+                evidence: {
+                    legacyHttpsProxy: httpsProxy.value,
+                    routingRole: 'non-routing',
+                    gitRoutingKey: 'http.proxy',
+                    httpsProxyWritten: false
+                }
             }));
         }
         if (overrides.value) {
@@ -427,6 +470,43 @@ export class ProxyRuntimeDiagnostics {
         }
 
         return { observation, issues };
+    }
+
+    /**
+     * Surfaces Auto's last unsupported PAC/WPAD observation on Diagnose so the
+     * two paths share kind/capability. Windows already emits the same issue from
+     * WinINet observation, so skip duplicates.
+     */
+    private collectUnsupportedAutoConfigFromState(state: ProxyState, existing: readonly ProxyIssue[]): ProxyIssue[] {
+        if (state.lastDetectionCapability !== 'unsupported') {
+            return [];
+        }
+        const kind = state.lastDetectionKind;
+        if (kind !== 'pac' && kind !== 'wpad') {
+            return [];
+        }
+
+        const source = state.lastDetectionSource;
+        const spec = source === 'windows' && kind === 'wpad'
+            ? { id: 'windows.wininet.wpad', targetId: 'windows.wininet', targetHost: 'windowsHost' as const, origin: 'registry' }
+            : source === 'windows'
+                ? { id: 'windows.wininet.pac', targetId: 'windows.wininet', targetHost: 'windowsHost' as const, origin: 'registry' }
+                : source === 'linux'
+                    ? { id: 'linux.gnome.auto', targetId: 'linux.gnome', targetHost: 'workspaceHost' as const, origin: 'gsettings' }
+                    : source === 'macos'
+                        ? { id: 'macos.autoproxy.pac', targetId: 'macos.network', targetHost: 'workspaceHost' as const, origin: 'networksetup' }
+                        : undefined;
+        if (!spec || existing.some(issue => issue.id === spec.id)) {
+            return [];
+        }
+
+        return [createUnsupportedAutoConfigIssue({
+            id: spec.id,
+            targetId: spec.targetId,
+            targetHost: spec.targetHost,
+            source: spec.origin,
+            kind
+        })];
     }
 
     private collectManagedConvergenceIssues(
@@ -467,11 +547,10 @@ export class ProxyRuntimeDiagnostics {
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
         const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
         if (state.gitConfigured && !gitReadFailed &&
-            (!this.proxyMatchesExpected(gitHttpProxy, expectedProxy) ||
-                !this.proxyMatchesExpected(gitHttpsProxy, expectedProxy))) {
+            !this.proxyMatchesExpected(gitHttpProxy, expectedProxy)) {
             issues.push(this.issue('git.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
                 expectedSanitized: expectedProxy,
-                actualSanitized: gitHttpProxy ?? gitHttpsProxy ?? 'unset',
+                actualSanitized: gitHttpProxy ?? 'unset',
                 source: 'git config',
                 capability: 'readOnly',
                 evidence: {
@@ -479,17 +558,21 @@ export class ProxyRuntimeDiagnostics {
                     autoModeOff: state.autoModeOff,
                     gitConfigured: state.gitConfigured,
                     expectedProxy,
+                    routingKey: 'http.proxy',
                     httpProxy: gitHttpProxy,
-                    legacyHttpsProxy: gitHttpsProxy
+                    legacyHttpsProxy: gitHttpsProxy,
+                    leftoverHttpsProxyDoesNotAffectRouting: true
                 }
             }));
         }
 
         const npmProxy = this.observedString(observations.npm, 'proxy');
         const npmHttpsProxy = this.observedString(observations.npm, 'httpsProxy');
+        const expectedNpmHttp = state.autoHttpProxyUrl || expectedProxy;
+        const expectedNpmHttps = state.autoHttpsProxyUrl || expectedProxy;
         if (state.npmConfigured &&
-            (!this.proxyMatchesExpected(npmProxy, expectedProxy) ||
-                !this.proxyMatchesExpected(npmHttpsProxy, expectedProxy))) {
+            (!this.proxyMatchesExpected(npmProxy, expectedNpmHttp) ||
+                !this.proxyMatchesExpected(npmHttpsProxy, expectedNpmHttps))) {
             issues.push(this.issue('npm.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
                 expectedSanitized: expectedProxy,
                 actualSanitized: npmProxy ?? npmHttpsProxy ?? 'unset',
@@ -500,6 +583,8 @@ export class ProxyRuntimeDiagnostics {
                     autoModeOff: state.autoModeOff,
                     npmConfigured: state.npmConfigured,
                     expectedProxy,
+                    expectedHttpProxy: expectedNpmHttp,
+                    expectedHttpsProxy: expectedNpmHttps,
                     proxy: npmProxy,
                     httpsProxy: npmHttpsProxy
                 }
@@ -526,6 +611,16 @@ export class ProxyRuntimeDiagnostics {
         return issues;
     }
 
+    private collectApplyBlocked(state: ProxyState): ProxyIssue | undefined {
+        if (state.applyBlocked === 'untrustedWorkspace' || vscode.workspace.isTrusted === false) {
+            return createApplyBlockedIssue('untrustedWorkspace');
+        }
+        if (state.applyBlocked) {
+            return createApplyBlockedIssue(state.applyBlocked);
+        }
+        return undefined;
+    }
+
     private collectManagedResidualIssues(
         state: ProxyState,
         observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> }
@@ -533,17 +628,18 @@ export class ProxyRuntimeDiagnostics {
         const issues: ProxyIssue[] = [];
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
         const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
-        if (gitHttpProxy || gitHttpsProxy) {
+        if (gitHttpProxy) {
             const preserved = state.targetOutcomes?.git === 'preservedExternal';
             issues.push(this.issue('git.managedProxyResidual', preserved ? 'externalOverride' : 'applyFailed', preserved ? 'advisoryResidualRisk' : 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
                 expectedSanitized: 'unset',
-                actualSanitized: gitHttpProxy ?? gitHttpsProxy,
+                actualSanitized: gitHttpProxy,
                 source: 'git config',
                 capability: 'readOnly',
                 evidence: {
                     mode: state.mode,
                     autoModeOff: state.autoModeOff,
                     gitConfigured: state.gitConfigured,
+                    routingKey: 'http.proxy',
                     httpProxy: gitHttpProxy,
                     legacyHttpsProxy: gitHttpsProxy
                 }
@@ -589,6 +685,66 @@ export class ProxyRuntimeDiagnostics {
         return issues;
     }
 
+    private async collectCredentialIssues(state: ProxyState): Promise<ProxyIssue[]> {
+        if (this.expectsProxyDisabled(state)) {
+            return [];
+        }
+
+        const expected = state.mode === ProxyMode.Auto
+            ? (state.autoProxyUrl || state.fallbackProxyUrl)
+            : state.manualProxyUrl;
+        if (!expected) {
+            return [];
+        }
+
+        const required = state.requiresAuth === true || hasProxyCredentials(expected);
+        const publicUrl = getProxyPublicUrl(expected) || expected;
+        const resolution = await new ProxyCredentialStore(this.context.secrets).resolveLocalCredentials(
+            publicUrl,
+            required
+        );
+
+        if (resolution.availability === 'notRequired' || resolution.availability === 'availableOnThisMachine') {
+            return [];
+        }
+
+        const secretStorageUnavailable = resolution.availability === 'secretStorageUnavailable';
+        return [this.issue(
+            'proxy.localCredential.unresolved',
+            secretStorageUnavailable ? 'capabilityUnavailable' : 'needsCredentialConsent',
+            'requiresUserDecision',
+            'proxy.credentials',
+            'workspaceHost',
+            {
+                expectedSanitized: publicUrl,
+                source: 'localCredential',
+                capability: secretStorageUnavailable ? 'unsupported' : 'permissionRequired',
+                autoAction: 'skipped',
+                userAction: resolution.availability === 'needsReEntry' ? 'changeSetting' : 'showDetails',
+                evidence: {
+                    localCredentialAvailability: resolution.availability,
+                    requiresAuth: state.requiresAuth === true
+                }
+            }
+        )];
+    }
+
+    private collectSplitProxyIssues(state: ProxyState): ProxyIssue[] {
+        if (this.expectsProxyDisabled(state)) {
+            return [];
+        }
+        if (!isPerSchemeProxy(state.autoProxyKind, state.autoHttpProxyUrl, state.autoHttpsProxyUrl) && !state.detectedBypass) {
+            return [];
+        }
+        return splitCapabilityIssues({
+            kind: state.autoProxyKind,
+            httpUrl: state.autoHttpProxyUrl,
+            httpsUrl: state.autoHttpsProxyUrl,
+            bypass: state.detectedBypass,
+            source: state.lastDetectionSource ?? 'detection'
+        });
+    }
+
     private expectedActiveProxyUrl(state: ProxyState): string | undefined {
         if (state.mode === ProxyMode.Off) {
             return undefined;
@@ -597,7 +753,11 @@ export class ProxyRuntimeDiagnostics {
             if (state.autoModeOff === true) {
                 return undefined;
             }
-            return state.autoProxyUrl || state.fallbackProxyUrl;
+            const url = state.autoProxyUrl || state.fallbackProxyUrl;
+            if (state.requiresAuth === true && url && !hasProxyCredentials(url)) {
+                return undefined;
+            }
+            return url;
         }
         return state.manualProxyUrl;
     }
@@ -620,16 +780,7 @@ export class ProxyRuntimeDiagnostics {
         if (!observed) {
             return false;
         }
-        return this.normalizeProxyForComparison(observed) === this.normalizeProxyForComparison(expected);
-    }
-
-    private normalizeProxyForComparison(value: string): string {
-        const trimmed = value.trim();
-        try {
-            return new URL(trimmed).toString();
-        } catch {
-            return trimmed;
-        }
+        return normalizeProxyForComparison(observed) === normalizeProxyForComparison(expected);
     }
 
     private async readGitConfig(args: string[]): Promise<GitConfigRead> {
@@ -648,12 +799,11 @@ export class ProxyRuntimeDiagnostics {
 
     private async readNpmConfigValues(): Promise<NpmDiagnosticValues> {
         try {
-            if (process.platform === 'win32') {
-                const comspec = process.env.ComSpec || 'cmd.exe';
-                const { stdout } = await this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', 'config', 'list', '--json']);
-                return JSON.parse(stdout) as NpmDiagnosticValues;
-            }
-            const { stdout } = await this.commandRunner('npm', ['config', 'list', '--json']);
+            const invocation = resolveNpmInvocation(['config', 'list', '--json'], {
+                isWindows: process.platform === 'win32',
+                env: process.env
+            });
+            const { stdout } = await this.commandRunner(invocation.command, invocation.args);
             return JSON.parse(stdout) as NpmDiagnosticValues;
         } catch {
             return {};

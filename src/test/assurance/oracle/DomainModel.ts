@@ -36,6 +36,25 @@ export interface ModeInput {
     manualProxyUrl?: string;
 }
 
+/**
+ * Independent copy of connection-test failure kinds. Must not import
+ * production types so the oracle cannot share a helper with the SUT.
+ */
+export type CanonicalTestFailureKind =
+    | 'endpointUnreachable'
+    | 'authRequired'
+    | 'connectRejected'
+    | 'destinationForbidden'
+    | 'timeout'
+    | 'dns'
+    | 'protocol'
+    | 'unknown';
+
+export interface ConnectionTestInput {
+    success: boolean;
+    failureKind?: CanonicalTestFailureKind;
+}
+
 export type IssueKind = 'blocking' | 'user-decision' | 'advisory';
 
 export interface ApplyInput {

@@ -52,7 +52,14 @@ export async function updateProxyConfigTargetDetailed(
 
             Logger.error(`${target.name} failed:`, result.error, result.errorType);
             errorAggregator.addError(target.name, result.error || `Failed to update ${target.name}`, result.errorType);
-            return { success: false, outcome: 'failed', errorType: result.errorType };
+            return result.residualKeys && result.residualKeys.length > 0
+                ? {
+                    success: false,
+                    outcome: 'failed',
+                    errorType: result.errorType,
+                    residualKeys: result.residualKeys
+                }
+                : { success: false, outcome: 'failed', errorType: result.errorType };
         }
 
         return { success: true, outcome: enabled ? 'configured' : 'cleared' };

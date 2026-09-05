@@ -23,6 +23,7 @@ suite('SystemProxyUpdateService Tests', () => {
     let saveStateStub: sinon.SinonStub;
     let publishStateStub: sinon.SinonStub;
     let notifyStub: sinon.SinonStub;
+    let warnStub: sinon.SinonStub;
     let service: SystemProxyUpdateService;
 
     setup(() => {
@@ -45,6 +46,7 @@ suite('SystemProxyUpdateService Tests', () => {
         });
         publishStateStub = sandbox.stub().resolves();
         notifyStub = sandbox.stub();
+        warnStub = sandbox.stub();
 
         connectionTester = {
             testProxyAuto: sandbox.stub().resolves({
@@ -68,7 +70,8 @@ suite('SystemProxyUpdateService Tests', () => {
             } as unknown as InitializerContext['proxyApplier'],
             systemProxyDetector: {} as unknown as InitializerContext['systemProxyDetector'],
             userNotifier: {
-                showSuccess: notifyStub
+                showSuccess: notifyStub,
+                showWarning: warnStub
             } as unknown as InitializerContext['userNotifier'],
             sanitizer: {
                 maskPassword: (url: string) => url
@@ -110,6 +113,28 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.calledOnce(saveStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(notifyStub);
+    });
+
+    test('Auto + same HTTP but changed HTTPS: re-applies split routing', async () => {
+        state = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy-a.example.com:8080',
+            autoHttpProxyUrl: 'http://proxy-a.example.com:8080',
+            autoHttpsProxyUrl: 'http://proxy-b.example.com:8443',
+            autoProxyKind: 'perSchemeProxy'
+        };
+        detectStub.resolves({
+            proxyUrl: 'http://proxy-a.example.com:8080',
+            source: 'environment',
+            kind: 'perSchemeProxy',
+            httpUrl: 'http://proxy-a.example.com:8080',
+            httpsUrl: 'http://proxy-c.example.com:8443'
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoHttpsProxyUrl, 'http://proxy-c.example.com:8443');
+        sinon.assert.calledOnce(applyProxyStub);
     });
 
     test('Auto OFF + same detected URL: re-applies before presenting Auto ON', async () => {
@@ -159,6 +184,25 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.notCalled(notifyStub);
     });
 
+    test('apply-blocked Auto refreshes the status bar from persisted apply result', async () => {
+        const updateStatusBar = sandbox.stub();
+        context.updateStatusBar = updateStatusBar;
+        state = { mode: ProxyMode.Auto };
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
+        applyProxyStub.callsFake(async () => {
+            state.lastError = 'Proxy settings were not changed because the workspace is untrusted.';
+            state.applyBlocked = 'untrustedWorkspace';
+            return false;
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        sinon.assert.calledWith(updateStatusBar, sinon.match({
+            applyBlocked: 'untrustedWorkspace',
+            lastError: sinon.match(/untrusted/i)
+        }));
+    });
+
     test('a toggle completed during detection is not overwritten by the stale Auto snapshot', async () => {
         let resolveDetection!: (value: { proxyUrl: string | null; source: string | null }) => void;
         detectStub.returns(new Promise<{ proxyUrl: string | null; source: string | null }>(resolve => {
@@ -201,6 +245,31 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.calledWith(notifyStub, 'fallback.usingManualProxy', sinon.match.any);
     });
 
+    test('Auto + detection fails + fallback 407 is not treated as unreachable', async () => {
+        state.mode = ProxyMode.Auto;
+        state.manualProxyUrl = 'http://manual.example:3128';
+        configValues.enableFallback = true;
+        detectStub.resolves({ proxyUrl: null, source: null });
+        connectionTester!.testProxyAuto.resolves({
+            success: false,
+            proxyUrl: 'http://manual.example:3128',
+            testUrls: ['https://www.github.com'],
+            errors: [{ url: 'https://www.github.com', message: 'Proxy CONNECT failed with status 407' }],
+            failureKind: 'authRequired',
+            proxyEndpointOk: true,
+            canaryHost: 'www.github.com',
+            timestamp: 0
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.usingFallbackProxy, true);
+        assert.strictEqual(state.fallbackProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.autoModeOff, false);
+        sinon.assert.calledWith(applyProxyStub, 'http://manual.example:3128', true);
+    });
+
     test('Auto + detection fails + fallback enabled + manual unreachable: enters autoModeOff', async () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
@@ -209,8 +278,10 @@ suite('SystemProxyUpdateService Tests', () => {
         connectionTester!.testProxyAuto.resolves({
             success: false,
             proxyUrl: 'http://manual.example:3128',
-            testUrls: [],
-            errors: [{ url: 'https://example.com', message: 'timeout' }],
+            testUrls: ['https://example.com'],
+            errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+            failureKind: 'endpointUnreachable',
+            proxyEndpointOk: false,
             timestamp: 0
         });
 
@@ -364,6 +435,59 @@ suite('SystemProxyUpdateService Tests', () => {
 
         assert.strictEqual(state.autoProxyUrl, undefined);
         sinon.assert.notCalled(applyProxyStub);
+    });
+
+    test('Auto + unsupported PAC without fallback: does not apply none', async () => {
+        state.mode = ProxyMode.Auto;
+        state.autoProxyUrl = 'http://detected.example:8080';
+        configValues.enableFallback = false;
+        detectStub.resolves({
+            proxyUrl: null,
+            source: 'windows',
+            kind: 'pac',
+            capability: 'unsupported'
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.systemProxyDetected, true);
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.lastDetectionKind, 'pac');
+        assert.strictEqual(state.lastDetectionCapability, 'unsupported');
+        assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
+        sinon.assert.notCalled(applyProxyStub);
+        sinon.assert.neverCalledWith(notifyStub, 'message.systemProxyRemoved');
+        sinon.assert.calledWith(warnStub, 'warning.unsupportedAutoConfig', sinon.match.any);
+    });
+
+    test('Auto + unsupported PAC + reachable fallback: uses fallback and says PAC is ignored', async () => {
+        state.mode = ProxyMode.Auto;
+        state.manualProxyUrl = 'http://manual.example:3128';
+        configValues.enableFallback = true;
+        detectStub.resolves({
+            proxyUrl: null,
+            source: 'linux',
+            kind: 'pac',
+            capability: 'unsupported'
+        });
+        connectionTester!.testProxyAuto.resolves({
+            success: true,
+            proxyUrl: 'http://manual.example:3128',
+            testUrls: [],
+            errors: [],
+            timestamp: 0
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.systemProxyDetected, true);
+        assert.strictEqual(state.usingFallbackProxy, true);
+        assert.strictEqual(state.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.lastDetectionKind, 'pac');
+        sinon.assert.calledWith(applyProxyStub, 'http://manual.example:3128', true);
+        sinon.assert.calledWith(notifyStub, 'fallback.ignoringAutoConfig', sinon.match.any);
+        sinon.assert.neverCalledWith(notifyStub, 'fallback.usingManualProxy');
     });
 
     test('getConfiguration is queried with otakProxy scope', async () => {

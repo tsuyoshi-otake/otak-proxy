@@ -1,20 +1,28 @@
-import { TargetHost } from './v3Types';
+import { ProxyIssue, ProxyValueKind, TargetHost } from './v3Types';
 
 export interface ProxyApplyOptions {
     silent?: boolean;
     showProgress?: boolean;
+    kind?: ProxyValueKind;
+    httpUrl?: string;
+    httpsUrl?: string;
+    bypass?: string;
 }
 
 export type ProxyConfigStatusReporter = (messageKey: string) => void;
 
 export interface ProxyConfigOperationOptions {
     onStatus?: ProxyConfigStatusReporter;
+    ownedObservations?: ReadonlyArray<{ targetId: string; value: string | null }>;
+    expectedValue?: string;
 }
 
 interface ProxyConfigOperationResult {
     success: boolean;
     error?: string;
     errorType?: string;
+    residualKeys?: readonly string[];
+    preservedKeys?: readonly string[];
 }
 
 interface ProxyConfigManagerLike {
@@ -33,6 +41,7 @@ export interface ProxyConfigTargetUpdateResult {
     success: boolean;
     outcome: ProxyTargetOutcome;
     errorType?: string;
+    residualKeys?: readonly string[];
 }
 
 export interface ProxyOwnershipObservation {
@@ -47,10 +56,19 @@ export interface ProxyOwnershipInspection {
     errorType?: string;
 }
 
+export interface OwnedTargetUnsetRequest {
+    targetId: string;
+    expectedValue: string;
+}
+
 export interface ProxyOwnershipAdapter {
     targets: Array<{ targetId: string; targetHost: TargetHost }>;
+    applyTargetIds?: readonly string[];
     inspect(): Promise<ProxyOwnershipInspection>;
-    unsetTargets(targetIds: readonly string[], options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
+    unsetTargets(
+        targets: readonly OwnedTargetUnsetRequest[],
+        options?: ProxyConfigOperationOptions
+    ): Promise<ProxyConfigOperationResult>;
 }
 
 export interface ProxyConfigTarget {
@@ -82,4 +100,5 @@ export interface ProxyApplyDetailedResult {
         message: string;
         errorType?: string;
     }>;
+    issues?: ProxyIssue[];
 }

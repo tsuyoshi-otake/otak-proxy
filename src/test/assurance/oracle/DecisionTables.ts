@@ -1,4 +1,4 @@
-import { ApplyInput, ModeInput, OracleDecision, SyncInput, TargetInput } from './DomainModel';
+import { ApplyInput, ConnectionTestInput, ModeInput, OracleDecision, SyncInput, TargetInput } from './DomainModel';
 
 export interface DecisionTableRow<TInput, TValue> {
     oracleCaseId: string;
@@ -32,11 +32,68 @@ export const MODE_DECISION_TABLE: readonly DecisionTableRow<ModeInput, string>[]
     {
         oracleCaseId: 'ORC-MODE-003',
         requirements: ['DVA-2.2', 'DVA-2.3', 'DVA-2.4'],
-        precondition: 'Auto OFF suppresses every candidate URL.',
+        precondition: 'Auto OFF, entered only for an unreachable proxy endpoint, suppresses every candidate URL.',
         input: { mode: 'auto', autoModeOff: true, autoProxyUrl: 'safe://proxy/a' },
         expected: { value: '', terminal: 'diagnosed', reasonCode: 'auto-off' },
         allowedEffects: ['clear-proxy'],
         prohibitedEffects: ['apply-proxy']
+    }
+];
+
+export const REACHABILITY_DECISION_TABLE: readonly DecisionTableRow<ConnectionTestInput, boolean>[] = [
+    {
+        oracleCaseId: 'ORC-REACH-001',
+        requirements: ['DVA-2.2', 'DVA-2.4'],
+        precondition: 'A successful canary CONNECT does not clear managed proxy settings.',
+        input: { success: true },
+        expected: { value: false, terminal: 'applied', reasonCode: 'canary-success' },
+        allowedEffects: [],
+        prohibitedEffects: ['clear-proxy']
+    },
+    {
+        oracleCaseId: 'ORC-REACH-002',
+        requirements: ['DVA-2.2', 'DVA-2.4'],
+        precondition: 'A truly unreachable proxy endpoint still clears managed settings (#18).',
+        input: { success: false, failureKind: 'endpointUnreachable' },
+        expected: { value: true, terminal: 'diagnosed', reasonCode: 'endpoint-unreachable' },
+        allowedEffects: ['clear-proxy'],
+        prohibitedEffects: ['apply-proxy']
+    },
+    {
+        oracleCaseId: 'ORC-REACH-003',
+        requirements: ['DVA-2.2', 'DVA-2.4'],
+        precondition: 'CONNECT 407 is not a broken proxy and must not clear.',
+        input: { success: false, failureKind: 'authRequired' },
+        expected: { value: false, terminal: 'diagnosed', reasonCode: 'canary-failure-advisory' },
+        allowedEffects: [],
+        prohibitedEffects: ['clear-proxy']
+    },
+    {
+        oracleCaseId: 'ORC-REACH-004',
+        requirements: ['DVA-2.2', 'DVA-2.4'],
+        precondition: 'CONNECT 403 destination policy must not clear.',
+        input: { success: false, failureKind: 'destinationForbidden' },
+        expected: { value: false, terminal: 'diagnosed', reasonCode: 'canary-failure-advisory' },
+        allowedEffects: [],
+        prohibitedEffects: ['clear-proxy']
+    },
+    {
+        oracleCaseId: 'ORC-REACH-005',
+        requirements: ['DVA-2.2', 'DVA-2.4'],
+        precondition: 'A canary timeout is not treated as an unreachable proxy.',
+        input: { success: false, failureKind: 'timeout' },
+        expected: { value: false, terminal: 'diagnosed', reasonCode: 'canary-failure-advisory' },
+        allowedEffects: [],
+        prohibitedEffects: ['clear-proxy']
+    },
+    {
+        oracleCaseId: 'ORC-REACH-006',
+        requirements: ['DVA-2.2', 'DVA-2.4'],
+        precondition: 'success:false without a failure kind is not enough to clear.',
+        input: { success: false },
+        expected: { value: false, terminal: 'diagnosed', reasonCode: 'canary-failure-advisory' },
+        allowedEffects: [],
+        prohibitedEffects: ['clear-proxy']
     }
 ];
 

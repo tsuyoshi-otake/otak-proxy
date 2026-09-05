@@ -89,7 +89,11 @@ const hermeticEnv = {
 // keeping the rest parallel for speed.
 const serialBasenames = new Set([
   'GitConfigManager.test.js',
+  'GitConfigManager.multivalue.test.js',
+  'GitConfigManager.partialwrite.test.js',
+  'GitConfigManager.valueunset.test.js',
   'NpmConfigManager.test.js',
+  'NpmConfigManager.partialwrite.test.js',
   'NpmConfigManager.property.test.js',
 ]);
 const serialTests = unitTests.filter(p => serialBasenames.has(path.basename(p)));

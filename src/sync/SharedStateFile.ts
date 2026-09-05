@@ -56,6 +56,12 @@ export interface ISharedStateFile {
     write(state: SharedState): Promise<void>;
 
     /**
+     * Write only when the on-disk version still matches `expectedVersion`.
+     * `undefined` means the file must be absent (first publish).
+     */
+    compareAndSwap?(expectedVersion: number | undefined, state: SharedState): Promise<'written' | 'stale'>;
+
+    /**
      * Check if state file exists
      */
     exists(): Promise<boolean>;
@@ -240,6 +246,17 @@ export class SharedStateFile implements ISharedStateFile {
 
             throw error;
         }
+    }
+
+    async compareAndSwap(expectedVersion: number | undefined, state: SharedState): Promise<'written' | 'stale'> {
+        const current = await this.read();
+        const currentVersion = current?.version;
+        if (currentVersion !== expectedVersion) {
+            return 'stale';
+        }
+
+        await this.write(state);
+        return 'written';
     }
 
     /**

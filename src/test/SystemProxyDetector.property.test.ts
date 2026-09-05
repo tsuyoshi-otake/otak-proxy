@@ -50,8 +50,12 @@ suite('SystemProxyDetector Property-Based Tests', () => {
                         }
                     }
 
-                    // Property: If no proxy found, source should be null
+                    // Property: If no proxy found, source should be null unless
+                    // auto-config was detected but is unsupported (#58).
                     if (result.proxyUrl === null && result.source !== null) {
+                        if (result.capability === 'unsupported' && (result.kind === 'pac' || result.kind === 'wpad')) {
+                            return;
+                        }
                         throw new Error(
                             `When proxyUrl is null, source should also be null. Got source: ${result.source}`
                         );

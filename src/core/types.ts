@@ -9,6 +9,9 @@
  * - Clear folder hierarchy (Requirement 1.5)
  */
 
+import type { TestResult } from '../utils/ProxyTestTypes';
+import type { ProxyValueKind } from './v3Types';
+
 /**
  * Proxy operation modes
  *
@@ -28,14 +31,7 @@ export enum ProxyMode {
  * Feature: auto-mode-proxy-testing
  * @interface ProxyTestResult
  */
-export interface ProxyTestResult {
-    success: boolean;
-    testUrls: string[];
-    errors: Array<{ url: string; message: string }>;
-    proxyUrl?: string;
-    timestamp?: number;
-    duration?: number;
-}
+export type ProxyTestResult = TestResult;
 
 /**
  * Source that produced the currently applied Auto proxy URL.
@@ -80,6 +76,11 @@ export interface ProxyState {
     terminalEnvConfigured?: boolean;
     targetOutcomes?: Partial<Record<'git' | 'vscode' | 'npm' | 'pip' | 'terminalEnv',
         'configured' | 'cleared' | 'skippedUnavailable' | 'preservedExternal' | 'failed'>>;
+    /**
+     * Apply was refused before any target write. Distinct from a partial write
+     * failure recorded only in lastError / targetOutcomes.
+     */
+    applyBlocked?: 'untrustedWorkspace' | 'invalidProxyUrl';
     systemProxyDetected?: boolean;
     lastError?: string;
     // Feature: auto-mode-proxy-testing
@@ -92,11 +93,57 @@ export interface ProxyState {
     lastSystemProxyUrl?: string;         // Last detected system proxy URL
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
     lastDetectionSource?: AppliedProxySource; // Provenance of autoProxyUrl (issue #29 echo suppression)
+    /**
+     * Monotonic logical generation for this window's ProxyState.
+     * Every committed write advances it so a completion derived from N cannot
+     * mutate N+1 (issue #17 P1-3). Absent on states written before this field
+     * existed; treat that as 0.
+     */
+    revision?: number;
+    /**
+     * True while a desired state has been saved but apply has not finished.
+     * Receivers must not treat this as a converged success (issue #17 P1-6).
+     */
+    convergencePending?: boolean;
+    /**
+     * Last-applied HTTP bypass list (NO_PROXY / http.noProxy). Identity only;
+     * used so a completion for a different bypass cannot land on the new one.
+     */
+    noProxy?: string;
+    /**
+     * Non-secret metadata: the active Auto/fallback endpoint requires credentials.
+     * Persisted and synced so a receiver can refuse a credentialless apply.
+     * Never contains userinfo.
+     */
+    requiresAuth?: boolean;
+    autoProxyKind?: ProxyValueKind;
+    autoHttpProxyUrl?: string;
+    autoHttpsProxyUrl?: string;
+    detectedBypass?: string;
+    lastDetectionKind?: 'direct' | 'singleProxy' | 'perSchemeProxy' | 'pac' | 'wpad' | 'unknown';
+    lastDetectionCapability?: 'supported' | 'unsupported' | 'readOnly' | 'parseUnavailable' | 'permissionRequired';
+}
+
+/**
+ * Outcome of a revision-checked write. `superseded` means another owner
+ * committed first; the caller must drop its snapshot instead of saving it.
+ */
+export type StateCommitResult =
+    | { kind: 'committed'; revision: number; state: ProxyState }
+    | { kind: 'superseded'; current: ProxyState };
+
+export function stateRevision(state: ProxyState | undefined): number {
+    const revision = state?.revision;
+    return typeof revision === 'number' && Number.isFinite(revision) ? revision : 0;
 }
 
 export interface IProxyStateManager {
     getState(): Promise<ProxyState>;
     saveState(state: ProxyState): Promise<void>;
+    /**
+     * Writes `next` only when the stored revision is still `expectedRevision`.
+     */
+    commitState?(expectedRevision: number, next: ProxyState): Promise<StateCommitResult>;
     getActiveProxyUrl(state: ProxyState): string;
     getNextMode(currentMode: ProxyMode): ProxyMode;
 }

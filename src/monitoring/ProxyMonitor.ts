@@ -85,6 +85,11 @@ export class ProxyMonitor extends EventEmitter {
         );
     }
 
+    setGenerationCapture(capture: () => Promise<import('../core/LogicalGeneration').LogicalGeneration | undefined>): void {
+        this.connectionState.captureGeneration = capture;
+        this.connectionState.scheduler?.setGenerationCapture(capture);
+    }
+
     /**
      * Starts proxy monitoring
      * Sets up polling interval and connection test scheduler
@@ -203,9 +208,15 @@ export class ProxyMonitor extends EventEmitter {
         this.isCheckInProgress = true;
         this.inFlightEpoch = epoch;
         this.state.recordCheckStart();
+        const startedGeneration = this.connectionState.captureGeneration
+            ? await this.connectionState.captureGeneration()
+            : undefined;
 
         try {
-            const result = await this.detectWithRetry(trigger);
+            const result = {
+                ...(await this.detectWithRetry(trigger)),
+                startedGeneration
+            };
             // A detector may resolve after stop() or after a newer start(). Its
             // observation is diagnostic only; it must not publish state/events
             // into the newer lifecycle.

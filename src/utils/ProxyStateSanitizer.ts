@@ -1,6 +1,7 @@
 import { ProxyState, ProxyTestResult } from '../core/types';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { toPublicProxyHref } from './ProxyUrlIdentity';
 
 const sanitizer = new InputSanitizer();
 const redactor = new ProxySecretRedactor();
@@ -26,14 +27,7 @@ export function getProxyPublicUrl(url: string | undefined): string | undefined {
         return url;
     }
 
-    try {
-        const parsed = new URL(url);
-        parsed.username = '';
-        parsed.password = '';
-        return parsed.toString();
-    } catch {
-        return removeProxyCredentials(url);
-    }
+    return toPublicProxyHref(url) ?? removeProxyCredentials(url);
 }
 
 function sanitizeOptionalMessage(message: string | undefined): string | undefined {
@@ -64,7 +58,40 @@ export function sanitizeProxyTestResultForPersistence(result: ProxyTestResult | 
         sanitized.proxyUrl = removeProxyCredentials(result.proxyUrl);
     }
 
+    // In-memory generation stamps must never reach globalState or sync files.
+    delete (sanitized as { startedGeneration?: unknown }).startedGeneration;
+
     return sanitized;
+}
+
+export const UNRESOLVED_LOCAL_CREDENTIAL_ERROR =
+    'Proxy credentials are required but unavailable on this machine';
+
+export function proxyUrlsHaveCredentials(state: Pick<ProxyState,
+    'autoProxyUrl' | 'fallbackProxyUrl' | 'lastSystemProxyUrl' | 'manualProxyUrl'
+>): boolean {
+    return [
+        state.autoProxyUrl,
+        state.fallbackProxyUrl,
+        state.lastSystemProxyUrl,
+        state.manualProxyUrl
+    ].some(url => Boolean(url && hasProxyCredentials(url)));
+}
+
+export function deriveRequiresAuth(state: ProxyState): boolean {
+    return proxyUrlsHaveCredentials(state) || state.requiresAuth === true;
+}
+
+export function setRequiresAuthFromLiveUrls(state: ProxyState): void {
+    if (proxyUrlsHaveCredentials(state)) {
+        state.requiresAuth = true;
+        return;
+    }
+    delete state.requiresAuth;
+}
+
+export function shouldSkipUnauthenticatedApply(state: ProxyState, activeUrl: string): boolean {
+    return Boolean(activeUrl) && state.requiresAuth === true && !hasProxyCredentials(activeUrl);
 }
 
 export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState {
@@ -75,6 +102,12 @@ export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState 
     }
     if ('autoProxyUrl' in state) {
         sanitized.autoProxyUrl = removeProxyCredentials(state.autoProxyUrl);
+    }
+    if ('autoHttpProxyUrl' in state) {
+        sanitized.autoHttpProxyUrl = removeProxyCredentials(state.autoHttpProxyUrl);
+    }
+    if ('autoHttpsProxyUrl' in state) {
+        sanitized.autoHttpsProxyUrl = removeProxyCredentials(state.autoHttpsProxyUrl);
     }
     if ('lastSystemProxyUrl' in state) {
         sanitized.lastSystemProxyUrl = removeProxyCredentials(state.lastSystemProxyUrl);
@@ -87,6 +120,12 @@ export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState 
     }
     if ('lastTestResult' in state) {
         sanitized.lastTestResult = sanitizeProxyTestResultForPersistence(state.lastTestResult);
+    }
+
+    if (deriveRequiresAuth(state)) {
+        sanitized.requiresAuth = true;
+    } else {
+        delete sanitized.requiresAuth;
     }
 
     return sanitized;

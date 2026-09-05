@@ -456,7 +456,9 @@ suite('ProxyMonitor Connection Testing Integration', () => {
             const failResult: TestResult = {
                 success: false,
                 testUrls: ['https://example.com'],
-                errors: [{ url: 'https://example.com', message: 'Connection failed' }],
+                errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+                failureKind: 'endpointUnreachable',
+                proxyEndpointOk: false,
                 proxyUrl: 'http://proxy.example.com:8080',
                 timestamp: Date.now(),
                 duration: 3000
@@ -506,7 +508,9 @@ suite('ProxyMonitor Connection Testing Integration', () => {
             const failResult: TestResult = {
                 success: false,
                 testUrls: ['https://example.com'],
-                errors: [{ url: 'https://example.com', message: 'Connection failed' }],
+                errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+                failureKind: 'endpointUnreachable',
+                proxyEndpointOk: false,
                 proxyUrl: 'http://proxy.example.com:8080',
                 timestamp: Date.now(),
                 duration: 3000
@@ -534,6 +538,42 @@ suite('ProxyMonitor Connection Testing Integration', () => {
 
             assert.ok(detectionResult !== undefined, 'checkComplete should be emitted');
             assert.strictEqual(detectionResult.proxyReachable, false, 'Proxy should not be reachable');
+        });
+
+        test('should not treat CONNECT 407 as proxy unreachable', async () => {
+            const authResult: TestResult = {
+                success: false,
+                testUrls: ['https://www.github.com'],
+                errors: [{ url: 'https://www.github.com', message: 'Proxy CONNECT failed with status 407' }],
+                failureKind: 'authRequired',
+                proxyEndpointOk: true,
+                canaryHost: 'www.github.com',
+                proxyUrl: 'http://proxy.example.com:8080',
+                timestamp: Date.now(),
+                duration: 50
+            };
+            sandbox.stub(connectionTester, 'testProxyAuto').resolves(authResult);
+
+            monitor = new ProxyMonitor(mockDetector as any, logger, {
+                pollingInterval: 60000,
+                debounceDelay: 10,
+                enableConnectionTest: true
+            }, connectionTester);
+
+            mockDetector.setMockResult('http://proxy.example.com:8080');
+
+            let detectionResult: ProxyDetectionResult | undefined;
+            monitor.on('checkComplete', (result: ProxyDetectionResult) => {
+                detectionResult = result;
+            });
+
+            monitor.start();
+            monitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            assert.ok(detectionResult !== undefined, 'checkComplete should be emitted');
+            assert.strictEqual(detectionResult.proxyReachable, true, '407 means the proxy endpoint answered');
+            assert.strictEqual(detectionResult.testResult?.failureKind, 'authRequired');
         });
 
         test('should report proxy as reachable when connection test succeeds', async () => {

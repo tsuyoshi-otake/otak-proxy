@@ -70,7 +70,7 @@ suite('Security Test Suite', () => {
                 'http://proxy\ncom',                     // Newline in hostname
                 'http://proxy\tcom',                     // Tab in hostname
                 'http://proxy.com:8080:9090',            // Multiple ports
-                'http://user:pass:extra@proxy.com',      // Extra colon in credentials
+                'http://user:pass%3Bextra@proxy.com',    // Encoded semicolon in credentials
                 'http://user@pass@proxy.com',            // Multiple @ symbols (unencoded)
                 'http://[proxy.com]:8080',               // Invalid IPv6 format
             ];

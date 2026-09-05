@@ -6,10 +6,10 @@
 export const CONFIG_COMMAND_TIMEOUT_MS = 15_000;
 
 /**
- * A Git write can contain two sequential commands (http.proxy and
- * https.proxy). The mutex must outlive the complete write operation, not just
- * one command, or a second window can report lock contention while the first
- * window is still within its valid command deadlines.
+ * A Git write can contain one apply (`http.proxy`) plus leftover cleanup
+ * (`https.proxy` unset). The mutex must outlive the complete write operation,
+ * not just one command, or a second window can report lock contention while
+ * the first window is still within its valid command deadlines.
  */
 export const GIT_CONFIG_MUTEX_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS * 2 + 5_000;
 

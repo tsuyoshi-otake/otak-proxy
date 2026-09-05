@@ -109,8 +109,8 @@ suite('ProxyStateManager Unit Tests', () => {
 
         await stateManager.saveState(testState);
 
-        // Verify state was stored
-        assert.deepStrictEqual(storedState, testState);
+        // Verify state was stored (revision is stamped by the write)
+        assert.deepStrictEqual(storedState, { ...testState, revision: 1 });
     });
 
     test('saveState should remove proxy credentials from persisted state', async () => {
@@ -150,6 +150,44 @@ suite('ProxyStateManager Unit Tests', () => {
 
         const runtimeState = await stateManager.getState();
         assert.strictEqual(runtimeState.manualProxyUrl, testState.manualProxyUrl);
+        assert.strictEqual(runtimeState.autoProxyUrl, testState.autoProxyUrl);
+        assert.strictEqual(runtimeState.requiresAuth, true);
+        assert.ok(credentialSecretFor('http://auto.example.com:8080/'));
+    });
+
+    test('getState should hydrate persisted Auto proxy credentials from SecretStorage', async () => {
+        const originalGetConfiguration = vscode.workspace.getConfiguration;
+        (vscode.workspace as any).getConfiguration = (section?: string) => {
+            if (section === 'otakProxy') {
+                return {
+                    get: (_key: string, defaultValue?: any) => defaultValue,
+                    update: async () => {}
+                };
+            }
+            return originalGetConfiguration(section);
+        };
+
+        try {
+            await stateManager.saveState({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://user:s3cret@auto.example.com:8080'
+            });
+
+            assert.strictEqual(storedState!.autoProxyUrl, 'http://auto.example.com:8080/');
+            assert.strictEqual(storedState!.requiresAuth, true);
+            assert.ok(!JSON.stringify(storedState).includes('s3cret'));
+
+            const receivingWindow = new ProxyStateManager(context);
+            const hydrated = await receivingWindow.getState();
+            assert.strictEqual(hydrated.autoProxyUrl, 'http://user:s3cret@auto.example.com:8080');
+            assert.strictEqual(hydrated.requiresAuth, true);
+            assert.strictEqual(
+                receivingWindow.getActiveProxyUrl(hydrated),
+                'http://user:s3cret@auto.example.com:8080'
+            );
+        } finally {
+            (vscode.workspace as any).getConfiguration = originalGetConfiguration;
+        }
     });
 
     test('getState should hydrate persisted manual proxy credentials from configuration', async () => {
@@ -282,7 +320,7 @@ suite('ProxyStateManager Unit Tests', () => {
         await stateManager.saveState(testState);
         const retrievedState = await stateManager.getState();
 
-        assert.deepStrictEqual(retrievedState, testState);
+        assert.deepStrictEqual(retrievedState, { ...testState, revision: 1 });
     });
 
     test('getState should migrate saved Manual state to Auto and persist it', async () => {
@@ -394,7 +432,7 @@ suite('ProxyStateManager Unit Tests', () => {
 
             await stateManager.saveState(testState);
 
-            assert.deepStrictEqual(storedState, testState);
+            assert.deepStrictEqual(storedState, { ...testState, revision: 1 });
             assert.strictEqual(storedState!.lastTestResult!.success, true);
             assert.strictEqual(storedState!.proxyReachable, true);
             assert.ok(storedState!.lastTestTimestamp);
@@ -519,7 +557,7 @@ suite('ProxyStateManager Unit Tests', () => {
 
             await stateManager.saveState(testState);
 
-            assert.deepStrictEqual(storedState, testState);
+            assert.deepStrictEqual(storedState, { ...testState, revision: 1 });
             assert.strictEqual(storedState!.usingFallbackProxy, true);
             assert.strictEqual(storedState!.autoModeOff, false);
             assert.strictEqual(storedState!.lastSystemProxyUrl, 'http://system.example.com:8080');

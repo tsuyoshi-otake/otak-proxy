@@ -332,9 +332,14 @@ suite('Fallback Behavior Tests (Task 5.2)', () => {
                 assert.ok('proxyUrl' in result);
                 assert.ok('source' in result);
 
-                // If proxyUrl is null, source should also be null
+                // If proxyUrl is null, source should also be null unless auto-config
+                // was detected but is unsupported (#58).
                 if (result.proxyUrl === null) {
-                    assert.strictEqual(result.source, null);
+                    if (result.capability === 'unsupported' && (result.kind === 'pac' || result.kind === 'wpad')) {
+                        assert.ok(result.source !== null);
+                    } else {
+                        assert.strictEqual(result.source, null);
+                    }
                 } else {
                     assert.ok(result.source !== null);
                 }

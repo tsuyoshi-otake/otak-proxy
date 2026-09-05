@@ -60,10 +60,12 @@ suite('ToggleProxyCommand Unit Tests', () => {
         getState: () => ProxyState;
         applyCalls: Array<{ url: string; enabled: boolean }>;
         monitorCalls: string[];
+        statusBarStates: ProxyState[];
     } {
         let state = { ...initialState };
         const applyCalls: Array<{ url: string; enabled: boolean }> = [];
         const monitorCalls: string[] = [];
+        const statusBarStates: ProxyState[] = [];
 
         const ctx: CommandContext = {
             extensionContext: {} as vscode.ExtensionContext,
@@ -88,7 +90,9 @@ suite('ToggleProxyCommand Unit Tests', () => {
                 }
                 return true;
             },
-            updateStatusBar: () => {},
+            updateStatusBar: (next) => {
+                statusBarStates.push({ ...next });
+            },
             checkAndUpdateSystemProxy,
             startSystemProxyMonitoring: async () => { monitorCalls.push('start'); },
             stopSystemProxyMonitoring: async () => { monitorCalls.push('stop'); },
@@ -104,7 +108,7 @@ suite('ToggleProxyCommand Unit Tests', () => {
             }
         };
 
-        return { ctx, getState: () => state, applyCalls, monitorCalls };
+        return { ctx, getState: () => state, applyCalls, monitorCalls, statusBarStates };
     }
 
     test('should switch from Off to Auto when an auto proxy is detected', async () => {
@@ -181,7 +185,7 @@ suite('ToggleProxyCommand Unit Tests', () => {
         });
     });
 
-    test('should not use unreachable manual proxy as Auto fallback', async function() {
+    test('should use a 407 manual proxy as Auto fallback instead of treating it as broken', async function() {
         this.timeout(5000);
         const server = http.createServer();
         server.on('connect', (_request, socket) => {
@@ -204,17 +208,48 @@ suite('ToggleProxyCommand Unit Tests', () => {
 
             assert.strictEqual(result.success, true);
             assert.strictEqual(state.mode, ProxyMode.Auto);
-            assert.strictEqual(state.autoProxyUrl, undefined);
-            assert.strictEqual(state.autoModeOff, true);
-            assert.strictEqual(state.usingFallbackProxy, false);
+            assert.strictEqual(state.autoProxyUrl, `http://127.0.0.1:${port}`);
+            assert.strictEqual(state.autoModeOff, false);
+            assert.strictEqual(state.usingFallbackProxy, true);
             assert.strictEqual(state.lastTestResult?.success, false);
+            assert.strictEqual(state.lastTestResult?.failureKind, 'authRequired');
             assert.deepStrictEqual(applyCalls[applyCalls.length - 1], {
-                url: '',
-                enabled: false
+                url: `http://127.0.0.1:${port}`,
+                enabled: true
             });
         } finally {
             await close(server);
         }
+    });
+
+    test('should not use unreachable manual proxy as Auto fallback', async function() {
+        this.timeout(5000);
+        const server = http.createServer();
+        const port = await listen(server);
+        await close(server);
+
+        const { ctx, getState, applyCalls } = createContext(
+            {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: `http://127.0.0.1:${port}`
+            },
+            async () => {}
+        );
+
+        const result = await executeToggleProxy(ctx);
+        const state = getState();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, undefined);
+        assert.strictEqual(state.autoModeOff, true);
+        assert.strictEqual(state.usingFallbackProxy, false);
+        assert.strictEqual(state.lastTestResult?.success, false);
+        assert.strictEqual(state.lastTestResult?.failureKind, 'endpointUnreachable');
+        assert.deepStrictEqual(applyCalls[applyCalls.length - 1], {
+            url: '',
+            enabled: false
+        });
     });
 
     test('should serialize rapid toggles and apply each transition in order', async () => {
@@ -354,5 +389,29 @@ suite('ToggleProxyCommand Unit Tests', () => {
         assert.strictEqual(showWarningMessageStub.callCount, 1);
 
         resolveWarning(undefined);
+    });
+
+    test('does not paint successful Auto from the pre-apply snapshot when apply is blocked', async () => {
+        let fixture: ReturnType<typeof createContext>;
+        fixture = createContext(
+            { mode: ProxyMode.Off, autoProxyUrl: 'http://system.example.com:8080' },
+            async () => {},
+            async () => {
+                const current = fixture.getState();
+                current.lastError = 'Proxy settings were not changed because the workspace is untrusted.';
+                current.applyBlocked = 'untrustedWorkspace';
+                current.targetOutcomes = { git: 'failed', vscode: 'failed', npm: 'failed', terminalEnv: 'failed' };
+                return false;
+            }
+        );
+
+        const result = await executeToggleProxy(fixture.ctx);
+        const painted = fixture.statusBarStates.at(-1);
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(fixture.getState().mode, ProxyMode.Auto);
+        assert.ok(painted, 'toggle must refresh the status bar after apply');
+        assert.strictEqual(painted?.applyBlocked, 'untrustedWorkspace');
+        assert.ok(painted?.lastError?.toLowerCase().includes('untrusted'));
     });
 });

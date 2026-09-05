@@ -25,6 +25,12 @@
       "source": "src/sync/ConflictResolver.ts",
       "symbols": ["resolve"],
       "requirements": ["DVA-4.1", "DVA-4.2", "DVA-4.3", "DVA-4.6", "DVA-4.7"]
+    },
+    {
+      "id": "C2-REACH",
+      "source": "src/utils/ProxyTestFailure.ts",
+      "symbols": ["isProxyEndpointUnreachable"],
+      "requirements": ["DVA-4.1", "DVA-4.2", "DVA-4.3", "DVA-4.6", "DVA-4.7"]
     }
   ],
   "infeasible": []

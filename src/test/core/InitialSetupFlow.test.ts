@@ -28,6 +28,7 @@ suite('InitialSetupFlow Tests', () => {
     let saveStateStub: sinon.SinonStub;
     let getStateStub: sinon.SinonStub;
     let applyProxyStub: sinon.SinonStub;
+    let updateStatusBarStub: sinon.SinonStub;
     let showSuccessStub: sinon.SinonStub;
     let showErrorStub: sinon.SinonStub;
     let showWarningStub: sinon.SinonStub;
@@ -66,6 +67,7 @@ suite('InitialSetupFlow Tests', () => {
             recordedApplyCalls.push({ url, enabled });
             return true;
         });
+        updateStatusBarStub = sandbox.stub();
 
         showSuccessStub = sandbox.stub().callsFake((key: string, params?: Record<string, string>) => {
             recordedNotifications.push({ type: 'success', key, params });
@@ -85,6 +87,9 @@ suite('InitialSetupFlow Tests', () => {
             return { proxyUrl: url ?? null, source: url ? 'windows' : null };
         });
         showInformationMessageStub = sandbox.stub(vscode.window, 'showInformationMessage');
+        if (!('showInputBox' in vscode.window)) {
+            (vscode.window as { showInputBox?: unknown }).showInputBox = async () => undefined;
+        }
         showInputBoxStub = sandbox.stub(vscode.window, 'showInputBox');
         executeCommandStub = sandbox.stub(vscode.commands, 'executeCommand').resolves();
 
@@ -107,6 +112,7 @@ suite('InitialSetupFlow Tests', () => {
             proxyApplier: {
                 applyProxy: applyProxyStub
             } as unknown as InitializerContext['proxyApplier'],
+            updateStatusBar: updateStatusBarStub,
             systemProxyDetector: {} as unknown as InitializerContext['systemProxyDetector'],
             userNotifier: {
                 showSuccess: showSuccessStub,
@@ -216,6 +222,10 @@ suite('InitialSetupFlow Tests', () => {
         assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
         assert.ok(!recordedNotifications.some(notification => notification.type === 'success'));
         sinon.assert.calledOnce(startSystemProxyMonitoringStub);
+        sinon.assert.calledWith(updateStatusBarStub, sinon.match({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://detected.example:8080'
+        }));
     });
 
     test('Auto + detected proxy with credentials: maskPassword is used in the success notification', async () => {

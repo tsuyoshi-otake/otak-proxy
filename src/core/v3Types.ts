@@ -1,4 +1,4 @@
-import { ProxyMode } from './types';
+import { ProxyMode, ProxyState } from './types';
 
 export type ProxyValueKind = 'direct' | 'singleProxy' | 'perSchemeProxy' | 'pac' | 'wpad' | 'unknown';
 
@@ -219,4 +219,39 @@ export function deriveRuntimeApplyState(
     }
 
     return 'failed';
+}
+
+export function createApplyBlockedIssue(
+    reason: NonNullable<ProxyState['applyBlocked']> | 'applyFailed'
+): ProxyIssue {
+    const untrusted = reason === 'untrustedWorkspace';
+    return {
+        id: `apply.blocked.${reason}`,
+        fingerprint: `apply.blocked.${reason}`,
+        category: untrusted ? 'capabilityUnavailable' : 'applyFailed',
+        impact: untrusted ? 'requiresUserDecision' : 'blocksConvergence',
+        targetId: 'workspace.apply',
+        targetHost: 'workspaceHost',
+        source: 'proxyApplier',
+        capability: untrusted ? 'permissionRequired' : 'supported',
+        autoAction: 'none',
+        userAction: 'showDetails',
+        evidence: { applyBlocked: reason }
+    };
+}
+
+export function deriveRuntimeApplyStateFromProxyState(state: ProxyState): RuntimeApplyState {
+    const issues: ProxyIssue[] = [];
+    if (state.applyBlocked) {
+        issues.push(createApplyBlockedIssue(state.applyBlocked));
+    } else if (state.lastError || Object.values(state.targetOutcomes ?? {}).some(outcome => outcome === 'failed')) {
+        issues.push(createApplyBlockedIssue('applyFailed'));
+    }
+
+    const outcomes = Object.values(state.targetOutcomes ?? {}).filter(
+        (outcome): outcome is NonNullable<typeof outcome> => Boolean(outcome)
+    );
+    const converged = outcomes.filter(outcome => outcome !== 'failed').length;
+    const attemptedWrite = !state.applyBlocked && outcomes.length > 0;
+    return deriveRuntimeApplyState(issues, attemptedWrite, converged, outcomes.length);
 }

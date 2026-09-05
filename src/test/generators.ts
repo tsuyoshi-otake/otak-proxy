@@ -10,7 +10,7 @@ import * as fc from 'fast-check';
  * Protocol: http or https
  * Hostname: alphanumeric, dots, hyphens
  * Port: 1-65535 (optional)
- * Credentials: alphanumeric, hyphens, underscores (optional)
+ * Credentials: alphanumeric plus encodable reserved characters (optional)
  */
 export const validProxyUrlGenerator = (): fc.Arbitrary<string> => {
     const protocolArb = fc.constantFrom('http', 'https');
@@ -21,7 +21,7 @@ export const validProxyUrlGenerator = (): fc.Arbitrary<string> => {
         .filter(s => s.length >= 1 && s.length <= 63);
     
     // Generate hostname with 2-4 parts (e.g., proxy.example.com)
-    const hostnameArb = fc.array(hostnamePartArb, { minLength: 2, maxLength: 4 })
+    const dnsHostnameArb = fc.array(hostnamePartArb, { minLength: 2, maxLength: 4 })
         .map(parts => parts.join('.'))
         .filter(hostname => {
             // Ensure the hostname is valid for URL parsing
@@ -32,13 +32,43 @@ export const validProxyUrlGenerator = (): fc.Arbitrary<string> => {
                 return false;
             }
         });
+
+    const ipv4HostnameArb = fc.tuple(
+        fc.integer({ min: 0, max: 255 }),
+        fc.integer({ min: 0, max: 255 }),
+        fc.integer({ min: 0, max: 255 }),
+        fc.integer({ min: 0, max: 255 })
+    ).map(([a, b, c, d]) => `${a}.${b}.${c}.${d}`);
+
+    // Full-form IPv6 plus a few compressed literals. Always WHATWG-bracketed.
+    const ipv6HostnameArb = fc.oneof(
+        fc.constantFrom('[::1]', '[2001:db8::1]', '[2001:db8::]'),
+        fc.tuple(
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 }),
+            fc.integer({ min: 0, max: 65535 })
+        ).map(parts => `[${parts.map(part => part.toString(16)).join(':')}]`)
+    );
+
+    const hostnameArb = fc.oneof(dnsHostnameArb, ipv4HostnameArb, ipv6HostnameArb);
     
     // Valid port: 1-65535
     const portArb = fc.integer({ min: 1, max: 65535 });
     
-    // Valid credentials: alphanumeric, hyphens, underscores (at least 1 char)
-    const credentialPartArb = fc.stringMatching(/^[a-zA-Z0-9_-]+$/)
-        .filter(s => s.length >= 1 && s.length <= 20);
+    // Valid credentials: alphanumeric plus reserved characters that must be encoded
+    const reservedCredentialCharArb = fc.constantFrom(
+        '!', '+', ':', '%', '@',
+        String.fromCodePoint(0xE4)
+    );
+    const credentialPartArb = fc.tuple(
+        fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,10}[a-zA-Z0-9]$/),
+        fc.option(reservedCredentialCharArb, { nil: undefined })
+    ).map(([base, reserved]) => reserved ? `${base}${reserved}` : base);
     
     return fc.record({
         protocol: protocolArb,
@@ -50,7 +80,7 @@ export const validProxyUrlGenerator = (): fc.Arbitrary<string> => {
         let url = `${protocol}://`;
         
         if (username && password) {
-            url += `${username}:${password}@`;
+            url += `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`;
         }
         
         url += hostname;

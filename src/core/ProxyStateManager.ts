@@ -10,15 +10,20 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState, IProxyStateManager } from './types';
+import { ProxyMode, ProxyState, IProxyStateManager, StateCommitResult, stateRevision } from './types';
 import { Logger } from '../utils/Logger';
 import { I18nManager } from '../i18n/I18nManager';
 import {
+    deriveRequiresAuth,
     getProxyPublicUrl,
     hasProxyCredentials,
     sanitizeProxyStateForPersistence
 } from '../utils/ProxyStateSanitizer';
-import { ProxyCredentialStore } from '../security/ProxyCredentialStore';
+import {
+    buildProxyUrlWithCredentials,
+    credentialsFromProcessEnv,
+    ProxyCredentialStore
+} from '../security/ProxyCredentialStore';
 import { V3MigrationService, LEGACY_MANUAL_PROXY_SECRET_KEY } from './V3MigrationService';
 
 /**
@@ -84,16 +89,47 @@ export class ProxyStateManager implements IProxyStateManager {
      * @param {ProxyState} state - State to save
      */
     async saveState(state: ProxyState): Promise<void> {
+        await this.writeState({ ...state, revision: this.nextRevision(state) });
+    }
+
+    /**
+     * Revision-checked write (issue #17). A snapshot derived from N is rejected
+     * once N+1 has already been committed, so a late retry cannot roll disk back.
+     */
+    async commitState(expectedRevision: number, next: ProxyState): Promise<StateCommitResult> {
+        const current = this.readStoredState();
+        const currentRevision = current ? stateRevision(current) : 0;
+        if (currentRevision !== expectedRevision) {
+            return { kind: 'superseded', current: current ?? next };
+        }
+
+        const revision = expectedRevision + 1;
+        const committed: ProxyState = { ...next, revision };
+        await this.writeState(committed);
+        return { kind: 'committed', revision, state: committed };
+    }
+
+    private nextRevision(state: ProxyState): number {
+        const persisted = this.readStoredState();
+        return Math.max(persisted ? stateRevision(persisted) : 0, stateRevision(state)) + 1;
+    }
+
+    private readStoredState(): ProxyState | undefined {
+        return this.inMemoryState ?? this.context.globalState.get<ProxyState>('proxyState');
+    }
+
+    private async writeState(state: ProxyState): Promise<void> {
         try {
-            await this.persistManualProxySecret(state.manualProxyUrl);
-            await this.context.globalState.update('proxyState', sanitizeProxyStateForPersistence(state));
+            await this.persistProxySecrets(state);
+            const persisted = this.sanitizeStateForPersistence(state);
+            await this.context.globalState.update('proxyState', persisted);
             // Keep the full state only in memory for the current session. Persistent state is sanitized.
-            this.inMemoryState = { ...state };
+            this.inMemoryState = this.withDerivedRequiresAuth(state);
         } catch (error) {
             // Requirement 3.2: Log error and continue with in-memory state
             Logger.error('Failed to write proxy state to global storage:', error);
             Logger.log('Continuing with in-memory state as fallback');
-            this.inMemoryState = { ...state };
+            this.inMemoryState = this.withDerivedRequiresAuth(state);
 
             // Notify user about the issue (only if vscode.window is available)
             try {
@@ -187,6 +223,24 @@ export class ProxyStateManager implements IProxyStateManager {
     }
 
     private async hydrateStateForRuntime(state: ProxyState): Promise<ProxyState> {
+        const withManual = await this.hydrateManualProxyUrl(state);
+        const next = { ...withManual };
+        const hydratedAuto = await this.hydrateProxyUrl(withManual.autoProxyUrl);
+        const hydratedFallback = await this.hydrateProxyUrl(withManual.fallbackProxyUrl);
+        const hydratedLastSystem = await this.hydrateProxyUrl(withManual.lastSystemProxyUrl);
+        if (hydratedAuto !== withManual.autoProxyUrl) {
+            next.autoProxyUrl = hydratedAuto;
+        }
+        if (hydratedFallback !== withManual.fallbackProxyUrl) {
+            next.fallbackProxyUrl = hydratedFallback;
+        }
+        if (hydratedLastSystem !== withManual.lastSystemProxyUrl) {
+            next.lastSystemProxyUrl = hydratedLastSystem;
+        }
+        return this.withDerivedRequiresAuth(next);
+    }
+
+    private async hydrateManualProxyUrl(state: ProxyState): Promise<ProxyState> {
         const config = vscode.workspace.getConfiguration('otakProxy');
         const configuredManualUrl = await this.normalizeConfiguredManualProxyUrl(config.get<string>('proxyUrl', ''));
 
@@ -218,14 +272,61 @@ export class ProxyStateManager implements IProxyStateManager {
         return state;
     }
 
+    private async hydrateProxyUrl(url: string | undefined): Promise<string | undefined> {
+        if (!url || hasProxyCredentials(url)) {
+            return url;
+        }
+
+        const publicUrl = getProxyPublicUrl(url) || url;
+        const reconstructed = await this.credentialStore.reconstructProxyUrl(publicUrl);
+        if (reconstructed) {
+            return reconstructed;
+        }
+
+        const envCredentials = credentialsFromProcessEnv(publicUrl);
+        if (envCredentials) {
+            return buildProxyUrlWithCredentials(publicUrl, envCredentials);
+        }
+
+        return url;
+    }
+
+    private sanitizeStateForPersistence(state: ProxyState): ProxyState {
+        return sanitizeProxyStateForPersistence(this.withDerivedRequiresAuth(state));
+    }
+
+    private withDerivedRequiresAuth(state: ProxyState): ProxyState {
+        const next = { ...state };
+        if (deriveRequiresAuth(state)) {
+            next.requiresAuth = true;
+        } else {
+            delete next.requiresAuth;
+        }
+        return next;
+    }
+
+    private async persistProxySecrets(state: ProxyState): Promise<void> {
+        await this.persistManualProxySecret(state.manualProxyUrl);
+        for (const url of [state.autoProxyUrl, state.fallbackProxyUrl, state.lastSystemProxyUrl]) {
+            if (!url || !hasProxyCredentials(url)) {
+                continue;
+            }
+            try {
+                await this.credentialStore.storeFromProxyUrl(url);
+            } catch (error) {
+                Logger.warn('Failed to store proxy credentials in secret storage:', error);
+            }
+        }
+    }
+
     private async scrubPersistedStateIfNeeded(state: ProxyState): Promise<void> {
-        const sanitizedState = sanitizeProxyStateForPersistence(state);
+        const sanitizedState = this.sanitizeStateForPersistence(state);
         if (JSON.stringify(sanitizedState) === JSON.stringify(state)) {
             return;
         }
 
         try {
-            await this.persistManualProxySecret(state.manualProxyUrl);
+            await this.persistProxySecrets(state);
             await this.context.globalState.update('proxyState', sanitizedState);
         } catch (error) {
             Logger.warn('Failed to scrub proxy credentials from persisted state:', error);

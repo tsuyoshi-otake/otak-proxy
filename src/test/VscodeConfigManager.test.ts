@@ -124,4 +124,19 @@ suite('VscodeConfigManager Test Suite', () => {
             await vscodeConfigManager.unsetProxy();
         });
     });
+
+    suite('Value-aware unset', () => {
+        test('preserves a current value that is no longer the owned value', async () => {
+            const owned = 'http://owned-vscode.example.com:8080';
+            const external = 'http://external-vscode.example.com:8080';
+            assert.strictEqual((await vscodeConfigManager.setProxy(owned)).success, true);
+            assert.strictEqual((await vscodeConfigManager.setProxy(external)).success, true);
+
+            const unsetResult = await vscodeConfigManager.unsetProxy({ expectedValue: owned });
+            assert.strictEqual(unsetResult.success, true);
+            assert.strictEqual(await vscodeConfigManager.getProxy(), external);
+
+            await vscodeConfigManager.unsetProxy();
+        });
+    });
 });

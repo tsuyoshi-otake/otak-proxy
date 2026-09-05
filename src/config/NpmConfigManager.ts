@@ -1,11 +1,24 @@
 import { execFile } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
+import {
+    createNpmNotInstalledError,
+    isCommandOnPath,
+    resolveNpmInvocation
+} from '../utils/NpmInvocation';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
+import {
+    compensatePartialProxyWrite,
+    getPartialWriteCompensation,
+    summarizePartialWriteCompensation,
+    UNREADABLE
+} from './PartialProxyWriteCompensation';
+import { InputSanitizer } from '../validation/InputSanitizer';
+import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
+
+const resultSanitizer = new InputSanitizer();
 
 const execFileAsync = promisify(execFile);
 
@@ -34,10 +47,10 @@ const defaultCommandRunner: NpmCommandRunner = async (command, args, options) =>
 };
 
 /**
- * npm on Windows starts through cmd.exe and npm.cmd before Node.js executes.
- * Under CPU, disk, or antivirus load that startup can exceed five seconds even
- * when npm is healthy. Keep the timeout bounded, but allow enough scheduler
- * headroom to avoid reporting a transient timeout as a configuration failure.
+ * npm on Windows starts node + npm-cli.js. Under CPU, disk, or antivirus load
+ * that startup can exceed five seconds even when npm is healthy. Keep the
+ * timeout bounded, but allow enough scheduler headroom to avoid reporting a
+ * transient timeout as a configuration failure.
  */
 export const NPM_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
@@ -59,6 +72,12 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
+    /**
+     * Keys that still hold the value this call wrote after a failed multi-key
+     * set. Empty/absent when compensation cleared or an external writer changed them.
+     */
+    residualKeys?: readonly string[];
+    preservedKeys?: readonly string[];
 }
 
 export type NpmProxyKey = 'proxy' | 'https-proxy';
@@ -145,81 +164,13 @@ function classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | n
         : null;
 }
 
-function getPathEnvValue(env: NodeJS.ProcessEnv): string {
-    return env.PATH || env.Path || '';
-}
-
-function getWindowsPathExtensions(env: NodeJS.ProcessEnv): string[] {
-    const raw = env.PATHEXT || '.COM;.EXE;.BAT;.CMD';
-    return raw
-        .split(';')
-        .map(ext => ext.trim())
-        .filter(Boolean);
-}
-
-function getCommandCandidates(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): string[] {
-    if (!isWindows || path.extname(command)) {
-        return [command];
-    }
-
-    return [command, ...getWindowsPathExtensions(env).map(ext => `${command}${ext}`)];
-}
-
-function canRunCandidate(candidatePath: string, isWindows: boolean): boolean {
-    try {
-        if (isWindows) {
-            return fs.existsSync(candidatePath);
-        }
-
-        fs.accessSync(candidatePath, fs.constants.X_OK);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function isCommandOnPath(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): boolean {
-    const pathValue = getPathEnvValue(env);
-    if (!pathValue) {
-        return false;
-    }
-
-    const delimiter = isWindows ? ';' : ':';
-    const pathModule = isWindows ? path.win32 : path.posix;
-    const pathEntries = pathValue
-        .split(delimiter)
-        .map(entry => entry.trim())
-        .filter(Boolean);
-
-    return pathEntries.some(entry =>
-        getCommandCandidates(command, isWindows, env).some(candidate =>
-            canRunCandidate(pathModule.join(entry, candidate), isWindows)
-        )
-    );
-}
-
-function createNpmNotInstalledError(cause?: unknown): Error & {
-    code?: string;
-    stderr?: string;
-    cause?: unknown;
-} {
-    const missingError = new Error('npm is not installed or not in PATH') as Error & {
-        code?: string;
-        stderr?: string;
-        cause?: unknown;
-    };
-    missingError.code = 'ENOENT';
-    missingError.stderr = getErrorStderr(cause);
-    missingError.cause = cause;
-    return missingError;
-}
-
 /**
  * Manages npm proxy configuration with secure command execution.
- * Uses execFile() directly. On Windows, npm is a batch file (.cmd), so this
- * invokes npm via cmd.exe to avoid relying on `shell: true`.
- * Arguments are passed as an array to avoid unsafe string concatenation.
- * 
+ * Uses execFile() with an argument array. On Windows, npm is a `.cmd` wrapper
+ * that cannot be spawned directly (EINVAL) and must not go through `cmd.exe /c`
+ * because `%VAR%` expands and `&` splits commands. `resolveNpmInvocation`
+ * starts `node` + `npm-cli.js` instead.
+ *
  * Note: npm 11.x uses 'proxy' instead of 'http-proxy' for HTTP proxy settings.
  */
 export class NpmConfigManager {
@@ -248,8 +199,7 @@ export class NpmConfigManager {
     }
 
     /**
-     * Executes npm command with platform-appropriate options.
-     * On Windows, npm is a batch file (.cmd). We invoke it via cmd.exe so we don't need `shell: true`.
+     * Executes npm with platform-appropriate options and no shell.
      */
     private async execNpm(args: string[]): Promise<{ stdout: string; stderr: string }> {
         const fullArgs = this.userConfigPath ? ['--userconfig', this.userConfigPath, ...args] : args;
@@ -265,22 +215,13 @@ export class NpmConfigManager {
         delete env.NPM_CONFIG_PROXY;
         delete env.NPM_CONFIG_HTTPS_PROXY;
 
-        if (this.isWindows) {
-            this.ensureNpmAvailable(env);
-            const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe';
-            return this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', ...fullArgs], {
-                timeout: this.timeout,
-                encoding: 'utf8',
-                env,
-                windowsHide: true
-            });
-        }
-
         this.ensureNpmAvailable(env);
-        return this.commandRunner('npm', fullArgs, {
+        const invocation = resolveNpmInvocation(fullArgs, { isWindows: this.isWindows, env });
+        return this.commandRunner(invocation.command, invocation.args, {
             timeout: this.timeout,
             encoding: 'utf8',
-            env
+            env,
+            ...(this.isWindows ? { windowsHide: true } : {})
         });
     }
 
@@ -291,16 +232,47 @@ export class NpmConfigManager {
      * @returns Result with success status and any errors
      */
     async setProxy(url: string): Promise<OperationResult> {
+        return this.setProxyKeys({ proxy: url, 'https-proxy': url });
+    }
+
+    async setProxyKeys(values: Partial<NpmProxyValues>): Promise<OperationResult> {
+        const snapshot = await this.readProxySnapshot();
+        const written: NpmProxyKey[] = [];
+        const writtenValues: Partial<Record<NpmProxyKey, string>> = {};
         try {
-            // Set proxy (for HTTP - npm 11.x naming)
-            await this.execNpm(['config', 'set', 'proxy', url]);
-
-            // Set https-proxy
-            await this.execNpm(['config', 'set', 'https-proxy', url]);
-
+            for (const key of ['proxy', 'https-proxy'] as const) {
+                const value = values[key];
+                if (!value) {
+                    continue;
+                }
+                await this.execNpm(['config', 'set', key, value]);
+                written.push(key);
+                writtenValues[key] = value;
+            }
+            for (const key of written) {
+                await this.assertWrittenValues(writtenValues[key]!, [key]);
+            }
             return { success: true };
         } catch (error) {
-            return this.handleError(error);
+            if (written.length === 0) {
+                return this.handleError(error);
+            }
+            const lastWritten = written[written.length - 1];
+            const lastValue = writtenValues[lastWritten] ?? Object.values(writtenValues)[0] ?? '';
+            const failedKey = written.length < Object.keys(values).filter(key => values[key as NpmProxyKey]).length
+                ? (['proxy', 'https-proxy'] as const).find(key => values[key] && !written.includes(key))
+                : undefined;
+            let compensation = await this.compensatePartialSet(written, lastValue, snapshot);
+            for (const key of written) {
+                const value = writtenValues[key];
+                if (value && value !== lastValue) {
+                    compensation = await this.compensatePartialSet([key], value, snapshot);
+                }
+            }
+            compensation.summary = summarizePartialWriteCompensation(failedKey, compensation);
+            const wrapped = error instanceof Error ? error : new Error(String(error));
+            (wrapped as Error & { otakPartialWrite: typeof compensation }).otakPartialWrite = compensation;
+            return this.handleSetFailure(wrapped);
         }
     }
 
@@ -312,17 +284,67 @@ export class NpmConfigManager {
         return this.unsetProxyKeys(['proxy', 'https-proxy']);
     }
 
-    async unsetProxyKeys(keys: readonly NpmProxyKey[]): Promise<OperationResult> {
+    async unsetProxyKeys(
+        keys: readonly NpmProxyKey[],
+        expectedValues?: Readonly<Partial<Record<NpmProxyKey, string>>>
+    ): Promise<OperationResult> {
         try {
+            const preservedKeys: NpmProxyKey[] = [];
             for (const key of keys) {
+                const expected = expectedValues?.[key];
+                if (expected !== undefined) {
+                    const result = await this.unsetOwnedNpmValue(key, expected);
+                    if (result.preserved) {
+                        preservedKeys.push(key);
+                    }
+                    continue;
+                }
+
                 // Prefer deleting keys to keep npmrc clean. Deletion is idempotent.
                 await this.execNpm(['config', 'delete', key]);
             }
 
-            return { success: true };
+            return preservedKeys.length > 0
+                ? { success: true, preservedKeys }
+                : { success: true };
         } catch (error) {
             return this.handleError(error);
         }
+    }
+
+    /**
+     * npm has no value-specific delete. Compare, then `config delete`, then
+     * post-read.
+     *
+     * Non-guarantee: `npm config delete` is key-level. An external writer
+     * that replaces the value during that delete cannot be restored.
+     */
+    private async unsetOwnedNpmValue(
+        key: NpmProxyKey,
+        expected: string
+    ): Promise<{ preserved: boolean }> {
+        const outcome = await compareThenDelete({
+            expected,
+            read: async () => {
+                const inspection = await this.inspectProxy();
+                if (inspection.status !== 'available' || !inspection.values) {
+                    return UNSET_UNREADABLE;
+                }
+                return inspection.values[key];
+            },
+            deleteKey: async () => {
+                await this.execNpm(['config', 'delete', key]);
+            }
+        });
+
+        if (!outcome.ok) {
+            throw new Error(
+                outcome.reason === 'unreadable'
+                    ? 'npm proxy re-read failed; refusing to unset'
+                    : 'npm owned proxy value remained after unset'
+            );
+        }
+        return { preserved: outcome.preserved };
     }
 
     /**
@@ -359,6 +381,71 @@ export class NpmConfigManager {
                 errorType: failure.errorType
             };
         }
+    }
+
+    private async readProxySnapshot(): Promise<NpmProxyValues | undefined> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return undefined;
+        }
+        return inspection.values;
+    }
+
+    private async readCurrentProxyValue(key: NpmProxyKey): Promise<string | null | typeof UNREADABLE> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return UNREADABLE;
+        }
+        return inspection.values[key];
+    }
+
+    private async assertWrittenValues(url: string, keys: readonly NpmProxyKey[]): Promise<void> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return;
+        }
+        const observed = keys.filter(key => inspection.values?.[key] !== null && inspection.values?.[key] !== undefined);
+        if (observed.length === 0) {
+            return;
+        }
+        const mismatched = keys.filter(key => inspection.values?.[key] !== url);
+        if (mismatched.length > 0) {
+            throw new Error('npm proxy write verify failed');
+        }
+    }
+
+    private async compensatePartialSet(
+        written: readonly NpmProxyKey[],
+        url: string,
+        snapshot: NpmProxyValues | undefined
+    ) {
+        return compensatePartialProxyWrite<NpmProxyKey>({
+            writtenKeys: written,
+            writtenValue: url,
+            snapshot,
+            readCurrent: key => this.readCurrentProxyValue(key),
+            restore: async (key, previous) => {
+                await this.execNpm(['config', 'set', key, previous]);
+            },
+            clear: async key => {
+                await this.execNpm(['config', 'delete', key]);
+            }
+        });
+    }
+
+    private handleSetFailure(error: unknown): OperationResult {
+        const failure = this.handleError(error);
+        const compensation = getPartialWriteCompensation<NpmProxyKey>(error);
+        if (!compensation) {
+            return failure;
+        }
+        const errorText = [failure.error, compensation.summary].filter(Boolean).join('; ');
+        Logger.warn(`npm partial write compensation: ${compensation.summary}`);
+        return {
+            ...failure,
+            error: resultSanitizer.maskPassword(errorText),
+            residualKeys: compensation.residualKeys.length > 0 ? compensation.residualKeys : undefined
+        };
     }
 
     /**

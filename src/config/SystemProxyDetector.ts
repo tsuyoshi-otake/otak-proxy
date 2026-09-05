@@ -4,7 +4,9 @@ import { promisify } from 'util';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
 import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
+import { buildDetectedProxyValue } from './DetectedProxyValue';
 import { getProxyPublicUrl } from '../utils/ProxyStateSanitizer';
+import type { ProxyCapability, ProxyIssue, ProxyValueKind } from '../core/v3Types';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,11 +16,25 @@ const execFileAsync = promisify(execFile);
 export type DetectionSource = 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | null;
 
 /**
- * Result of proxy detection with source information
+ * Result of proxy detection with source information.
+ * `kind` / `capability` reuse the v3 value-kind and capability enums so PAC/WPAD
+ * can be reported as detected-but-unsupported instead of collapsing to none (#58).
  */
 export interface ProxyDetectionWithSource {
     proxyUrl: string | null;
     source: DetectionSource;
+    kind?: ProxyValueKind;
+    httpUrl?: string;
+    httpsUrl?: string;
+    bypass?: string;
+    capability?: ProxyCapability;
+    issue?: ProxyIssue;
+}
+
+export function isUnsupportedAutoConfig(
+    result: Pick<ProxyDetectionWithSource, 'kind' | 'capability'>
+): boolean {
+    return result.capability === 'unsupported' && (result.kind === 'pac' || result.kind === 'wpad');
 }
 
 /**
@@ -109,15 +125,15 @@ export class SystemProxyDetector {
         try {
             for (const source of this.detectionSourcePriority) {
                 const result = await this.detectFromSource(source);
-                if (result.proxyUrl !== null) {
+                if (result.proxyUrl !== null || isUnsupportedAutoConfig(result)) {
                     return result;
                 }
             }
 
-            return { proxyUrl: null, source: null };
+            return emptyDetection();
         } catch (error) {
             Logger.error('System proxy detection failed:', error);
-            return { proxyUrl: null, source: null };
+            return emptyDetection();
         }
     }
 
@@ -132,58 +148,77 @@ export class SystemProxyDetector {
             return await this.detectKnownSource(source);
         } catch (error) {
             Logger.warn(`Detection from source '${source}' failed:`, error);
-            return { proxyUrl: null, source: null };
+            return emptyDetection();
         }
     }
 
     private async detectKnownSource(source: string): Promise<ProxyDetectionWithSource> {
         switch (source) {
             case 'environment':
-                return this.validateSourceResult(this.detectFromEnvironment(), 'environment', 'Environment');
+                return this.validateDetectedValue(this.detectFromEnvironment(), 'Environment');
             case 'vscode': {
-                const result = this.validateSourceResult(this.detectFromVSCode(), 'vscode', 'VSCode');
+                const result = this.validateDetectedValue(this.detectFromVSCode(), 'VSCode');
                 if (result.proxyUrl && await this.isSelfWrittenVSCodeValue(result.proxyUrl)) {
                     Logger.info('Ignoring VSCode http.proxy: it matches the proxy this extension applied (echo suppression)');
-                    return { proxyUrl: null, source: null };
+                    return emptyDetection();
                 }
                 return result;
             }
             case 'platform':
-                return this.validatePlatformResult(await detectPlatformProxyWithSource((command, args) => this.exec(command, args)));
+                return this.validateDetectedValue(
+                    await detectPlatformProxyWithSource((command, args) => this.exec(command, args)),
+                    'Platform'
+                );
             default:
                 Logger.warn(`Unknown detection source: ${source}`);
-                return { proxyUrl: null, source: null };
+                return emptyDetection();
         }
     }
 
-    private validateSourceResult(
-        proxyUrl: string | null,
-        source: Exclude<DetectionSource, 'windows' | 'macos' | 'linux' | null>,
-        label: string
-    ): ProxyDetectionWithSource {
-        if (!proxyUrl) {
-            return { proxyUrl: null, source: null };
-        }
-
-        if (this.validateDetectedProxy(proxyUrl)) {
-            return { proxyUrl, source };
-        }
-
-        Logger.warn(`${label} proxy failed validation:`, proxyUrl);
-        return { proxyUrl: null, source: null };
-    }
-
-    private validatePlatformResult(result: ProxyDetectionWithSource): ProxyDetectionWithSource {
-        if (!result.proxyUrl) {
-            return { proxyUrl: null, source: null };
-        }
-
-        if (this.validateDetectedProxy(result.proxyUrl)) {
+    private validateDetectedValue(result: ProxyDetectionWithSource, label: string): ProxyDetectionWithSource {
+        if (isUnsupportedAutoConfig(result)) {
             return result;
         }
 
-        Logger.warn('Platform proxy failed validation:', result.proxyUrl);
-        return { proxyUrl: null, source: null };
+        const httpUrl = this.validOptionalUrl(result.httpUrl, `${label} HTTP`);
+        const httpsUrl = this.validOptionalUrl(result.httpsUrl, `${label} HTTPS`);
+        if (httpUrl || httpsUrl) {
+            return buildDetectedProxyValue({
+                http: httpUrl,
+                https: httpsUrl,
+                bypass: result.bypass,
+                source: result.source
+            });
+        }
+
+        if (!result.proxyUrl) {
+            return result.bypass
+                ? { ...emptyDetection(), bypass: result.bypass, kind: 'direct' }
+                : emptyDetection();
+        }
+
+        if (this.validateDetectedProxy(result.proxyUrl)) {
+            return buildDetectedProxyValue({
+                http: result.proxyUrl,
+                https: result.proxyUrl,
+                bypass: result.bypass,
+                source: result.source
+            });
+        }
+
+        Logger.warn(`${label} proxy failed validation:`, result.proxyUrl);
+        return emptyDetection();
+    }
+
+    private validOptionalUrl(url: string | undefined, label: string): string | undefined {
+        if (!url) {
+            return undefined;
+        }
+        if (this.validateDetectedProxy(url)) {
+            return url;
+        }
+        Logger.warn(`${label} proxy failed validation:`, url);
+        return undefined;
     }
 
     /**
@@ -234,11 +269,13 @@ export class SystemProxyDetector {
      * 
      * @returns string | null - Proxy URL from environment, or null
      */
-    private detectFromEnvironment(): string | null {
-        const httpProxy = process.env.HTTP_PROXY || process.env.http_proxy;
-        const httpsProxy = process.env.HTTPS_PROXY || process.env.https_proxy;
-        
-        return httpProxy || httpsProxy || null;
+    private detectFromEnvironment(): ProxyDetectionWithSource {
+        return buildDetectedProxyValue({
+            http: process.env.HTTP_PROXY || process.env.http_proxy,
+            https: process.env.HTTPS_PROXY || process.env.https_proxy,
+            bypass: process.env.NO_PROXY || process.env.no_proxy,
+            source: 'environment'
+        });
     }
 
     /**
@@ -246,13 +283,15 @@ export class SystemProxyDetector {
      * 
      * @returns string | null - Proxy URL from VSCode config, or null
      */
-    private detectFromVSCode(): string | null {
+    private detectFromVSCode(): ProxyDetectionWithSource {
         try {
             const vscodeProxy = vscode.workspace.getConfiguration('http').get<string>('proxy');
-            return vscodeProxy || null;
+            return vscodeProxy
+                ? buildDetectedProxyValue({ http: vscodeProxy, https: vscodeProxy, source: 'vscode' })
+                : emptyDetection();
         } catch (error) {
             Logger.error('Failed to read VSCode proxy configuration:', error);
-            return null;
+            return emptyDetection();
         }
     }
 
@@ -274,4 +313,8 @@ export class SystemProxyDetector {
         
         return true;
     }
+}
+
+export function emptyDetection(): ProxyDetectionWithSource {
+    return { proxyUrl: null, source: null };
 }

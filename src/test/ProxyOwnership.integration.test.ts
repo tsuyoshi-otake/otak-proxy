@@ -21,8 +21,21 @@ interface FakeTargetSet {
 }
 
 class FakeGitManager {
-    values: Record<GitProxyKey, string | null> = { 'http.proxy': null, 'https.proxy': null };
+    values: Record<GitProxyKey, string | string[] | null> = { 'http.proxy': null, 'https.proxy': null };
     unsetCalls: GitProxyKey[][] = [];
+    expectedValueCalls: Array<Partial<Record<GitProxyKey, string>> | undefined> = [];
+
+    private list(key: GitProxyKey): string[] {
+        const value = this.values[key];
+        if (value === null || value === undefined) {
+            return [];
+        }
+        return Array.isArray(value) ? value : [value];
+    }
+
+    private first(key: GitProxyKey): string | null {
+        return this.list(key)[0] ?? null;
+    }
 
     async setProxy(url: string) {
         this.values['http.proxy'] = url;
@@ -30,12 +43,63 @@ class FakeGitManager {
         return { success: true };
     }
     async unsetProxy() { return this.unsetProxyKeys(['http.proxy', 'https.proxy']); }
-    async unsetProxyKeys(keys: readonly GitProxyKey[]) {
+    async unsetProxyKeys(
+        keys: readonly GitProxyKey[],
+        options?: {
+            exactValues?: Partial<Record<GitProxyKey, readonly string[]>>;
+            expectedValues?: Readonly<Partial<Record<GitProxyKey, string>>>;
+        }
+    ) {
         this.unsetCalls.push([...keys]);
-        keys.forEach(key => { this.values[key] = null; });
-        return { success: true };
+        this.expectedValueCalls.push(options?.expectedValues ? { ...options.expectedValues } : undefined);
+        const preservedKeys: GitProxyKey[] = [];
+        for (const key of keys) {
+            const exact = options?.exactValues?.[key];
+            const expected = options?.expectedValues?.[key];
+            if (exact && exact.length > 0) {
+                const remaining = this.list(key).filter(value => !exact.includes(value));
+                this.values[key] = remaining.length === 0 ? null : remaining.length === 1 ? remaining[0] : remaining;
+                if (remaining.length > 0) {
+                    preservedKeys.push(key);
+                }
+                continue;
+            }
+            if (expected !== undefined) {
+                const remaining = this.list(key).filter(value => value !== expected);
+                if (!this.list(key).includes(expected)) {
+                    if (remaining.length > 0) {
+                        preservedKeys.push(key);
+                    }
+                    continue;
+                }
+                this.values[key] = remaining.length === 0 ? null : remaining.length === 1 ? remaining[0] : remaining;
+                if (remaining.length > 0) {
+                    preservedKeys.push(key);
+                }
+                continue;
+            }
+            if (this.list(key).length > 1) {
+                return { success: false, error: 'Git key has multiple values', errorType: 'CONFIG_ERROR' };
+            }
+            this.values[key] = null;
+        }
+        return preservedKeys.length > 0
+            ? { success: true, preservedKeys }
+            : { success: true };
     }
-    async inspectProxy() { return { status: 'available' as const, values: { ...this.values } }; }
+    async inspectProxy(): Promise<{
+        status: 'available' | 'unavailable' | 'error';
+        values?: Record<GitProxyKey, string | null>;
+        allValues?: Record<GitProxyKey, string[]>;
+        error?: string;
+        errorType?: string;
+    }> {
+        return {
+            status: 'available',
+            values: { 'http.proxy': this.first('http.proxy'), 'https.proxy': this.first('https.proxy') },
+            allValues: { 'http.proxy': this.list('http.proxy'), 'https.proxy': this.list('https.proxy') }
+        };
+    }
 }
 
 class FakeNpmManager {
@@ -48,10 +112,23 @@ class FakeNpmManager {
         return { success: true };
     }
     async unsetProxy() { return this.unsetProxyKeys(['proxy', 'https-proxy']); }
-    async unsetProxyKeys(keys: readonly NpmProxyKey[]) {
+    async unsetProxyKeys(
+        keys: readonly NpmProxyKey[],
+        expectedValues?: Readonly<Partial<Record<NpmProxyKey, string>>>
+    ) {
         this.unsetCalls.push([...keys]);
-        keys.forEach(key => { this.values[key] = null; });
-        return { success: true };
+        const preservedKeys: NpmProxyKey[] = [];
+        for (const key of keys) {
+            const expected = expectedValues?.[key];
+            if (expected !== undefined && this.values[key] !== expected) {
+                preservedKeys.push(key);
+                continue;
+            }
+            this.values[key] = null;
+        }
+        return preservedKeys.length > 0
+            ? { success: true, preservedKeys }
+            : { success: true };
     }
     async inspectProxy() { return { status: 'available' as const, values: { ...this.values } }; }
 }
@@ -61,7 +138,15 @@ class FakeSingleManager {
     unsetCount = 0;
 
     async setProxy(url: string) { this.value = url; return { success: true }; }
-    async unsetProxy() { this.unsetCount++; this.value = null; return { success: true }; }
+    async unsetProxy(options?: { expectedValue?: string }) {
+        this.unsetCount++;
+        const expectedValue = options?.expectedValue;
+        if (expectedValue !== undefined && this.value !== expectedValue) {
+            return { success: true, preservedKeys: ['proxy'] };
+        }
+        this.value = null;
+        return { success: true };
+    }
     async inspectProxy() { return { status: 'available' as const, values: { proxy: this.value } }; }
 }
 
@@ -121,6 +206,30 @@ function createApplier(targets: FakeTargetSet, ownershipStore: TargetOwnershipSt
 }
 
 suite('Ownership-safe proxy disable integration', () => {
+    test('Off removes an uncompensated first-key residual after a failed Git setProxy', async () => {
+        const targets = createTargets();
+        const ownedUrl = 'http://partial.example:8080';
+        targets.git.setProxy = async (url: string) => {
+            targets.git.values['http.proxy'] = url;
+            return {
+                success: false,
+                error: 'https.proxy write failed; residual remains: http.proxy',
+                errorType: 'UNKNOWN',
+                residualKeys: ['http.proxy']
+            };
+        };
+        const applier = createApplier(targets, createOwnershipStore());
+
+        const applied = await applier.applyProxyDetailed(ownedUrl, true, { silent: true });
+        assert.strictEqual(applied.success, false);
+        assert.strictEqual(targets.git.values['http.proxy'], ownedUrl);
+
+        const disabled = await applier.disableProxyDetailed({ silent: true });
+        assert.strictEqual(disabled.success, true);
+        assert.strictEqual(targets.git.values['http.proxy'], null);
+        assert.deepStrictEqual(targets.git.unsetCalls, [['http.proxy']]);
+    });
+
     test('clears only keys whose current values still match otak-proxy fingerprints', async () => {
         const targets = createTargets();
         const applier = createApplier(targets, createOwnershipStore());
@@ -196,7 +305,7 @@ suite('Ownership-safe proxy disable integration', () => {
         const targets = createTargets();
         const applier = createApplier(targets, createOwnershipStore());
         await applier.applyProxyDetailed('http://proxy.example:8080', true, { silent: true });
-        (targets.git as unknown as { inspectProxy(): Promise<unknown> }).inspectProxy = async () => ({
+        (targets.git as { inspectProxy(): Promise<unknown> }).inspectProxy = async () => ({
             status: 'error',
             error: 'permission denied',
             errorType: 'NO_PERMISSION'
@@ -258,5 +367,72 @@ suite('Ownership-safe proxy disable integration', () => {
             ['http.proxy', 'https.proxy'],
             ['https.proxy']
         ]);
+    });
+
+    test('clears only the owned Git multi-value and leaves the external value', async () => {
+        const targets = createTargets();
+        const applier = createApplier(targets, createOwnershipStore());
+        const proxyUrl = 'http://proxy.example:8080';
+        const externalUrl = 'http://external.example:8080';
+        assert.strictEqual((await applier.applyProxyDetailed(proxyUrl, true, { silent: true })).success, true);
+
+        targets.git.values['http.proxy'] = [proxyUrl, externalUrl];
+
+        const result = await applier.disableProxyDetailed({ silent: true });
+
+        assert.strictEqual(result.success, true);
+        assert.deepStrictEqual(targets.git.unsetCalls, [['http.proxy', 'https.proxy']]);
+        assert.deepStrictEqual(targets.git.values['http.proxy'], externalUrl);
+        assert.strictEqual(targets.git.values['https.proxy'], null);
+        assert.strictEqual(result.results.gitOutcome, 'preservedExternal');
+    });
+
+    test('keeps an external value written after ownership was confirmed and before unset', async () => {
+        const targets = createTargets();
+        const applier = createApplier(targets, createOwnershipStore());
+        const ownedUrl = 'http://owned.example:8080';
+        const externalUrl = 'http://external.example:8080';
+        assert.strictEqual((await applier.applyProxyDetailed(ownedUrl, true, { silent: true })).success, true);
+
+        const originalUnset = targets.git.unsetProxyKeys.bind(targets.git);
+        targets.git.unsetProxyKeys = async (keys, options) => {
+            targets.git.values['http.proxy'] = externalUrl;
+            targets.git.values['https.proxy'] = externalUrl;
+            return originalUnset(keys, options);
+        };
+
+        const result = await applier.disableProxyDetailed({ silent: true });
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(targets.git.values['http.proxy'], externalUrl);
+        assert.strictEqual(targets.git.values['https.proxy'], externalUrl);
+        assert.ok(targets.git.unsetCalls.length >= 1);
+        assert.ok(targets.git.expectedValueCalls.some(expected =>
+            expected?.['http.proxy'] === ownedUrl && expected?.['https.proxy'] === ownedUrl
+        ));
+        assert.strictEqual(result.results.gitOutcome, 'preservedExternal');
+    });
+
+    test('fails closed and does not unset when the confirming re-inspect cannot be read', async () => {
+        const targets = createTargets();
+        const applier = createApplier(targets, createOwnershipStore());
+        await applier.applyProxyDetailed('http://owned.example:8080', true, { silent: true });
+
+        let inspectCount = 0;
+        const originalInspect = targets.git.inspectProxy.bind(targets.git);
+        targets.git.inspectProxy = async () => {
+            inspectCount += 1;
+            if (inspectCount === 2) {
+                return { status: 'error' as const, error: 'permission denied', errorType: 'NO_PERMISSION' };
+            }
+            return originalInspect();
+        };
+
+        const result = await applier.disableProxyDetailed({ silent: true });
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.results.gitOutcome, 'failed');
+        assert.deepStrictEqual(targets.git.unsetCalls, []);
+        assert.strictEqual(targets.git.values['http.proxy'], 'http://owned.example:8080');
     });
 });

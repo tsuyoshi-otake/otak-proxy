@@ -69,7 +69,7 @@ suite('GitConfigManager Cross-Platform Test Suite (Task 3.1)', () => {
     });
 
     suite('Proxy Configuration Keys', () => {
-        test('should set http.proxy and https.proxy keys', async () => {
+        test('should set the http.proxy routing key', async () => {
             // Note: This test verifies the interface, not actual git interaction
             const proxyUrl = TestDataPatterns.expectedProxyUrl;
 
@@ -129,7 +129,7 @@ suite('NpmConfigManager Cross-Platform Test Suite (Task 3.2)', () => {
             restorePlatform = PlatformMocker.mockPlatform('win32');
 
             // NpmConfigManager checks process.platform internally
-            // On Windows, npm is a batch file (.cmd), so it must be invoked via cmd.exe.
+            // On Windows, npm is a batch file (.cmd). Spawn node + npm-cli.js, not cmd.exe.
             const manager = new NpmConfigManager();
             assert.ok(manager);
 

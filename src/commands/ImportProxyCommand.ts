@@ -10,12 +10,16 @@
 
 import * as vscode from 'vscode';
 import { ProxyMode, type AppliedProxySource, type ProxyState } from '../core/types';
+import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { validateProxyUrl, sanitizeProxyUrl, testProxyConnection, detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
-import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
+import { assignDetectedProxyToState } from '../config/DetectedProxyValue';
+import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 
 /**
  * Execute the import proxy command
@@ -40,6 +44,24 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
 
         const state = await ctx.getProxyState();
 
+        if (isUnsupportedAutoConfig(detected)) {
+            const action = await vscode.window.showWarningMessage(
+                i18n.t('warning.unsupportedAutoConfig', {
+                    kind: unsupportedAutoConfigKindLabel(detected.kind)
+                }),
+                i18n.t('action.configureManual'),
+                i18n.t('action.redetect')
+            );
+
+            if (action === i18n.t('action.configureManual')) {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            } else if (action === i18n.t('action.redetect')) {
+                return await executeImportProxy(ctx);
+            }
+
+            return { success: true };
+        }
+
         if (detectedProxy) {
             // Requirement 2.3: Display sanitized proxy URL to user
             const sanitizedProxy = ctx.sanitizer.maskPassword(detectedProxy);
@@ -52,9 +74,9 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
             );
 
             if (action === i18n.t('action.testFirst')) {
-                return await handleTestFirst(ctx, state, detectedProxy, detectedSource, i18n);
+                return await handleTestFirst(ctx, state, detected, detectedSource, i18n);
             } else if (action === i18n.t('action.useAutoMode')) {
-                return await handleUseAutoMode(ctx, state, detectedProxy, detectedSource);
+                return await handleUseAutoMode(ctx, state, detected, detectedSource);
             } else if (action === i18n.t('action.saveAsManual')) {
                 return await handleSaveAsManual(ctx, state, detectedProxy);
             }
@@ -100,10 +122,11 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
 async function handleTestFirst(
     ctx: CommandContext,
     state: ProxyState,
-    detectedProxy: string,
+    detected: ProxyDetectionWithSource,
     detectedSource: AppliedProxySource | undefined,
     i18n: I18nManager
 ): Promise<CommandResult> {
+    const detectedProxy = detected.proxyUrl!;
     const testResult = await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: i18n.t('message.testingProxyGeneric'),
@@ -121,7 +144,7 @@ async function handleTestFirst(
         );
 
         if (useAction === i18n.t('action.useAutoMode')) {
-            return await handleUseAutoMode(ctx, state, detectedProxy, detectedSource);
+            return await handleUseAutoMode(ctx, state, detected, detectedSource);
         } else if (useAction === i18n.t('action.saveAsManual')) {
             return await handleSaveAsManual(ctx, state, detectedProxy);
         }
@@ -156,31 +179,37 @@ async function handleTestFirst(
 async function handleUseAutoMode(
     ctx: CommandContext,
     state: ProxyState,
-    detectedProxy: string,
+    detected: ProxyDetectionWithSource,
     detectedSource: AppliedProxySource | undefined
 ): Promise<CommandResult> {
+    const detectedProxy = detected.proxyUrl!;
     if (validateProxyUrl(detectedProxy)) {
         const wasAutoMode = state.mode === ProxyMode.Auto;
-        state.autoProxyUrl = detectedProxy;
+        assignDetectedProxyToState(state, detected);
         state.mode = ProxyMode.Auto;
         state.autoModeOff = false;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
-        state.lastDetectionSource = detectedSource;
+        if (detectedSource) {
+            state.lastDetectionSource = detectedSource;
+        }
         state.proxyReachable = undefined;
         state.lastTestResult = undefined;
         state.lastTestTimestamp = undefined;
         state.systemProxyDetected = true;
+        setRequiresAuthFromLiveUrls(state);
         await ctx.saveProxyState(state);
-        await ctx.applyProxySettings(detectedProxy, true);
-        ctx.updateStatusBar(state);
+        const applied = await ctx.applyProxySettings(detectedProxy, true);
+        ctx.updateStatusBar(await ctx.getProxyState());
         if (wasAutoMode) {
             await ctx.stopSystemProxyMonitoring();
         }
         await ctx.startSystemProxyMonitoring();
-        ctx.userNotifier.showSuccess('message.switchedToAutoMode', {
-            url: sanitizeProxyUrl(detectedProxy)
-        });
+        if (applied) {
+            ctx.userNotifier.showSuccess('message.switchedToAutoMode', {
+                url: sanitizeProxyUrl(detectedProxy)
+            });
+        }
     } else {
         showInvalidProxyError(ctx);
     }

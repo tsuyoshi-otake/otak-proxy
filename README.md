@@ -94,11 +94,21 @@ There is **no separate Manual mode**: a URL entered via `otak: Configure Manual 
   │ ⌁ Auto (Fallback): http://192.168.1.2:88 │  no system proxy; using your configured
   │                                          │  fallback URL (plug icon)
   ├──────────────────────────────────────────┤
+  │ ⚠ Auto: PAC unsupported                  │  PAC / GNOME auto / similar auto-config
+  │                                          │  was detected; otak-proxy cannot resolve it
+  ├──────────────────────────────────────────┤
+  │ ⌁ Auto (Fallback, ignoring PAC): url     │  unsupported auto-config; using your
+  │                                          │  configured fallback and saying so
+  ├──────────────────────────────────────────┤
   │ ⊘ Auto: OFF                              │  no reachable proxy right now; retested
   │                                          │  automatically in the background
   ├──────────────────────────────────────────┤
   │ ⚠ Auto: http://proxy.example.com:8080    │  last apply failed on some target —
   │                                          │  hover for details
+  ├──────────────────────────────────────────┤
+  │ ⚠ Auto (blocked)                         │  apply was refused (for example an
+  │                                          │  untrusted workspace); desired Auto
+  │                                          │  is not treated as applied
   └──────────────────────────────────────────┘
 ```
 
@@ -111,6 +121,12 @@ The detailed status bar hover tooltip remains enabled by default. The otak-proxy
 
 Auto detection uses `otakProxy.detectionSourcePriority`, such as environment variables, VS Code settings, and platform proxy settings. Platform-specific behavior can differ between local Windows, macOS, Linux, WSL, containers, and remote extension hosts. Windows registry and WinHTTP actions are available only when the extension host is running on local Windows.
 
+PAC / WPAD / GNOME `mode=auto` are reported as **detected but unsupported** (`kind: pac|wpad`, capability `unsupported`). They are not treated as “no proxy”. otak-proxy does not ship a PAC/WPAD engine. If a manual fallback URL is used, the status bar says the auto-config is being ignored.
+
+Windows: `ProxyEnable=0` with `AutoConfigURL` is unsupported PAC. A registry `AutoDetect=1` bit without `AutoConfigURL` is reported as unsupported WPAD as a **registry observation only** — whether WPAD was the effective path was not lab-confirmed.
+
+macOS: services are enumerated with `networksetup -listallnetworkservices` (disabled `*` services skipped). A usable web / secure-web proxy on any enumerated service wins; an enabled auto-proxy URL is unsupported PAC. The three well-known names (`Wi-Fi` / `Ethernet` / `Thunderbolt Ethernet`) remain the fallback when listing fails. **Which service is the OS effective/default route was not verified on a Darwin lab machine.**
+
 ### Integrated Terminal Environment
 
 When the proxy is enabled, otak-proxy sets these variables for **newly created** VS Code integrated terminals:
@@ -118,7 +134,7 @@ When the proxy is enabled, otak-proxy sets these variables for **newly created**
 - `HTTP_PROXY` / `HTTPS_PROXY`
 - `http_proxy` / `https_proxy` on non-Windows hosts
 
-Existing terminals keep their current environment. Open a new terminal for the updated values to take effect. When `otakProxy.terminalOffMaskingEnabled` is enabled and proxy mode is Off, otak-proxy masks inherited proxy variables for new terminals by replacing them with empty values; this avoids VS Code-launched tools accidentally continuing to use a proxy inherited from the editor process.
+Existing terminals keep their current environment. Open a new terminal for the updated values to take effect. When `otakProxy.terminalOffMaskingEnabled` is enabled and proxy mode is Off, otak-proxy masks `HTTP_PROXY` / `HTTPS_PROXY` (and lowercase variants on non-Windows) for new terminals by replacing them with empty values. This prevents VS Code-launched tools from accidentally continuing to use a proxy inherited from the editor process. `NO_PROXY` / `no_proxy` / `ALL_PROXY` / `all_proxy` are left unchanged unless otak-proxy previously wrote them.
 
 ## Settings
 
@@ -193,7 +209,7 @@ For stricter corporate environments, prefer:
 | `otakProxy.remediationFlapCooldownMs` | `600000` | Cooldown after repeated remediation failures |
 | `otakProxy.notificationCooldownMs` | `600000` | Minimum interval before repeating a notification for the same issue |
 | `otakProxy.slowDiagnosticsTtlMs` | `300000` | Cache TTL for slow diagnostics that spawn Git, npm, or Windows commands |
-| `otakProxy.terminalOffMaskingEnabled` | `true` | Mask inherited proxy env vars for new terminals when proxy mode is Off |
+| `otakProxy.terminalOffMaskingEnabled` | `true` | Mask HTTP_PROXY/HTTPS_PROXY for new terminals when Off. Does not change NO_PROXY unless otak-proxy wrote it |
 | `otakProxy.notificationLevel` | `"warnings"` | Notification level: `off`, `important`, `warnings`, or `all` |
 | `otakProxy.windowsActionsEnabled` | `false` | Allow user-approved Windows proxy actions such as WinHTTP reset |
 | `otakProxy.credentialTargetPolicy` | `"ask"` | Control authenticated proxy writes to plaintext target files: `ask`, `allowPlaintextTargets`, or `blockPlaintextTargets`; use `blockPlaintextTargets` when policy forbids credentials in tool config files |
@@ -216,7 +232,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 ### Local Configuration Changes
 
 - VS Code: writes the global `http.proxy` setting through the VS Code configuration API.
-- Git: writes global `http.proxy` and `https.proxy` with `git config --global`.
+- Git: writes global `http.proxy` with `git config --global`. Git's HTTP stack uses that single key for both HTTP remotes and HTTPS remotes (HTTPS uses CONNECT). `https.proxy` is a leftover/non-routing key: otak-proxy does not write it, and Off still unsets an owned leftover.
 - npm: writes user-level `proxy` and `https-proxy` with `npm config set`.
 - Integrated terminals: sets `HTTP_PROXY` and `HTTPS_PROXY` for new terminals, and lowercase variants on non-Windows hosts.
 - Off clears the proxy entries managed by otak-proxy. Deactivating or uninstalling the extension does not guarantee cleanup by itself; switch Off before uninstalling, or use the recovery commands in [Troubleshooting](#troubleshooting).
@@ -242,7 +258,7 @@ Run `otak: Diagnose Proxy State` to inspect the current proxy state. Diagnostics
 
 Diagnostics also check convergence between the selected state and the actual tool settings:
 
-- In Auto with an active proxy, diagnostics report a managed proxy mismatch when VS Code, Git, or npm does not match the expected proxy URL.
+- In Auto with an active proxy, diagnostics report a managed proxy mismatch when VS Code, Git `http.proxy`, or npm does not match the expected proxy URL. A leftover Git `https.proxy` is informational only; it is not a second Git routing plane.
 - In Off or Auto: OFF, diagnostics report a managed proxy residual when VS Code, Git, or npm still has a proxy configured.
 - In remote, WSL, container, or web-like extension hosts, unsupported local Windows checks are reported as capability limits instead of being forced.
 

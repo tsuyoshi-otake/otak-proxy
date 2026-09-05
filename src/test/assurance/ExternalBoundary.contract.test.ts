@@ -189,26 +189,89 @@ async function withConnectServer(
 suite('Assurance: external-boundary contracts', () => {
     test('CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract', async () => {
         const calls: CommandCall[] = [];
+        const store: { 'http.proxy': string | null; 'https.proxy': string | null } = {
+            'http.proxy': null,
+            'https.proxy': null
+        };
         const manager = new GitConfigManager({
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
+                if (args.includes('--get-regexp')) {
+                    const lines = [
+                        store['http.proxy'] ? `http.proxy ${store['http.proxy']}` : '',
+                        store['https.proxy'] ? `https.proxy ${store['https.proxy']}` : ''
+                    ].filter(Boolean);
+                    if (lines.length === 0) {
+                        throw Object.assign(new Error('missing'), { code: 1 });
+                    }
+                    return { stdout: `${lines.join('\n')}\n`, stderr: '' };
+                }
+                if (args.includes('http.proxy') && !args.includes('--unset')) {
+                    store['http.proxy'] = args[args.length - 1];
+                }
+                if (args.includes('https.proxy') && !args.includes('--unset')) {
+                    store['https.proxy'] = args[args.length - 1];
+                }
                 return { stdout: '', stderr: '' };
             }
         });
 
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/git'), { success: true });
-        assert.deepStrictEqual(calls.map(call => call.command), ['git', 'git']);
-        assert.deepStrictEqual(calls.map(call => call.args), [
-            ['config', '--global', 'http.proxy', 'safe://proxy/git'],
-            ['config', '--global', 'https.proxy', 'safe://proxy/git']
+        const writes = calls.filter(call => !call.args.includes('--get-regexp') && !call.args.includes('--get-all'));
+        assert.deepStrictEqual(writes.map(call => call.command), ['git']);
+        assert.deepStrictEqual(writes.map(call => call.args), [
+            ['config', '--global', '--replace-all', 'http.proxy', 'safe://proxy/git']
         ]);
-        assert.deepStrictEqual(calls.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS, GIT_CONFIG_COMMAND_TIMEOUT_MS]);
-        assert.deepStrictEqual(calls.map(call => call.options.encoding), ['utf8', 'utf8']);
+        assert.ok(!writes.some(call => call.args.includes('https.proxy')), 'https.proxy is leftover/non-routing and must not be written');
+        assert.deepStrictEqual(writes.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS]);
+        assert.deepStrictEqual(writes.map(call => call.options.encoding), ['utf8']);
+    });
+
+    test('CT-CLI-GIT-002: Git unset exit 5 distinguishes missing from multi-value and never value-less --unset-all', async () => {
+        const calls: CommandCall[] = [];
+        const multi = new GitConfigManager({
+            commandRunner: async (command, args, options) => {
+                calls.push({ command, args, options });
+                if (args.includes('--get-all')) {
+                    return { stdout: 'http://one.example:8080\nhttp://two.example:8080\n', stderr: '' };
+                }
+                if (args.includes('--get-regexp')) {
+                    return {
+                        stdout: 'http.proxy http://one.example:8080\nhttp.proxy http://two.example:8080\n',
+                        stderr: ''
+                    };
+                }
+                if (args.includes('--unset')) {
+                    throw errorWithCode('warning: http.proxy has multiple values', '5', {
+                        stderr: 'warning: http.proxy has multiple values'
+                    });
+                }
+                return { stdout: '', stderr: '' };
+            }
+        });
+        const multiResult = await multi.unsetProxyKeys(['http.proxy']);
+        assert.strictEqual(multiResult.success, false);
+        assert.ok(calls.every(call => !(call.args.includes('--unset-all') && call.args.length === 4)));
+
+        const missing = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                if (args.includes('--get-all') || args.includes('--get-regexp')) {
+                    throw errorWithCode('not found', '1', { stderr: '' });
+                }
+                if (args.includes('--unset')) {
+                    throw errorWithCode('exit 5 missing', '5', { stderr: '' });
+                }
+                return { stdout: '', stderr: '' };
+            }
+        });
+        assert.deepStrictEqual(await missing.unsetProxyKeys(['http.proxy']), { success: true });
     });
 
     test('CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering', async () => {
         const calls: CommandCall[] = [];
-        const manager = new NpmConfigManager(path.join(os.tmpdir(), 'assurance-npmrc'), {
+        const store: { proxy: string | null; 'https-proxy': string | null } = { proxy: null, 'https-proxy': null };
+        const userconfig = path.join(os.tmpdir(), 'assurance-npmrc');
+        const manager = new NpmConfigManager(userconfig, {
             isWindows: false,
             env: {
                 PATH: '/test/path',
@@ -218,21 +281,104 @@ suite('Assurance: external-boundary contracts', () => {
             commandAvailable: () => true,
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
+                const key = args.includes('https-proxy') ? 'https-proxy' : args.includes('proxy') ? 'proxy' : undefined;
+                if (args.includes('get') && key) {
+                    return { stdout: `${store[key] ?? 'null'}\n`, stderr: '' };
+                }
+                if (args.includes('set') && key) {
+                    store[key] = args[args.length - 1];
+                }
                 return { stdout: '', stderr: '' };
             }
         });
 
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/npm'), { success: true });
-        assert.deepStrictEqual(calls.map(call => call.command), ['npm', 'npm']);
-        assert.deepStrictEqual(calls.map(call => call.args), [
-            ['--userconfig', path.join(os.tmpdir(), 'assurance-npmrc'), 'config', 'set', 'proxy', 'safe://proxy/npm'],
-            ['--userconfig', path.join(os.tmpdir(), 'assurance-npmrc'), 'config', 'set', 'https-proxy', 'safe://proxy/npm']
+        const writes = calls.filter(call => call.args.includes('set'));
+        assert.deepStrictEqual(writes.map(call => call.command), ['npm', 'npm']);
+        assert.deepStrictEqual(writes.map(call => call.args), [
+            ['--userconfig', userconfig, 'config', 'set', 'proxy', 'safe://proxy/npm'],
+            ['--userconfig', userconfig, 'config', 'set', 'https-proxy', 'safe://proxy/npm']
         ]);
-        assert.deepStrictEqual(calls.map(call => call.options.timeout), [NPM_CONFIG_COMMAND_TIMEOUT_MS, NPM_CONFIG_COMMAND_TIMEOUT_MS]);
+        assert.deepStrictEqual(writes.map(call => call.options.timeout), [NPM_CONFIG_COMMAND_TIMEOUT_MS, NPM_CONFIG_COMMAND_TIMEOUT_MS]);
         for (const call of calls) {
             const env = call.options.env as NodeJS.ProcessEnv;
             assert.strictEqual(env.npm_config_proxy, undefined);
             assert.strictEqual(env.NPM_CONFIG_HTTPS_PROXY, undefined);
+        }
+    });
+
+    test('CT-CLI-GIT-003: a failed http.proxy write-verify compensates the --replace-all routing write', async () => {
+        const calls: string[][] = [];
+        const store: { 'http.proxy': string | null; 'https.proxy': string | null } = {
+            'http.proxy': null,
+            'https.proxy': null
+        };
+        let inspectCount = 0;
+        const manager = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                calls.push(args);
+                if (args.includes('--get-regexp')) {
+                    inspectCount += 1;
+                    if (inspectCount === 2) {
+                        return { stdout: 'http.proxy http://verify-mismatch.example:1\n', stderr: '' };
+                    }
+                    const lines = [
+                        store['http.proxy'] ? `http.proxy ${store['http.proxy']}` : '',
+                        store['https.proxy'] ? `https.proxy ${store['https.proxy']}` : ''
+                    ].filter(Boolean);
+                    if (lines.length === 0) {
+                        throw Object.assign(new Error('missing'), { code: 1 });
+                    }
+                    return { stdout: `${lines.join('\n')}\n`, stderr: '' };
+                }
+                if (args.includes('--unset') || args.includes('--unset-all')) {
+                    store['http.proxy'] = args.includes('https.proxy') ? store['http.proxy'] : null;
+                    store['https.proxy'] = args.includes('https.proxy') ? null : store['https.proxy'];
+                    return { stdout: '', stderr: '' };
+                }
+                if (args.includes('https.proxy')) {
+                    throw Object.assign(new Error('https.proxy must not be written'), { code: 128 });
+                }
+                store['http.proxy'] = args[args.length - 1];
+                return { stdout: '', stderr: '' };
+            }
+        });
+
+        const result = await manager.setProxy('safe://proxy/git');
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(store['http.proxy'], null);
+        assert.ok(calls.some(args => args.includes('--replace-all') && args.includes('http.proxy')));
+        assert.ok(!calls.some(args => args.includes('--replace-all') && args.includes('https.proxy')));
+        assert.ok(calls.some(args =>
+            (args.includes('--unset') || args.includes('--unset-all')) && args.includes('http.proxy')
+        ));
+        assert.ok(!JSON.stringify(result).includes('safe://proxy/git'));
+    });
+
+    test('CT-CLI-NPM-002: Windows npm command port does not use cmd.exe', async () => {
+        const calls: CommandCall[] = [];
+        const url = 'http://user:x%25OS%25y@proxy.example:8080';
+        const manager = new NpmConfigManager(path.join(os.tmpdir(), 'assurance-npmrc-win'), {
+            isWindows: true,
+            env: process.env,
+            commandAvailable: () => true,
+            commandRunner: async (command, args, options) => {
+                calls.push({ command, args, options });
+                return { stdout: '', stderr: '' };
+            }
+        });
+
+        assert.deepStrictEqual(await manager.setProxy(url), { success: true });
+        assert.ok(calls.length >= 1);
+        const setCalls = calls.filter(call => call.args.includes('set'));
+        assert.ok(setCalls.length >= 1);
+        for (const call of calls) {
+            const base = path.basename(call.command).toLowerCase();
+            assert.ok(base !== 'cmd.exe' && base !== 'cmd', 'Windows npm must not spawn cmd.exe');
+            assert.ok(!call.args.includes('/c'));
+        }
+        for (const call of setCalls) {
+            assert.ok(call.args.includes(url));
         }
     });
 
@@ -309,7 +455,8 @@ suite('Assurance: external-boundary contracts', () => {
         assert.deepStrictEqual(memento.get('proxyState'), {
             mode: ProxyMode.Auto,
             autoModeOff: false,
-            autoProxyUrl: 'safe://proxy/memento'
+            autoProxyUrl: 'safe://proxy/memento',
+            revision: 1
         });
         assert.deepStrictEqual(memento.keys(), ['proxyState']);
 

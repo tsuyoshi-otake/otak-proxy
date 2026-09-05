@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../core/types';
-import { deriveRuntimeApplyState, ProxyIssue, V3_SCHEMA_VERSION } from '../core/v3Types';
+import { deriveRuntimeApplyState, deriveRuntimeApplyStateFromProxyState, ProxyIssue, V3_SCHEMA_VERSION } from '../core/v3Types';
 import { publicFingerprint, TargetOwnershipStore } from '../core/TargetOwnershipStore';
 import { V3_MIGRATION_JOURNAL_KEY, V3_SCHEMA_VERSION_KEY, LEGACY_MANUAL_PROXY_SECRET_KEY } from '../core/V3MigrationService';
 import { ProxyCredentialStore, splitProxyUrl, getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
@@ -101,11 +101,14 @@ function stubConfiguration(proxyUrl: string, httpProxy?: string, proxySupport = 
 }
 
 // #28 consolidated npm diagnostics into a single `npm config list --json`
-// read (spawned through %ComSpec% on Windows, so `command` may be cmd.exe
-// with npm inside the args). Fake runners answer that one call with the
-// JSON a scenario needs.
+// read. On Windows that is `node` + `npm-cli.js` (not cmd.exe). Fake runners
+// answer that one call with the JSON a scenario needs.
 function isNpmConfigListCall(command: string, args: string[]): boolean {
-    return (command === 'npm' || args.includes('npm')) &&
+    const invokesNpm = command === 'npm' ||
+        args.includes('npm') ||
+        /(?:^|[/\\])npm-cli\.js$/i.test(command) ||
+        args.some(arg => /(?:^|[/\\])npm-cli\.js$/i.test(arg));
+    return invokesNpm &&
         args.includes('config') && args.includes('list') && args.includes('--json');
 }
 
@@ -383,6 +386,23 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         assert.strictEqual(deriveRuntimeApplyState([blocking], true, 1, 2), 'partial');
     });
 
+    test('untrusted apply-blocked desired Auto is awaitingUser, not applied', () => {
+        const runtime = deriveRuntimeApplyStateFromProxyState({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            applyBlocked: 'untrustedWorkspace',
+            lastError: 'Proxy settings were not changed because the workspace is untrusted.',
+            targetOutcomes: {
+                git: 'failed',
+                vscode: 'failed',
+                npm: 'failed',
+                terminalEnv: 'failed'
+            }
+        });
+        assert.strictEqual(runtime, 'awaitingUser');
+        assert.notStrictEqual(runtime, 'applied');
+    });
+
     test('parses English and Japanese WinHTTP fixture output without mutating Windows settings', () => {
         const english = parseWinHttpShowProxy('Current WinHTTP proxy settings:\r\n    Proxy Server(s) : proxy.example.com:8080\r\n    Bypass List     : <local>\r\n');
         const japanese = parseWinHttpShowProxy('現在の WinHTTP プロキシ設定:\r\n    プロキシ サーバー: proxy.example.com:8080\r\n    バイパス一覧: <local>\r\n');
@@ -486,7 +506,9 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             assert.ok(issueIds.has('npm.managedProxyResidual'));
             assert.ok(issueIds.has('vscode.managedProxyResidual'));
             assert.strictEqual(report.highestPriorityCategory, 'applyFailed');
-            assert.ok(report.issues.every(issue => issue.capability === 'readOnly'));
+            assert.ok(report.issues.every(issue =>
+                issue.id === 'git.legacyHttpsProxy' ? issue.capability === 'unsupported' : issue.capability === 'readOnly'
+            ));
         } finally {
             restoreConfig();
         }
@@ -597,7 +619,9 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             assert.ok(issueIds.has('npm.managedProxyMismatch'));
             assert.ok(issueIds.has('vscode.managedProxyMismatch'));
             assert.strictEqual(report.highestPriorityCategory, 'applyFailed');
-            assert.ok(report.issues.every(issue => issue.capability === 'readOnly'));
+            assert.ok(report.issues.every(issue =>
+                issue.id === 'git.legacyHttpsProxy' ? issue.capability === 'unsupported' : issue.capability === 'readOnly'
+            ));
         } finally {
             restoreConfig();
         }
@@ -692,6 +716,61 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             const issueIds = new Set(report.issues.map(issue => issue.id));
             assert.ok(issueIds.has('git.managedProxyMismatch'), 'a genuinely unset managed proxy is a real, retryable mismatch');
             assert.ok(!issueIds.has('git.readUnavailable'), 'exit 1 is "unset", not a read failure');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics does not treat leftover https.proxy as Git routing success or mismatch', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const expectedProxy = 'http://expected.example.com:8080';
+        const leftoverHttps = 'http://leftover-https.example.com:8080';
+        const restoreConfig = stubConfiguration('', expectedProxy, 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: expectedProxy,
+                    autoModeOff: false,
+                    gitConfigured: true,
+                    npmConfigured: false,
+                    vscodeConfigured: true
+                }),
+                {
+                    commandRunner: async (command, args) => {
+                        if (command === 'git' && args.includes('http.proxy')) {
+                            return { stdout: `${expectedProxy}\n`, stderr: '' };
+                        }
+                        if (command === 'git' && args.includes('https.proxy')) {
+                            return { stdout: `${leftoverHttps}\n`, stderr: '' };
+                        }
+                        if (command === 'git') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (command === 'reg' || command === 'netsh') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            const git = report.observations.git as Record<string, unknown>;
+            assert.ok(!issueIds.has('git.managedProxyMismatch'), 'http.proxy match is routing convergence; leftover https.proxy is not a second plane');
+            assert.ok(issueIds.has('git.legacyHttpsProxy'));
+            const leftover = report.issues.find(issue => issue.id === 'git.legacyHttpsProxy');
+            assert.strictEqual(leftover?.capability, 'unsupported');
+            assert.strictEqual(leftover?.impact, 'informational');
+            assert.strictEqual(leftover?.evidence.routingRole, 'non-routing');
+            assert.strictEqual(git.routingKey, 'http.proxy');
+            assert.strictEqual(git.routingCapability, 'lossy-single-http.proxy');
+            assert.strictEqual(git.httpsProxyWritten, false);
+            assert.strictEqual(git.legacyHttpsProxyRole, 'non-routing');
         } finally {
             restoreConfig();
         }
@@ -812,6 +891,36 @@ suite('v3 Phase 1 diagnostics foundation', () => {
 
             assert.ok(callsAfterFirstRun > 0);
             assert.strictEqual(commandCalls, callsAfterFirstRun);
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics reports unresolved local credentials without applying a public URL', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://proxy.example.com:8080/',
+                    requiresAuth: true
+                }),
+                {
+                    commandRunner: async () => ({ stdout: '', stderr: '' })
+                }
+            );
+
+            const report = await diagnostics.run();
+            const unresolved = report.issues.find(issue => issue.id === 'proxy.localCredential.unresolved');
+            assert.ok(unresolved, 'missing local credentials must surface as an explicit issue');
+            assert.strictEqual(unresolved?.category, 'needsCredentialConsent');
+            assert.strictEqual(unresolved?.autoAction, 'skipped');
+            assert.strictEqual(unresolved?.evidence.localCredentialAvailability, 'missingOnThisMachine');
+            assert.ok(!JSON.stringify(report).includes('s3cret'));
         } finally {
             restoreConfig();
         }

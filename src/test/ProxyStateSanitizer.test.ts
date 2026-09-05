@@ -14,6 +14,8 @@ suite('ProxyStateSanitizer security tests', () => {
             mode: ProxyMode.Auto,
             manualProxyUrl: credentialUrl,
             autoProxyUrl: credentialUrl,
+            autoHttpProxyUrl: credentialUrl,
+            autoHttpsProxyUrl: `http://${token}@proxy-b.example.com:8443`,
             lastSystemProxyUrl: credentialUrl,
             fallbackProxyUrl: credentialUrl,
             lastError: `apply failed through ${credentialUrl}`,
@@ -28,6 +30,19 @@ suite('ProxyStateSanitizer security tests', () => {
         const serialized = JSON.stringify(sanitizeProxyStateForPersistence(state));
         assert.ok(!serialized.includes(token), `token leaked from persisted state: ${serialized}`);
         assert.ok(serialized.includes('<credentials>@'), 'arbitrary text should use the strict redactor');
+        assert.ok(serialized.includes('"requiresAuth":true'), 'auth-required metadata must survive sanitization');
+    });
+
+    test('preserves requiresAuth without writing userinfo into the persisted payload', () => {
+        const sanitized = sanitizeProxyStateForPersistence({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://user:s3cret@proxy.example.com:8080',
+            requiresAuth: true
+        });
+
+        assert.strictEqual(sanitized.autoProxyUrl, 'http://proxy.example.com:8080/');
+        assert.strictEqual(sanitized.requiresAuth, true);
+        assert.ok(!JSON.stringify(sanitized).includes('s3cret'));
     });
 
     test('redacts authorization headers and control characters from test errors', () => {

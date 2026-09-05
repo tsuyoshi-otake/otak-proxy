@@ -9,16 +9,19 @@
  */
 
 import * as vscode from 'vscode';
+import { captureLogicalGeneration, isStaleGeneration } from '../core/LogicalGeneration';
 import { ProxyMode, type ProxyState, type ProxyTestResult } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import {
     getDefaultAutoTimeout,
     getDefaultTestUrls,
+    isProxyEndpointReachable,
     testProxyConnectionParallel
 } from '../utils/ProxyUtils';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
+import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 let toggleQueue: Promise<void> = Promise.resolve();
 
@@ -52,6 +55,7 @@ function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
     target.fallbackProxyUrl = source.fallbackProxyUrl;
     target.autoModeOff = source.autoModeOff;
     target.lastDetectionSource = source.lastDetectionSource;
+    target.requiresAuth = source.requiresAuth;
 }
 
 function setAutoModeOff(state: ProxyState): void {
@@ -61,6 +65,7 @@ function setAutoModeOff(state: ProxyState): void {
     state.usingFallbackProxy = false;
     state.fallbackProxyUrl = undefined;
     state.lastDetectionSource = undefined;
+    setRequiresAuthFromLiveUrls(state);
 }
 
 async function testFallbackProxy(proxyUrl: string): Promise<ProxyTestResult> {
@@ -128,6 +133,7 @@ async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyStat
     state.fallbackProxyUrl = manualProxyUrl;
     state.autoProxyUrl = manualProxyUrl;
     state.lastDetectionSource = 'fallback';
+    setRequiresAuthFromLiveUrls(state);
 
     const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
     Logger.log(`Fallback to Manual Proxy: ${sanitizedManualProxyUrl}`);
@@ -145,10 +151,10 @@ async function tryApplyManualFallback(ctx: CommandContext, state: ProxyState): P
 
     const testResult = await testFallbackProxy(manualProxyUrl);
     state.lastTestResult = testResult;
-    state.proxyReachable = testResult.success;
+    state.proxyReachable = isProxyEndpointReachable(testResult);
     state.lastTestTimestamp = Date.now();
 
-    if (testResult.success) {
+    if (isProxyEndpointReachable(testResult)) {
         await applyReachableFallbackProxy(ctx, state, manualProxyUrl);
         return true;
     }
@@ -256,7 +262,7 @@ async function prepareNextMode(
 }
 
 async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<boolean> {
-    await ctx.saveProxyState(state);
+    const started = captureLogicalGeneration(await ctx.getProxyState());
     const newActiveUrl = ctx.getActiveProxyUrl(state);
 
     const applied = await ctx.applyProxySettings(
@@ -269,6 +275,27 @@ async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promi
     } else {
         await ctx.stopSystemProxyMonitoring();
     }
+
+    const latest = await ctx.getProxyState();
+    if (isStaleGeneration(started, latest) && latest.mode !== state.mode) {
+        ctx.updateStatusBar(latest);
+        return applied;
+    }
+
+    // Publish after apply so other windows do not treat an unapplied desired as
+    // converged. Fold onto latest so apply-result fields survive.
+    await ctx.saveProxyState({
+        ...latest,
+        mode: state.mode,
+        autoProxyUrl: state.autoProxyUrl,
+        manualProxyUrl: state.manualProxyUrl,
+        autoModeOff: state.autoModeOff,
+        usingFallbackProxy: state.usingFallbackProxy,
+        fallbackProxyUrl: state.fallbackProxyUrl,
+        lastSystemProxyUrl: state.lastSystemProxyUrl,
+        lastDetectionSource: state.lastDetectionSource,
+        convergencePending: false
+    });
 
     // ProxyApplier records per-target success/failure in state. Refresh from that
     // authoritative result instead of presenting the pre-apply desired snapshot.

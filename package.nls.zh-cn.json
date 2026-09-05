@@ -30,7 +30,7 @@
   "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "启用多个 VSCode/Cursor 实例之间的同步。启用后，代理设置将在所有实例之间共享。",
   "config.syncInterval": "同步检查间隔（毫秒，100-5000）。用于检查来自其他实例的更改的频率。",
-  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask HTTP_PROXY and HTTPS_PROXY (and lowercase variants on non-Windows) for newly created integrated terminals by replacing them with empty values. NO_PROXY, no_proxy, ALL_PROXY, and all_proxy are left unchanged unless otak-proxy previously wrote them.",
   "config.testInterval": "代理连接测试间隔（秒，仅自动模式）。范围：30-600 秒。默认：60 秒。",
   "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
   "extension.description": "一键管理 VS Code、Git、npm 和集成终端的代理设置。"

@@ -1,4 +1,6 @@
 import { TestResult } from '../utils/ProxyUtils';
+import type { ProxyCapability, ProxyValueKind } from '../core/v3Types';
+import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 
 export type ProxyCheckTrigger = 'polling' | 'focus' | 'config' | 'network';
 
@@ -21,11 +23,14 @@ export interface ProxyMonitorConfig {
 export interface ProxyDetectionResult {
     proxyUrl: string | null;
     source: 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | null;
+    kind?: ProxyValueKind;
+    capability?: ProxyCapability;
     timestamp: number;
     success: boolean;
     error?: string;
     testResult?: TestResult;
     proxyReachable?: boolean;
+    startedGeneration?: import('../core/LogicalGeneration').LogicalGeneration;
 }
 
 /**
@@ -33,5 +38,5 @@ export interface ProxyDetectionResult {
  */
 export interface ISystemProxyDetector {
     detectSystemProxy(): Promise<string | null>;
-    detectSystemProxyWithSource?(): Promise<{ proxyUrl: string | null; source: string | null }>;
+    detectSystemProxyWithSource?(): Promise<ProxyDetectionWithSource>;
 }

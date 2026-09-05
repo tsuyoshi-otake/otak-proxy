@@ -1,5 +1,5 @@
 import { Logger } from './Logger';
-import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
+import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import {
     getSanitizer,
     getSystemProxyDetector,
@@ -32,22 +32,32 @@ export async function detectSystemProxySettingsWithSource(): Promise<ProxyDetect
     try {
         const detected = await detector.detectSystemProxyWithSource();
 
-        if (!detected.proxyUrl) {
-            Logger.log('No system proxy detected');
-            return { proxyUrl: null, source: null };
+        if (isUnsupportedAutoConfig(detected)) {
+            Logger.log(`System auto-config detected but unsupported (${detected.kind})`);
+            return detected;
         }
 
-        const validationResult = urlValidator.validate(detected.proxyUrl);
-        if (!validationResult.isValid) {
-            Logger.warn('Detected system proxy has invalid format:', detected.proxyUrl);
-            Logger.warn('Validation errors:', validationResult.errors.join(', '));
+        if (!detected.proxyUrl) {
+            Logger.log('No system proxy detected');
+            return { proxyUrl: null, source: null, kind: detected.kind, bypass: detected.bypass };
+        }
 
-            notifier.showWarning(
-                'warning.invalidFormat',
-                { url: urlSanitizer.maskPassword(detected.proxyUrl) }
-            );
+        const urlsToValidate = [detected.httpUrl, detected.httpsUrl, detected.proxyUrl]
+            .filter((url, index, all): url is string => Boolean(url) && all.indexOf(url) === index);
 
-            return { proxyUrl: null, source: null };
+        for (const url of urlsToValidate) {
+            const validationResult = urlValidator.validate(url);
+            if (!validationResult.isValid) {
+                Logger.warn('Detected system proxy has invalid format:', url);
+                Logger.warn('Validation errors:', validationResult.errors.join(', '));
+
+                notifier.showWarning(
+                    'warning.invalidFormat',
+                    { url: urlSanitizer.maskPassword(url) }
+                );
+
+                return { proxyUrl: null, source: null };
+            }
         }
 
         return detected;

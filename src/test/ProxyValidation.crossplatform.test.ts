@@ -225,7 +225,11 @@ suite('Cross-Platform Property-Based Tests (Task 6.2)', () => {
                     const result = await detector.detectSystemProxyWithSource();
 
                     // Property: If proxyUrl is null, source must also be null
+                    // unless auto-config was detected but is unsupported (#58).
                     if (result.proxyUrl === null && result.source !== null) {
+                        if (result.capability === 'unsupported' && (result.kind === 'pac' || result.kind === 'wpad')) {
+                            return true;
+                        }
                         throw new Error('When proxyUrl is null, source must also be null');
                     }
 

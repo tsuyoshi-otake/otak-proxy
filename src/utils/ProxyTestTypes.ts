@@ -3,11 +3,26 @@
  */
 
 /**
+ * Why a canary CONNECT failed. Canary failure is not the same as
+ * "the proxy endpoint is gone" — only `endpointUnreachable` means that.
+ */
+export type ProxyTestFailureKind =
+    | 'endpointUnreachable'
+    | 'authRequired'
+    | 'connectRejected'
+    | 'destinationForbidden'
+    | 'timeout'
+    | 'dns'
+    | 'protocol'
+    | 'unknown';
+
+/**
  * Error details for a single test URL.
  */
 export interface TestUrlError {
     url: string;
     message: string;
+    failureKind?: ProxyTestFailureKind;
 }
 
 /**
@@ -20,6 +35,14 @@ export interface TestResult {
     proxyUrl?: string;
     timestamp?: number;
     duration?: number;
+    /**
+     * Generation captured when the test started. Completions without this
+     * still fence on URL identity, but A→B→A requires the stamp.
+     */
+    startedGeneration?: import('../core/LogicalGeneration').LogicalGeneration;
+    failureKind?: ProxyTestFailureKind;
+    proxyEndpointOk?: boolean;
+    canaryHost?: string;
 }
 
 /**

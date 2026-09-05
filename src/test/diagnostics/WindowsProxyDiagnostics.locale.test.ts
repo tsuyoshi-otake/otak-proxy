@@ -151,4 +151,32 @@ suite('WindowsProxyDiagnostics.observe locale independence', () => {
         assert.strictEqual(observation.winHttpParseStatus, 'parsed');
         assert.strictEqual(observation.winHttpProxy, 'proxy.example.com:8080');
     });
+
+    test('AutoConfigURL is capabilityUnavailable unsupported PAC, not informational', async function () {
+        const runner: CommandRunner = async (command, args) => {
+            if (command === 'reg' && args.includes('AutoConfigURL')) {
+                return {
+                    stdout: '\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\r\n    AutoConfigURL    REG_SZ    http://pac.example.com/proxy.pac\r\n',
+                    stderr: ''
+                };
+            }
+            if (command === 'reg') {
+                return { stdout: '', stderr: '' };
+            }
+            if (command === 'netsh') {
+                return { stdout: 'Direct access (no proxy server).\r\n', stderr: '' };
+            }
+            throw new Error(`unexpected command: ${command}`);
+        };
+
+        const diagnostics = new WindowsProxyDiagnostics(runner, 'win32');
+        const observation = await diagnostics.observe();
+        const issues = diagnostics.toIssues(observation);
+        const pac = issues.find(issue => issue.id === 'windows.wininet.pac');
+        assert.ok(pac, 'windows.wininet.pac must be emitted');
+        assert.strictEqual(pac?.category, 'capabilityUnavailable');
+        assert.strictEqual(pac?.capability, 'unsupported');
+        assert.strictEqual(pac?.evidence.kind, 'pac');
+        assert.notStrictEqual(pac?.category, 'info');
+    });
 });

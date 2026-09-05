@@ -9,9 +9,11 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ProxyApplier } from '../core/ProxyApplier';
+import { ProxyMode, ProxyState } from '../core/types';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { I18nManager } from '../i18n/I18nManager';
+import { getStatusBarDisplay } from '../ui/StatusBarDisplay';
 
 function overrideWorkspaceTrustForTest(value: boolean): () => void {
     const descriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'isTrusted');
@@ -534,6 +536,84 @@ suite('ProxyApplier Unit Tests', () => {
             assert.strictEqual(result, false, 'applyProxy should fail in untrusted workspace');
             assert.strictEqual(setCalls, 0, 'No manager should be called in untrusted workspace');
             assert.strictEqual(warningShown, true, 'Warning should be shown in untrusted workspace');
+        } finally {
+            restoreWorkspaceTrust();
+        }
+    });
+
+    test('applyProxy records lastError and failed outcomes in an untrusted workspace', async () => {
+        const restoreWorkspaceTrust = overrideWorkspaceTrustForTest(false);
+
+        try {
+            let state: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080'
+            };
+            const stateManager = {
+                getState: async () => ({ ...state }),
+                saveState: async (next: typeof state) => { state = { ...next }; }
+            };
+
+            const applier = new ProxyApplier(
+                { setProxy: async () => ({ success: true }), unsetProxy: async () => ({ success: true }) } as any,
+                { setProxy: async () => ({ success: true }), unsetProxy: async () => ({ success: true }) } as any,
+                { setProxy: async () => ({ success: true }), unsetProxy: async () => ({ success: true }) } as any,
+                new ProxyUrlValidator(),
+                new InputSanitizer(),
+                { showSuccess: () => {}, showError: () => {}, showWarning: () => {} } as any,
+                stateManager as any
+            );
+
+            const result = await applier.applyProxy('http://proxy.example.com:8080', true);
+
+            assert.strictEqual(result, false);
+            assert.ok(state.lastError, 'untrusted apply must persist lastError');
+            assert.ok(
+                String(state.lastError).toLowerCase().includes('untrusted'),
+                `lastError should mention untrusted workspace, got: ${state.lastError}`
+            );
+            assert.strictEqual(state.applyBlocked, 'untrustedWorkspace');
+            assert.strictEqual(state.targetOutcomes?.git, 'failed');
+            assert.strictEqual(state.targetOutcomes?.vscode, 'failed');
+            assert.strictEqual(state.targetOutcomes?.npm, 'failed');
+
+            const display = getStatusBarDisplay(state, true, I18nManager.getInstance(), new InputSanitizer());
+            assert.ok(display.text.startsWith('$(warning)'), `expected blocked Auto UI, got: ${display.text}`);
+            assert.ok(!display.text.startsWith('$(sync)'));
+        } finally {
+            restoreWorkspaceTrust();
+        }
+    });
+
+    test('disableProxy records lastError and failed outcomes in an untrusted workspace', async () => {
+        const restoreWorkspaceTrust = overrideWorkspaceTrustForTest(false);
+
+        try {
+            let state: ProxyState = {
+                mode: ProxyMode.Off,
+                gitConfigured: true
+            };
+            const stateManager = {
+                getState: async () => ({ ...state }),
+                saveState: async (next: typeof state) => { state = { ...next }; }
+            };
+
+            const applier = new ProxyApplier(
+                { setProxy: async () => ({ success: true }), unsetProxy: async () => ({ success: true }) } as any,
+                { setProxy: async () => ({ success: true }), unsetProxy: async () => ({ success: true }) } as any,
+                { setProxy: async () => ({ success: true }), unsetProxy: async () => ({ success: true }) } as any,
+                new ProxyUrlValidator(),
+                new InputSanitizer(),
+                { showSuccess: () => {}, showError: () => {}, showWarning: () => {} } as any,
+                stateManager as any
+            );
+
+            const result = await applier.disableProxy();
+
+            assert.strictEqual(result, false);
+            assert.ok(state.lastError, 'untrusted disable must persist lastError');
+            assert.strictEqual(state.applyBlocked, 'untrustedWorkspace');
+            assert.strictEqual(state.targetOutcomes?.git, 'failed');
         } finally {
             restoreWorkspaceTrust();
         }

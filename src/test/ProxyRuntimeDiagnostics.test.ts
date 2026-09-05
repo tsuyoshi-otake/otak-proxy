@@ -64,7 +64,11 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
             ]);
 
             const npmCalls = calls.filter(call =>
-                call.command.toLowerCase().endsWith('npm') || call.args.includes('npm')
+                call.command.toLowerCase().endsWith('npm') ||
+                call.command.toLowerCase().endsWith('npm.cmd') ||
+                call.command.toLowerCase().endsWith('npm-cli.js') ||
+                call.args.includes('npm') ||
+                call.args.some(arg => /(?:^|[/\\])npm-cli\.js$/i.test(arg))
             );
             assert.strictEqual(npmCalls.length, 1);
             assert.deepStrictEqual(reports[0].observations.npm, {
@@ -74,6 +78,117 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
                 registry: 'https://registry.npmjs.org/'
             });
             assert.deepStrictEqual(reports[1].observations.npm, reports[0].observations.npm);
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('terminal observation reports ownedVars and maskedVars without treating empty NO_PROXY as no proxy', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const collection = new Map<string, { type: number; value: string; options: object }>([
+            ['HTTP_PROXY', { type: 1, value: '', options: {} }],
+            ['HTTPS_PROXY', { type: 1, value: '', options: {} }],
+            ['NO_PROXY', { type: 1, value: '', options: {} }]
+        ]);
+        Object.assign(collection, {
+            persistent: true,
+            description: 'Managed by otak-proxy for newly created terminals.'
+        });
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            {
+                extension: { extensionKind: vscode.ExtensionKind.Workspace },
+                environmentVariableCollection: collection
+            } as unknown as vscode.ExtensionContext,
+            async () => ({ mode: ProxyMode.Off } as ProxyState),
+            { commandRunner: async () => ({ stdout: '', stderr: '' }) }
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            const terminal = report.observations.terminal as {
+                ownedVars: string[];
+                maskedVars: string[];
+                mutators: Record<string, { value: string }>;
+            };
+            assert.deepStrictEqual(terminal.ownedVars, ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']);
+            assert.deepStrictEqual(terminal.maskedVars, ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']);
+            assert.strictEqual(terminal.mutators.NO_PROXY.value, '');
+            assert.ok(!('noProxyConfigured' in terminal));
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('reports applyBlocked untrustedWorkspace without leaking proxy credentials', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const restoreTrust = (() => {
+            const descriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'isTrusted');
+            Object.defineProperty(vscode.workspace, 'isTrusted', {
+                configurable: true,
+                get: () => false
+            });
+            return () => {
+                if (descriptor) {
+                    Object.defineProperty(vscode.workspace, 'isTrusted', descriptor);
+                } else {
+                    delete (vscode.workspace as { isTrusted?: boolean }).isTrusted;
+                }
+            };
+        })();
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            createContext(),
+            async () => ({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://alice:s3cr3t@proxy.example.com:8080',
+                applyBlocked: 'untrustedWorkspace',
+                lastError: 'Proxy settings were not changed because the workspace is untrusted.'
+            } as ProxyState)
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            const serialized = JSON.stringify(report);
+            assert.strictEqual(report.observations.applyBlocked, 'untrustedWorkspace');
+            assert.ok(report.issues.some(issue => issue.evidence.applyBlocked === 'untrustedWorkspace'));
+            assert.notStrictEqual(report.runtimeState, 'applied');
+            assert.ok(!serialized.includes('s3cr3t'));
+        } finally {
+            restoreTrust();
+            restoreConfig();
+        }
+    });
+
+    test('exposes canaryHost, failureKind, and proxyEndpointOk from the last test', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const runner: CommandRunner = async (_command, args) => {
+            if (args.includes('--json')) {
+                return { stdout: '{}', stderr: '' };
+            }
+            return { stdout: '', stderr: '' };
+        };
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            createContext(),
+            async () => ({
+                mode: ProxyMode.Auto,
+                lastTestResult: {
+                    success: false,
+                    testUrls: ['https://www.github.com'],
+                    errors: [{ url: 'https://www.github.com', message: 'Proxy CONNECT failed with status 407' }],
+                    failureKind: 'authRequired',
+                    proxyEndpointOk: true,
+                    canaryHost: 'www.github.com'
+                }
+            } as ProxyState),
+            { commandRunner: runner }
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            assert.deepStrictEqual(report.observations.connectionTest, {
+                canaryHost: 'www.github.com',
+                failureKind: 'authRequired',
+                proxyEndpointOk: true
+            });
         } finally {
             restoreConfig();
         }

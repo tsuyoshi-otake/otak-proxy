@@ -1,4 +1,6 @@
 import { ProxyMode, ProxyState } from '../core/types';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
+import { deriveRuntimeApplyStateFromProxyState } from '../core/v3Types';
 import { I18nManager } from '../i18n/I18nManager';
 import { InputSanitizer } from '../validation/InputSanitizer';
 
@@ -44,9 +46,14 @@ export function getStatusBarDisplay(
 
 function hasConvergenceFailure(state: ProxyState): boolean {
     return Boolean(
+        state.applyBlocked ||
         state.lastError ||
         Object.values(state.targetOutcomes ?? {}).some(outcome => outcome === 'failed')
     );
+}
+
+function isApplyBlocked(state: ProxyState): boolean {
+    return Boolean(state.applyBlocked) || deriveRuntimeApplyStateFromProxyState(state) === 'awaitingUser';
 }
 
 export function getUrlDisplay(
@@ -72,11 +79,36 @@ function getAutoDisplay(
         };
     }
 
+    if (isApplyBlocked(state)) {
+        return {
+            text: `$(warning) ${i18n.t('statusbar.autoApplyBlocked')}`,
+            statusText: i18n.t('statusbar.tooltip.autoApplyBlocked')
+        };
+    }
+
+    const unsupportedKind = state.lastDetectionCapability === 'unsupported' &&
+        (state.lastDetectionKind === 'pac' || state.lastDetectionKind === 'wpad')
+        ? unsupportedAutoConfigKindLabel(state.lastDetectionKind)
+        : undefined;
+
     if (state.usingFallbackProxy && state.fallbackProxyUrl) {
         const fallbackDisplay = getUrlDisplay(state.fallbackProxyUrl, showUrl, i18n, sanitizer);
+        if (unsupportedKind) {
+            return {
+                text: `$(plug) ${i18n.t('statusbar.autoFallbackIgnoringAutoConfig', { kind: unsupportedKind, url: fallbackDisplay })}`,
+                statusText: i18n.t('statusbar.tooltip.autoFallbackIgnoringAutoConfig', { kind: unsupportedKind, url: fallbackDisplay })
+            };
+        }
         return {
             text: `$(plug) ${i18n.t('statusbar.autoFallback', { url: fallbackDisplay })}`,
             statusText: i18n.t('statusbar.tooltip.autoFallback', { url: fallbackDisplay })
+        };
+    }
+
+    if (unsupportedKind) {
+        return {
+            text: `$(warning) ${i18n.t('statusbar.autoUnsupported', { kind: unsupportedKind })}`,
+            statusText: i18n.t('statusbar.tooltip.autoUnsupported', { kind: unsupportedKind })
         };
     }
 
