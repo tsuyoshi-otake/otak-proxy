@@ -21,6 +21,7 @@ import { normalizeProxyForComparison } from '../utils/ProxyUrlIdentity';
 import { isPerSchemeProxy } from '../config/DetectedProxyValue';
 import { splitCapabilityIssues } from '../core/ProxyTargetCapability';
 import { createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
+import { buildConnectionTestObservation } from '../utils/ProxyTestFailure';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -193,6 +194,11 @@ export class ProxyRuntimeDiagnostics {
         }));
         issues.push(...this.collectSplitProxyIssues(state));
         issues.push(...this.collectUnsupportedAutoConfigFromState(state, issues));
+
+        const connectionTest = buildConnectionTestObservation(state.lastTestResult);
+        if (connectionTest) {
+            observations.connectionTest = connectionTest;
+        }
 
         const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);

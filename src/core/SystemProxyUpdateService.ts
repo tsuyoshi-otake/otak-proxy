@@ -4,7 +4,7 @@ import { Logger } from '../utils/Logger';
 import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptionsFromState } from '../config/DetectedProxyValue';
 import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
-import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
+import { detectSystemProxySettingsWithSource, isProxyEndpointReachable } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
 import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration, sameLogicalIdentity } from './LogicalGeneration';
@@ -363,6 +363,6 @@ export class SystemProxyUpdateService {
 
         Logger.log(`Testing fallback proxy: ${proxyUrl}`);
         const testResult = await connectionTester.testProxyAuto(proxyUrl);
-        return testResult.success;
+        return isProxyEndpointReachable(testResult);
     }
 }

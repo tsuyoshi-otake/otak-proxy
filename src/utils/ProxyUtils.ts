@@ -13,4 +13,9 @@ export {
 } from './ProxyConnectionTest';
 export { resetInstances } from './ProxyUtilityInstances';
 export { sanitizeProxyUrl, validateProxyUrl } from './ProxyUrlUtils';
-export { TestResult } from './ProxyTestTypes';
+export type { ProxyTestFailureKind, TestResult, TestUrlError } from './ProxyTestTypes';
+export {
+    buildConnectionTestObservation,
+    isProxyEndpointReachable,
+    isProxyEndpointUnreachable
+} from './ProxyTestFailure';

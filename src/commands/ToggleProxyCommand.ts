@@ -16,6 +16,7 @@ import { Logger } from '../utils/Logger';
 import {
     getDefaultAutoTimeout,
     getDefaultTestUrls,
+    isProxyEndpointReachable,
     testProxyConnectionParallel
 } from '../utils/ProxyUtils';
 import { CommandContext, CommandResult } from './types';
@@ -150,10 +151,10 @@ async function tryApplyManualFallback(ctx: CommandContext, state: ProxyState): P
 
     const testResult = await testFallbackProxy(manualProxyUrl);
     state.lastTestResult = testResult;
-    state.proxyReachable = testResult.success;
+    state.proxyReachable = isProxyEndpointReachable(testResult);
     state.lastTestTimestamp = Date.now();
 
-    if (testResult.success) {
+    if (isProxyEndpointReachable(testResult)) {
         await applyReachableFallbackProxy(ctx, state, manualProxyUrl);
         return true;
     }

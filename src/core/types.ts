@@ -9,6 +9,7 @@
  * - Clear folder hierarchy (Requirement 1.5)
  */
 
+import type { TestResult } from '../utils/ProxyTestTypes';
 import type { ProxyValueKind } from './v3Types';
 
 /**
@@ -30,15 +31,7 @@ export enum ProxyMode {
  * Feature: auto-mode-proxy-testing
  * @interface ProxyTestResult
  */
-export interface ProxyTestResult {
-    success: boolean;
-    testUrls: string[];
-    errors: Array<{ url: string; message: string }>;
-    proxyUrl?: string;
-    timestamp?: number;
-    duration?: number;
-    startedGeneration?: import('./LogicalGeneration').LogicalGeneration;
-}
+export type ProxyTestResult = TestResult;
 
 /**
  * Source that produced the currently applied Auto proxy URL.

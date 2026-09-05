@@ -174,6 +174,8 @@ suite('ProxyUtils Test Suite', () => {
                 );
 
                 assert.strictEqual(result.success, false);
+                assert.strictEqual(result.failureKind, 'authRequired');
+                assert.strictEqual(result.proxyEndpointOk, true);
                 assert.ok(
                     result.errors.some(error => error.message.includes('407')),
                     `Expected CONNECT 407 error, got: ${JSON.stringify(result.errors)}`
@@ -363,6 +365,8 @@ suite('ProxyUtils Test Suite', () => {
                 );
 
                 assert.strictEqual(result.success, false);
+                assert.strictEqual(result.failureKind, 'authRequired');
+                assert.strictEqual(result.proxyEndpointOk, true);
                 assert.ok(
                     result.errors.some(error => error.message.includes('407')),
                     `Expected CONNECT 407 error, got: ${JSON.stringify(result.errors)}`

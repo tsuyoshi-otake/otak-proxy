@@ -185,7 +185,7 @@ suite('ToggleProxyCommand Unit Tests', () => {
         });
     });
 
-    test('should not use unreachable manual proxy as Auto fallback', async function() {
+    test('should use a 407 manual proxy as Auto fallback instead of treating it as broken', async function() {
         this.timeout(5000);
         const server = http.createServer();
         server.on('connect', (_request, socket) => {
@@ -208,17 +208,48 @@ suite('ToggleProxyCommand Unit Tests', () => {
 
             assert.strictEqual(result.success, true);
             assert.strictEqual(state.mode, ProxyMode.Auto);
-            assert.strictEqual(state.autoProxyUrl, undefined);
-            assert.strictEqual(state.autoModeOff, true);
-            assert.strictEqual(state.usingFallbackProxy, false);
+            assert.strictEqual(state.autoProxyUrl, `http://127.0.0.1:${port}`);
+            assert.strictEqual(state.autoModeOff, false);
+            assert.strictEqual(state.usingFallbackProxy, true);
             assert.strictEqual(state.lastTestResult?.success, false);
+            assert.strictEqual(state.lastTestResult?.failureKind, 'authRequired');
             assert.deepStrictEqual(applyCalls[applyCalls.length - 1], {
-                url: '',
-                enabled: false
+                url: `http://127.0.0.1:${port}`,
+                enabled: true
             });
         } finally {
             await close(server);
         }
+    });
+
+    test('should not use unreachable manual proxy as Auto fallback', async function() {
+        this.timeout(5000);
+        const server = http.createServer();
+        const port = await listen(server);
+        await close(server);
+
+        const { ctx, getState, applyCalls } = createContext(
+            {
+                mode: ProxyMode.Manual,
+                manualProxyUrl: `http://127.0.0.1:${port}`
+            },
+            async () => {}
+        );
+
+        const result = await executeToggleProxy(ctx);
+        const state = getState();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, undefined);
+        assert.strictEqual(state.autoModeOff, true);
+        assert.strictEqual(state.usingFallbackProxy, false);
+        assert.strictEqual(state.lastTestResult?.success, false);
+        assert.strictEqual(state.lastTestResult?.failureKind, 'endpointUnreachable');
+        assert.deepStrictEqual(applyCalls[applyCalls.length - 1], {
+            url: '',
+            enabled: false
+        });
     });
 
     test('should serialize rapid toggles and apply each transition in order', async () => {

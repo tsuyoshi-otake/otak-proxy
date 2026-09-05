@@ -245,6 +245,31 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.calledWith(notifyStub, 'fallback.usingManualProxy', sinon.match.any);
     });
 
+    test('Auto + detection fails + fallback 407 is not treated as unreachable', async () => {
+        state.mode = ProxyMode.Auto;
+        state.manualProxyUrl = 'http://manual.example:3128';
+        configValues.enableFallback = true;
+        detectStub.resolves({ proxyUrl: null, source: null });
+        connectionTester!.testProxyAuto.resolves({
+            success: false,
+            proxyUrl: 'http://manual.example:3128',
+            testUrls: ['https://www.github.com'],
+            errors: [{ url: 'https://www.github.com', message: 'Proxy CONNECT failed with status 407' }],
+            failureKind: 'authRequired',
+            proxyEndpointOk: true,
+            canaryHost: 'www.github.com',
+            timestamp: 0
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.usingFallbackProxy, true);
+        assert.strictEqual(state.fallbackProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.autoModeOff, false);
+        sinon.assert.calledWith(applyProxyStub, 'http://manual.example:3128', true);
+    });
+
     test('Auto + detection fails + fallback enabled + manual unreachable: enters autoModeOff', async () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';
@@ -253,8 +278,10 @@ suite('SystemProxyUpdateService Tests', () => {
         connectionTester!.testProxyAuto.resolves({
             success: false,
             proxyUrl: 'http://manual.example:3128',
-            testUrls: [],
-            errors: [{ url: 'https://example.com', message: 'timeout' }],
+            testUrls: ['https://example.com'],
+            errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+            failureKind: 'endpointUnreachable',
+            proxyEndpointOk: false,
             timestamp: 0
         });
 

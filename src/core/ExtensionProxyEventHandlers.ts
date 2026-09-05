@@ -2,7 +2,7 @@ import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { Logger } from '../utils/Logger';
-import { TestResult } from '../utils/ProxyUtils';
+import { isProxyEndpointReachable, isProxyEndpointUnreachable, TestResult } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
 import {
@@ -130,10 +130,10 @@ export async function handleProxyTestComplete(
 
         const next = { ...state };
         next.lastTestResult = stripGeneration(testResult);
-        next.proxyReachable = testResult.success;
+        next.proxyReachable = isProxyEndpointReachable(testResult);
         next.lastTestTimestamp = Date.now();
         updateAutoModeFromTestResult(next, testResult);
-        next.convergencePending = !testResult.success;
+        next.convergencePending = isProxyEndpointUnreachable(testResult);
         return next;
     });
 
@@ -150,7 +150,7 @@ export async function handleProxyTestComplete(
     context.updateStatusBar?.(committed);
     clearStartupPendingIfNeeded(startupTestState, testResult);
 
-    if (!testResult.success) {
+    if (isProxyEndpointUnreachable(testResult)) {
         const latest = await context.proxyStateManager.getState();
         if (latest.mode !== ProxyMode.Auto) {
             return;
@@ -298,15 +298,17 @@ function notifyProxyChange(
 }
 
 function updateAutoModeFromTestResult(state: ProxyState, testResult: TestResult): void {
-    if (!testResult.success) {
+    if (isProxyEndpointUnreachable(testResult)) {
         state.autoModeOff = true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
-        Logger.info('Proxy test failed - Auto Mode OFF');
+        Logger.info('Proxy endpoint unreachable - Auto Mode OFF');
         return;
     }
 
-    state.autoModeOff = false;
+    if (testResult.success) {
+        state.autoModeOff = false;
+    }
 }
 
 function clearStartupPendingIfNeeded(startupTestState: StartupTestState, testResult: TestResult): void {

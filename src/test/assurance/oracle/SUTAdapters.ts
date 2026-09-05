@@ -11,7 +11,8 @@ import { ProxyStateManager } from '../../../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../../../core/types';
 import { deriveRuntimeApplyState, ProxyIssue } from '../../../core/v3Types';
 import { ConflictResolver, SyncableState } from '../../../sync/ConflictResolver';
-import { ApplyInput, CanonicalMode, ModeInput, SyncInput, SyncWinner, TargetInput } from './DomainModel';
+import { isProxyEndpointUnreachable } from '../../../utils/ProxyTestFailure';
+import { ApplyInput, CanonicalMode, ConnectionTestInput, ModeInput, SyncInput, SyncWinner, TargetInput } from './DomainModel';
 
 function toProductionMode(mode: CanonicalMode): ProxyMode {
     switch (mode) {
@@ -39,6 +40,13 @@ function stateManagerWithoutStorage(): ProxyStateManager {
 
 export function activeProxyFromSut(input: ModeInput): string {
     return stateManagerWithoutStorage().getActiveProxyUrl(bareState(input));
+}
+
+export function shouldClearManagedProxyFromSut(input: ConnectionTestInput): boolean {
+    return isProxyEndpointUnreachable({
+        success: input.success,
+        failureKind: input.failureKind
+    });
 }
 
 export function nextModeFromSut(input: CanonicalMode): CanonicalMode {
