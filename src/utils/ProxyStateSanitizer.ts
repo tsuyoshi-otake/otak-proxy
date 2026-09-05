@@ -1,6 +1,7 @@
 import { ProxyState, ProxyTestResult } from '../core/types';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { toPublicProxyHref } from './ProxyUrlIdentity';
 
 const sanitizer = new InputSanitizer();
 const redactor = new ProxySecretRedactor();
@@ -26,14 +27,7 @@ export function getProxyPublicUrl(url: string | undefined): string | undefined {
         return url;
     }
 
-    try {
-        const parsed = new URL(url);
-        parsed.username = '';
-        parsed.password = '';
-        return parsed.toString();
-    } catch {
-        return removeProxyCredentials(url);
-    }
+    return toPublicProxyHref(url) ?? removeProxyCredentials(url);
 }
 
 function sanitizeOptionalMessage(message: string | undefined): string | undefined {

@@ -1,3 +1,8 @@
+import {
+    classifyProxyHostname,
+    describeInvalidProxyAuthority
+} from './ProxyHost';
+
 /**
  * Validation interfaces and types
  */
@@ -13,14 +18,9 @@ export interface ValidationResult {
  * command injection through strict character whitelisting.
  */
 export class ProxyUrlValidator {
-    private static readonly INVALID_HOSTNAME_ERROR = 'Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)';
-
     // Shell metacharacters that could be used for command injection
     private static readonly SHELL_METACHARACTERS = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
-    
-    // Allowed characters for hostname (alphanumeric, dots, hyphens)
-    private static readonly HOSTNAME_PATTERN = /^[a-zA-Z0-9.-]+$/;
-    
+
     // Allowed characters for credentials (alphanumeric, hyphens, underscores, @)
     private static readonly CREDENTIAL_PATTERN = /^[a-zA-Z0-9\-_@]+$/;
 
@@ -77,24 +77,7 @@ export class ProxyUrlValidator {
         }
 
         const afterProtocol = url.substring(protocolMatch[0].length);
-        return this.isProxyAuthoritySyntaxValid(afterProtocol)
-            ? null
-            : ProxyUrlValidator.INVALID_HOSTNAME_ERROR;
-    }
-
-    private isProxyAuthoritySyntaxValid(authority: string): boolean {
-        const invalidChars = /[/?#\s\\]/;
-        if (invalidChars.test(authority)) {
-            return false;
-        }
-
-        const parts = authority.split('@');
-        if (parts.length > 2) {
-            return false;
-        }
-
-        const hostPortPart = parts[parts.length - 1];
-        return /^[a-zA-Z0-9.\-:]+$/.test(hostPortPart);
+        return describeInvalidProxyAuthority(afterProtocol);
     }
 
     private parseUrl(url: string): URL | Error {
@@ -125,8 +108,9 @@ export class ProxyUrlValidator {
             return;
         }
 
-        if (!ProxyUrlValidator.HOSTNAME_PATTERN.test(parsed.hostname)) {
-            errors.push(ProxyUrlValidator.INVALID_HOSTNAME_ERROR);
+        const classified = classifyProxyHostname(parsed.hostname);
+        if (!classified.ok) {
+            errors.push(classified.error);
         }
     }
 
