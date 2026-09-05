@@ -28,6 +28,21 @@ function errorWithCode(message: string, code: string, extras: Record<string, unk
     return Object.assign(new Error(message), { code, ...extras }) as Error & { code: string };
 }
 
+function fakeWindowsNpmEnv(): { env: NodeJS.ProcessEnv; cleanup: () => void } {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-npm-win-'));
+    fs.mkdirSync(path.join(root, 'node_modules', 'npm', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'npm.cmd'), '');
+    fs.writeFileSync(path.join(root, 'node_modules', 'npm', 'bin', 'npm-cli.js'), '');
+    return {
+        env: {
+            ...process.env,
+            PATH: `${root};${process.env.PATH || ''}`,
+            PATHEXT: '.COM;.EXE;.BAT;.CMD'
+        },
+        cleanup: () => fs.rmSync(root, { recursive: true, force: true })
+    };
+}
+
 type DisposableLike = { dispose(): void };
 type ConfigurationChangeEventLike = { affectsConfiguration(section: string): boolean };
 type ConfigurationListener = (event: ConfigurationChangeEventLike) => unknown;
@@ -358,9 +373,10 @@ suite('Assurance: external-boundary contracts', () => {
     test('CT-CLI-NPM-002: Windows npm command port does not use cmd.exe', async () => {
         const calls: CommandCall[] = [];
         const url = 'http://user:x%25OS%25y@proxy.example:8080';
+        const windowsNpm = fakeWindowsNpmEnv();
         const manager = new NpmConfigManager(path.join(os.tmpdir(), 'assurance-npmrc-win'), {
             isWindows: true,
-            env: process.env,
+            env: windowsNpm.env,
             commandAvailable: () => true,
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
@@ -368,17 +384,21 @@ suite('Assurance: external-boundary contracts', () => {
             }
         });
 
-        assert.deepStrictEqual(await manager.setProxy(url), { success: true });
-        assert.ok(calls.length >= 1);
-        const setCalls = calls.filter(call => call.args.includes('set'));
-        assert.ok(setCalls.length >= 1);
-        for (const call of calls) {
-            const base = path.basename(call.command).toLowerCase();
-            assert.ok(base !== 'cmd.exe' && base !== 'cmd', 'Windows npm must not spawn cmd.exe');
-            assert.ok(!call.args.includes('/c'));
-        }
-        for (const call of setCalls) {
-            assert.ok(call.args.includes(url));
+        try {
+            assert.deepStrictEqual(await manager.setProxy(url), { success: true });
+            assert.ok(calls.length >= 1);
+            const setCalls = calls.filter(call => call.args.includes('set'));
+            assert.ok(setCalls.length >= 1);
+            for (const call of calls) {
+                const base = path.basename(call.command).toLowerCase();
+                assert.ok(base !== 'cmd.exe' && base !== 'cmd', 'Windows npm must not spawn cmd.exe');
+                assert.ok(!call.args.includes('/c'));
+            }
+            for (const call of setCalls) {
+                assert.ok(call.args.includes(url));
+            }
+        } finally {
+            windowsNpm.cleanup();
         }
     });
 

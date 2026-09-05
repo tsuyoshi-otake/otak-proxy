@@ -201,9 +201,17 @@ suite('NpmConfigManager Test Suite', () => {
         test('does not invoke cmd.exe when setting a reserved-character credential URL', async () => {
             const calls: Array<{ command: string; args: string[] }> = [];
             const url = 'http://user:x%25OS%25y@proxy.example:8080';
+            const windowsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-npm-win-'));
+            fs.mkdirSync(path.join(windowsRoot, 'node_modules', 'npm', 'bin'), { recursive: true });
+            fs.writeFileSync(path.join(windowsRoot, 'npm.cmd'), '');
+            fs.writeFileSync(path.join(windowsRoot, 'node_modules', 'npm', 'bin', 'npm-cli.js'), '');
             const manager = new NpmConfigManager(userConfigPath, {
                 isWindows: true,
-                env: process.env,
+                env: {
+                    ...process.env,
+                    PATH: `${windowsRoot};${process.env.PATH || ''}`,
+                    PATHEXT: '.COM;.EXE;.BAT;.CMD'
+                },
                 commandAvailable: () => true,
                 commandRunner: async (command, args) => {
                     calls.push({ command, args });
@@ -211,18 +219,22 @@ suite('NpmConfigManager Test Suite', () => {
                 }
             });
 
-            const result = await manager.setProxy(url);
-            assert.strictEqual(result.success, true, result.error);
-            assert.ok(calls.length >= 1);
-            const setCalls = calls.filter(call => call.args.includes('set'));
-            assert.ok(setCalls.length >= 1);
-            for (const call of calls) {
-                assert.strictEqual(isCmdExecutable(call.command), false, 'Windows npm must not start cmd.exe');
-                assert.ok(!call.args.includes('/c'), 'Windows npm must not use cmd /c');
-                assert.ok(!call.args.includes('/s'), 'Windows npm must not use cmd /s');
-            }
-            for (const call of setCalls) {
-                assert.ok(call.args.includes(url), 'proxy URL must remain a single argv element');
+            try {
+                const result = await manager.setProxy(url);
+                assert.strictEqual(result.success, true, result.error);
+                assert.ok(calls.length >= 1);
+                const setCalls = calls.filter(call => call.args.includes('set'));
+                assert.ok(setCalls.length >= 1);
+                for (const call of calls) {
+                    assert.strictEqual(isCmdExecutable(call.command), false, 'Windows npm must not start cmd.exe');
+                    assert.ok(!call.args.includes('/c'), 'Windows npm must not use cmd /c');
+                    assert.ok(!call.args.includes('/s'), 'Windows npm must not use cmd /s');
+                }
+                for (const call of setCalls) {
+                    assert.ok(call.args.includes(url), 'proxy URL must remain a single argv element');
+                }
+            } finally {
+                fs.rmSync(windowsRoot, { recursive: true, force: true });
             }
         });
 
