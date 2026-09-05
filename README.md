@@ -118,7 +118,7 @@ When the proxy is enabled, otak-proxy sets these variables for **newly created**
 - `HTTP_PROXY` / `HTTPS_PROXY`
 - `http_proxy` / `https_proxy` on non-Windows hosts
 
-Existing terminals keep their current environment. Open a new terminal for the updated values to take effect. When `otakProxy.terminalOffMaskingEnabled` is enabled and proxy mode is Off, otak-proxy masks inherited proxy variables for new terminals by replacing them with empty values; this avoids VS Code-launched tools accidentally continuing to use a proxy inherited from the editor process.
+Existing terminals keep their current environment. Open a new terminal for the updated values to take effect. When `otakProxy.terminalOffMaskingEnabled` is enabled and proxy mode is Off, otak-proxy masks `HTTP_PROXY` / `HTTPS_PROXY` (and lowercase variants on non-Windows) for new terminals by replacing them with empty values. This prevents VS Code-launched tools from accidentally continuing to use a proxy inherited from the editor process. `NO_PROXY` / `no_proxy` / `ALL_PROXY` / `all_proxy` are left unchanged unless otak-proxy previously wrote them.
 
 ## Settings
 
@@ -193,7 +193,7 @@ For stricter corporate environments, prefer:
 | `otakProxy.remediationFlapCooldownMs` | `600000` | Cooldown after repeated remediation failures |
 | `otakProxy.notificationCooldownMs` | `600000` | Minimum interval before repeating a notification for the same issue |
 | `otakProxy.slowDiagnosticsTtlMs` | `300000` | Cache TTL for slow diagnostics that spawn Git, npm, or Windows commands |
-| `otakProxy.terminalOffMaskingEnabled` | `true` | Mask inherited proxy env vars for new terminals when proxy mode is Off |
+| `otakProxy.terminalOffMaskingEnabled` | `true` | Mask HTTP_PROXY/HTTPS_PROXY for new terminals when Off. Does not change NO_PROXY unless otak-proxy wrote it |
 | `otakProxy.notificationLevel` | `"warnings"` | Notification level: `off`, `important`, `warnings`, or `all` |
 | `otakProxy.windowsActionsEnabled` | `false` | Allow user-approved Windows proxy actions such as WinHTTP reset |
 | `otakProxy.credentialTargetPolicy` | `"ask"` | Control authenticated proxy writes to plaintext target files: `ask`, `allowPlaintextTargets`, or `blockPlaintextTargets`; use `blockPlaintextTargets` when policy forbids credentials in tool config files |

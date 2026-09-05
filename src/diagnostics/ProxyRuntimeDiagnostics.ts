@@ -362,10 +362,18 @@ export class ProxyRuntimeDiagnostics {
             }));
         }
 
+        const ownedVars = Object.keys(mutators).sort();
+        const maskedVars = ownedVars.filter(name => {
+            const mutator = mutators[name];
+            return typeof mutator === 'object' && mutator !== null && (mutator as { value?: unknown }).value === '';
+        });
+
         return {
             observation: {
                 inheritedEnv,
                 mutators,
+                ownedVars,
+                maskedVars,
                 terminalCount: vscode.window.terminals.length,
                 collectionPersistent: collection?.persistent,
                 collectionDescription: collection?.description?.toString()
