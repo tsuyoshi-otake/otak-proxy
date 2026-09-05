@@ -48,6 +48,8 @@ const defaultCommandRunner: GitCommandRunner = async (command, args, options) =>
 export type { GitConfigOperationOptions, GitProxyKey, OperationResult } from './GitConfigTypes';
 export const GIT_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
+export const GIT_ROUTING_PROXY_KEY: GitProxyKey = 'http.proxy';
+export const GIT_LEGACY_NON_ROUTING_PROXY_KEY: GitProxyKey = 'https.proxy';
 export interface GitProxyValues {
     'http.proxy': string | null;
     'https.proxy': string | null;
@@ -132,7 +134,9 @@ export class GitConfigManager {
     }
 
     /**
-     * Sets Git global proxy configuration for both http and https
+     * Sets the Git routing proxy. Git's HTTP stack uses only `http.proxy` for
+     * both HTTP and HTTPS remotes (HTTPS uses CONNECT). `https.proxy` is not a
+     * routing plane and is not written here; Off still unsets leftover values.
      * @param url - Validated proxy URL
      * @returns Result with success status and any errors
      */
@@ -142,18 +146,18 @@ export class GitConfigManager {
                 const snapshot = await this.readProxySnapshot();
                 const written: GitProxyKey[] = [];
                 try {
-                    await this.execGitConfigWithRetry(['config', '--global', '--replace-all', 'http.proxy', url], options);
-                    written.push('http.proxy');
-                    await this.execGitConfigWithRetry(['config', '--global', '--replace-all', 'https.proxy', url], options);
-                    written.push('https.proxy');
+                    await this.execGitConfigWithRetry(
+                        ['config', '--global', '--replace-all', GIT_ROUTING_PROXY_KEY, url],
+                        options
+                    );
+                    written.push(GIT_ROUTING_PROXY_KEY);
                     await this.assertWrittenValues(url, written);
                 } catch (error) {
                     if (written.length === 0) {
                         throw error;
                     }
-                    const failedKey = written.includes('https.proxy') ? undefined : 'https.proxy';
                     const compensation = await this.compensatePartialSet(written, url, snapshot, options);
-                    compensation.summary = summarizePartialWriteCompensation(failedKey, compensation);
+                    compensation.summary = summarizePartialWriteCompensation(GIT_ROUTING_PROXY_KEY, compensation);
                     const wrapped = error instanceof Error ? error : new Error(String(error));
                     (wrapped as Error & { otakPartialWrite: typeof compensation }).otakPartialWrite = compensation;
                     throw wrapped;
@@ -368,15 +372,15 @@ export class GitConfigManager {
     }
 
     /**
-     * Gets current Git proxy configuration
-     * @returns Current proxy URL or null if not configured
+     * Gets the Git routing proxy (`http.proxy` only).
+     * A leftover `https.proxy` is not treated as a configured routing plane.
      */
     async getProxy(): Promise<string | null> {
         const inspection = await this.inspectProxy();
         if (inspection.status !== 'available' || !inspection.values) {
             return null;
         }
-        return inspection.values['http.proxy'] || inspection.values['https.proxy'];
+        return inspection.values[GIT_ROUTING_PROXY_KEY];
     }
 
     async inspectProxy(): Promise<GitProxyInspection> {

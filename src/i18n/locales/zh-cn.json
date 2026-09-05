@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code 是使用与代理相关的进程标志启动的",
   "diagnose.reason.inheritedProxyEnv": "新终端可能会继承代理环境变量",
   "diagnose.reason.existingTerminals": "现有终端会保留其旧的代理环境",
-  "diagnose.reason.legacyHttpsProxy": "配置了旧版 Git https.proxy",
+  "diagnose.reason.legacyHttpsProxy": "配置了旧版 Git https.proxy，它不用于 HTTP/HTTPS 路由",
   "diagnose.reason.effectiveOverride": "Git 存在生效的代理覆盖",
   "diagnose.reason.npmNoproxy": "配置了 npm noproxy，可能会绕过代理",
   "diagnose.target.windowsWinhttp": "WinHTTP 代理诊断",

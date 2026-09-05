@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "تم تشغيل VS Code بعلامات عملية متعلقة بالوكيل",
   "diagnose.reason.inheritedProxyEnv": "قد ترث الطرفيات الجديدة متغيرات بيئة الوكيل",
   "diagnose.reason.existingTerminals": "تحتفظ الطرفيات الحالية ببيئة الوكيل القديمة",
-  "diagnose.reason.legacyHttpsProxy": "تم تهيئة Git https.proxy قديم",
+  "diagnose.reason.legacyHttpsProxy": "تم تهيئة Git https.proxy قديم وهو غير مستخدم لتوجيه HTTP/HTTPS",
   "diagnose.reason.effectiveOverride": "لدى Git تجاوز وكيل فعّال",
   "diagnose.reason.npmNoproxy": "تم تهيئة npm noproxy وقد يتجاوز الوكيل",
   "diagnose.target.windowsWinhttp": "تشخيص وكيل WinHTTP",

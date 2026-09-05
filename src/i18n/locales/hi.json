@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code प्रॉक्सी-संबंधित प्रोसेस फ़्लैग के साथ लॉन्च हुआ",
   "diagnose.reason.inheritedProxyEnv": "नए टर्मिनल प्रॉक्सी परिवेश चर विरासत में ले सकते हैं",
   "diagnose.reason.existingTerminals": "मौजूदा टर्मिनल अपना पुराना प्रॉक्सी परिवेश बनाए रखते हैं",
-  "diagnose.reason.legacyHttpsProxy": "लीगेसी Git https.proxy कॉन्फ़िगर है",
+  "diagnose.reason.legacyHttpsProxy": "लीगेसी Git https.proxy कॉन्फ़िगर है और HTTP/HTTPS रूटिंग के लिए उपयोग नहीं होता",
   "diagnose.reason.effectiveOverride": "Git में एक प्रभावी प्रॉक्सी ओवरराइड है",
   "diagnose.reason.npmNoproxy": "npm noproxy कॉन्फ़िगर है और प्रॉक्सी को बायपास कर सकता है",
   "diagnose.target.windowsWinhttp": "WinHTTP प्रॉक्सी निदान",

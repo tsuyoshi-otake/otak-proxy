@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code, proxy ile ilgili işlem bayraklarıyla başlatıldı",
   "diagnose.reason.inheritedProxyEnv": "yeni terminaller proxy ortam değişkenlerini devralabilir",
   "diagnose.reason.existingTerminals": "mevcut terminaller eski proxy ortamlarını korur",
-  "diagnose.reason.legacyHttpsProxy": "eski Git https.proxy yapılandırılmış",
+  "diagnose.reason.legacyHttpsProxy": "eski Git https.proxy yapılandırılmış ve HTTP/HTTPS yönlendirmesi için kullanılmaz",
   "diagnose.reason.effectiveOverride": "Git'in etkin bir proxy geçersiz kılması var",
   "diagnose.reason.npmNoproxy": "npm noproxy yapılandırılmış ve proxy'yi atlayabilir",
   "diagnose.target.windowsWinhttp": "WinHTTP proxy tanılaması",

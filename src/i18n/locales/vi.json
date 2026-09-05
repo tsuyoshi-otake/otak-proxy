@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code được khởi chạy với các cờ tiến trình liên quan đến proxy",
   "diagnose.reason.inheritedProxyEnv": "các terminal mới có thể kế thừa các biến môi trường proxy",
   "diagnose.reason.existingTerminals": "các terminal hiện có vẫn giữ môi trường proxy cũ",
-  "diagnose.reason.legacyHttpsProxy": "Git https.proxy cũ đang được cấu hình",
+  "diagnose.reason.legacyHttpsProxy": "Git https.proxy cũ đang được cấu hình và không được dùng cho định tuyến HTTP/HTTPS",
   "diagnose.reason.effectiveOverride": "Git có một ghi đè proxy đang có hiệu lực",
   "diagnose.reason.npmNoproxy": "npm noproxy được cấu hình và có thể bỏ qua proxy",
   "diagnose.target.windowsWinhttp": "Chẩn đoán proxy WinHTTP",

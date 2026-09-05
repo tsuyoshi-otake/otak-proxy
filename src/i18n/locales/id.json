@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code diluncurkan dengan bendera proses terkait proxy",
   "diagnose.reason.inheritedProxyEnv": "terminal baru mungkin mewarisi variabel lingkungan proxy",
   "diagnose.reason.existingTerminals": "terminal yang ada mempertahankan lingkungan proxy lamanya",
-  "diagnose.reason.legacyHttpsProxy": "Git https.proxy lama dikonfigurasi",
+  "diagnose.reason.legacyHttpsProxy": "Git https.proxy lama dikonfigurasi dan tidak digunakan untuk perutean HTTP/HTTPS",
   "diagnose.reason.effectiveOverride": "Git memiliki penggantian proxy yang berlaku",
   "diagnose.reason.npmNoproxy": "npm noproxy dikonfigurasi dan dapat melewati proxy",
   "diagnose.target.windowsWinhttp": "Diagnostik proxy WinHTTP",

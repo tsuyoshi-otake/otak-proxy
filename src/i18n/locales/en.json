@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code was launched with proxy-related process flags",
   "diagnose.reason.inheritedProxyEnv": "new terminals may inherit proxy environment variables",
   "diagnose.reason.existingTerminals": "existing terminals keep their old proxy environment",
-  "diagnose.reason.legacyHttpsProxy": "legacy Git https.proxy is configured",
+  "diagnose.reason.legacyHttpsProxy": "legacy Git https.proxy is configured and is not used for HTTP/HTTPS routing",
   "diagnose.reason.effectiveOverride": "Git has an effective proxy override",
   "diagnose.reason.npmNoproxy": "npm noproxy is configured and may bypass the proxy",
   "diagnose.target.windowsWinhttp": "WinHTTP proxy diagnostics",

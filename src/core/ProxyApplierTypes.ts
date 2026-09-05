@@ -59,6 +59,7 @@ export interface OwnedTargetUnsetRequest {
 
 export interface ProxyOwnershipAdapter {
     targets: Array<{ targetId: string; targetHost: TargetHost }>;
+    applyTargetIds?: readonly string[];
     inspect(): Promise<ProxyOwnershipInspection>;
     unsetTargets(
         targets: readonly OwnedTargetUnsetRequest[],

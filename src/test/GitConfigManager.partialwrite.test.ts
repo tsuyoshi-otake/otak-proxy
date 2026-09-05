@@ -25,7 +25,7 @@ function isGitWrite(args: string[], key: GitProxyKey): boolean {
 }
 
 function createMemoryGit(options: {
-    failHttpsWrite?: boolean;
+    failVerifyAfterWrite?: boolean;
     externalizeHttpAfterWrite?: boolean;
     failHttpUnset?: boolean;
 }): { values: Record<GitProxyKey, string | null>; runner: GitCommandRunner } {
@@ -34,6 +34,7 @@ function createMemoryGit(options: {
         'https.proxy': null
     };
 
+    let inspectCount = 0;
     const runner: GitCommandRunner = async (_command, args) => {
         if (args.includes('--get-all')) {
             const key: GitProxyKey = args.includes('https.proxy') ? 'https.proxy' : 'http.proxy';
@@ -44,6 +45,10 @@ function createMemoryGit(options: {
         }
 
         if (args.includes('--get-regexp')) {
+            inspectCount += 1;
+            if (options.failVerifyAfterWrite && inspectCount === 2) {
+                return { stdout: 'http.proxy http://verify-mismatch.example:1\n', stderr: '' };
+            }
             const lines: string[] = [];
             if (values['http.proxy']) {
                 lines.push(`http.proxy ${values['http.proxy']}`);
@@ -71,8 +76,8 @@ function createMemoryGit(options: {
 
         const key: GitProxyKey = args.includes('https.proxy') ? 'https.proxy' : 'http.proxy';
         const value = args[args.length - 1];
-        if (options.failHttpsWrite && isGitWrite(args, 'https.proxy')) {
-            throw execError(128, 'error: could not write https.proxy');
+        if (isGitWrite(args, 'https.proxy')) {
+            throw execError(128, 'https.proxy must not be written');
         }
         values[key] = value;
         if (options.externalizeHttpAfterWrite && key === 'http.proxy') {
@@ -99,9 +104,6 @@ function createIsolatedGit(): {
     };
 
     const runner: GitCommandRunner = async (command, args, options) => {
-        if (isGitWrite(args, 'https.proxy')) {
-            throw execError(128, 'error: could not write https.proxy');
-        }
         return await execFileAsync(command, args, { ...options, env });
     };
 
@@ -127,9 +129,9 @@ function createIsolatedGit(): {
     };
 }
 
-suite('GitConfigManager partial multi-key write (#43)', () => {
-    test('first write succeeds, second write fails, first value is compensated away', async () => {
-        const memory = createMemoryGit({ failHttpsWrite: true });
+suite('GitConfigManager routing-key write compensation (#43, #55)', () => {
+    test('failed write-verify compensates the http.proxy routing write', async () => {
+        const memory = createMemoryGit({ failVerifyAfterWrite: true });
         const manager = new GitConfigManager({ commandRunner: memory.runner });
 
         const result = await manager.setProxy(OWNED);
@@ -141,7 +143,7 @@ suite('GitConfigManager partial multi-key write (#43)', () => {
     });
 
     test('does not restore a snapshot over a value an external writer changed', async () => {
-        const memory = createMemoryGit({ failHttpsWrite: true, externalizeHttpAfterWrite: true });
+        const memory = createMemoryGit({ failVerifyAfterWrite: true, externalizeHttpAfterWrite: true });
         const manager = new GitConfigManager({ commandRunner: memory.runner });
 
         const result = await manager.setProxy(OWNED);
@@ -152,7 +154,7 @@ suite('GitConfigManager partial multi-key write (#43)', () => {
     });
 
     test('reports residual keys when compensation cannot remove the written value', async () => {
-        const memory = createMemoryGit({ failHttpsWrite: true, failHttpUnset: true });
+        const memory = createMemoryGit({ failVerifyAfterWrite: true, failHttpUnset: true });
         const manager = new GitConfigManager({ commandRunner: memory.runner });
 
         const result = await manager.setProxy(OWNED);
@@ -165,7 +167,7 @@ suite('GitConfigManager partial multi-key write (#43)', () => {
     });
 
     test('redacts credentials from the failed-write error path', async () => {
-        const memory = createMemoryGit({ failHttpsWrite: true });
+        const memory = createMemoryGit({ failVerifyAfterWrite: true });
         const manager = new GitConfigManager({ commandRunner: memory.runner });
 
         const result = await manager.setProxy(SECRET);
@@ -175,13 +177,13 @@ suite('GitConfigManager partial multi-key write (#43)', () => {
         assert.ok(!JSON.stringify(result).includes(SECRET));
     });
 
-    test('isolated GIT_CONFIG_GLOBAL: https write failure does not leave http.proxy', async function() {
+    test('isolated GIT_CONFIG_GLOBAL: setProxy writes only http.proxy', async function() {
         const isolated = createIsolatedGit();
         try {
             const result = await isolated.manager.setProxy(OWNED);
-            assert.strictEqual(result.success, false);
+            assert.strictEqual(result.success, true, result.error);
             const remaining = await isolated.inspectRaw();
-            assert.strictEqual(remaining.http, null, 'otak-proxy-written http.proxy must not remain');
+            assert.strictEqual(remaining.http, OWNED);
             assert.strictEqual(remaining.https, null);
         } finally {
             isolated.cleanup();

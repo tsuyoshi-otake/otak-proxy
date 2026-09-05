@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code がプロキシ関連のプロセスフラグ付きで起動されました",
   "diagnose.reason.inheritedProxyEnv": "新しいターミナルがプロキシ環境変数を継承する可能性があります",
   "diagnose.reason.existingTerminals": "既存のターミナルは古いプロキシ環境変数を保持します",
-  "diagnose.reason.legacyHttpsProxy": "レガシーな Git https.proxy が設定されています",
+  "diagnose.reason.legacyHttpsProxy": "レガシーな Git https.proxy が設定されています（HTTP/HTTPS の実ルーティングには使われません）",
   "diagnose.reason.effectiveOverride": "Git に有効なプロキシオーバーライドがあります",
   "diagnose.reason.npmNoproxy": "npm noproxy が設定されており、プロキシがバイパスされる可能性があります",
   "diagnose.target.windowsWinhttp": "WinHTTP プロキシ診断",

@@ -218,13 +218,13 @@ suite('Assurance: external-boundary contracts', () => {
 
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/git'), { success: true });
         const writes = calls.filter(call => !call.args.includes('--get-regexp') && !call.args.includes('--get-all'));
-        assert.deepStrictEqual(writes.map(call => call.command), ['git', 'git']);
+        assert.deepStrictEqual(writes.map(call => call.command), ['git']);
         assert.deepStrictEqual(writes.map(call => call.args), [
-            ['config', '--global', '--replace-all', 'http.proxy', 'safe://proxy/git'],
-            ['config', '--global', '--replace-all', 'https.proxy', 'safe://proxy/git']
+            ['config', '--global', '--replace-all', 'http.proxy', 'safe://proxy/git']
         ]);
-        assert.deepStrictEqual(writes.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS, GIT_CONFIG_COMMAND_TIMEOUT_MS]);
-        assert.deepStrictEqual(writes.map(call => call.options.encoding), ['utf8', 'utf8']);
+        assert.ok(!writes.some(call => call.args.includes('https.proxy')), 'https.proxy is leftover/non-routing and must not be written');
+        assert.deepStrictEqual(writes.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS]);
+        assert.deepStrictEqual(writes.map(call => call.options.encoding), ['utf8']);
     });
 
     test('CT-CLI-GIT-002: Git unset exit 5 distinguishes missing from multi-value and never value-less --unset-all', async () => {
@@ -307,16 +307,21 @@ suite('Assurance: external-boundary contracts', () => {
         }
     });
 
-    test('CT-CLI-GIT-003: a failed https.proxy write compensates the --replace-all http.proxy write', async () => {
+    test('CT-CLI-GIT-003: a failed http.proxy write-verify compensates the --replace-all routing write', async () => {
         const calls: string[][] = [];
         const store: { 'http.proxy': string | null; 'https.proxy': string | null } = {
             'http.proxy': null,
             'https.proxy': null
         };
+        let inspectCount = 0;
         const manager = new GitConfigManager({
             commandRunner: async (_command, args) => {
                 calls.push(args);
                 if (args.includes('--get-regexp')) {
+                    inspectCount += 1;
+                    if (inspectCount === 2) {
+                        return { stdout: 'http.proxy http://verify-mismatch.example:1\n', stderr: '' };
+                    }
                     const lines = [
                         store['http.proxy'] ? `http.proxy ${store['http.proxy']}` : '',
                         store['https.proxy'] ? `https.proxy ${store['https.proxy']}` : ''
@@ -332,7 +337,7 @@ suite('Assurance: external-boundary contracts', () => {
                     return { stdout: '', stderr: '' };
                 }
                 if (args.includes('https.proxy')) {
-                    throw Object.assign(new Error('injected https write failure'), { code: 128, stderr: 'error: write failed' });
+                    throw Object.assign(new Error('https.proxy must not be written'), { code: 128 });
                 }
                 store['http.proxy'] = args[args.length - 1];
                 return { stdout: '', stderr: '' };
@@ -343,6 +348,7 @@ suite('Assurance: external-boundary contracts', () => {
         assert.strictEqual(result.success, false);
         assert.strictEqual(store['http.proxy'], null);
         assert.ok(calls.some(args => args.includes('--replace-all') && args.includes('http.proxy')));
+        assert.ok(!calls.some(args => args.includes('--replace-all') && args.includes('https.proxy')));
         assert.ok(calls.some(args =>
             (args.includes('--unset') || args.includes('--unset-all')) && args.includes('http.proxy')
         ));
