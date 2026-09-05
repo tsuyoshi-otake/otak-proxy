@@ -1,6 +1,7 @@
 import { Logger } from '../utils/Logger';
 import { buildDetectedProxyValue, normalizeProxyEndpoint } from './DetectedProxyValue';
 import type { ProxyDetectionWithSource } from './SystemProxyDetector';
+import { createUnsupportedAutoConfigIssue } from '../diagnostics/unsupportedAutoConfig';
 
 export type CommandExecutor = (command: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
@@ -8,6 +9,9 @@ export interface WindowsProxyServerParse {
     http?: string;
     https?: string;
 }
+
+const FALLBACK_MACOS_SERVICES = ['Wi-Fi', 'Ethernet', 'Thunderbolt Ethernet'];
+const REG_VALUE_LINE_PATTERN = /^\s*(\S+)\s+REG_\w+\s+(.+)$/i;
 
 export async function detectPlatformProxyWithSource(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     try {
@@ -31,28 +35,78 @@ export async function detectPlatformProxyWithSource(exec: CommandExecutor): Prom
 const WINDOWS_INTERNET_SETTINGS_KEY =
     'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
 
+function parseRegValue(stdout: string, name: string): string | undefined {
+    const target = name.toLowerCase();
+    for (const line of stdout.split(/\r?\n/)) {
+        const match = REG_VALUE_LINE_PATTERN.exec(line);
+        if (match && match[1].toLowerCase() === target) {
+            return match[2].trim();
+        }
+    }
+    return undefined;
+}
+
+function dwordIsEnabled(value: string | undefined): boolean {
+    if (!value) {
+        return false;
+    }
+    return /0x0*1\b/i.test(value) || value === '1';
+}
+
 async function detectWindowsProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     try {
-        // Query the whole key once: it returns both ProxyEnable and ProxyServer,
-        // so this halves the child processes spawned on every detection cycle
-        // (the only recurring process spawn in the polling loop).
         const { stdout } = await exec('reg', ['query', WINDOWS_INTERNET_SETTINGS_KEY]);
+        const proxyEnable = dwordIsEnabled(parseRegValue(stdout, 'ProxyEnable'));
+        const proxyServer = parseRegValue(stdout, 'ProxyServer');
+        const autoConfigUrl = parseRegValue(stdout, 'AutoConfigURL');
+        const autoDetect = dwordIsEnabled(parseRegValue(stdout, 'AutoDetect'));
+        const bypass = parseRegValue(stdout, 'ProxyOverride');
 
-        const enableMatch = stdout.match(/ProxyEnable\s+REG_DWORD\s+0x(\d)/);
-        if (!enableMatch || enableMatch[1] !== '1') {
-            return { proxyUrl: null, source: null };
+        if (proxyEnable && proxyServer) {
+            const parsed = parseWindowsProxyServer(proxyServer);
+            return buildDetectedProxyValue({
+                http: parsed.http,
+                https: parsed.https,
+                bypass,
+                source: 'windows'
+            });
         }
 
-        const match = stdout.match(/ProxyServer\s+REG_SZ\s+(.+)/);
-        const parsed = match?.[1] ? parseWindowsProxyServer(match[1].trim()) : {};
-        const overrideMatch = stdout.match(/ProxyOverride\s+REG_SZ\s+(.+)/);
+        if (autoConfigUrl) {
+            return {
+                proxyUrl: null,
+                source: 'windows',
+                kind: 'pac',
+                capability: 'unsupported',
+                issue: createUnsupportedAutoConfigIssue({
+                    id: 'windows.wininet.pac',
+                    targetId: 'windows.wininet',
+                    targetHost: 'windowsHost',
+                    source: 'registry',
+                    kind: 'pac',
+                    autoConfigUrl
+                })
+            };
+        }
 
-        return buildDetectedProxyValue({
-            http: parsed.http,
-            https: parsed.https,
-            bypass: overrideMatch?.[1]?.trim(),
-            source: 'windows'
-        });
+        if (autoDetect) {
+            return {
+                proxyUrl: null,
+                source: 'windows',
+                kind: 'wpad',
+                capability: 'unsupported',
+                issue: createUnsupportedAutoConfigIssue({
+                    id: 'windows.wininet.wpad',
+                    targetId: 'windows.wininet',
+                    targetHost: 'windowsHost',
+                    source: 'registry',
+                    kind: 'wpad',
+                    evidence: { observation: 'registry AutoDetect' }
+                })
+            };
+        }
+
+        return { proxyUrl: null, source: null };
     } catch (error) {
         Logger.error('Windows registry query failed:', error);
         return { proxyUrl: null, source: null };
@@ -85,8 +139,40 @@ export function parseWindowsProxyServer(proxyValue: string): WindowsProxyServerP
     return parsed;
 }
 
+export function parseMacOSNetworkServices(stdout: string): string[] {
+    const services: string[] = [];
+    for (const raw of stdout.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line) {
+            continue;
+        }
+        if (/asterisk/i.test(line) && /disabled/i.test(line)) {
+            continue;
+        }
+        if (line.startsWith('*')) {
+            continue;
+        }
+        services.push(line);
+    }
+    return services;
+}
+
+async function listMacOSNetworkServices(exec: CommandExecutor): Promise<string[]> {
+    try {
+        const { stdout } = await exec('networksetup', ['-listallnetworkservices']);
+        const services = parseMacOSNetworkServices(stdout);
+        if (services.length > 0) {
+            return services;
+        }
+    } catch (error) {
+        Logger.debug('networksetup -listallnetworkservices failed; falling back to well-known names:', error);
+    }
+    return [...FALLBACK_MACOS_SERVICES];
+}
+
 async function detectMacOSProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
-    const interfaces = ['Wi-Fi', 'Ethernet', 'Thunderbolt Ethernet'];
+    const interfaces = await listMacOSNetworkServices(exec);
+    let firstPacUrl: string | undefined;
 
     for (const iface of interfaces) {
         const http = await readMacNetworkProxy(exec, '-getwebproxy', iface);
@@ -98,6 +184,26 @@ async function detectMacOSProxy(exec: CommandExecutor): Promise<ProxyDetectionWi
                 source: 'macos'
             });
         }
+        if (!firstPacUrl) {
+            firstPacUrl = await readMacAutoProxyUrl(exec, iface);
+        }
+    }
+
+    if (firstPacUrl) {
+        return {
+            proxyUrl: null,
+            source: 'macos',
+            kind: 'pac',
+            capability: 'unsupported',
+            issue: createUnsupportedAutoConfigIssue({
+                id: 'macos.networksetup.pac',
+                targetId: 'macos.networksetup',
+                targetHost: 'unavailable',
+                source: 'networksetup',
+                kind: 'pac',
+                autoConfigUrl: firstPacUrl
+            })
+        };
     }
 
     return { proxyUrl: null, source: null };
@@ -123,9 +229,40 @@ async function readMacNetworkProxy(
     return undefined;
 }
 
+async function readMacAutoProxyUrl(exec: CommandExecutor, iface: string): Promise<string | undefined> {
+    try {
+        const { stdout } = await exec('networksetup', ['-getautoproxyurl', iface]);
+        const enabledMatch = stdout.match(/Enabled:\s*(\w+)/);
+        const urlMatch = stdout.match(/URL:\s*(.+)/);
+        const url = urlMatch?.[1]?.trim();
+        if (enabledMatch?.[1] === 'Yes' && url && url !== '(null)') {
+            return url;
+        }
+    } catch (error) {
+        Logger.debug(`Interface ${iface} -getautoproxyurl not available or failed:`, error);
+    }
+    return undefined;
+}
+
 async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     try {
         const { stdout: mode } = await exec('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
+
+        if (mode.includes('auto')) {
+            return {
+                proxyUrl: null,
+                source: 'linux',
+                kind: 'pac',
+                capability: 'unsupported',
+                issue: createUnsupportedAutoConfigIssue({
+                    id: 'linux.gnome.auto',
+                    targetId: 'linux.gsettings',
+                    targetHost: 'unavailable',
+                    source: 'gsettings',
+                    kind: 'pac'
+                })
+            };
+        }
 
         if (!mode.includes('manual')) {
             return { proxyUrl: null, source: null };

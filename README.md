@@ -94,6 +94,12 @@ There is **no separate Manual mode**: a URL entered via `otak: Configure Manual 
   │ ⌁ Auto (Fallback): http://192.168.1.2:88 │  no system proxy; using your configured
   │                                          │  fallback URL (plug icon)
   ├──────────────────────────────────────────┤
+  │ ⚠ Auto: PAC unsupported                  │  PAC / GNOME auto / similar auto-config
+  │                                          │  was detected; otak-proxy cannot resolve it
+  ├──────────────────────────────────────────┤
+  │ ⌁ Auto (Fallback, ignoring PAC): url     │  unsupported auto-config; using your
+  │                                          │  configured fallback and saying so
+  ├──────────────────────────────────────────┤
   │ ⊘ Auto: OFF                              │  no reachable proxy right now; retested
   │                                          │  automatically in the background
   ├──────────────────────────────────────────┤
@@ -110,6 +116,12 @@ The detailed status bar hover tooltip remains enabled by default. The otak-proxy
 ### Auto Detection Scope
 
 Auto detection uses `otakProxy.detectionSourcePriority`, such as environment variables, VS Code settings, and platform proxy settings. Platform-specific behavior can differ between local Windows, macOS, Linux, WSL, containers, and remote extension hosts. Windows registry and WinHTTP actions are available only when the extension host is running on local Windows.
+
+PAC / WPAD / GNOME `mode=auto` are reported as **detected but unsupported** (`kind: pac|wpad`, capability `unsupported`). They are not treated as “no proxy”. otak-proxy does not ship a PAC/WPAD engine. If a manual fallback URL is used, the status bar says the auto-config is being ignored.
+
+Windows: `ProxyEnable=0` with `AutoConfigURL` is unsupported PAC. A registry `AutoDetect=1` bit without `AutoConfigURL` is reported as unsupported WPAD as a **registry observation only** — whether WPAD was the effective path was not lab-confirmed.
+
+macOS: services are enumerated with `networksetup -listallnetworkservices` (disabled `*` services skipped). A usable web / secure-web proxy on any enumerated service wins; an enabled auto-proxy URL is unsupported PAC. The three well-known names (`Wi-Fi` / `Ethernet` / `Thunderbolt Ethernet`) remain the fallback when listing fails. **Which service is the OS effective/default route was not verified on a Darwin lab machine.**
 
 ### Integrated Terminal Environment
 

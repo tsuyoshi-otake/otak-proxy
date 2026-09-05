@@ -3,10 +3,10 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
-import type { ProxyValueKind } from '../core/v3Types';
 import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
 import { buildDetectedProxyValue } from './DetectedProxyValue';
 import { getProxyPublicUrl } from '../utils/ProxyStateSanitizer';
+import type { ProxyCapability, ProxyIssue, ProxyValueKind } from '../core/v3Types';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,7 +16,9 @@ const execFileAsync = promisify(execFile);
 export type DetectionSource = 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | null;
 
 /**
- * Result of proxy detection with source information
+ * Result of proxy detection with source information.
+ * `kind` / `capability` reuse the v3 value-kind and capability enums so PAC/WPAD
+ * can be reported as detected-but-unsupported instead of collapsing to none (#58).
  */
 export interface ProxyDetectionWithSource {
     proxyUrl: string | null;
@@ -25,6 +27,14 @@ export interface ProxyDetectionWithSource {
     httpUrl?: string;
     httpsUrl?: string;
     bypass?: string;
+    capability?: ProxyCapability;
+    issue?: ProxyIssue;
+}
+
+export function isUnsupportedAutoConfig(
+    result: Pick<ProxyDetectionWithSource, 'kind' | 'capability'>
+): boolean {
+    return result.capability === 'unsupported' && (result.kind === 'pac' || result.kind === 'wpad');
 }
 
 /**
@@ -115,7 +125,7 @@ export class SystemProxyDetector {
         try {
             for (const source of this.detectionSourcePriority) {
                 const result = await this.detectFromSource(source);
-                if (result.proxyUrl !== null) {
+                if (result.proxyUrl !== null || isUnsupportedAutoConfig(result)) {
                     return result;
                 }
             }
@@ -166,6 +176,10 @@ export class SystemProxyDetector {
     }
 
     private validateDetectedValue(result: ProxyDetectionWithSource, label: string): ProxyDetectionWithSource {
+        if (isUnsupportedAutoConfig(result)) {
+            return result;
+        }
+
         const httpUrl = this.validOptionalUrl(result.httpUrl, `${label} HTTP`);
         const httpsUrl = this.validOptionalUrl(result.httpsUrl, `${label} HTTPS`);
         if (httpUrl || httpsUrl) {

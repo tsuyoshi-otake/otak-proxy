@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
 import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptionsFromState } from '../config/DetectedProxyValue';
+import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
@@ -9,7 +11,6 @@ import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration, sameLog
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
-import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 
 export class SystemProxyUpdateService {
     constructor(
@@ -48,7 +49,7 @@ export class SystemProxyUpdateService {
             return;
         }
         state.lastSystemProxyCheck = now;
-        state.systemProxyDetected = !!detectedProxy;
+        state.systemProxyDetected = !!detectedProxy || isUnsupportedAutoConfig(detected);
 
         if (state.mode === ProxyMode.Auto) {
             await this.updateAutoProxyState(started, state, detected, detectedSource);
@@ -76,11 +77,21 @@ export class SystemProxyUpdateService {
         const previousProxy = state.autoProxyUrl;
         const previousHttps = state.autoHttpsProxyUrl;
         const wasAutoModeOff = state.autoModeOff === true;
+        const previousKind = state.lastDetectionKind;
         const detectedProxy = detected.proxyUrl;
 
         if (detectedProxy) {
             this.applyDetectedProxyState(state, detected, detectedSource);
+        } else if (isUnsupportedAutoConfig(detected)) {
+            await this.applyUnsupportedAutoConfigState(state, detected);
+            if (!state.usingFallbackProxy) {
+                await this.saveAndPublishState(started, state);
+                this.notifyUnsupportedAutoConfig(state, previousKind);
+                this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
+                return;
+            }
         } else {
+            this.clearAutoConfigMetadata(state);
             await this.applyFallbackProxyState(state);
         }
 
@@ -108,7 +119,56 @@ export class SystemProxyUpdateService {
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         state.lastDetectionSource = detectedSource;
+        state.lastDetectionKind = detected.kind ?? 'singleProxy';
+        state.lastDetectionCapability = detected.capability ?? 'supported';
         setRequiresAuthFromLiveUrls(state);
+    }
+
+    private async applyUnsupportedAutoConfigState(
+        state: ProxyState,
+        detected: ProxyDetectionWithSource
+    ): Promise<void> {
+        state.systemProxyDetected = true;
+        state.autoModeOff = false;
+        state.lastDetectionKind = detected.kind;
+        state.lastDetectionCapability = detected.capability;
+        state.lastDetectionSource = detected.source ?? undefined;
+        clearDetectedSplitFields(state);
+
+        const config = vscode.workspace.getConfiguration('otakProxy');
+        const fallbackEnabled = config.get<boolean>('enableFallback', true);
+
+        if (fallbackEnabled && state.manualProxyUrl && await this.isFallbackReachable(state.manualProxyUrl)) {
+            state.autoProxyUrl = state.manualProxyUrl;
+            state.usingFallbackProxy = true;
+            state.fallbackProxyUrl = state.manualProxyUrl;
+            setRequiresAuthFromLiveUrls(state);
+            Logger.log(`Ignoring unsupported auto-config (${detected.kind}); using fallback proxy`);
+            return;
+        }
+
+        state.usingFallbackProxy = false;
+        state.fallbackProxyUrl = undefined;
+        setRequiresAuthFromLiveUrls(state);
+        Logger.log(`System auto-config detected but unsupported (${detected.kind})`);
+    }
+
+    private clearAutoConfigMetadata(state: ProxyState): void {
+        state.lastDetectionKind = 'direct';
+        state.lastDetectionCapability = 'supported';
+    }
+
+    private notifyUnsupportedAutoConfig(
+        state: ProxyState,
+        previousKind: ProxyState['lastDetectionKind']
+    ): void {
+        if (previousKind === 'pac' || previousKind === 'wpad') {
+            return;
+        }
+        this.context.userNotifier.showWarning(
+            'warning.unsupportedAutoConfig',
+            { kind: unsupportedAutoConfigKindLabel(state.lastDetectionKind) }
+        );
     }
 
     private async saveAndApplyAutoProxyState(
@@ -199,12 +259,26 @@ export class SystemProxyUpdateService {
         detected: ProxyDetectionWithSource,
         detectedSource: AppliedProxySource | undefined
     ): Promise<void> {
+        if (isUnsupportedAutoConfig(detected)) {
+            state.lastDetectionSource = detected.source ?? undefined;
+            state.lastDetectionKind = detected.kind;
+            state.lastDetectionCapability = detected.capability;
+            clearDetectedSplitFields(state);
+            setRequiresAuthFromLiveUrls(state);
+            await this.saveAndPublishState(started, state);
+            return;
+        }
+
         if (detected.proxyUrl) {
             assignDetectedProxyToState(state, detected);
             state.lastDetectionSource = detectedSource;
+            state.lastDetectionKind = detected.kind ?? 'singleProxy';
+            state.lastDetectionCapability = detected.capability ?? 'supported';
         } else {
             state.autoProxyUrl = undefined;
             state.lastDetectionSource = undefined;
+            state.lastDetectionKind = 'direct';
+            state.lastDetectionCapability = 'supported';
             clearDetectedSplitFields(state);
         }
         setRequiresAuthFromLiveUrls(state);
@@ -225,7 +299,9 @@ export class SystemProxyUpdateService {
             autoProxyKind: state.autoProxyKind,
             autoHttpProxyUrl: state.autoHttpProxyUrl,
             autoHttpsProxyUrl: state.autoHttpsProxyUrl,
-            detectedBypass: state.detectedBypass
+            detectedBypass: state.detectedBypass,
+            lastDetectionKind: state.lastDetectionKind,
+            lastDetectionCapability: state.lastDetectionCapability
         }));
         if (outcome === 'stale') {
             return;

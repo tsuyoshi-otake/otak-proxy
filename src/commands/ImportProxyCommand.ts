@@ -10,6 +10,8 @@
 
 import * as vscode from 'vscode';
 import { ProxyMode, type AppliedProxySource, type ProxyState } from '../core/types';
+import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { validateProxyUrl, sanitizeProxyUrl, testProxyConnection, detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
@@ -41,6 +43,24 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
         const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
 
         const state = await ctx.getProxyState();
+
+        if (isUnsupportedAutoConfig(detected)) {
+            const action = await vscode.window.showWarningMessage(
+                i18n.t('warning.unsupportedAutoConfig', {
+                    kind: unsupportedAutoConfigKindLabel(detected.kind)
+                }),
+                i18n.t('action.configureManual'),
+                i18n.t('action.redetect')
+            );
+
+            if (action === i18n.t('action.configureManual')) {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            } else if (action === i18n.t('action.redetect')) {
+                return await executeImportProxy(ctx);
+            }
+
+            return { success: true };
+        }
 
         if (detectedProxy) {
             // Requirement 2.3: Display sanitized proxy URL to user

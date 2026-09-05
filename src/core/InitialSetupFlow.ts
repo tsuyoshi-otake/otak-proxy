@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { I18nManager } from '../i18n/I18nManager';
+import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
+import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource, validateProxyUrl } from '../utils/ProxyUtils';
 import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { InitializerContext } from './ExtensionInitializerTypes';
@@ -82,6 +84,28 @@ export class InitialSetupFlow {
     ): Promise<void> {
         const detected = await detectSystemProxySettingsWithSource();
         const detectedProxy = detected.proxyUrl;
+
+        if (isUnsupportedAutoConfig(detected)) {
+            if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
+                return;
+            }
+            state.systemProxyDetected = true;
+            state.lastDetectionKind = detected.kind;
+            state.lastDetectionCapability = detected.capability;
+            state.lastDetectionSource = detected.source ?? undefined;
+            await this.context.proxyStateManager.saveState(state);
+            const configure = await vscode.window.showWarningMessage(
+                i18n.t('warning.unsupportedAutoConfig', {
+                    kind: unsupportedAutoConfigKindLabel(detected.kind)
+                }),
+                i18n.t('action.configureManual'),
+                i18n.t('action.no')
+            );
+            if (configure === i18n.t('action.configureManual')) {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            }
+            return;
+        }
 
         if (detectedProxy && validateProxyUrl(detectedProxy)) {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {

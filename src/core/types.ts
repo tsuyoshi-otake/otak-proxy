@@ -122,6 +122,8 @@ export interface ProxyState {
     autoHttpProxyUrl?: string;
     autoHttpsProxyUrl?: string;
     detectedBypass?: string;
+    lastDetectionKind?: 'direct' | 'singleProxy' | 'perSchemeProxy' | 'pac' | 'wpad' | 'unknown';
+    lastDetectionCapability?: 'supported' | 'unsupported' | 'readOnly' | 'parseUnavailable' | 'permissionRequired';
 }
 
 /**

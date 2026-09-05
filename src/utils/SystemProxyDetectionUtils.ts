@@ -1,5 +1,5 @@
 import { Logger } from './Logger';
-import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
+import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import {
     getSanitizer,
     getSystemProxyDetector,
@@ -31,6 +31,11 @@ export async function detectSystemProxySettingsWithSource(): Promise<ProxyDetect
 
     try {
         const detected = await detector.detectSystemProxyWithSource();
+
+        if (isUnsupportedAutoConfig(detected)) {
+            Logger.log(`System auto-config detected but unsupported (${detected.kind})`);
+            return detected;
+        }
 
         if (!detected.proxyUrl) {
             Logger.log('No system proxy detected');
