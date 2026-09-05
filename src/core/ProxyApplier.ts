@@ -23,8 +23,9 @@ import {
     OwnedTargetUnsetRequest
 } from './ProxyApplierTypes';
 import { updateProxyConfigTargetDetailed } from './ProxyConfigTargetRunner';
-import { captureLogicalGeneration } from './LogicalGeneration';
+import { LogicalGeneration, captureLogicalGeneration } from './LogicalGeneration';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
+import { ProxyState } from './types';
 import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
 import {
     showAggregatedErrors,
@@ -36,6 +37,11 @@ import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyState
 import { isPerSchemeProxy } from '../config/DetectedProxyValue';
 import { splitCapabilityIssues } from './ProxyTargetCapability';
 import { ProxyIssue } from './v3Types';
+
+export const UNTRUSTED_WORKSPACE_APPLY_MESSAGE =
+    'Proxy settings were not changed because the workspace is untrusted.';
+const INVALID_PROXY_URL_APPLY_MESSAGE =
+    'Proxy settings were not applied because the proxy URL is invalid.';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -69,12 +75,42 @@ export class ProxyApplier {
             return false;
         }
 
-        const message = 'Proxy settings were not changed because the workspace is untrusted.';
-        Logger.warn(message);
+        Logger.warn(UNTRUSTED_WORKSPACE_APPLY_MESSAGE);
         if (!options?.silent) {
-            this.userNotifier.showWarning(message);
+            this.userNotifier.showWarning(UNTRUSTED_WORKSPACE_APPLY_MESSAGE);
         }
         return true;
+    }
+
+    private async recordApplyBlocked(
+        enabled: boolean,
+        errorAggregator: ErrorAggregator,
+        message: string,
+        applyBlocked: NonNullable<ProxyState['applyBlocked']>,
+        started?: LogicalGeneration
+    ): Promise<ProxyConfigResults> {
+        errorAggregator.addError(
+            applyBlocked === 'untrustedWorkspace' ? 'Workspace trust' : 'Proxy URL',
+            message
+        );
+        const results = this.blockedResults();
+        await saveProxyConfigResults(this.stateManager, enabled, results, errorAggregator, started, applyBlocked);
+        return results;
+    }
+
+    private blockedResults(): ProxyConfigResults {
+        return {
+            gitSuccess: false,
+            vscodeSuccess: false,
+            npmSuccess: false,
+            pipSuccess: this.pipManager ? false : undefined,
+            terminalEnvSuccess: false,
+            gitOutcome: 'failed',
+            vscodeOutcome: 'failed',
+            npmOutcome: 'failed',
+            pipOutcome: this.pipManager ? 'failed' : undefined,
+            terminalEnvOutcome: 'failed'
+        };
     }
 
     private async withOptionalProgress<T>(
@@ -193,7 +229,14 @@ export class ProxyApplier {
         }
 
         if (this.blockIfUntrustedWorkspace(options)) {
-            return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
+            const results = await this.recordApplyBlocked(
+                true,
+                errorAggregator,
+                UNTRUSTED_WORKSPACE_APPLY_MESSAGE,
+                'untrustedWorkspace',
+                applyGeneration
+            );
+            return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
         }
         
         const applyOptions = await this.resolveApplyOptions(proxyUrl, options);
@@ -202,10 +245,24 @@ export class ProxyApplier {
         if (this.isSplitApply(applyOptions)) {
             if (!this.validateProxyUrlForApply(applyOptions.httpUrl!) ||
                 !this.validateProxyUrlForApply(applyOptions.httpsUrl!)) {
-                return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
+                const results = await this.recordApplyBlocked(
+                    true,
+                    errorAggregator,
+                    INVALID_PROXY_URL_APPLY_MESSAGE,
+                    'invalidProxyUrl',
+                    applyGeneration
+                );
+                return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
             }
         } else if (proxyUrl && !this.validateProxyUrlForApply(proxyUrl)) {
-            return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
+            const results = await this.recordApplyBlocked(
+                true,
+                errorAggregator,
+                INVALID_PROXY_URL_APPLY_MESSAGE,
+                'invalidProxyUrl',
+                applyGeneration
+            );
+            return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
         }
 
         const capabilityIssues = this.isSplitApply(applyOptions)
@@ -262,7 +319,14 @@ export class ProxyApplier {
         const errorAggregator = new ErrorAggregator();
 
         if (this.blockIfUntrustedWorkspace(options)) {
-            return this.buildDetailedResult(false, false, '', this.emptyResults(), errorAggregator);
+            const results = await this.recordApplyBlocked(
+                false,
+                errorAggregator,
+                UNTRUSTED_WORKSPACE_APPLY_MESSAGE,
+                'untrustedWorkspace',
+                applyGeneration
+            );
+            return this.buildDetailedResult(false, false, '', results, errorAggregator);
         }
         
         const results = await this.withOptionalProgress(

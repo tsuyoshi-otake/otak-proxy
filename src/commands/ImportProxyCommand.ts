@@ -199,15 +199,17 @@ async function handleUseAutoMode(
         state.systemProxyDetected = true;
         setRequiresAuthFromLiveUrls(state);
         await ctx.saveProxyState(state);
-        await ctx.applyProxySettings(detectedProxy, true);
-        ctx.updateStatusBar(state);
+        const applied = await ctx.applyProxySettings(detectedProxy, true);
+        ctx.updateStatusBar(await ctx.getProxyState());
         if (wasAutoMode) {
             await ctx.stopSystemProxyMonitoring();
         }
         await ctx.startSystemProxyMonitoring();
-        ctx.userNotifier.showSuccess('message.switchedToAutoMode', {
-            url: sanitizeProxyUrl(detectedProxy)
-        });
+        if (applied) {
+            ctx.userNotifier.showSuccess('message.switchedToAutoMode', {
+                url: sanitizeProxyUrl(detectedProxy)
+            });
+        }
     } else {
         showInvalidProxyError(ctx);
     }

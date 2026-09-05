@@ -2,6 +2,7 @@ import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { Logger } from '../utils/Logger';
 import { commitUnlessStale } from './GenerationFence';
 import { LogicalGeneration, captureLogicalGeneration } from './LogicalGeneration';
+import { ProxyState } from './types';
 import { ProxyStateManager } from './ProxyStateManager';
 import { ProxyConfigResults } from './ProxyApplierTypes';
 
@@ -10,7 +11,8 @@ export async function saveProxyConfigResults(
     enabled: boolean,
     results: ProxyConfigResults,
     errorAggregator: ErrorAggregator,
-    started?: LogicalGeneration
+    started?: LogicalGeneration,
+    applyBlocked?: ProxyState['applyBlocked']
 ): Promise<void> {
     if (!stateManager) {
         return;
@@ -46,6 +48,7 @@ export async function saveProxyConfigResults(
             terminalEnv: results.terminalEnvOutcome
         };
             next.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
+            next.applyBlocked = applyBlocked;
             return next;
         });
         if (outcome === 'stale') {

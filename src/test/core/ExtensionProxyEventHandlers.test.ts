@@ -177,4 +177,28 @@ suite('ExtensionProxyEventHandlers Tests', () => {
         sinon.assert.notCalled(applyProxySettingsStub);
         sinon.assert.calledOnce(saveStateStub);
     });
+
+    test('apply-blocked Auto does not toast success or paint the pre-apply snapshot', async () => {
+        const showSuccess = context.userNotifier.showSuccess as sinon.SinonStub;
+        applyProxySettingsStub.callsFake(async () => {
+            state.lastError = 'Proxy settings were not changed because the workspace is untrusted.';
+            state.applyBlocked = 'untrustedWorkspace';
+            return false;
+        });
+        const result: ProxyDetectionResult = {
+            proxyUrl: 'http://corp-proxy.example.com:8080',
+            source: 'windows',
+            timestamp: Date.now(),
+            success: true
+        };
+
+        await handleProxyChanged(context, result);
+
+        sinon.assert.calledOnce(applyProxySettingsStub);
+        sinon.assert.notCalled(showSuccess);
+        sinon.assert.calledWith(updateStatusBarStub, sinon.match({
+            applyBlocked: 'untrustedWorkspace',
+            lastError: sinon.match(/untrusted/i)
+        }));
+    });
 });

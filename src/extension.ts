@@ -570,6 +570,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (generation !== activationGeneration) {
             return;
         }
+        statusBarManager.update(target);
         await updateMonitoringForState(target);
         await publishStartupSyncState(target);
     })().catch(error => Logger.warn('Startup proxy enforcement failed:', error));

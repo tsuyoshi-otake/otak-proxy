@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 import { resolveNpmInvocation } from '../utils/NpmInvocation';
 import { ProxyMode, ProxyState } from '../core/types';
 import {
+    createApplyBlockedIssue,
+    deriveRuntimeApplyStateFromProxyState,
     ExecutionContext,
     getHighestPriorityIssue,
     ProxyIssue,
@@ -142,6 +144,12 @@ export class ProxyRuntimeDiagnostics {
         const issues: ProxyIssue[] = [];
         const observations: Record<string, unknown> = {};
 
+        const applyBlocked = this.collectApplyBlocked(state);
+        if (applyBlocked) {
+            observations.applyBlocked = applyBlocked.evidence.applyBlocked;
+            issues.push(applyBlocked);
+        }
+
         const vscodeDiagnostics = this.collectVSCodeDiagnostics();
         observations.vscode = vscodeDiagnostics.observation;
         issues.push(...vscodeDiagnostics.issues);
@@ -192,7 +200,7 @@ export class ProxyRuntimeDiagnostics {
 
         return {
             generatedAt: new Date().toISOString(),
-            runtimeState: 'diagnosed',
+            runtimeState: deriveRuntimeApplyStateFromProxyState(state),
             executionContext,
             issueCount: sanitizedIssues.length,
             highestPriorityCategory: highest?.category,
@@ -595,6 +603,16 @@ export class ProxyRuntimeDiagnostics {
         }
 
         return issues;
+    }
+
+    private collectApplyBlocked(state: ProxyState): ProxyIssue | undefined {
+        if (state.applyBlocked === 'untrustedWorkspace' || vscode.workspace.isTrusted === false) {
+            return createApplyBlockedIssue('untrustedWorkspace');
+        }
+        if (state.applyBlocked) {
+            return createApplyBlockedIssue(state.applyBlocked);
+        }
+        return undefined;
     }
 
     private collectManagedResidualIssues(

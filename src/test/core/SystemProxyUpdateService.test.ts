@@ -184,6 +184,25 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.notCalled(notifyStub);
     });
 
+    test('apply-blocked Auto refreshes the status bar from persisted apply result', async () => {
+        const updateStatusBar = sandbox.stub();
+        context.updateStatusBar = updateStatusBar;
+        state = { mode: ProxyMode.Auto };
+        detectStub.resolves({ proxyUrl: 'http://detected.example:8080', source: 'windows' });
+        applyProxyStub.callsFake(async () => {
+            state.lastError = 'Proxy settings were not changed because the workspace is untrusted.';
+            state.applyBlocked = 'untrustedWorkspace';
+            return false;
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        sinon.assert.calledWith(updateStatusBar, sinon.match({
+            applyBlocked: 'untrustedWorkspace',
+            lastError: sinon.match(/untrusted/i)
+        }));
+    });
+
     test('a toggle completed during detection is not overwritten by the stale Auto snapshot', async () => {
         let resolveDetection!: (value: { proxyUrl: string | null; source: string | null }) => void;
         detectStub.returns(new Promise<{ proxyUrl: string | null; source: string | null }>(resolve => {

@@ -315,5 +315,7 @@
     "diagnose.reason.gnomeAuto": "GNOME proxy mode is auto-config and cannot be applied",
     "diagnose.reason.macosPac": "a macOS automatic proxy URL is configured and cannot be applied",
     "diagnose.target.linuxGnome": "GNOME proxy",
-    "diagnose.target.macosNetwork": "macOS network proxy"
+    "diagnose.target.macosNetwork": "macOS network proxy",
+    "statusbar.autoApplyBlocked": "Auto（已阻止）",
+    "statusbar.tooltip.autoApplyBlocked": "Auto 模式 - 所需代理未应用"
 }

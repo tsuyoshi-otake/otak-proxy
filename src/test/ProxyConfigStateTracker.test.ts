@@ -66,4 +66,42 @@ suite('ProxyConfigStateTracker outcome tests', () => {
         assert.strictEqual(state.vscodeConfigured, false);
         assert.strictEqual(state.terminalEnvConfigured, false);
     });
+
+    test('records applyBlocked on an early refusal and clears it after a successful write', async () => {
+        let state: ProxyState = { mode: ProxyMode.Auto };
+        const stateManager = {
+            getState: async () => ({ ...state }),
+            saveState: async (next: ProxyState) => { state = { ...next }; }
+        } as unknown as ProxyStateManager;
+        const errors = new ErrorAggregator();
+        errors.addError('Workspace trust', 'Proxy settings were not changed because the workspace is untrusted.');
+
+        await saveProxyConfigResults(stateManager, true, {
+            gitSuccess: false,
+            vscodeSuccess: false,
+            npmSuccess: false,
+            terminalEnvSuccess: false,
+            gitOutcome: 'failed',
+            vscodeOutcome: 'failed',
+            npmOutcome: 'failed',
+            terminalEnvOutcome: 'failed'
+        }, errors, undefined, 'untrustedWorkspace');
+
+        assert.strictEqual(state.applyBlocked, 'untrustedWorkspace');
+        assert.ok(state.lastError?.toLowerCase().includes('untrusted'));
+
+        await saveProxyConfigResults(stateManager, true, {
+            gitSuccess: true,
+            vscodeSuccess: true,
+            npmSuccess: true,
+            terminalEnvSuccess: true,
+            gitOutcome: 'configured',
+            vscodeOutcome: 'configured',
+            npmOutcome: 'configured',
+            terminalEnvOutcome: 'configured'
+        }, new ErrorAggregator());
+
+        assert.strictEqual(state.applyBlocked, undefined);
+        assert.strictEqual(state.lastError, undefined);
+    });
 });
