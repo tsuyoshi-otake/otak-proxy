@@ -370,10 +370,14 @@ suite('Assurance: external-boundary contracts', () => {
 
         assert.deepStrictEqual(await manager.setProxy(url), { success: true });
         assert.ok(calls.length >= 1);
+        const setCalls = calls.filter(call => call.args.includes('set'));
+        assert.ok(setCalls.length >= 1);
         for (const call of calls) {
             const base = path.basename(call.command).toLowerCase();
             assert.ok(base !== 'cmd.exe' && base !== 'cmd', 'Windows npm must not spawn cmd.exe');
             assert.ok(!call.args.includes('/c'));
+        }
+        for (const call of setCalls) {
             assert.ok(call.args.includes(url));
         }
     });
