@@ -49,6 +49,7 @@ export interface ProxyOwnershipInspection {
 
 export interface ProxyOwnershipAdapter {
     targets: Array<{ targetId: string; targetHost: TargetHost }>;
+    applyTargetIds?: readonly string[];
     inspect(): Promise<ProxyOwnershipInspection>;
     unsetTargets(targetIds: readonly string[], options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
 }

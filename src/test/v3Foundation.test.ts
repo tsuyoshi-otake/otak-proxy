@@ -486,7 +486,9 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             assert.ok(issueIds.has('npm.managedProxyResidual'));
             assert.ok(issueIds.has('vscode.managedProxyResidual'));
             assert.strictEqual(report.highestPriorityCategory, 'applyFailed');
-            assert.ok(report.issues.every(issue => issue.capability === 'readOnly'));
+            assert.ok(report.issues.every(issue =>
+                issue.id === 'git.legacyHttpsProxy' ? issue.capability === 'unsupported' : issue.capability === 'readOnly'
+            ));
         } finally {
             restoreConfig();
         }
@@ -597,7 +599,9 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             assert.ok(issueIds.has('npm.managedProxyMismatch'));
             assert.ok(issueIds.has('vscode.managedProxyMismatch'));
             assert.strictEqual(report.highestPriorityCategory, 'applyFailed');
-            assert.ok(report.issues.every(issue => issue.capability === 'readOnly'));
+            assert.ok(report.issues.every(issue =>
+                issue.id === 'git.legacyHttpsProxy' ? issue.capability === 'unsupported' : issue.capability === 'readOnly'
+            ));
         } finally {
             restoreConfig();
         }
@@ -692,6 +696,61 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             const issueIds = new Set(report.issues.map(issue => issue.id));
             assert.ok(issueIds.has('git.managedProxyMismatch'), 'a genuinely unset managed proxy is a real, retryable mismatch');
             assert.ok(!issueIds.has('git.readUnavailable'), 'exit 1 is "unset", not a read failure');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics does not treat leftover https.proxy as Git routing success or mismatch', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const expectedProxy = 'http://expected.example.com:8080';
+        const leftoverHttps = 'http://leftover-https.example.com:8080';
+        const restoreConfig = stubConfiguration('', expectedProxy, 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: expectedProxy,
+                    autoModeOff: false,
+                    gitConfigured: true,
+                    npmConfigured: false,
+                    vscodeConfigured: true
+                }),
+                {
+                    commandRunner: async (command, args) => {
+                        if (command === 'git' && args.includes('http.proxy')) {
+                            return { stdout: `${expectedProxy}\n`, stderr: '' };
+                        }
+                        if (command === 'git' && args.includes('https.proxy')) {
+                            return { stdout: `${leftoverHttps}\n`, stderr: '' };
+                        }
+                        if (command === 'git') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        if (command === 'reg' || command === 'netsh') {
+                            return { stdout: '', stderr: '' };
+                        }
+                        return { stdout: 'undefined\n', stderr: '' };
+                    }
+                }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            const git = report.observations.git as Record<string, unknown>;
+            assert.ok(!issueIds.has('git.managedProxyMismatch'), 'http.proxy match is routing convergence; leftover https.proxy is not a second plane');
+            assert.ok(issueIds.has('git.legacyHttpsProxy'));
+            const leftover = report.issues.find(issue => issue.id === 'git.legacyHttpsProxy');
+            assert.strictEqual(leftover?.capability, 'unsupported');
+            assert.strictEqual(leftover?.impact, 'informational');
+            assert.strictEqual(leftover?.evidence.routingRole, 'non-routing');
+            assert.strictEqual(git.routingKey, 'http.proxy');
+            assert.strictEqual(git.routingCapability, 'lossy-single-http.proxy');
+            assert.strictEqual(git.httpsProxyWritten, false);
+            assert.strictEqual(git.legacyHttpsProxyRole, 'non-routing');
         } finally {
             restoreConfig();
         }

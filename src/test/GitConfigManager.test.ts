@@ -1,5 +1,14 @@
 import * as assert from 'assert';
-import { GIT_CONFIG_COMMAND_TIMEOUT_MS, GitConfigManager } from '../config/GitConfigManager';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import {
+    GIT_CONFIG_COMMAND_TIMEOUT_MS,
+    GIT_LEGACY_NON_ROUTING_PROXY_KEY,
+    GIT_ROUTING_PROXY_KEY,
+    GitConfigManager
+} from '../config/GitConfigManager';
+
+const execFileAsync = promisify(execFile);
 
 suite('GitConfigManager Test Suite', () => {
     let gitConfigManager: GitConfigManager;
@@ -37,6 +46,60 @@ suite('GitConfigManager Test Suite', () => {
         test('getProxy should return string or null', async () => {
             const result = await gitConfigManager.getProxy();
             assert.ok(result === null || typeof result === 'string');
+        });
+
+        test('setProxy writes only the http.proxy routing key', async () => {
+            const calls: Array<{ command: string; args: string[] }> = [];
+            const manager = new GitConfigManager({
+                commandRunner: async (command, args) => {
+                    calls.push({ command, args });
+                    return { stdout: '', stderr: '' };
+                }
+            });
+
+            const result = await manager.setProxy('http://proxy.example.com:8080');
+            assert.strictEqual(result.success, true, result.error);
+            assert.deepStrictEqual(calls.map(call => call.args), [
+                ['config', '--global', GIT_ROUTING_PROXY_KEY, 'http://proxy.example.com:8080']
+            ]);
+            assert.ok(!calls.some(call => call.args.includes(GIT_LEGACY_NON_ROUTING_PROXY_KEY)));
+        });
+
+        test('getProxy ignores leftover https.proxy and does not treat it as routing', async () => {
+            const leftover = 'http://leftover-https.example.com:8080';
+            const manager = new GitConfigManager({
+                commandRunner: async (_command, args) => {
+                    if (args.includes('--get-regexp')) {
+                        return { stdout: `${GIT_LEGACY_NON_ROUTING_PROXY_KEY} ${leftover}\n`, stderr: '' };
+                    }
+                    return { stdout: '', stderr: '' };
+                }
+            });
+
+            assert.strictEqual(await manager.getProxy(), null);
+            const inspection = await manager.inspectProxy();
+            assert.strictEqual(inspection.status, 'available');
+            assert.deepStrictEqual(inspection.values, {
+                'http.proxy': null,
+                'https.proxy': leftover
+            });
+        });
+
+        test('unsetProxy still clears leftover https.proxy', async () => {
+            const calls: Array<string[]> = [];
+            const manager = new GitConfigManager({
+                commandRunner: async (_command, args) => {
+                    calls.push(args);
+                    return { stdout: '', stderr: '' };
+                }
+            });
+
+            const result = await manager.unsetProxy();
+            assert.strictEqual(result.success, true, result.error);
+            assert.deepStrictEqual(calls, [
+                ['config', '--global', '--unset', GIT_ROUTING_PROXY_KEY],
+                ['config', '--global', '--unset', GIT_LEGACY_NON_ROUTING_PROXY_KEY]
+            ]);
         });
     });
 
@@ -107,10 +170,29 @@ suite('GitConfigManager Test Suite', () => {
             assert.strictEqual(before.status, 'available');
             assert.deepStrictEqual(before.values, {
                 'http.proxy': testUrl,
-                'https.proxy': testUrl
+                'https.proxy': null
             });
 
-            const unsetResult = await gitConfigManager.unsetProxyKeys(['http.proxy']);
+            try {
+                await execFileAsync('git', ['config', '--global', GIT_LEGACY_NON_ROUTING_PROXY_KEY, testUrl], {
+                    timeout: 15000,
+                    encoding: 'utf8',
+                    windowsHide: true
+                });
+            } catch (error) {
+                this.skip();
+                return;
+            }
+
+            const withLeftover = await gitConfigManager.inspectProxy();
+            assert.strictEqual(withLeftover.status, 'available');
+            assert.deepStrictEqual(withLeftover.values, {
+                'http.proxy': testUrl,
+                'https.proxy': testUrl
+            });
+            assert.strictEqual(await gitConfigManager.getProxy(), testUrl);
+
+            const unsetResult = await gitConfigManager.unsetProxyKeys([GIT_ROUTING_PROXY_KEY]);
             assert.strictEqual(unsetResult.success, true);
 
             const after = await gitConfigManager.inspectProxy();
@@ -119,8 +201,9 @@ suite('GitConfigManager Test Suite', () => {
                 'http.proxy': null,
                 'https.proxy': testUrl
             });
+            assert.strictEqual(await gitConfigManager.getProxy(), null, 'leftover https.proxy is not a routing plane');
 
-            await gitConfigManager.unsetProxyKeys(['https.proxy']);
+            await gitConfigManager.unsetProxyKeys([GIT_LEGACY_NON_ROUTING_PROXY_KEY]);
         });
     });
 });

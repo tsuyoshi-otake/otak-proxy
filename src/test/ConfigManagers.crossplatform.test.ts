@@ -69,7 +69,7 @@ suite('GitConfigManager Cross-Platform Test Suite (Task 3.1)', () => {
     });
 
     suite('Proxy Configuration Keys', () => {
-        test('should set http.proxy and https.proxy keys', async () => {
+        test('should set the http.proxy routing key', async () => {
             // Note: This test verifies the interface, not actual git interaction
             const proxyUrl = TestDataPatterns.expectedProxyUrl;
 

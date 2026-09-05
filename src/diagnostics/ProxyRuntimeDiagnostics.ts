@@ -385,17 +385,26 @@ export class ProxyRuntimeDiagnostics {
         observation.httpProxy = httpProxy.value;
         observation.legacyHttpsProxy = httpsProxy.value;
         observation.overrides = overrides.value;
-        // Only the two --get reads feed convergence checking; the regexp read
-        // only informs git.effectiveOverride. Flag a convergence-blocking read
-        // failure so the managed-mismatch check can skip an unreadable value
-        // instead of treating it as "unset" (#16).
-        observation.readFailed = Boolean(httpProxy.readFailed || httpsProxy.readFailed);
+        observation.routingKey = 'http.proxy';
+        observation.routingCapability = 'lossy-single-http.proxy';
+        observation.httpsProxyWritten = false;
+        observation.legacyHttpsProxyRole = 'non-routing';
+        observation.requestedProxyKind = 'singleProxy';
+        // Only `http.proxy` feeds routing convergence. `https.proxy` is leftover
+        // and is not a second routing plane; a leftover read failure must not
+        // look like "routing unset" (#16, #55).
+        observation.readFailed = Boolean(httpProxy.readFailed);
 
         if (httpsProxy.value) {
-            issues.push(this.issue('git.legacyHttpsProxy', 'info', 'informational', 'git.global.https.proxy', 'workspaceHost', {
+            issues.push(this.issue('git.legacyHttpsProxy', 'capabilityUnavailable', 'informational', 'git.global.https.proxy', 'workspaceHost', {
                 source: 'git config',
-                capability: 'readOnly',
-                evidence: { legacyHttpsProxy: httpsProxy.value }
+                capability: 'unsupported',
+                evidence: {
+                    legacyHttpsProxy: httpsProxy.value,
+                    routingRole: 'non-routing',
+                    gitRoutingKey: 'http.proxy',
+                    httpsProxyWritten: false
+                }
             }));
         }
         if (overrides.value) {
@@ -467,11 +476,10 @@ export class ProxyRuntimeDiagnostics {
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
         const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
         if (state.gitConfigured && !gitReadFailed &&
-            (!this.proxyMatchesExpected(gitHttpProxy, expectedProxy) ||
-                !this.proxyMatchesExpected(gitHttpsProxy, expectedProxy))) {
+            !this.proxyMatchesExpected(gitHttpProxy, expectedProxy)) {
             issues.push(this.issue('git.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
                 expectedSanitized: expectedProxy,
-                actualSanitized: gitHttpProxy ?? gitHttpsProxy ?? 'unset',
+                actualSanitized: gitHttpProxy ?? 'unset',
                 source: 'git config',
                 capability: 'readOnly',
                 evidence: {
@@ -479,8 +487,10 @@ export class ProxyRuntimeDiagnostics {
                     autoModeOff: state.autoModeOff,
                     gitConfigured: state.gitConfigured,
                     expectedProxy,
+                    routingKey: 'http.proxy',
                     httpProxy: gitHttpProxy,
-                    legacyHttpsProxy: gitHttpsProxy
+                    legacyHttpsProxy: gitHttpsProxy,
+                    leftoverHttpsProxyDoesNotAffectRouting: true
                 }
             }));
         }
@@ -533,17 +543,18 @@ export class ProxyRuntimeDiagnostics {
         const issues: ProxyIssue[] = [];
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
         const gitHttpsProxy = this.observedString(observations.git, 'legacyHttpsProxy');
-        if (gitHttpProxy || gitHttpsProxy) {
+        if (gitHttpProxy) {
             const preserved = state.targetOutcomes?.git === 'preservedExternal';
             issues.push(this.issue('git.managedProxyResidual', preserved ? 'externalOverride' : 'applyFailed', preserved ? 'advisoryResidualRisk' : 'blocksConvergence', 'git.global.proxy', 'workspaceHost', {
                 expectedSanitized: 'unset',
-                actualSanitized: gitHttpProxy ?? gitHttpsProxy,
+                actualSanitized: gitHttpProxy,
                 source: 'git config',
                 capability: 'readOnly',
                 evidence: {
                     mode: state.mode,
                     autoModeOff: state.autoModeOff,
                     gitConfigured: state.gitConfigured,
+                    routingKey: 'http.proxy',
                     httpProxy: gitHttpProxy,
                     legacyHttpsProxy: gitHttpsProxy
                 }

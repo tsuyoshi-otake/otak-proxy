@@ -216,7 +216,7 @@ Access via the Command Palette (`Cmd/Ctrl+Shift+P`):
 ### Local Configuration Changes
 
 - VS Code: writes the global `http.proxy` setting through the VS Code configuration API.
-- Git: writes global `http.proxy` and `https.proxy` with `git config --global`.
+- Git: writes global `http.proxy` with `git config --global`. Git's HTTP stack uses that single key for both HTTP remotes and HTTPS remotes (HTTPS uses CONNECT). `https.proxy` is a leftover/non-routing key: otak-proxy does not write it, and Off still unsets an owned leftover.
 - npm: writes user-level `proxy` and `https-proxy` with `npm config set`.
 - Integrated terminals: sets `HTTP_PROXY` and `HTTPS_PROXY` for new terminals, and lowercase variants on non-Windows hosts.
 - Off clears the proxy entries managed by otak-proxy. Deactivating or uninstalling the extension does not guarantee cleanup by itself; switch Off before uninstalling, or use the recovery commands in [Troubleshooting](#troubleshooting).
@@ -242,7 +242,7 @@ Run `otak: Diagnose Proxy State` to inspect the current proxy state. Diagnostics
 
 Diagnostics also check convergence between the selected state and the actual tool settings:
 
-- In Auto with an active proxy, diagnostics report a managed proxy mismatch when VS Code, Git, or npm does not match the expected proxy URL.
+- In Auto with an active proxy, diagnostics report a managed proxy mismatch when VS Code, Git `http.proxy`, or npm does not match the expected proxy URL. A leftover Git `https.proxy` is informational only; it is not a second Git routing plane.
 - In Off or Auto: OFF, diagnostics report a managed proxy residual when VS Code, Git, or npm still has a proxy configured.
 - In remote, WSL, container, or web-like extension hosts, unsupported local Windows checks are reported as capability limits instead of being forced.
 

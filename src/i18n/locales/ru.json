@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code был запущен с флагами процесса, связанными с прокси",
   "diagnose.reason.inheritedProxyEnv": "новые терминалы могут наследовать переменные окружения прокси",
   "diagnose.reason.existingTerminals": "существующие терминалы сохраняют своё старое прокси-окружение",
-  "diagnose.reason.legacyHttpsProxy": "настроен устаревший Git https.proxy",
+  "diagnose.reason.legacyHttpsProxy": "настроен устаревший Git https.proxy, он не используется для маршрутизации HTTP/HTTPS",
   "diagnose.reason.effectiveOverride": "в Git действует переопределение прокси",
   "diagnose.reason.npmNoproxy": "настроен npm noproxy, который может обходить прокси",
   "diagnose.target.windowsWinhttp": "Диагностика прокси WinHTTP",

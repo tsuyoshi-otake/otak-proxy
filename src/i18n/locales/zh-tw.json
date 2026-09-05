@@ -289,7 +289,7 @@
   "diagnose.reason.launchProxyFlags": "VS Code 是以與 Proxy 相關的處理程序旗標啟動的",
   "diagnose.reason.inheritedProxyEnv": "新的終端機可能會繼承 Proxy 環境變數",
   "diagnose.reason.existingTerminals": "現有終端機會保留其舊的 Proxy 環境",
-  "diagnose.reason.legacyHttpsProxy": "設定了舊版 Git https.proxy",
+  "diagnose.reason.legacyHttpsProxy": "設定了舊版 Git https.proxy，它不用於 HTTP/HTTPS 路由",
   "diagnose.reason.effectiveOverride": "Git 有生效的 Proxy 覆寫",
   "diagnose.reason.npmNoproxy": "設定了 npm noproxy，可能會略過 Proxy",
   "diagnose.target.windowsWinhttp": "WinHTTP Proxy 診斷",

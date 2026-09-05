@@ -197,13 +197,13 @@ suite('Assurance: external-boundary contracts', () => {
         });
 
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/git'), { success: true });
-        assert.deepStrictEqual(calls.map(call => call.command), ['git', 'git']);
+        assert.deepStrictEqual(calls.map(call => call.command), ['git']);
         assert.deepStrictEqual(calls.map(call => call.args), [
-            ['config', '--global', 'http.proxy', 'safe://proxy/git'],
-            ['config', '--global', 'https.proxy', 'safe://proxy/git']
+            ['config', '--global', 'http.proxy', 'safe://proxy/git']
         ]);
-        assert.deepStrictEqual(calls.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS, GIT_CONFIG_COMMAND_TIMEOUT_MS]);
-        assert.deepStrictEqual(calls.map(call => call.options.encoding), ['utf8', 'utf8']);
+        assert.ok(!calls.some(call => call.args.includes('https.proxy')), 'https.proxy is leftover/non-routing and must not be written');
+        assert.deepStrictEqual(calls.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS]);
+        assert.deepStrictEqual(calls.map(call => call.options.encoding), ['utf8']);
     });
 
     test('CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering', async () => {

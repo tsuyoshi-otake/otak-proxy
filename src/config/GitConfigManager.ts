@@ -40,6 +40,8 @@ export type { GitConfigOperationOptions, OperationResult } from './GitConfigType
 export const GIT_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
 export type GitProxyKey = 'http.proxy' | 'https.proxy';
+export const GIT_ROUTING_PROXY_KEY: GitProxyKey = 'http.proxy';
+export const GIT_LEGACY_NON_ROUTING_PROXY_KEY: GitProxyKey = 'https.proxy';
 export interface GitProxyValues {
     'http.proxy': string | null;
     'https.proxy': string | null;
@@ -90,18 +92,16 @@ export class GitConfigManager {
     }
 
     /**
-     * Sets Git global proxy configuration for both http and https
+     * Sets the Git routing proxy. Git's HTTP stack uses only `http.proxy` for
+     * both HTTP and HTTPS remotes (HTTPS uses CONNECT). `https.proxy` is not a
+     * routing plane and is not written here; Off still unsets leftover values.
      * @param url - Validated proxy URL
      * @returns Result with success status and any errors
      */
     async setProxy(url: string, options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
             await withGitConfigWriteMutex(async () => {
-                // Set http.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url], options);
-
-                // Set https.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url], options);
+                await this.execGitConfigWithRetry(['config', '--global', GIT_ROUTING_PROXY_KEY, url], options);
             }, options);
 
             return { success: true };
@@ -141,15 +141,15 @@ export class GitConfigManager {
     }
 
     /**
-     * Gets current Git proxy configuration
-     * @returns Current proxy URL or null if not configured
+     * Gets the Git routing proxy (`http.proxy` only).
+     * A leftover `https.proxy` is not treated as a configured routing plane.
      */
     async getProxy(): Promise<string | null> {
         const inspection = await this.inspectProxy();
         if (inspection.status !== 'available' || !inspection.values) {
             return null;
         }
-        return inspection.values['http.proxy'] || inspection.values['https.proxy'];
+        return inspection.values[GIT_ROUTING_PROXY_KEY];
     }
 
     async inspectProxy(): Promise<ProxyConfigInspection<GitProxyValues>> {

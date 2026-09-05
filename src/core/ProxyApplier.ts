@@ -362,13 +362,18 @@ export class ProxyApplier {
 
     private async markTargetOwned(target: ProxyConfigTarget, proxyUrl: string): Promise<void> {
         const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl;
+        const applyIds = new Set(
+            target.ownership!.applyTargetIds ?? target.ownership!.targets.map(entry => entry.targetId)
+        );
         await this.ownershipStore!.bootstrapFromSnapshot(
             publicUrl,
-            target.ownership!.targets.map(entry => ({
-                targetId: entry.targetId,
-                targetHost: entry.targetHost,
-                value: publicUrl
-            })),
+            target.ownership!.targets
+                .filter(entry => applyIds.has(entry.targetId))
+                .map(entry => ({
+                    targetId: entry.targetId,
+                    targetHost: entry.targetHost,
+                    value: publicUrl
+                })),
             proxyUrl
         );
     }
@@ -492,6 +497,7 @@ export class ProxyApplier {
             manager: this.gitManager,
             ownership: {
                 targets: Object.values(ids).map(targetId => ({ targetId, targetHost: 'workspaceHost' })),
+                applyTargetIds: [ids['http.proxy']],
                 inspect: async () => {
                     const result = await this.gitManager.inspectProxy();
                     return {
