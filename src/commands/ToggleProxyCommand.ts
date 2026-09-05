@@ -9,6 +9,7 @@
  */
 
 import * as vscode from 'vscode';
+import { captureLogicalGeneration, isStaleGeneration } from '../core/LogicalGeneration';
 import { ProxyMode, type ProxyState, type ProxyTestResult } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
@@ -256,7 +257,7 @@ async function prepareNextMode(
 }
 
 async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<boolean> {
-    await ctx.saveProxyState(state);
+    const started = captureLogicalGeneration(await ctx.getProxyState());
     const newActiveUrl = ctx.getActiveProxyUrl(state);
 
     const applied = await ctx.applyProxySettings(
@@ -269,6 +270,27 @@ async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promi
     } else {
         await ctx.stopSystemProxyMonitoring();
     }
+
+    const latest = await ctx.getProxyState();
+    if (isStaleGeneration(started, latest) && latest.mode !== state.mode) {
+        ctx.updateStatusBar(latest);
+        return applied;
+    }
+
+    // Publish after apply so other windows do not treat an unapplied desired as
+    // converged. Fold onto latest so apply-result fields survive.
+    await ctx.saveProxyState({
+        ...latest,
+        mode: state.mode,
+        autoProxyUrl: state.autoProxyUrl,
+        manualProxyUrl: state.manualProxyUrl,
+        autoModeOff: state.autoModeOff,
+        usingFallbackProxy: state.usingFallbackProxy,
+        fallbackProxyUrl: state.fallbackProxyUrl,
+        lastSystemProxyUrl: state.lastSystemProxyUrl,
+        lastDetectionSource: state.lastDetectionSource,
+        convergencePending: false
+    });
 
     // ProxyApplier records per-target success/failure in state. Refresh from that
     // authoritative result instead of presenting the pre-apply desired snapshot.

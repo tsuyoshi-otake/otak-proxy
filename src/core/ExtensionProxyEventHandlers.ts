@@ -2,6 +2,14 @@ import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { Logger } from '../utils/Logger';
 import { TestResult } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
+import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
+import {
+    LogicalGeneration,
+    captureLogicalGeneration,
+    isStaleGeneration,
+    proxyUrlIdentity,
+    sameLogicalIdentity
+} from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState, ProxyTestResult } from './types';
 
@@ -14,6 +22,10 @@ export async function handleProxyChanged(
     result: ProxyDetectionResult
 ): Promise<void> {
     const state = await context.proxyStateManager.getState();
+    const started = result.startedGeneration ?? captureLogicalGeneration(state);
+    if (result.startedGeneration && isStaleGeneration(result.startedGeneration, state)) {
+        return;
+    }
     if (state.mode !== ProxyMode.Auto) {
         return;
     }
@@ -31,11 +43,21 @@ export async function handleProxyChanged(
 
     const recoveredFromAutoOff = wasAutoModeOff && state.autoModeOff === false;
     if (previousProxy === state.autoProxyUrl && !recoveredFromAutoOff && !hasKnownEnableFailure(state)) {
-        await saveAndPublishProxyState(context, state);
+        await commitAndPublish(context, started, 'detection', current => ({
+            ...current,
+            lastTestResult: state.lastTestResult,
+            proxyReachable: state.proxyReachable,
+            lastTestTimestamp: state.lastTestTimestamp,
+            autoModeOff: state.autoModeOff
+        }));
         return;
     }
 
-    await saveAndApplyProxyChange(context, state, result, previousProxy);
+    await saveApplyThenPublish(context, started, 'detection', state, async () => {
+        const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
+        await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
+        notifyProxyChange(context, state, result, previousProxy);
+    });
 }
 
 function hasKnownEnableFailure(state: ProxyState): boolean {
@@ -53,22 +75,56 @@ export async function handleProxyTestComplete(
     startupTestState: StartupTestState,
     testResult: TestResult
 ): Promise<void> {
-    const state = await context.proxyStateManager.getState();
+    const current = await context.proxyStateManager.getState();
+    const started = resolveTestGeneration(testResult, current);
 
-    if (state.mode !== ProxyMode.Auto) {
+    if (isStaleTestCompletion(started, testResult, current)) {
+        clearStartupPendingIfNeeded(startupTestState, testResult);
         return;
     }
 
-    state.lastTestResult = testResult as ProxyTestResult;
-    state.proxyReachable = testResult.success;
-    state.lastTestTimestamp = Date.now();
-    updateAutoModeFromTestResult(state, testResult);
+    if (current.mode !== ProxyMode.Auto) {
+        return;
+    }
 
-    await saveAndPublishProxyState(context, state);
-    context.updateStatusBar?.(state);
+    const outcome = await commitUnlessStale(context.proxyStateManager, started, 'connectionTest', state => {
+        if (state.mode !== ProxyMode.Auto) {
+            return undefined;
+        }
+
+        const next = { ...state };
+        next.lastTestResult = stripGeneration(testResult);
+        next.proxyReachable = testResult.success;
+        next.lastTestTimestamp = Date.now();
+        updateAutoModeFromTestResult(next, testResult);
+        next.convergencePending = !testResult.success;
+        return next;
+    });
+
+    if (outcome === 'stale') {
+        clearStartupPendingIfNeeded(startupTestState, testResult);
+        return;
+    }
+
+    const committed = await context.proxyStateManager.getState();
+    await publishUnlessStale(context.publishProxyState, captureLogicalGeneration(committed), 'connectionTest', {
+        ...committed,
+        convergencePending: false
+    });
+    context.updateStatusBar?.(committed);
     clearStartupPendingIfNeeded(startupTestState, testResult);
 
     if (!testResult.success) {
+        const latest = await context.proxyStateManager.getState();
+        if (latest.mode !== ProxyMode.Auto) {
+            return;
+        }
+        if (testResult.startedGeneration && isStaleGeneration(testResult.startedGeneration, latest)) {
+            return;
+        }
+        if (testResult.proxyUrl && proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(latest.autoProxyUrl)) {
+            return;
+        }
         await applyProxyThroughContext(context, '', false, { silent: true });
     }
 }
@@ -77,31 +133,84 @@ export async function handleProxyStateChanged(
     context: InitializerContext,
     data: { proxyUrl: string; reachable: boolean; previousState: boolean }
 ): Promise<void> {
+    const started = captureLogicalGeneration(await context.proxyStateManager.getState());
     const state = await context.proxyStateManager.getState();
 
     if (state.mode !== ProxyMode.Auto) {
         return;
     }
 
-    state.proxyReachable = data.reachable;
-    await applyReachabilityChange(context, state, data);
-
-    await saveAndPublishProxyState(context, state);
-    context.updateStatusBar?.(state);
-}
-
-async function saveAndPublishProxyState(context: InitializerContext, state: ProxyState): Promise<void> {
-    await context.proxyStateManager.saveState(state);
-
-    if (!context.publishProxyState) {
+    if (proxyUrlIdentity(data.proxyUrl) !== proxyUrlIdentity(state.autoProxyUrl) && data.proxyUrl) {
+        // Reachability event for a different endpoint must not mutate the current generation.
         return;
     }
 
-    try {
-        await context.publishProxyState(state);
-    } catch (error) {
-        Logger.warn('Failed to publish proxy state:', error);
+    state.proxyReachable = data.reachable;
+    await applyReachabilityChange(context, started, state, data);
+}
+
+async function commitAndPublish(
+    context: InitializerContext,
+    started: LogicalGeneration,
+    owner: 'detection' | 'connectionTest' | 'autoMonitoring' | 'stateChanged',
+    fold: (current: ProxyState) => ProxyState | undefined
+): Promise<void> {
+    const outcome = await commitUnlessStale(context.proxyStateManager, started, owner, fold);
+    if (outcome === 'stale') {
+        return;
     }
+
+    const current = await context.proxyStateManager.getState();
+    await publishUnlessStale(
+        context.publishProxyState,
+        captureLogicalGeneration(current),
+        owner,
+        current
+    );
+}
+
+async function saveApplyThenPublish(
+    context: InitializerContext,
+    started: LogicalGeneration,
+    owner: 'detection' | 'autoMonitoring' | 'stateChanged',
+    desired: ProxyState,
+    apply: () => Promise<void>
+): Promise<void> {
+    const pending = await commitUnlessStale(context.proxyStateManager, started, owner, current => ({
+        ...current,
+        ...desired,
+        revision: current.revision,
+        convergencePending: true
+    }));
+    if (pending === 'stale') {
+        return;
+    }
+
+    await apply();
+
+    const afterApply = await context.proxyStateManager.getState();
+    const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
+    if (!sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(afterApply))) {
+        return;
+    }
+
+    const cleared = await commitUnlessStale(
+        context.proxyStateManager,
+        captureLogicalGeneration(afterApply),
+        owner,
+        current => ({ ...current, convergencePending: false })
+    );
+    if (cleared === 'stale') {
+        return;
+    }
+
+    const published = await context.proxyStateManager.getState();
+    await publishUnlessStale(
+        context.publishProxyState,
+        captureLogicalGeneration(published),
+        owner,
+        published
+    );
 }
 
 function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetectionResult): void {
@@ -120,24 +229,11 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
     }
 
     if (result.testResult) {
-        state.lastTestResult = result.testResult as ProxyTestResult;
+        state.lastTestResult = stripGeneration(result.testResult);
         state.proxyReachable = result.proxyReachable;
         state.lastTestTimestamp = Date.now();
         updateAutoModeFromTestResult(state, result.testResult);
     }
-}
-
-async function saveAndApplyProxyChange(
-    context: InitializerContext,
-    state: ProxyState,
-    result: ProxyDetectionResult,
-    previousProxy: string | undefined
-): Promise<void> {
-    await saveAndPublishProxyState(context, state);
-
-    const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
-    await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
-    notifyProxyChange(context, state, result, previousProxy);
 }
 
 function notifyProxyChange(
@@ -182,13 +278,17 @@ function clearStartupPendingIfNeeded(startupTestState: StartupTestState, testRes
 
 async function applyReachabilityChange(
     context: InitializerContext,
+    started: LogicalGeneration,
     state: ProxyState,
     data: { proxyUrl: string; reachable: boolean; previousState: boolean }
 ): Promise<void> {
     if (data.reachable && !data.previousState) {
         state.autoModeOff = false;
-        await applyProxyThroughContext(context, data.proxyUrl, true, { silent: true });
-        Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
+        await saveApplyThenPublish(context, started, 'autoMonitoring', state, async () => {
+            await applyProxyThroughContext(context, data.proxyUrl, true, { silent: true });
+            Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
+        });
+        context.updateStatusBar?.(await context.proxyStateManager.getState());
         return;
     }
 
@@ -196,7 +296,53 @@ async function applyReachabilityChange(
         state.autoModeOff = true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
-        await applyProxyThroughContext(context, data.proxyUrl, false, { silent: true });
-        Logger.info(`Proxy ${data.proxyUrl} became unreachable, Auto Mode OFF`);
+        await saveApplyThenPublish(context, started, 'stateChanged', state, async () => {
+            await applyProxyThroughContext(context, data.proxyUrl, false, { silent: true });
+            Logger.info(`Proxy ${data.proxyUrl} became unreachable, Auto Mode OFF`);
+        });
+        context.updateStatusBar?.(await context.proxyStateManager.getState());
+        return;
     }
+
+    await commitAndPublish(context, started, 'stateChanged', current => ({
+        ...current,
+        proxyReachable: data.reachable
+    }));
+    context.updateStatusBar?.(await context.proxyStateManager.getState());
+}
+
+function resolveTestGeneration(testResult: TestResult, current: ProxyState): LogicalGeneration {
+    if (testResult.startedGeneration) {
+        return testResult.startedGeneration;
+    }
+
+    return captureLogicalGeneration({
+        ...current,
+        autoProxyUrl: testResult.proxyUrl ?? current.autoProxyUrl
+    });
+}
+
+function isStaleTestCompletion(
+    started: LogicalGeneration,
+    testResult: TestResult,
+    current: ProxyState
+): boolean {
+    if (testResult.startedGeneration) {
+        return isStaleGeneration(started, current);
+    }
+
+    if (current.mode !== ProxyMode.Auto) {
+        return true;
+    }
+
+    if (testResult.proxyUrl && proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(current.autoProxyUrl)) {
+        return true;
+    }
+
+    return false;
+}
+
+function stripGeneration(testResult: TestResult): ProxyTestResult {
+    const { startedGeneration: _started, ...rest } = testResult;
+    return rest as ProxyTestResult;
 }

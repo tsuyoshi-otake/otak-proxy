@@ -6,8 +6,9 @@
  * Requirements: 4.1, 4.2, 4.3, 4.4
  *
  * Conflict Resolution Strategy:
- * - Timestamp-based: Latest change wins
- * - Deterministic: Same timestamps -> remote wins
+ * - Logical clock first: higher SyncableState.version wins (issue #17 P1-6)
+ * - Timestamp only breaks ties when versions are equal
+ * - Deterministic: equal version and timestamp -> remote wins
  * - Future timestamps are rejected (clock drift protection)
  */
 
@@ -66,10 +67,11 @@ const MAX_CLOCK_DRIFT_MS = 30000;
  * ConflictResolver handles conflicts between local and remote state changes.
  *
  * Resolution rules:
- * 1. Newer timestamp wins (Requirement 4.1)
- * 2. If timestamps are equal, remote wins (deterministic, Requirement 4.4)
- * 3. Future timestamps beyond MAX_CLOCK_DRIFT_MS are rejected
- * 4. Same instance updates are not considered conflicts
+ * 1. Higher version (logical clock) wins — clock rollback cannot revive a stale write
+ * 2. When versions are equal, newer timestamp wins (Requirement 4.1)
+ * 3. If version and timestamp are equal, remote wins (deterministic, Requirement 4.4)
+ * 4. Future timestamps beyond MAX_CLOCK_DRIFT_MS are rejected
+ * 5. Same instance updates are not considered conflicts
  */
 export class ConflictResolver {
     /**
@@ -127,10 +129,18 @@ export class ConflictResolver {
             };
         }
 
-        // Compare timestamps.
-        // Only emit conflict details when we detect a real conflict condition:
-        // - simultaneous timestamps, or
-        // - an out-of-order write where a stale state overwrote a newer one.
+        if (remote.version !== local.version) {
+            const remoteNewer = remote.version > local.version;
+            return {
+                winner: remoteNewer ? 'remote' : 'local',
+                resolvedState: remoteNewer ? remote : local,
+                conflictDetails: remoteNewer
+                    ? null
+                    : conflictDetails('stale')
+            };
+        }
+
+        // Versions are equal — timestamp is only a tie-break, never the sole clock.
         if (remote.timestamp > local.timestamp) {
             // Remote is newer - this is a normal update (not a conflict).
             return {

@@ -64,6 +64,9 @@ export function sanitizeProxyTestResultForPersistence(result: ProxyTestResult | 
         sanitized.proxyUrl = removeProxyCredentials(result.proxyUrl);
     }
 
+    // In-memory generation stamps must never reach globalState or sync files.
+    delete (sanitized as { startedGeneration?: unknown }).startedGeneration;
+
     return sanitized;
 }
 

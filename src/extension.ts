@@ -8,6 +8,7 @@
  */
 
 import * as vscode from 'vscode';
+import { captureLogicalGeneration, isStaleGeneration } from './core/LogicalGeneration';
 import { ProxyMode, ProxyState } from './core/types';
 import { ProxyStateManager } from './core/ProxyStateManager';
 import { ProxyApplier } from './core/ProxyApplier';
@@ -198,8 +199,34 @@ async function applyProxySafely(
     trigger: ProxyApplyTrigger,
     options?: ProxyApplyOptions
 ): Promise<boolean> {
+    const started = captureLogicalGeneration(await proxyStateManager.getState());
+    const applyIfCurrent = async (
+        proxyUrl: string,
+        shouldEnable: boolean,
+        applyOptions?: ProxyApplyOptions
+    ) => {
+        const current = await proxyStateManager.getState();
+        if (isStaleGeneration(started, current)) {
+            Logger.warn(`Discarding stale ${trigger} apply/retry for a superseded generation.`);
+            return {
+                success: true,
+                enabled: shouldEnable,
+                proxyUrl,
+                results: {
+                    gitSuccess: true,
+                    vscodeSuccess: true,
+                    npmSuccess: true,
+                    terminalEnvSuccess: true
+                },
+                errors: []
+            };
+        }
+
+        return proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions);
+    };
+
     if (!proxyRemediationService) {
-        return await proxyApplier.applyProxy(url, enabled, options);
+        return (await applyIfCurrent(url, enabled, options)).success;
     }
 
     const result = await proxyRemediationService.applyWithSafety(
@@ -209,7 +236,7 @@ async function applyProxySafely(
             ...options,
             trigger
         },
-        (proxyUrl, shouldEnable, applyOptions) => proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions)
+        applyIfCurrent
     );
     return result.success;
 }
@@ -357,9 +384,11 @@ async function loadSharedStateIfEnabled(state: ProxyState): Promise<ProxyState> 
  */
 function startupEnforcementTarget(state: ProxyState): string {
     return JSON.stringify({
+        revision: state.revision ?? 0,
         mode: state.mode,
         activeUrl: proxyStateManager.getActiveProxyUrl(state),
-        autoModeOff: state.autoModeOff === true
+        autoModeOff: state.autoModeOff === true,
+        noProxy: state.noProxy ?? ''
     });
 }
 

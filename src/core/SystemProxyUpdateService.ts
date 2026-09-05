@@ -3,6 +3,8 @@ import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
 import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
+import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
+import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration, sameLogicalIdentity } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
 
@@ -23,6 +25,7 @@ export class SystemProxyUpdateService {
             return;
         }
 
+        const started = captureLogicalGeneration(stateBeforeDetection);
         const detected = await detectSystemProxySettingsWithSource();
         const detectedProxy = detected.proxyUrl;
         const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
@@ -30,15 +33,26 @@ export class SystemProxyUpdateService {
         // newer toggle/sync decision owns finalization instead of being overwritten
         // by the stale pre-detection snapshot (#17, #27).
         const state = await this.context.proxyStateManager.getState();
+        if (isStaleGeneration(started, state)) {
+            if (state.mode !== ProxyMode.Auto) {
+                await this.saveDetectedProxyForNonAutoMode(
+                    captureLogicalGeneration(state),
+                    state,
+                    detectedProxy,
+                    detectedSource
+                );
+            }
+            return;
+        }
         state.lastSystemProxyCheck = now;
         state.systemProxyDetected = !!detectedProxy;
 
         if (state.mode === ProxyMode.Auto) {
-            await this.updateAutoProxyState(state, detectedProxy, detectedSource);
+            await this.updateAutoProxyState(started, state, detectedProxy, detectedSource);
             return;
         }
 
-        await this.saveDetectedProxyForNonAutoMode(state, detectedProxy, detectedSource);
+        await this.saveDetectedProxyForNonAutoMode(started, state, detectedProxy, detectedSource);
     }
 
     private shouldSkipRecentNonAutoCheck(state: ProxyState, now: number): boolean {
@@ -51,6 +65,7 @@ export class SystemProxyUpdateService {
     }
 
     private async updateAutoProxyState(
+        started: LogicalGeneration,
         state: ProxyState,
         detectedProxy: string | null,
         detectedSource: AppliedProxySource | undefined
@@ -70,11 +85,11 @@ export class SystemProxyUpdateService {
             !this.hasKnownConvergenceFailure(state, Boolean(state.autoProxyUrl)) &&
             !this.shouldEnsureDisabledProxy(state)
         ) {
-            await this.saveAndPublishState(state);
+            await this.saveAndPublishState(started, state);
             return;
         }
 
-        await this.saveAndApplyAutoProxyState(state, previousProxy);
+        await this.saveAndApplyAutoProxyState(started, state, previousProxy);
     }
 
     private applyDetectedProxyState(
@@ -89,8 +104,21 @@ export class SystemProxyUpdateService {
         state.lastDetectionSource = detectedSource;
     }
 
-    private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
-        await this.saveAndPublishState(state);
+    private async saveAndApplyAutoProxyState(
+        started: LogicalGeneration,
+        state: ProxyState,
+        previousProxy: string | undefined
+    ): Promise<void> {
+        const pending = await commitUnlessStale(this.context.proxyStateManager, started, 'detection', current => ({
+            ...current,
+            ...state,
+            revision: current.revision,
+            convergencePending: true
+        }));
+        if (pending === 'stale') {
+            return;
+        }
+
         const activeProxyUrl = state.autoProxyUrl || '';
         const applied = await applyProxyThroughContext(
             this.context,
@@ -98,10 +126,27 @@ export class SystemProxyUpdateService {
             Boolean(activeProxyUrl),
             activeProxyUrl ? undefined : { silent: true }
         );
+
+        const afterApply = await this.context.proxyStateManager.getState();
+        if (!sameLogicalIdentity(
+            captureLogicalGeneration({ ...state, revision: afterApply.revision }),
+            captureLogicalGeneration(afterApply)
+        )) {
+            return;
+        }
+
+        await commitUnlessStale(
+            this.context.proxyStateManager,
+            captureLogicalGeneration(afterApply),
+            'detection',
+            current => ({ ...current, convergencePending: false })
+        );
+        const published = await this.context.proxyStateManager.getState();
+        await publishUnlessStale(this.context.publishProxyState, captureLogicalGeneration(published), 'detection', published);
         if (applied) {
             this.notifyAutoProxyChange(state, previousProxy);
         }
-        this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
+        this.context.updateStatusBar?.(published);
     }
 
     private shouldEnsureDisabledProxy(state: ProxyState): boolean {
@@ -142,27 +187,38 @@ export class SystemProxyUpdateService {
     }
 
     private async saveDetectedProxyForNonAutoMode(
+        started: LogicalGeneration,
         state: ProxyState,
         detectedProxy: string | null,
         detectedSource: AppliedProxySource | undefined
     ): Promise<void> {
         state.autoProxyUrl = detectedProxy || undefined;
         state.lastDetectionSource = detectedProxy ? detectedSource : undefined;
-        await this.saveAndPublishState(state);
+        await this.saveAndPublishState(started, state);
     }
 
-    private async saveAndPublishState(state: ProxyState): Promise<void> {
-        await this.context.proxyStateManager.saveState(state);
-
-        if (!this.context.publishProxyState) {
+    private async saveAndPublishState(started: LogicalGeneration, state: ProxyState): Promise<void> {
+        const outcome = await commitUnlessStale(this.context.proxyStateManager, started, 'detection', current => ({
+            ...current,
+            lastSystemProxyCheck: state.lastSystemProxyCheck,
+            systemProxyDetected: state.systemProxyDetected,
+            autoProxyUrl: state.autoProxyUrl,
+            lastDetectionSource: state.lastDetectionSource,
+            autoModeOff: state.autoModeOff,
+            usingFallbackProxy: state.usingFallbackProxy,
+            fallbackProxyUrl: state.fallbackProxyUrl
+        }));
+        if (outcome === 'stale') {
             return;
         }
 
-        try {
-            await this.context.publishProxyState(state);
-        } catch (error) {
-            Logger.warn('Failed to publish proxy state:', error);
-        }
+        const current = await this.context.proxyStateManager.getState();
+        await publishUnlessStale(
+            this.context.publishProxyState,
+            captureLogicalGeneration(current),
+            'detection',
+            current
+        );
     }
 
     private async applyFallbackProxyState(state: ProxyState): Promise<void> {

@@ -20,6 +20,11 @@ export interface TestResult {
     proxyUrl?: string;
     timestamp?: number;
     duration?: number;
+    /**
+     * Generation captured when the test started. Completions without this
+     * still fence on URL identity, but A→B→A requires the stamp.
+     */
+    startedGeneration?: import('../core/LogicalGeneration').LogicalGeneration;
 }
 
 /**

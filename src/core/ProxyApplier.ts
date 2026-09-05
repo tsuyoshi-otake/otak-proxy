@@ -21,6 +21,7 @@ import {
     ProxyOwnershipInspection
 } from './ProxyApplierTypes';
 import { updateProxyConfigTargetDetailed } from './ProxyConfigTargetRunner';
+import { captureLogicalGeneration } from './LogicalGeneration';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
 import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
 import {
@@ -167,6 +168,9 @@ export class ProxyApplier {
     }
 
     async applyProxyDetailed(proxyUrl: string, enabled: boolean, options?: ProxyApplyOptions): Promise<ProxyApplyDetailedResult> {
+        const applyGeneration = this.stateManager
+            ? captureLogicalGeneration(await this.stateManager.getState())
+            : undefined;
         const errorAggregator = new ErrorAggregator();
         
         // Edge Case 1: Handle empty URL as disable proxy (Requirement 4.1)
@@ -200,7 +204,7 @@ export class ProxyApplier {
         );
 
         // Track configuration state if stateManager is provided
-        await saveProxyConfigResults(this.stateManager, true, results, errorAggregator);
+        await saveProxyConfigResults(this.stateManager, true, results, errorAggregator, applyGeneration);
 
         const success = this.areConfigResultsSuccessful(results);
         
@@ -223,6 +227,9 @@ export class ProxyApplier {
     }
 
     async disableProxyDetailed(options?: ProxyApplyOptions): Promise<ProxyApplyDetailedResult> {
+        const applyGeneration = this.stateManager
+            ? captureLogicalGeneration(await this.stateManager.getState())
+            : undefined;
         const errorAggregator = new ErrorAggregator();
 
         if (this.blockIfUntrustedWorkspace(options)) {
@@ -241,7 +248,7 @@ export class ProxyApplier {
         );
 
         // Track configuration state if stateManager is provided
-        await saveProxyConfigResults(this.stateManager, false, results, errorAggregator);
+        await saveProxyConfigResults(this.stateManager, false, results, errorAggregator, applyGeneration);
 
         const success = this.areConfigResultsSuccessful(results);
         

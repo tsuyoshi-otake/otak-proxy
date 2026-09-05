@@ -422,7 +422,8 @@ suite('Assurance: external-boundary contracts', () => {
         assert.deepStrictEqual(memento.get('proxyState'), {
             mode: ProxyMode.Auto,
             autoModeOff: false,
-            autoProxyUrl: 'safe://proxy/memento'
+            autoProxyUrl: 'safe://proxy/memento',
+            revision: 1
         });
         assert.deepStrictEqual(memento.keys(), ['proxyState']);
 
