@@ -38,6 +38,25 @@ suite('GitConfigManager Test Suite', () => {
             const result = await gitConfigManager.getProxy();
             assert.ok(result === null || typeof result === 'string');
         });
+
+        test('passes encoded credential URLs to git as a single argv without a shell', async () => {
+            const calls: Array<{ command: string; args: string[] }> = [];
+            const manager = new GitConfigManager({
+                commandRunner: async (command, args) => {
+                    calls.push({ command, args });
+                    return { stdout: '', stderr: '' };
+                }
+            });
+            const url = 'http://user:abc%21def@proxy.example:8080';
+            const result = await manager.setProxy(url);
+            assert.strictEqual(result.success, true, result.error);
+            assert.ok(calls.length >= 1);
+            for (const call of calls) {
+                assert.strictEqual(call.command, 'git');
+                assert.ok(!call.args.includes('/c'));
+                assert.ok(call.args.includes(url));
+            }
+        });
     });
 
     suite('Error Handling', () => {

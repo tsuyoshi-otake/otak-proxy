@@ -64,7 +64,11 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
             ]);
 
             const npmCalls = calls.filter(call =>
-                call.command.toLowerCase().endsWith('npm') || call.args.includes('npm')
+                call.command.toLowerCase().endsWith('npm') ||
+                call.command.toLowerCase().endsWith('npm.cmd') ||
+                call.command.toLowerCase().endsWith('npm-cli.js') ||
+                call.args.includes('npm') ||
+                call.args.some(arg => /(?:^|[/\\])npm-cli\.js$/i.test(arg))
             );
             assert.strictEqual(npmCalls.length, 1);
             assert.deepStrictEqual(reports[0].observations.npm, {

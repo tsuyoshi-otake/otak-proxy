@@ -10,8 +10,8 @@ function translateProxyValidationError(error: string): string {
         'Protocol must be http:// or https://': 'validation.proxyUrl.protocol',
         'Hostname is required': 'validation.proxyUrl.hostnameRequired',
         'Port must be between 1 and 65535': 'validation.proxyUrl.portRange',
-        'Username contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)': 'validation.proxyUrl.usernameInvalid',
-        'Password contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)': 'validation.proxyUrl.passwordInvalid'
+        'Username contains dangerous shell characters': 'validation.proxyUrl.usernameInvalid',
+        'Password contains dangerous shell characters': 'validation.proxyUrl.passwordInvalid'
     };
 
     const key = keyByMessage[error];

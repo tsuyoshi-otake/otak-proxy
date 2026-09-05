@@ -236,6 +236,29 @@ suite('Assurance: external-boundary contracts', () => {
         }
     });
 
+    test('CT-CLI-NPM-002: Windows npm command port does not use cmd.exe', async () => {
+        const calls: CommandCall[] = [];
+        const url = 'http://user:x%25OS%25y@proxy.example:8080';
+        const manager = new NpmConfigManager(path.join(os.tmpdir(), 'assurance-npmrc-win'), {
+            isWindows: true,
+            env: process.env,
+            commandAvailable: () => true,
+            commandRunner: async (command, args, options) => {
+                calls.push({ command, args, options });
+                return { stdout: '', stderr: '' };
+            }
+        });
+
+        assert.deepStrictEqual(await manager.setProxy(url), { success: true });
+        assert.ok(calls.length >= 1);
+        for (const call of calls) {
+            const base = path.basename(call.command).toLowerCase();
+            assert.ok(base !== 'cmd.exe' && base !== 'cmd', 'Windows npm must not spawn cmd.exe');
+            assert.ok(!call.args.includes('/c'));
+            assert.ok(call.args.includes(url));
+        }
+    });
+
     test('CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol', async () => {
         const calls: CommandCall[] = [];
         const manager = new PipConfigManager({

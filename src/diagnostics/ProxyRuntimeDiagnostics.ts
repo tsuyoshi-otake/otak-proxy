@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
+import { resolveNpmInvocation } from '../utils/NpmInvocation';
 import { ProxyMode, ProxyState } from '../core/types';
 import {
     ExecutionContext,
@@ -648,12 +649,11 @@ export class ProxyRuntimeDiagnostics {
 
     private async readNpmConfigValues(): Promise<NpmDiagnosticValues> {
         try {
-            if (process.platform === 'win32') {
-                const comspec = process.env.ComSpec || 'cmd.exe';
-                const { stdout } = await this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', 'config', 'list', '--json']);
-                return JSON.parse(stdout) as NpmDiagnosticValues;
-            }
-            const { stdout } = await this.commandRunner('npm', ['config', 'list', '--json']);
+            const invocation = resolveNpmInvocation(['config', 'list', '--json'], {
+                isWindows: process.platform === 'win32',
+                env: process.env
+            });
+            const { stdout } = await this.commandRunner(invocation.command, invocation.args);
             return JSON.parse(stdout) as NpmDiagnosticValues;
         } catch {
             return {};
