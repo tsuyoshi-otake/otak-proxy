@@ -187,7 +187,7 @@ suite('ConflictResolver Unit Tests', () => {
      * The most recent user change should be prioritized
      */
     suite('User Intent Priority (Requirement 4.4)', () => {
-        test('should prioritize the most recent change regardless of version', () => {
+        test('should prioritize the higher logical version over a newer wall clock', () => {
             const local: SyncableState = {
                 state: { mode: ProxyMode.Manual },
                 timestamp: 3000,
@@ -199,12 +199,31 @@ suite('ConflictResolver Unit Tests', () => {
                 state: { mode: ProxyMode.Auto },
                 timestamp: 2000,
                 instanceId: 'instance-2',
-                version: 5 // Higher version but older timestamp
+                version: 5 // Higher version but older timestamp (clock rollback)
             };
 
             const result = resolver.resolve(local, remote);
 
-            // Timestamp should win over version
+            assert.strictEqual(result.winner, 'remote');
+        });
+
+        test('equal timestamps still use version, not last-write-wins clock', () => {
+            const local: SyncableState = {
+                state: { mode: ProxyMode.Off },
+                timestamp: 1000,
+                instanceId: 'instance-1',
+                version: 3
+            };
+
+            const remote: SyncableState = {
+                state: { mode: ProxyMode.Auto },
+                timestamp: 1000,
+                instanceId: 'instance-2',
+                version: 2
+            };
+
+            const result = resolver.resolve(local, remote);
+
             assert.strictEqual(result.winner, 'local');
         });
     });

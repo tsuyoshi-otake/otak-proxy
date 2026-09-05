@@ -13,7 +13,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { ProxyState } from '../core/types';
+import { ProxyState, stateRevision } from '../core/types';
 import { Logger } from '../utils/Logger';
 import { SharedStateFile, SharedState, ISharedStateFile } from './SharedStateFile';
 import { InstanceRegistry, IInstanceRegistry } from './InstanceRegistry';
@@ -190,19 +190,29 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 return;
             }
 
+            const onDisk = await this.sharedStateFile.read();
+            const snapshotRevision = stateRevision(state);
+            const diskRevision = stateRevision(onDisk?.proxyState);
+            const rememberedRevision = stateRevision(this.currentState?.state);
+            if (snapshotRevision > 0 && (
+                (onDisk && snapshotRevision < diskRevision) ||
+                snapshotRevision < rememberedRevision
+            )) {
+                Logger.warn(
+                    `Discarding stale sync publication (snapshot rev ${snapshotRevision}, disk rev ${diskRevision}, remembered ${rememberedRevision}).`
+                );
+                return;
+            }
+
+            const expectedVersion = onDisk?.version;
+            const version = Math.max(
+                onDisk?.version ?? 0,
+                this.currentState?.version ?? 0,
+                snapshotRevision
+            ) + 1;
             const now = Date.now();
-            const version = this.currentState ? this.currentState.version + 1 : 1;
             const sharedProxyState = sanitizeProxyStateForPersistence(state);
 
-            // Create syncable state
-            this.currentState = {
-                state: sharedProxyState,
-                timestamp: now,
-                instanceId,
-                version
-            };
-
-            // Write to shared state file
             const sharedState: SharedState = {
                 version,
                 lastModified: now,
@@ -211,7 +221,26 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 testResult: sharedProxyState.lastTestResult
             };
 
-            await this.sharedStateFile.write(sharedState);
+            const cas = this.sharedStateFile.compareAndSwap
+                ? await this.sharedStateFile.compareAndSwap(expectedVersion, sharedState)
+                : 'written';
+            if (cas === 'stale') {
+                Logger.warn(
+                    `Discarding stale sync publication (CAS expected version ${String(expectedVersion)}).`
+                );
+                return;
+            }
+
+            if (!this.sharedStateFile.compareAndSwap) {
+                await this.sharedStateFile.write(sharedState);
+            }
+
+            this.currentState = {
+                state: sharedProxyState,
+                timestamp: now,
+                instanceId,
+                version
+            };
             this.lastSyncTime = now;
             this.lastError = null;
             this.emitStatusChanged();

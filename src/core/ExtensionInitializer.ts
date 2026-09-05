@@ -13,6 +13,7 @@
  */
 
 import * as vscode from 'vscode';
+import { captureLogicalGeneration } from './LogicalGeneration';
 import { ProxyMode, ProxyState } from './types';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
@@ -120,6 +121,10 @@ export class ExtensionInitializer {
             );
         });
 
+        this.proxyMonitor.setGenerationCapture(async () => {
+            return captureLogicalGeneration(await this.context.proxyStateManager.getState());
+        });
+
         return this.proxyMonitor;
     }
 
@@ -147,6 +152,7 @@ export class ExtensionInitializer {
      */
     async startSystemProxyMonitoring(): Promise<void> {
         const state = await this.context.proxyStateManager.getState();
+        const started = captureLogicalGeneration(state);
 
         // Monitoring is only meaningful in Auto mode. In other modes, ensure it's stopped.
         if (state.mode !== ProxyMode.Auto) {
@@ -162,6 +168,10 @@ export class ExtensionInitializer {
         // Feature: auto-mode-proxy-testing - Mark state as testing pending
         this.startupTestState.isPending = true;
         state.proxyReachable = undefined; // Indeterminate until test completes
+        const latest = await this.context.proxyStateManager.getState();
+        if (latest.mode !== ProxyMode.Auto || latest.revision !== started.revision) {
+            return;
+        }
         await this.context.proxyStateManager.saveState(state);
 
         // Check system proxy immediately using legacy method

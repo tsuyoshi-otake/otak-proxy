@@ -8,6 +8,7 @@
  */
 
 import { ProxyConnectionTester } from './ProxyConnectionTester';
+import { LogicalGeneration } from '../core/LogicalGeneration';
 import { TestResult } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
 
@@ -37,6 +38,11 @@ export class ProxyTestScheduler {
     private active: boolean;
     private currentProxyUrl?: string;
     private onTestComplete?: (result: TestResult) => void;
+    private captureGeneration?: () => Promise<LogicalGeneration | undefined>;
+
+    setGenerationCapture(capture: (() => Promise<LogicalGeneration | undefined>) | undefined): void {
+        this.captureGeneration = capture;
+    }
 
     /**
      * Create a new ProxyTestScheduler
@@ -180,8 +186,11 @@ export class ProxyTestScheduler {
         }
 
         try {
+            const startedGeneration = this.captureGeneration
+                ? await this.captureGeneration()
+                : undefined;
             const result = await this.tester.testProxyAuto(this.currentProxyUrl);
-            this.onTestComplete(result);
+            this.onTestComplete(startedGeneration ? { ...result, startedGeneration } : result);
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : 'Unknown error';
             Logger.error('ProxyTestScheduler test error:', errorMsg);

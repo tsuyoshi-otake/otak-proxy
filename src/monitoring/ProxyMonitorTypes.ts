@@ -26,6 +26,7 @@ export interface ProxyDetectionResult {
     error?: string;
     testResult?: TestResult;
     proxyReachable?: boolean;
+    startedGeneration?: import('../core/LogicalGeneration').LogicalGeneration;
 }
 
 /**

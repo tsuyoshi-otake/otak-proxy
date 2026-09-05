@@ -1,4 +1,5 @@
 import { Logger } from '../utils/Logger';
+import { LogicalGeneration } from '../core/LogicalGeneration';
 import { TestResult } from '../utils/ProxyUtils';
 import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { ProxyTestScheduler } from './ProxyTestScheduler';
@@ -15,6 +16,7 @@ export interface ProxyMonitorConnectionState {
     lastProxyReachable: boolean;
     lastConnectionTestAt: number | null;
     events: ProxyMonitorConnectionEvents;
+    captureGeneration?: () => Promise<LogicalGeneration | undefined>;
 }
 
 export function createProxyMonitorConnectionState(
@@ -27,8 +29,25 @@ export function createProxyMonitorConnectionState(
         scheduler: tester ? new ProxyTestScheduler(tester, initialConfig.connectionTestInterval) : undefined,
         lastProxyReachable: false,
         lastConnectionTestAt: null,
-        events
+        events,
+        captureGeneration: undefined
     };
+}
+
+async function stampTestGeneration(
+    state: ProxyMonitorConnectionState,
+    result: TestResult
+): Promise<TestResult> {
+    if (result.startedGeneration || !state.captureGeneration) {
+        return result;
+    }
+
+    try {
+        const startedGeneration = await state.captureGeneration();
+        return startedGeneration ? { ...result, startedGeneration } : result;
+    } catch {
+        return result;
+    }
 }
 
 function shouldUseConnectionScheduler(
@@ -271,7 +290,7 @@ async function runConnectionTestIfNeeded(
         return;
     }
 
-    const testResult = await state.tester!.testProxyAuto(result.proxyUrl!);
+    const testResult = await stampTestGeneration(state, await state.tester!.testProxyAuto(result.proxyUrl!));
     recordConnectionTestResult(state, result, testResult);
 }
 

@@ -10,7 +10,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState, IProxyStateManager } from './types';
+import { ProxyMode, ProxyState, IProxyStateManager, StateCommitResult, stateRevision } from './types';
 import { Logger } from '../utils/Logger';
 import { I18nManager } from '../i18n/I18nManager';
 import {
@@ -84,6 +84,36 @@ export class ProxyStateManager implements IProxyStateManager {
      * @param {ProxyState} state - State to save
      */
     async saveState(state: ProxyState): Promise<void> {
+        await this.writeState({ ...state, revision: this.nextRevision(state) });
+    }
+
+    /**
+     * Revision-checked write (issue #17). A snapshot derived from N is rejected
+     * once N+1 has already been committed, so a late retry cannot roll disk back.
+     */
+    async commitState(expectedRevision: number, next: ProxyState): Promise<StateCommitResult> {
+        const current = this.readStoredState();
+        const currentRevision = current ? stateRevision(current) : 0;
+        if (currentRevision !== expectedRevision) {
+            return { kind: 'superseded', current: current ?? next };
+        }
+
+        const revision = expectedRevision + 1;
+        const committed: ProxyState = { ...next, revision };
+        await this.writeState(committed);
+        return { kind: 'committed', revision, state: committed };
+    }
+
+    private nextRevision(state: ProxyState): number {
+        const persisted = this.readStoredState();
+        return Math.max(persisted ? stateRevision(persisted) : 0, stateRevision(state)) + 1;
+    }
+
+    private readStoredState(): ProxyState | undefined {
+        return this.inMemoryState ?? this.context.globalState.get<ProxyState>('proxyState');
+    }
+
+    private async writeState(state: ProxyState): Promise<void> {
         try {
             await this.persistManualProxySecret(state.manualProxyUrl);
             await this.context.globalState.update('proxyState', sanitizeProxyStateForPersistence(state));

@@ -35,6 +35,7 @@ export interface ProxyTestResult {
     proxyUrl?: string;
     timestamp?: number;
     duration?: number;
+    startedGeneration?: import('./LogicalGeneration').LogicalGeneration;
 }
 
 /**
@@ -92,11 +93,45 @@ export interface ProxyState {
     lastSystemProxyUrl?: string;         // Last detected system proxy URL
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
     lastDetectionSource?: AppliedProxySource; // Provenance of autoProxyUrl (issue #29 echo suppression)
+    /**
+     * Monotonic logical generation for this window's ProxyState.
+     * Every committed write advances it so a completion derived from N cannot
+     * mutate N+1 (issue #17 P1-3). Absent on states written before this field
+     * existed; treat that as 0.
+     */
+    revision?: number;
+    /**
+     * True while a desired state has been saved but apply has not finished.
+     * Receivers must not treat this as a converged success (issue #17 P1-6).
+     */
+    convergencePending?: boolean;
+    /**
+     * Last-applied HTTP bypass list (NO_PROXY / http.noProxy). Identity only;
+     * used so a completion for a different bypass cannot land on the new one.
+     */
+    noProxy?: string;
+}
+
+/**
+ * Outcome of a revision-checked write. `superseded` means another owner
+ * committed first; the caller must drop its snapshot instead of saving it.
+ */
+export type StateCommitResult =
+    | { kind: 'committed'; revision: number; state: ProxyState }
+    | { kind: 'superseded'; current: ProxyState };
+
+export function stateRevision(state: ProxyState | undefined): number {
+    const revision = state?.revision;
+    return typeof revision === 'number' && Number.isFinite(revision) ? revision : 0;
 }
 
 export interface IProxyStateManager {
     getState(): Promise<ProxyState>;
     saveState(state: ProxyState): Promise<void>;
+    /**
+     * Writes `next` only when the stored revision is still `expectedRevision`.
+     */
+    commitState?(expectedRevision: number, next: ProxyState): Promise<StateCommitResult>;
     getActiveProxyUrl(state: ProxyState): string;
     getNextMode(currentMode: ProxyMode): ProxyMode;
 }

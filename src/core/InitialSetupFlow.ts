@@ -50,12 +50,14 @@ export class InitialSetupFlow {
 
     private setupStateSignature(state: ProxyState): string {
         return JSON.stringify({
+            revision: state.revision ?? 0,
             mode: state.mode,
             manualProxyUrl: state.manualProxyUrl || '',
             autoProxyUrl: state.autoProxyUrl || '',
             autoModeOff: state.autoModeOff === true,
             usingFallbackProxy: state.usingFallbackProxy === true,
-            fallbackProxyUrl: state.fallbackProxyUrl || ''
+            fallbackProxyUrl: state.fallbackProxyUrl || '',
+            noProxy: state.noProxy || ''
         });
     }
 

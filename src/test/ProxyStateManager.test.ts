@@ -109,8 +109,8 @@ suite('ProxyStateManager Unit Tests', () => {
 
         await stateManager.saveState(testState);
 
-        // Verify state was stored
-        assert.deepStrictEqual(storedState, testState);
+        // Verify state was stored (revision is stamped by the write)
+        assert.deepStrictEqual(storedState, { ...testState, revision: 1 });
     });
 
     test('saveState should remove proxy credentials from persisted state', async () => {
@@ -282,7 +282,7 @@ suite('ProxyStateManager Unit Tests', () => {
         await stateManager.saveState(testState);
         const retrievedState = await stateManager.getState();
 
-        assert.deepStrictEqual(retrievedState, testState);
+        assert.deepStrictEqual(retrievedState, { ...testState, revision: 1 });
     });
 
     test('getState should migrate saved Manual state to Auto and persist it', async () => {
@@ -394,7 +394,7 @@ suite('ProxyStateManager Unit Tests', () => {
 
             await stateManager.saveState(testState);
 
-            assert.deepStrictEqual(storedState, testState);
+            assert.deepStrictEqual(storedState, { ...testState, revision: 1 });
             assert.strictEqual(storedState!.lastTestResult!.success, true);
             assert.strictEqual(storedState!.proxyReachable, true);
             assert.ok(storedState!.lastTestTimestamp);
@@ -519,7 +519,7 @@ suite('ProxyStateManager Unit Tests', () => {
 
             await stateManager.saveState(testState);
 
-            assert.deepStrictEqual(storedState, testState);
+            assert.deepStrictEqual(storedState, { ...testState, revision: 1 });
             assert.strictEqual(storedState!.usingFallbackProxy, true);
             assert.strictEqual(storedState!.autoModeOff, false);
             assert.strictEqual(storedState!.lastSystemProxyUrl, 'http://system.example.com:8080');
