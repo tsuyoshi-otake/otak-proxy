@@ -224,6 +224,35 @@ suite('PipConfigManager Test Suite', () => {
         assert.strictEqual(result.error, 'pip is not installed or Python is not in PATH');
     });
 
+    test('preserves a current pip value that is no longer the owned value', async () => {
+        let current: string | null = 'http://external.example:8080';
+        const calls: CommandCall[] = [];
+        const runner: PipCommandRunner = async (command, args) => {
+            calls.push({ command, args });
+            if (args.includes('get')) {
+                if (current === null) {
+                    throw noSuchKeyError();
+                }
+                return { stdout: `${current}\n`, stderr: '' };
+            }
+            if (args.includes('unset')) {
+                current = null;
+                return { stdout: '', stderr: '' };
+            }
+            return { stdout: '', stderr: '' };
+        };
+        const manager = new PipConfigManager({
+            commandRunner: runner,
+            candidates: [{ command: 'python3', argsPrefix: ['-m', 'pip'] }]
+        });
+
+        const result = await manager.unsetProxy({ expectedValue: 'http://owned.example:8080' });
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(current, 'http://external.example:8080');
+        assert.ok(!calls.some(call => call.args.includes('unset')));
+    });
+
     test('should classify pip timeouts', () => {
         const result = classifyPipConfigError(commandError('Command timed out', {
             killed: true,

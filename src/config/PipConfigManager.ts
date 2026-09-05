@@ -4,6 +4,7 @@ import { Logger } from '../utils/Logger';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
+import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
 
 const execFileAsync = promisify(execFile);
 
@@ -11,6 +12,7 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
+    preservedKeys?: readonly string[];
 }
 
 interface PipErrorDetails {
@@ -190,8 +192,50 @@ export class PipConfigManager {
         }
     }
 
-    async unsetProxy(): Promise<OperationResult> {
+    /**
+     * pip has no value-specific unset. Compare, then key-level unset, then
+     * post-read when an expected owned value is provided.
+     *
+     * Non-guarantee: `pip config unset` is key-level. An external writer
+     * during that unset cannot be restored.
+     */
+    async unsetProxy(options?: { expectedValue?: string }): Promise<OperationResult> {
         try {
+            const expectedValue = options?.expectedValue;
+            if (expectedValue !== undefined) {
+                const outcome = await compareThenDelete({
+                    expected: expectedValue,
+                    read: async () => {
+                        const inspection = await this.inspectProxy();
+                        if (inspection.status !== 'available') {
+                            return UNSET_UNREADABLE;
+                        }
+                        return inspection.values?.proxy ?? null;
+                    },
+                    deleteKey: async () => {
+                        try {
+                            await this.execPip(['config', '--user', 'unset', 'global.proxy']);
+                        } catch (error) {
+                            if (!isPipKeyUnsetError(error)) {
+                                throw error;
+                            }
+                        }
+                    }
+                });
+                if (!outcome.ok) {
+                    return {
+                        success: false,
+                        error: outcome.reason === 'unreadable'
+                            ? 'pip proxy re-read failed; refusing to unset'
+                            : 'pip owned proxy value remained after unset',
+                        errorType: 'CONFIG_ERROR'
+                    };
+                }
+                return outcome.preserved
+                    ? { success: true, preservedKeys: ['global.proxy'] }
+                    : { success: true };
+            }
+
             const currentProxy = await this.readProxy();
             if (currentProxy === null) {
                 return { success: true };

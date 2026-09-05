@@ -80,6 +80,14 @@ function escapeGitValueRegex(value: string): string {
 }
 
 /**
+ * git config value-pattern is a POSIX regex. Anchor and escape so an owned
+ * URL is matched literally, not as a wildcard.
+ */
+export function exactGitConfigValuePattern(value: string): string {
+    return `^${value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}$`;
+}
+
+/**
  * Manages Git proxy configuration with secure command execution.
  * Uses execFile() instead of exec() to prevent shell interpretation and command injection.
  */
@@ -168,14 +176,35 @@ export class GitConfigManager {
 
     async unsetProxyKeys(keys: readonly GitProxyKey[], options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
+            const preservedKeys: GitProxyKey[] = [];
             await withGitConfigWriteMutex(async () => {
+                const expectedValues = options?.expectedValues;
                 for (const key of keys) {
+                    const exact = options?.exactValues?.[key];
+                    const expected = expectedValues?.[key];
+                    const ownedValues = exact && exact.length > 0
+                        ? [...exact]
+                        : expected !== undefined
+                            ? [expected]
+                            : undefined;
+                    if (ownedValues) {
+                        for (const value of ownedValues) {
+                            const result = await this.unsetOwnedGitValue(key, value, options);
+                            if (result.preserved) {
+                                preservedKeys.push(key);
+                            }
+                        }
+                        continue;
+                    }
+
                     await this.unsetOneKey(key, options);
                 }
                 await this.assertUnsetPostCondition(keys, options);
             }, options);
 
-            return { success: true };
+            return preservedKeys.length > 0
+                ? { success: true, preservedKeys }
+                : { success: true };
         } catch (error) {
             if (error instanceof GitConfigUnsetError) {
                 return { success: false, error: error.message, errorType: error.errorType };
@@ -265,8 +294,14 @@ export class GitConfigManager {
             const remaining = inspection.allValues?.[key]
                 ?? (inspection.values?.[key] ? [inspection.values[key] as string] : []);
             const exact = options?.exactValues?.[key];
-            if (exact && exact.length > 0) {
-                if (exact.some(value => remaining.includes(value))) {
+            const expected = options?.expectedValues?.[key];
+            const managed = exact && exact.length > 0
+                ? [...exact]
+                : expected !== undefined
+                    ? [expected]
+                    : undefined;
+            if (managed) {
+                if (managed.some(value => remaining.includes(value))) {
                     throw new GitConfigUnsetError(`Git ${key} still contains a managed value after cleanup`);
                 }
                 continue;
@@ -275,6 +310,61 @@ export class GitConfigManager {
                 throw new GitConfigUnsetError(`Git ${key} still contains a value after cleanup`);
             }
         }
+    }
+
+    /**
+     * Value-specific delete. Git can remove only lines matching the owned value.
+     *
+     * Non-guarantee: if an external writer replaces the value in the same
+     * instant as `git config --unset-all` rewrites the file, Git's own
+     * last-writer-wins apply. otak-proxy locks cannot serialize those writers.
+     */
+    private async unsetOwnedGitValue(
+        key: GitProxyKey,
+        expected: string,
+        options?: GitConfigOperationOptions
+    ): Promise<{ preserved: boolean }> {
+        const readValues = async (): Promise<string[] | undefined> => {
+            const inspection = await this.inspectProxy();
+            if (inspection.status !== 'available') {
+                return undefined;
+            }
+            if (inspection.allValues?.[key]) {
+                return inspection.allValues[key];
+            }
+            const single = inspection.values?.[key];
+            return single ? [single] : [];
+        };
+
+        const before = await readValues();
+        if (!before) {
+            throw new GitConfigUnsetError('Git proxy re-read failed; refusing to unset');
+        }
+        if (!before.includes(expected)) {
+            return { preserved: before.length > 0 };
+        }
+
+        try {
+            await this.unsetExactValue(key, expected, options);
+        } catch (error) {
+            const remaining = await readValues();
+            if (!remaining) {
+                throw new GitConfigUnsetError('Git proxy re-read failed; refusing to unset');
+            }
+            if (isGitExitCode(error, 5) && !remaining.includes(expected)) {
+                return { preserved: remaining.length > 0 };
+            }
+            throw error;
+        }
+
+        const after = await readValues();
+        if (!after) {
+            throw new GitConfigUnsetError('Git proxy re-read failed; refusing to unset');
+        }
+        if (after.includes(expected)) {
+            throw new GitConfigUnsetError('Git owned proxy value remained after unset');
+        }
+        return { preserved: after.length > 0 };
     }
 
     /**

@@ -7,6 +7,11 @@ export interface GitConfigOperationOptions {
      * permission to run value-less `--unset-all`.
      */
     exactValues?: Partial<Record<GitProxyKey, readonly string[]>>;
+    /**
+     * When set, unset only removes these exact values (git --unset-all + value-pattern).
+     * A key whose current value differs is left untouched.
+     */
+    expectedValues?: Readonly<Partial<Record<GitProxyKey, string>>>;
 }
 
 export interface OperationResult {
@@ -18,4 +23,5 @@ export interface OperationResult {
      * set. Empty/absent when compensation cleared or an external writer changed them.
      */
     residualKeys?: readonly string[];
+    preservedKeys?: readonly string[];
 }

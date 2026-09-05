@@ -91,6 +91,7 @@ const serialBasenames = new Set([
   'GitConfigManager.test.js',
   'GitConfigManager.multivalue.test.js',
   'GitConfigManager.partialwrite.test.js',
+  'GitConfigManager.valueunset.test.js',
   'NpmConfigManager.test.js',
   'NpmConfigManager.partialwrite.test.js',
   'NpmConfigManager.property.test.js',
