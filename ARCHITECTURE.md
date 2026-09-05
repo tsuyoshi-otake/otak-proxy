@@ -27,7 +27,7 @@ src/
 ├── extension.ts          # Entry point (~350 lines)
 │
 ├── core/                 # Core business logic
-│   ├── types.ts         # Common type definitions (ProxyMode: Off/Manual/Auto)
+│   ├── types.ts         # Common type definitions (ProxyMode: Off/Auto; Manual is a legacy value migrated to Auto)
 │   ├── ProxyStateManager.ts    # State persistence
 │   ├── ProxyApplier.ts         # Proxy configuration orchestration
 │   └── ExtensionInitializer.ts # Initialization logic
@@ -311,7 +311,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 3. ProxyStateManager.getState()
    └─→ Retrieve current state
    ↓
-4. Determine next mode (Off → Manual → Auto)
+4. Determine next mode (Off ↔ Auto; getNextMode never returns Manual)
    ↓
 5. ProxyApplier.applyProxy() or disableProxy()
    ├─→ GitConfigManager
@@ -400,8 +400,9 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ProxyStateManager
 - **Responsibility**: ProxyState persistence and retrieval
 - **Key features**:
-  - `getState()`: State loading (with automatic fallback)
+  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto
   - `saveState()`: State saving (with automatic fallback)
+  - `getNextMode()`: Off ↔ Auto (a leftover Manual value also advances to Auto)
   - `migrateOldSettings()`: Migration from legacy settings
 - **Tests**: ProxyStateManager.test.ts, ProxyStateManager.property.test.ts
 
@@ -423,21 +424,21 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   - Window focus listeners
 
 #### ToggleProxyCommand
-- **Responsibility**: Mode switching (Off → Manual → Auto)
+- **Responsibility**: Mode switching (Off ↔ Auto)
 - **Flow**:
   1. Get current mode
-  2. Determine next mode
+  2. Determine next mode (`getNextMode`: Off → Auto → Off)
   3. Apply or disable proxy
   4. Save state
   5. Update UI
 
 #### ConfigureUrlCommand
-- **Responsibility**: Manual proxy URL configuration
+- **Responsibility**: Configure the Auto fallback proxy URL (`otak: Configure Manual Proxy`)
 - **Flow**:
   1. Prompt user for URL input
   2. Validate URL
-  3. Switch to Manual mode
-  4. Apply proxy
+  3. Store the URL as the Auto fallback (`manualProxyUrl` / `otakProxy.proxyUrl`)
+  4. Apply only if a leftover Manual mode is still current (hydrate migrates Manual → Auto)
 
 #### TestProxyCommand
 - **Responsibility**: Proxy connection testing
@@ -671,10 +672,10 @@ The extension uses three testing approaches:
 
 **Example**:
 ```typescript
-it('should toggle from off to manual', async () => {
+it('should toggle from off to auto', async () => {
     const state = { mode: ProxyMode.Off };
     const nextMode = stateManager.getNextMode(state.mode);
-    expect(nextMode).toBe(ProxyMode.Manual);
+    expect(nextMode).toBe(ProxyMode.Auto);
 });
 ```
 
