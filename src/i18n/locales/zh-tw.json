@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "自動：無系統代理",
   "statusbar.autoOff": "自動：OFF",
   "statusbar.autoFallback": "自動（回退）：{url}",
+  "statusbar.autoApplyBlocked": "Auto（已封鎖）",
+  "statusbar.tooltip.autoApplyBlocked": "Auto 模式 - 所需的 Proxy 尚未套用",
   "statusbar.manualWithProxy": "手動：{url}",
   "statusbar.manualWithUrl": "手動：{url}",
   "statusbar.manualNotConfigured": "手動：未設定",

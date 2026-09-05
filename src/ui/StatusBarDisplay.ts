@@ -1,4 +1,5 @@
 import { ProxyMode, ProxyState } from '../core/types';
+import { deriveRuntimeApplyStateFromProxyState } from '../core/v3Types';
 import { I18nManager } from '../i18n/I18nManager';
 import { InputSanitizer } from '../validation/InputSanitizer';
 
@@ -44,9 +45,14 @@ export function getStatusBarDisplay(
 
 function hasConvergenceFailure(state: ProxyState): boolean {
     return Boolean(
+        state.applyBlocked ||
         state.lastError ||
         Object.values(state.targetOutcomes ?? {}).some(outcome => outcome === 'failed')
     );
+}
+
+function isApplyBlocked(state: ProxyState): boolean {
+    return Boolean(state.applyBlocked) || deriveRuntimeApplyStateFromProxyState(state) === 'awaitingUser';
 }
 
 export function getUrlDisplay(
@@ -69,6 +75,13 @@ function getAutoDisplay(
         return {
             text: `$(circle-slash) ${i18n.t('statusbar.autoOff')}`,
             statusText: i18n.t('statusbar.tooltip.autoOff')
+        };
+    }
+
+    if (isApplyBlocked(state)) {
+        return {
+            text: `$(warning) ${i18n.t('statusbar.autoApplyBlocked')}`,
+            statusText: i18n.t('statusbar.tooltip.autoApplyBlocked')
         };
     }
 

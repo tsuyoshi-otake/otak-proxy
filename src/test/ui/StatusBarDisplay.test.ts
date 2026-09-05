@@ -51,4 +51,43 @@ suite('StatusBarDisplay convergence states', () => {
 
         assert.ok(display.text.startsWith('$(circle-slash)'));
     });
+
+    test('does not show successful Auto when apply was blocked before any target write', () => {
+        const display = getStatusBarDisplay({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            applyBlocked: 'untrustedWorkspace',
+            lastError: 'Proxy settings were not changed because the workspace is untrusted.',
+            targetOutcomes: {
+                git: 'failed',
+                vscode: 'failed',
+                npm: 'failed',
+                terminalEnv: 'failed'
+            }
+        }, true, i18n, sanitizer);
+
+        assert.ok(display.text.startsWith('$(warning)'), `expected warning icon, got: ${display.text}`);
+        assert.ok(!display.text.startsWith('$(sync)'), `must not show successful Auto: ${display.text}`);
+        assert.ok(
+            display.text.includes('blocked') || display.statusText.toLowerCase().includes('untrusted'),
+            `must surface apply-blocked vs desired Auto: ${display.text} / ${display.statusText}`
+        );
+    });
+
+    test('does not show a clean Off when disable was blocked', () => {
+        const display = getStatusBarDisplay({
+            mode: ProxyMode.Off,
+            applyBlocked: 'untrustedWorkspace',
+            lastError: 'Proxy settings were not changed because the workspace is untrusted.',
+            targetOutcomes: {
+                git: 'failed',
+                vscode: 'failed',
+                npm: 'failed',
+                terminalEnv: 'failed'
+            }
+        }, true, i18n, sanitizer);
+
+        assert.ok(display.text.startsWith('$(warning)'), `expected warning Off, got: ${display.text}`);
+        assert.ok(!display.text.startsWith('$(circle-slash)'), `must not show clean Off: ${display.text}`);
+    });
 });

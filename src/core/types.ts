@@ -80,6 +80,11 @@ export interface ProxyState {
     terminalEnvConfigured?: boolean;
     targetOutcomes?: Partial<Record<'git' | 'vscode' | 'npm' | 'pip' | 'terminalEnv',
         'configured' | 'cleared' | 'skippedUnavailable' | 'preservedExternal' | 'failed'>>;
+    /**
+     * Apply was refused before any target write. Distinct from a partial write
+     * failure recorded only in lastError / targetOutcomes.
+     */
+    applyBlocked?: 'untrustedWorkspace' | 'invalidProxyUrl';
     systemProxyDetected?: boolean;
     lastError?: string;
     // Feature: auto-mode-proxy-testing

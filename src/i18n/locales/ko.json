@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "자동: 시스템 프록시 없음",
   "statusbar.autoOff": "자동: OFF",
   "statusbar.autoFallback": "자동(폴백): {url}",
+  "statusbar.autoApplyBlocked": "Auto (차단됨)",
+  "statusbar.tooltip.autoApplyBlocked": "Auto 모드 - 원하는 프록시가 적용되지 않았습니다",
   "statusbar.manualWithProxy": "수동: {url}",
   "statusbar.manualWithUrl": "수동: {url}",
   "statusbar.manualNotConfigured": "수동: 미설정",

@@ -63,13 +63,18 @@ suite('ImportProxyCommand Unit Tests', () => {
         applyCalls: Array<{ url: string; enabled: boolean }>;
         notifications: Notification[];
         counters: { monitoringStarts: number; monitoringStops: number; statusBarUpdates: number };
+        statusBarStates: ProxyState[];
     }
 
-    function createContext(initialState: ProxyState): TestContext {
+    function createContext(
+        initialState: ProxyState,
+        applyProxySettings?: (url: string, enabled: boolean, state: ProxyState) => Promise<boolean>
+    ): TestContext {
         let state: ProxyState = { ...initialState };
         const applyCalls: Array<{ url: string; enabled: boolean }> = [];
         const notifications: Notification[] = [];
         const counters = { monitoringStarts: 0, monitoringStops: 0, statusBarUpdates: 0 };
+        const statusBarStates: ProxyState[] = [];
 
         const ctx: CommandContext = {
             extensionContext: {} as vscode.ExtensionContext,
@@ -89,10 +94,14 @@ suite('ImportProxyCommand Unit Tests', () => {
             getNextMode: (m) => (m === ProxyMode.Manual ? ProxyMode.Auto : ProxyMode.Off),
             applyProxySettings: async (url, enabled) => {
                 applyCalls.push({ url, enabled });
+                if (applyProxySettings) {
+                    return applyProxySettings(url, enabled, state);
+                }
                 return true;
             },
-            updateStatusBar: () => {
+            updateStatusBar: (next) => {
                 counters.statusBarUpdates++;
+                statusBarStates.push({ ...next });
             },
             checkAndUpdateSystemProxy: async () => {},
             startSystemProxyMonitoring: async () => {
@@ -121,7 +130,8 @@ suite('ImportProxyCommand Unit Tests', () => {
             getState: () => state,
             applyCalls,
             notifications,
-            counters
+            counters,
+            statusBarStates
         };
     }
 
@@ -190,7 +200,7 @@ suite('ImportProxyCommand Unit Tests', () => {
     test('detected proxy + Use Auto Mode switches state, applies, and starts monitoring', async () => {
         detectStub.resolves('http://detected.example:8080');
         showInformationMessageStub.resolves(i18n.t('action.useAutoMode'));
-        const { ctx, getState, applyCalls, notifications, counters } =
+        const { ctx, getState, applyCalls, notifications, counters, statusBarStates } =
             createContext({ mode: ProxyMode.Off });
 
         const result = await executeImportProxy(ctx);
@@ -209,6 +219,31 @@ suite('ImportProxyCommand Unit Tests', () => {
         const success = notifications.find(n => n.type === 'success');
         assert.ok(success, 'expected a success notification');
         assert.strictEqual(success?.key, 'message.switchedToAutoMode');
+        assert.ok(!statusBarStates.at(-1)?.lastError);
+    });
+
+    test('Use Auto Mode does not paint successful Auto from the pre-apply snapshot when apply is blocked', async () => {
+        detectStub.resolves('http://detected.example:8080');
+        showInformationMessageStub.resolves(i18n.t('action.useAutoMode'));
+        const { ctx, notifications, statusBarStates, counters } = createContext(
+            { mode: ProxyMode.Off },
+            async (_url, _enabled, state) => {
+                state.lastError = 'Proxy settings were not changed because the workspace is untrusted.';
+                state.applyBlocked = 'untrustedWorkspace';
+                state.targetOutcomes = { git: 'failed', vscode: 'failed', npm: 'failed', terminalEnv: 'failed' };
+                return false;
+            }
+        );
+
+        const result = await executeImportProxy(ctx);
+
+        assert.strictEqual(result.success, true);
+        assert.ok(counters.statusBarUpdates >= 1);
+        const painted = statusBarStates.at(-1);
+        assert.ok(painted, 'status bar must refresh after apply');
+        assert.strictEqual(painted?.applyBlocked, 'untrustedWorkspace');
+        assert.ok(painted?.lastError?.toLowerCase().includes('untrusted'));
+        assert.ok(!notifications.some(n => n.type === 'success'), 'must not toast Auto success when apply is blocked');
     });
 
     test('detected proxy + Use Auto Mode clears stale Auto OFF state and restarts monitoring', async () => {

@@ -136,8 +136,11 @@ async function saveAndApplyProxyChange(
     await saveAndPublishProxyState(context, state);
 
     const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
-    await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
-    notifyProxyChange(context, state, result, previousProxy);
+    const applied = await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
+    context.updateStatusBar?.(await context.proxyStateManager.getState());
+    if (applied) {
+        notifyProxyChange(context, state, result, previousProxy);
+    }
 }
 
 function notifyProxyChange(

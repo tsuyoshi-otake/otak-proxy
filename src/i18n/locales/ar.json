@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "تلقائي: لا يوجد وكيل نظام",
   "statusbar.autoOff": "تلقائي: متوقف",
   "statusbar.autoFallback": "تلقائي (بديل): {url}",
+  "statusbar.autoApplyBlocked": "Auto (محظور)",
+  "statusbar.tooltip.autoApplyBlocked": "وضع Auto - لم يتم تطبيق الوكيل المطلوب",
   "statusbar.manualWithProxy": "يدوي: {url}",
   "statusbar.manualWithUrl": "يدوي: {url}",
   "statusbar.manualNotConfigured": "يدوي: غير مُكوَّن",

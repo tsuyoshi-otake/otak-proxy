@@ -22,6 +22,7 @@ import {
 } from './ProxyApplierTypes';
 import { updateProxyConfigTargetDetailed } from './ProxyConfigTargetRunner';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
+import { ProxyState } from './types';
 import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
 import {
     showAggregatedErrors,
@@ -30,6 +31,11 @@ import {
 } from './ProxyApplierNotifications';
 import { TargetOwnershipStore } from './TargetOwnershipStore';
 import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+
+export const UNTRUSTED_WORKSPACE_APPLY_MESSAGE =
+    'Proxy settings were not changed because the workspace is untrusted.';
+const INVALID_PROXY_URL_APPLY_MESSAGE =
+    'Proxy settings were not applied because the proxy URL is invalid.';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -63,12 +69,41 @@ export class ProxyApplier {
             return false;
         }
 
-        const message = 'Proxy settings were not changed because the workspace is untrusted.';
-        Logger.warn(message);
+        Logger.warn(UNTRUSTED_WORKSPACE_APPLY_MESSAGE);
         if (!options?.silent) {
-            this.userNotifier.showWarning(message);
+            this.userNotifier.showWarning(UNTRUSTED_WORKSPACE_APPLY_MESSAGE);
         }
         return true;
+    }
+
+    private async recordApplyBlocked(
+        enabled: boolean,
+        errorAggregator: ErrorAggregator,
+        message: string,
+        applyBlocked: NonNullable<ProxyState['applyBlocked']>
+    ): Promise<ProxyConfigResults> {
+        errorAggregator.addError(
+            applyBlocked === 'untrustedWorkspace' ? 'Workspace trust' : 'Proxy URL',
+            message
+        );
+        const results = this.blockedResults();
+        await saveProxyConfigResults(this.stateManager, enabled, results, errorAggregator, applyBlocked);
+        return results;
+    }
+
+    private blockedResults(): ProxyConfigResults {
+        return {
+            gitSuccess: false,
+            vscodeSuccess: false,
+            npmSuccess: false,
+            pipSuccess: this.pipManager ? false : undefined,
+            terminalEnvSuccess: false,
+            gitOutcome: 'failed',
+            vscodeOutcome: 'failed',
+            npmOutcome: 'failed',
+            pipOutcome: this.pipManager ? 'failed' : undefined,
+            terminalEnvOutcome: 'failed'
+        };
     }
 
     private async withOptionalProgress<T>(
@@ -180,12 +215,24 @@ export class ProxyApplier {
         }
 
         if (this.blockIfUntrustedWorkspace(options)) {
-            return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
+            const results = await this.recordApplyBlocked(
+                true,
+                errorAggregator,
+                UNTRUSTED_WORKSPACE_APPLY_MESSAGE,
+                'untrustedWorkspace'
+            );
+            return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
         }
         
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
         if (proxyUrl && !this.validateProxyUrlForApply(proxyUrl)) {
-            return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
+            const results = await this.recordApplyBlocked(
+                true,
+                errorAggregator,
+                INVALID_PROXY_URL_APPLY_MESSAGE,
+                'invalidProxyUrl'
+            );
+            return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
         }
         
         const results = await this.withOptionalProgress(
@@ -226,7 +273,13 @@ export class ProxyApplier {
         const errorAggregator = new ErrorAggregator();
 
         if (this.blockIfUntrustedWorkspace(options)) {
-            return this.buildDetailedResult(false, false, '', this.emptyResults(), errorAggregator);
+            const results = await this.recordApplyBlocked(
+                false,
+                errorAggregator,
+                UNTRUSTED_WORKSPACE_APPLY_MESSAGE,
+                'untrustedWorkspace'
+            );
+            return this.buildDetailedResult(false, false, '', results, errorAggregator);
         }
         
         const results = await this.withOptionalProgress(

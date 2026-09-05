@@ -78,4 +78,43 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
             restoreConfig();
         }
     });
+
+    test('reports applyBlocked untrustedWorkspace without leaking proxy credentials', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const restoreTrust = (() => {
+            const descriptor = Object.getOwnPropertyDescriptor(vscode.workspace, 'isTrusted');
+            Object.defineProperty(vscode.workspace, 'isTrusted', {
+                configurable: true,
+                get: () => false
+            });
+            return () => {
+                if (descriptor) {
+                    Object.defineProperty(vscode.workspace, 'isTrusted', descriptor);
+                } else {
+                    delete (vscode.workspace as { isTrusted?: boolean }).isTrusted;
+                }
+            };
+        })();
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            createContext(),
+            async () => ({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://alice:s3cr3t@proxy.example.com:8080',
+                applyBlocked: 'untrustedWorkspace',
+                lastError: 'Proxy settings were not changed because the workspace is untrusted.'
+            } as ProxyState)
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            const serialized = JSON.stringify(report);
+            assert.strictEqual(report.observations.applyBlocked, 'untrustedWorkspace');
+            assert.ok(report.issues.some(issue => issue.evidence.applyBlocked === 'untrustedWorkspace'));
+            assert.notStrictEqual(report.runtimeState, 'applied');
+            assert.ok(!serialized.includes('s3cr3t'));
+        } finally {
+            restoreTrust();
+            restoreConfig();
+        }
+    });
 });

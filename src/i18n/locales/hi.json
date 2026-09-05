@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "ऑटो: कोई सिस्टम proxy नहीं",
   "statusbar.autoOff": "ऑटो: OFF",
   "statusbar.autoFallback": "ऑटो (फ़ॉलबैक): {url}",
+  "statusbar.autoApplyBlocked": "Auto (ब्लॉक)",
+  "statusbar.tooltip.autoApplyBlocked": "Auto मोड - वांछित प्रॉक्सी लागू नहीं हुई",
   "statusbar.manualWithProxy": "मैनुअल: {url}",
   "statusbar.manualWithUrl": "मैनुअल: {url}",
   "statusbar.manualNotConfigured": "मैनुअल: कॉन्फ़िगर नहीं किया गया",

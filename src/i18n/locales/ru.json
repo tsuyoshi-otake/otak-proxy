@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "Авто: нет системного прокси",
   "statusbar.autoOff": "Авто: ВЫКЛ.",
   "statusbar.autoFallback": "Авто (резервный): {url}",
+  "statusbar.autoApplyBlocked": "Auto (заблокировано)",
+  "statusbar.tooltip.autoApplyBlocked": "Режим Auto — желаемый прокси не применён",
   "statusbar.manualWithProxy": "Вручную: {url}",
   "statusbar.manualWithUrl": "Вручную: {url}",
   "statusbar.manualNotConfigured": "Вручную: не настроено",

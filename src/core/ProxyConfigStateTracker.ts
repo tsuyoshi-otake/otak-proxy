@@ -1,5 +1,6 @@
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { Logger } from '../utils/Logger';
+import { ProxyState } from './types';
 import { ProxyStateManager } from './ProxyStateManager';
 import { ProxyConfigResults } from './ProxyApplierTypes';
 
@@ -7,7 +8,8 @@ export async function saveProxyConfigResults(
     stateManager: ProxyStateManager | undefined,
     enabled: boolean,
     results: ProxyConfigResults,
-    errorAggregator: ErrorAggregator
+    errorAggregator: ErrorAggregator,
+    applyBlocked?: ProxyState['applyBlocked']
 ): Promise<void> {
     if (!stateManager) {
         return;
@@ -41,6 +43,7 @@ export async function saveProxyConfigResults(
             terminalEnv: results.terminalEnvOutcome
         };
         state.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
+        state.applyBlocked = applyBlocked;
         await stateManager.saveState(state);
     } catch (error) {
         Logger.error('Failed to update configuration state tracking:', error);

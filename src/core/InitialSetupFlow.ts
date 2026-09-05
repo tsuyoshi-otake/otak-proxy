@@ -88,6 +88,7 @@ export class InitialSetupFlow {
             this.useAutoProxy(state, detectedProxy, false, detected.source ?? undefined);
             await this.context.proxyStateManager.saveState(state);
             const applied = await applyProxyThroughContext(this.context, detectedProxy, true);
+            this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
             if (applied) {
                 this.context.userNotifier.showSuccess(
                     'message.usingSystemProxy',
@@ -113,6 +114,7 @@ export class InitialSetupFlow {
                 this.useAutoProxy(updatedState, updatedState.manualProxyUrl, true);
                 await this.context.proxyStateManager.saveState(updatedState);
                 await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
+                this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
             }
         }
     }
@@ -158,6 +160,7 @@ export class InitialSetupFlow {
         );
 
         const applied = await applyProxyThroughContext(this.context, manualProxyUrl, true);
+        this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
         if (applied) {
             this.context.userNotifier.showSuccess(
                 'message.manualProxyConfigured',

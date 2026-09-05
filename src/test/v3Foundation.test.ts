@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../core/types';
-import { deriveRuntimeApplyState, ProxyIssue, V3_SCHEMA_VERSION } from '../core/v3Types';
+import { deriveRuntimeApplyState, deriveRuntimeApplyStateFromProxyState, ProxyIssue, V3_SCHEMA_VERSION } from '../core/v3Types';
 import { publicFingerprint, TargetOwnershipStore } from '../core/TargetOwnershipStore';
 import { V3_MIGRATION_JOURNAL_KEY, V3_SCHEMA_VERSION_KEY, LEGACY_MANUAL_PROXY_SECRET_KEY } from '../core/V3MigrationService';
 import { ProxyCredentialStore, splitProxyUrl, getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
@@ -381,6 +381,23 @@ suite('v3 Phase 1 diagnostics foundation', () => {
 
         assert.strictEqual(deriveRuntimeApplyState([advisory], true, 2, 2), 'applied');
         assert.strictEqual(deriveRuntimeApplyState([blocking], true, 1, 2), 'partial');
+    });
+
+    test('untrusted apply-blocked desired Auto is awaitingUser, not applied', () => {
+        const runtime = deriveRuntimeApplyStateFromProxyState({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            applyBlocked: 'untrustedWorkspace',
+            lastError: 'Proxy settings were not changed because the workspace is untrusted.',
+            targetOutcomes: {
+                git: 'failed',
+                vscode: 'failed',
+                npm: 'failed',
+                terminalEnv: 'failed'
+            }
+        });
+        assert.strictEqual(runtime, 'awaitingUser');
+        assert.notStrictEqual(runtime, 'applied');
     });
 
     test('parses English and Japanese WinHTTP fixture output without mutating Windows settings', () => {

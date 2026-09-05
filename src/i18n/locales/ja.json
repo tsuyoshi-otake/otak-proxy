@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "Auto: システムproxyなし",
   "statusbar.autoOff": "Auto: OFF",
   "statusbar.autoFallback": "Auto (フォールバック): {url}",
+  "statusbar.autoApplyBlocked": "Auto（ブロック）",
+  "statusbar.tooltip.autoApplyBlocked": "Autoモード - 希望したproxyは適用されていません",
   "statusbar.manualWithProxy": "Manual: {url}",
   "statusbar.manualWithUrl": "Manual: {url}",
   "statusbar.manualNotConfigured": "Manual: 未設定",

@@ -99,6 +99,10 @@ There is **no separate Manual mode**: a URL entered via `otak: Configure Manual 
   ├──────────────────────────────────────────┤
   │ ⚠ Auto: http://proxy.example.com:8080    │  last apply failed on some target —
   │                                          │  hover for details
+  ├──────────────────────────────────────────┤
+  │ ⚠ Auto (blocked)                         │  apply was refused (for example an
+  │                                          │  untrusted workspace); desired Auto
+  │                                          │  is not treated as applied
   └──────────────────────────────────────────┘
 ```
 

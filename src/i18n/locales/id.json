@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "Auto: Tidak ada proxy sistem",
   "statusbar.autoOff": "Auto: OFF",
   "statusbar.autoFallback": "Auto (Fallback): {url}",
+  "statusbar.autoApplyBlocked": "Auto (diblokir)",
+  "statusbar.tooltip.autoApplyBlocked": "Mode Auto - Proxy yang diinginkan tidak diterapkan",
   "statusbar.manualWithProxy": "Manual: {url}",
   "statusbar.manualWithUrl": "Manual: {url}",
   "statusbar.manualNotConfigured": "Manual: Tidak dikonfigurasi",

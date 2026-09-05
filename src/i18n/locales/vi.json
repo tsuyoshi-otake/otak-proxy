@@ -107,6 +107,8 @@
   "statusbar.autoNoProxy": "Auto: Không có proxy hệ thống",
   "statusbar.autoOff": "Auto: OFF",
   "statusbar.autoFallback": "Auto (Fallback): {url}",
+  "statusbar.autoApplyBlocked": "Auto (bị chặn)",
+  "statusbar.tooltip.autoApplyBlocked": "Chế độ Auto - Proxy mong muốn chưa được áp dụng",
   "statusbar.manualWithProxy": "Manual: {url}",
   "statusbar.manualWithUrl": "Manual: {url}",
   "statusbar.manualNotConfigured": "Manual: Chưa cấu hình",
