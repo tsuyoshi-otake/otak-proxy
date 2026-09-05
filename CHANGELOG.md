@@ -1,5 +1,26 @@
 # Change Log
 
+## [3.2.7] - 2026-09-05
+
+### Fixed
+- Stop treating Git `unset` exit 5 as missing-key success when multi-values remain (#44).
+- Compensate leftover Git/npm keys after a partial set so Off can recover them (#43).
+- Fence stale async completions with `ProxyState.revision` so a late test or apply cannot mutate a newer generation (#17).
+- Re-inspect before Off unsets and preserve external values that no longer match ownership (#46).
+- Restore Auto proxy credentials locally after persist/sync instead of applying a credentialless URL (#45).
+- Restore WHATWG default ports on CONNECT (`:80` / `:443`) instead of substituting 8080/443 incorrectly (#54).
+- Accept WHATWG-bracketed IPv6 proxy URLs and pass an unbracketed hostname to Node `http.request` (#53).
+- Pass encoded credentials as a single argv element without `cmd.exe` (#52).
+- Write only Git `http.proxy` as the routing key; treat `https.proxy` as leftover and clear it on Off (#55).
+- Keep distinct HTTP and HTTPS proxy fields instead of collapsing them to one URL (#56).
+- Stop the Off terminal mask from emptying an unowned `NO_PROXY` (#57).
+- Report PAC, WPAD, and GNOME auto-config as unsupported instead of applying none (#58).
+- Surface apply-blocked (untrusted workspace / invalid URL) instead of painting a false Auto success (#66).
+- Classify canary CONNECT failures so only an unreachable proxy endpoint clears Auto (#67).
+
+### Changed
+- Align `ARCHITECTURE.md` with the two-state Off ↔ Auto toggle (#68).
+
 ## [3.2.6] - 2026-08-15
 
 ### Fixed
