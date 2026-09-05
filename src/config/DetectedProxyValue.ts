@@ -22,6 +22,7 @@ export function buildDetectedProxyValue(input: {
             proxyUrl: null,
             source: null,
             kind: 'direct',
+            capability: 'supported',
             bypass
         };
     }
@@ -32,6 +33,7 @@ export function buildDetectedProxyValue(input: {
             proxyUrl,
             source: input.source,
             kind: 'singleProxy',
+            capability: 'supported',
             httpUrl: httpUrl ?? (httpsUrl === proxyUrl ? proxyUrl : undefined),
             httpsUrl: httpsUrl ?? (httpUrl === proxyUrl ? proxyUrl : undefined),
             bypass
@@ -42,6 +44,7 @@ export function buildDetectedProxyValue(input: {
         proxyUrl: httpUrl,
         source: input.source,
         kind: 'perSchemeProxy',
+        capability: 'supported',
         httpUrl,
         httpsUrl,
         bypass
