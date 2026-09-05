@@ -112,6 +112,28 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.notCalled(notifyStub);
     });
 
+    test('Auto + same HTTP but changed HTTPS: re-applies split routing', async () => {
+        state = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy-a.example.com:8080',
+            autoHttpProxyUrl: 'http://proxy-a.example.com:8080',
+            autoHttpsProxyUrl: 'http://proxy-b.example.com:8443',
+            autoProxyKind: 'perSchemeProxy'
+        };
+        detectStub.resolves({
+            proxyUrl: 'http://proxy-a.example.com:8080',
+            source: 'environment',
+            kind: 'perSchemeProxy',
+            httpUrl: 'http://proxy-a.example.com:8080',
+            httpsUrl: 'http://proxy-c.example.com:8443'
+        });
+
+        await service.checkAndUpdateSystemProxy();
+
+        assert.strictEqual(state.autoHttpsProxyUrl, 'http://proxy-c.example.com:8443');
+        sinon.assert.calledOnce(applyProxyStub);
+    });
+
     test('Auto OFF + same detected URL: re-applies before presenting Auto ON', async () => {
         state = {
             mode: ProxyMode.Auto,

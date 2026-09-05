@@ -34,20 +34,25 @@ export async function detectSystemProxySettingsWithSource(): Promise<ProxyDetect
 
         if (!detected.proxyUrl) {
             Logger.log('No system proxy detected');
-            return { proxyUrl: null, source: null };
+            return { proxyUrl: null, source: null, kind: detected.kind, bypass: detected.bypass };
         }
 
-        const validationResult = urlValidator.validate(detected.proxyUrl);
-        if (!validationResult.isValid) {
-            Logger.warn('Detected system proxy has invalid format:', detected.proxyUrl);
-            Logger.warn('Validation errors:', validationResult.errors.join(', '));
+        const urlsToValidate = [detected.httpUrl, detected.httpsUrl, detected.proxyUrl]
+            .filter((url, index, all): url is string => Boolean(url) && all.indexOf(url) === index);
 
-            notifier.showWarning(
-                'warning.invalidFormat',
-                { url: urlSanitizer.maskPassword(detected.proxyUrl) }
-            );
+        for (const url of urlsToValidate) {
+            const validationResult = urlValidator.validate(url);
+            if (!validationResult.isValid) {
+                Logger.warn('Detected system proxy has invalid format:', url);
+                Logger.warn('Validation errors:', validationResult.errors.join(', '));
 
-            return { proxyUrl: null, source: null };
+                notifier.showWarning(
+                    'warning.invalidFormat',
+                    { url: urlSanitizer.maskPassword(url) }
+                );
+
+                return { proxyUrl: null, source: null };
+            }
         }
 
         return detected;

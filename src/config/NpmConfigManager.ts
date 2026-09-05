@@ -232,21 +232,43 @@ export class NpmConfigManager {
      * @returns Result with success status and any errors
      */
     async setProxy(url: string): Promise<OperationResult> {
+        return this.setProxyKeys({ proxy: url, 'https-proxy': url });
+    }
+
+    async setProxyKeys(values: Partial<NpmProxyValues>): Promise<OperationResult> {
         const snapshot = await this.readProxySnapshot();
         const written: NpmProxyKey[] = [];
+        const writtenValues: Partial<Record<NpmProxyKey, string>> = {};
         try {
-            await this.execNpm(['config', 'set', 'proxy', url]);
-            written.push('proxy');
-            await this.execNpm(['config', 'set', 'https-proxy', url]);
-            written.push('https-proxy');
-            await this.assertWrittenValues(url, written);
+            for (const key of ['proxy', 'https-proxy'] as const) {
+                const value = values[key];
+                if (!value) {
+                    continue;
+                }
+                await this.execNpm(['config', 'set', key, value]);
+                written.push(key);
+                writtenValues[key] = value;
+            }
+            for (const key of written) {
+                await this.assertWrittenValues(writtenValues[key]!, [key]);
+            }
             return { success: true };
         } catch (error) {
             if (written.length === 0) {
                 return this.handleError(error);
             }
-            const failedKey = written.includes('https-proxy') ? undefined : 'https-proxy';
-            const compensation = await this.compensatePartialSet(written, url, snapshot);
+            const lastWritten = written[written.length - 1];
+            const lastValue = writtenValues[lastWritten] ?? Object.values(writtenValues)[0] ?? '';
+            const failedKey = written.length < Object.keys(values).filter(key => values[key as NpmProxyKey]).length
+                ? (['proxy', 'https-proxy'] as const).find(key => values[key] && !written.includes(key))
+                : undefined;
+            let compensation = await this.compensatePartialSet(written, lastValue, snapshot);
+            for (const key of written) {
+                const value = writtenValues[key];
+                if (value && value !== lastValue) {
+                    compensation = await this.compensatePartialSet([key], value, snapshot);
+                }
+            }
             compensation.summary = summarizePartialWriteCompensation(failedKey, compensation);
             const wrapped = error instanceof Error ? error : new Error(String(error));
             (wrapped as Error & { otakPartialWrite: typeof compensation }).otakPartialWrite = compensation;

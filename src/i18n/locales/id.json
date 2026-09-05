@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "keluaran proxy WinHTTP tidak dapat diurai",
   "diagnose.reason.wininetPac": "URL konfigurasi otomatis proxy (PAC) telah dikonfigurasi",
   "diagnose.reason.gitReadUnavailable": "konfigurasi git tidak dapat dibaca",
-  "migration.credentialsDropped": "otak-proxy tidak dapat memigrasikan {count} kredensial proxy duplikat ke penyimpanan aman selama peningkatan v3. Masukkan kembali jika sebuah proxy berhenti mengautentikasi."
+  "migration.credentialsDropped": "otak-proxy tidak dapat memigrasikan {count} kredensial proxy duplikat ke penyimpanan aman selama peningkatan v3. Masukkan kembali jika sebuah proxy berhenti mengautentikasi.",
+  "diagnose.target.systemBypass": "Bypass proxy sistem",
+  "diagnose.target.pipUserProxy": "Proxy pengguna pip",
+  "diagnose.reason.gitSplitLossy": "Git merutekan remote HTTP dan HTTPS lewat satu http.proxy; proxy terpisah tidak dapat dinyatakan",
+  "diagnose.reason.vscodeSplitLossy": "http.proxy VS Code adalah satu URL; proxy HTTP/HTTPS terpisah tidak dapat dinyatakan",
+  "diagnose.reason.pipSplitLossy": "Proxy pip adalah satu URL; proxy HTTP/HTTPS terpisah tidak dapat dinyatakan",
+  "diagnose.reason.bypassNotApplied": "Bypass proxy sistem terdeteksi tetapi tidak diterapkan",
+  "warning.splitProxyPartial": "Proxy HTTP dan HTTPS yang berbeda terdeteksi. npm dan terminal menerima keduanya; Git dan VS Code hanya dapat menyimpan satu URL."
 }

@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "无法解析 WinHTTP 代理输出",
   "diagnose.reason.wininetPac": "配置了代理自动配置 (PAC) URL",
   "diagnose.reason.gitReadUnavailable": "无法读取 git 配置",
-  "migration.credentialsDropped": "在升级到 v3 期间，otak-proxy 无法将 {count} 个重复的代理凭据迁移到安全存储。如果代理停止验证，请重新输入。"
+  "migration.credentialsDropped": "在升级到 v3 期间，otak-proxy 无法将 {count} 个重复的代理凭据迁移到安全存储。如果代理停止验证，请重新输入。",
+  "diagnose.target.systemBypass": "系统代理绕过",
+  "diagnose.target.pipUserProxy": "pip 用户代理",
+  "diagnose.reason.gitSplitLossy": "Git 通过单一 http.proxy 路由 HTTP 和 HTTPS 远程，无法完整表示分协议代理",
+  "diagnose.reason.vscodeSplitLossy": "VS Code 的 http.proxy 是单一 URL，无法完整表示分协议代理",
+  "diagnose.reason.pipSplitLossy": "pip 代理是单一 URL，无法完整表示分协议代理",
+  "diagnose.reason.bypassNotApplied": "已检测到系统代理绕过列表，但未应用",
+  "warning.splitProxyPartial": "检测到不同的 HTTP 和 HTTPS 代理。已分别写入 npm 和终端；Git 和 VS Code 只能保存一个 URL。"
 }

@@ -33,6 +33,9 @@ import {
 } from './ProxyApplierNotifications';
 import { TargetOwnershipStore } from './TargetOwnershipStore';
 import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { isPerSchemeProxy } from '../config/DetectedProxyValue';
+import { splitCapabilityIssues } from './ProxyTargetCapability';
+import { ProxyIssue } from './v3Types';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -129,7 +132,8 @@ export class ProxyApplier {
     private notifyApplyResult(
         proxyUrl: string,
         options: ProxyApplyOptions | undefined,
-        errorAggregator: ErrorAggregator
+        errorAggregator: ErrorAggregator,
+        capabilityIssues: readonly ProxyIssue[] = []
     ): void {
         if (errorAggregator.hasErrors()) {
             showAggregatedErrors(errorAggregator, this.userNotifier);
@@ -138,6 +142,9 @@ export class ProxyApplier {
 
         if (!options?.silent) {
             showProxyConfigured(proxyUrl, this.sanitizer, this.userNotifier);
+            if (capabilityIssues.some(issue => issue.category === 'capabilityUnavailable')) {
+                this.userNotifier.showWarning('warning.splitProxyPartial');
+            }
         }
     }
 
@@ -189,10 +196,29 @@ export class ProxyApplier {
             return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
         }
         
+        const applyOptions = await this.resolveApplyOptions(proxyUrl, options);
+
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
-        if (proxyUrl && !this.validateProxyUrlForApply(proxyUrl)) {
+        if (this.isSplitApply(applyOptions)) {
+            if (!this.validateProxyUrlForApply(applyOptions.httpUrl!) ||
+                !this.validateProxyUrlForApply(applyOptions.httpsUrl!)) {
+                return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
+            }
+        } else if (proxyUrl && !this.validateProxyUrlForApply(proxyUrl)) {
             return this.buildDetailedResult(false, true, proxyUrl, this.emptyResults(), errorAggregator);
         }
+
+        const capabilityIssues = this.isSplitApply(applyOptions)
+            ? splitCapabilityIssues({
+                kind: applyOptions.kind,
+                httpUrl: applyOptions.httpUrl,
+                httpsUrl: applyOptions.httpsUrl,
+                bypass: applyOptions.bypass,
+                source: 'apply'
+            })
+            : applyOptions.bypass
+                ? splitCapabilityIssues({ bypass: applyOptions.bypass, source: 'apply' })
+                : [];
         
         const results = await this.withOptionalProgress(
             options,
@@ -201,7 +227,8 @@ export class ProxyApplier {
                 true,
                 proxyUrl,
                 errorAggregator,
-                reportStatus
+                reportStatus,
+                applyOptions
             )
         );
 
@@ -211,9 +238,9 @@ export class ProxyApplier {
         const success = this.areConfigResultsSuccessful(results);
         
         // Requirement 2.5: Use ErrorAggregator to display all errors together
-        this.notifyApplyResult(proxyUrl, options, errorAggregator);
+        this.notifyApplyResult(proxyUrl, options, errorAggregator, capabilityIssues);
 
-        return this.buildDetailedResult(success, true, proxyUrl, results, errorAggregator);
+        return this.buildDetailedResult(success, true, proxyUrl, results, errorAggregator, capabilityIssues);
     }
 
     /**
@@ -275,7 +302,8 @@ export class ProxyApplier {
         enabled: boolean,
         proxyUrl: string,
         results: ProxyConfigResults,
-        errorAggregator: ErrorAggregator
+        errorAggregator: ErrorAggregator,
+        issues: readonly ProxyIssue[] = []
     ): ProxyApplyDetailedResult {
         return {
             success,
@@ -286,8 +314,49 @@ export class ProxyApplier {
                 target: error.operation,
                 message: this.sanitizer.maskPassword(error.error),
                 errorType: error.errorType
-            }))
+            })),
+            issues: issues.length > 0 ? [...issues] : undefined
         };
+    }
+
+    private async resolveApplyOptions(proxyUrl: string, options?: ProxyApplyOptions): Promise<ProxyApplyOptions> {
+        if (this.isSplitApply(options) || options?.bypass) {
+            return options ?? {};
+        }
+        if (!this.stateManager) {
+            return options ?? {};
+        }
+
+        try {
+            const state = await this.stateManager.getState();
+            if (!isPerSchemeProxy(state.autoProxyKind, state.autoHttpProxyUrl, state.autoHttpsProxyUrl)) {
+                return {
+                    ...options,
+                    bypass: options?.bypass ?? state.detectedBypass
+                };
+            }
+
+            const primary = state.autoHttpProxyUrl || state.autoProxyUrl;
+            const publicPrimary = primary ? (removeProxyCredentials(primary) || primary) : undefined;
+            const publicApplied = removeProxyCredentials(proxyUrl) || proxyUrl;
+            if (publicPrimary && publicPrimary !== publicApplied) {
+                return options ?? {};
+            }
+
+            return {
+                ...options,
+                kind: 'perSchemeProxy',
+                httpUrl: state.autoHttpProxyUrl,
+                httpsUrl: state.autoHttpsProxyUrl,
+                bypass: options?.bypass ?? state.detectedBypass
+            };
+        } catch {
+            return options ?? {};
+        }
+    }
+
+    private isSplitApply(options?: ProxyApplyOptions): boolean {
+        return isPerSchemeProxy(options?.kind, options?.httpUrl, options?.httpsUrl);
     }
 
     private async updateTargets(
@@ -295,7 +364,8 @@ export class ProxyApplier {
         enabled: boolean,
         proxyUrl: string,
         errorAggregator: ErrorAggregator,
-        reportStatus?: ProxyConfigStatusReporter
+        reportStatus?: ProxyConfigStatusReporter,
+        applyOptions?: ProxyApplyOptions
     ): Promise<ProxyConfigResults> {
         const results: ProxyConfigResults = {
             gitSuccess: false,
@@ -312,7 +382,8 @@ export class ProxyApplier {
                 enabled,
                 proxyUrl,
                 errorAggregator,
-                reportStatus
+                reportStatus,
+                applyOptions
             );
             const success = targetResult.success;
             switch (target.name) {
@@ -349,15 +420,17 @@ export class ProxyApplier {
         enabled: boolean,
         proxyUrl: string,
         errorAggregator: ErrorAggregator,
-        reportStatus?: ProxyConfigStatusReporter
+        reportStatus?: ProxyConfigStatusReporter,
+        applyOptions?: ProxyApplyOptions
     ): Promise<ProxyConfigTargetUpdateResult> {
         const options = { onStatus: reportStatus };
         if (!enabled && this.ownershipStore && target.ownership) {
             return this.disableOwnedTarget(target, errorAggregator, options);
         }
 
+        const splitTarget = enabled ? this.splitAwareTarget(target, applyOptions) : target;
         const result = await updateProxyConfigTargetDetailed(
-            target,
+            splitTarget,
             enabled,
             proxyUrl,
             errorAggregator,
@@ -365,12 +438,65 @@ export class ProxyApplier {
         );
         if (enabled && this.ownershipStore && target.ownership) {
             if (result.outcome === 'configured') {
-                await this.markTargetOwned(target, proxyUrl);
+                if (target.name === 'npm configuration' && this.isSplitApply(applyOptions)) {
+                    await this.markSplitNpmOwned(applyOptions!.httpUrl!, applyOptions!.httpsUrl!);
+                } else {
+                    await this.markTargetOwned(target, proxyUrl);
+                }
             } else if (result.residualKeys && result.residualKeys.length > 0) {
                 await this.markResidualOwned(target, proxyUrl, result.residualKeys);
             }
         }
         return result;
+    }
+
+    private splitAwareTarget(target: ProxyConfigTarget, applyOptions?: ProxyApplyOptions): ProxyConfigTarget {
+        if (!this.isSplitApply(applyOptions)) {
+            return target;
+        }
+
+        if (target.name === 'npm configuration') {
+            return {
+                ...target,
+                manager: {
+                    setProxy: () => this.npmManager.setProxyKeys({
+                        proxy: applyOptions!.httpUrl!,
+                        'https-proxy': applyOptions!.httpsUrl!
+                    }),
+                    unsetProxy: options => target.manager.unsetProxy(options)
+                }
+            };
+        }
+
+        if (target.name === 'Terminal environment' && this.terminalEnvManager) {
+            return {
+                ...target,
+                manager: {
+                    setProxy: () => this.terminalEnvManager!.setProxyByScheme(
+                        applyOptions!.httpUrl!,
+                        applyOptions!.httpsUrl!
+                    ),
+                    unsetProxy: options => target.manager.unsetProxy(options)
+                }
+            };
+        }
+
+        return target;
+    }
+
+    private async markSplitNpmOwned(httpUrl: string, httpsUrl: string): Promise<void> {
+        const httpPublic = removeProxyCredentials(httpUrl) || httpUrl;
+        const httpsPublic = removeProxyCredentials(httpsUrl) || httpsUrl;
+        await this.ownershipStore!.bootstrapFromSnapshot(httpPublic, [{
+            targetId: 'npm.user.proxy',
+            targetHost: 'workspaceHost',
+            value: httpPublic
+        }], httpUrl);
+        await this.ownershipStore!.bootstrapFromSnapshot(httpsPublic, [{
+            targetId: 'npm.user.https-proxy',
+            targetHost: 'workspaceHost',
+            value: httpsPublic
+        }], httpsUrl);
     }
 
     private async markTargetOwned(target: ProxyConfigTarget, proxyUrl: string): Promise<void> {

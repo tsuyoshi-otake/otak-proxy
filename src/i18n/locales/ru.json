@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "не удалось разобрать вывод прокси WinHTTP",
   "diagnose.reason.wininetPac": "настроен URL автоконфигурации прокси (PAC)",
   "diagnose.reason.gitReadUnavailable": "не удалось прочитать конфигурацию git",
-  "migration.credentialsDropped": "otak-proxy не удалось перенести {count} повторяющихся учётных данных прокси в безопасное хранилище при обновлении до v3. Введите их заново, если прокси перестанет проходить аутентификацию."
+  "migration.credentialsDropped": "otak-proxy не удалось перенести {count} повторяющихся учётных данных прокси в безопасное хранилище при обновлении до v3. Введите их заново, если прокси перестанет проходить аутентификацию.",
+  "diagnose.target.systemBypass": "Исключения системного прокси",
+  "diagnose.target.pipUserProxy": "Пользовательский прокси pip",
+  "diagnose.reason.gitSplitLossy": "Git направляет HTTP и HTTPS remote через один http.proxy; раздельный прокси нельзя представить полностью",
+  "diagnose.reason.vscodeSplitLossy": "http.proxy в VS Code — один URL; раздельный HTTP/HTTPS прокси нельзя представить",
+  "diagnose.reason.pipSplitLossy": "Прокси pip — один URL; раздельный HTTP/HTTPS прокси нельзя представить",
+  "diagnose.reason.bypassNotApplied": "Исключения системного прокси обнаружены, но не применены",
+  "warning.splitProxyPartial": "Обнаружены разные HTTP и HTTPS прокси. npm и терминал получили оба; Git и VS Code могут хранить только один URL."
 }

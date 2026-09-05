@@ -9,6 +9,8 @@
  * - Clear folder hierarchy (Requirement 1.5)
  */
 
+import type { ProxyValueKind } from './v3Types';
+
 /**
  * Proxy operation modes
  *
@@ -116,6 +118,10 @@ export interface ProxyState {
      * Never contains userinfo.
      */
     requiresAuth?: boolean;
+    autoProxyKind?: ProxyValueKind;
+    autoHttpProxyUrl?: string;
+    autoHttpsProxyUrl?: string;
+    detectedBypass?: string;
 }
 
 /**

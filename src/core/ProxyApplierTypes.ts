@@ -1,8 +1,12 @@
-import { TargetHost } from './v3Types';
+import { ProxyIssue, ProxyValueKind, TargetHost } from './v3Types';
 
 export interface ProxyApplyOptions {
     silent?: boolean;
     showProgress?: boolean;
+    kind?: ProxyValueKind;
+    httpUrl?: string;
+    httpsUrl?: string;
+    bypass?: string;
 }
 
 export type ProxyConfigStatusReporter = (messageKey: string) => void;
@@ -96,4 +100,5 @@ export interface ProxyApplyDetailedResult {
         message: string;
         errorType?: string;
     }>;
+    issues?: ProxyIssue[];
 }

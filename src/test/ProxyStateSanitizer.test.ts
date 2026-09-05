@@ -14,6 +14,8 @@ suite('ProxyStateSanitizer security tests', () => {
             mode: ProxyMode.Auto,
             manualProxyUrl: credentialUrl,
             autoProxyUrl: credentialUrl,
+            autoHttpProxyUrl: credentialUrl,
+            autoHttpsProxyUrl: `http://${token}@proxy-b.example.com:8443`,
             lastSystemProxyUrl: credentialUrl,
             fallbackProxyUrl: credentialUrl,
             lastError: `apply failed through ${credentialUrl}`,

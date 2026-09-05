@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP प्रॉक्सी आउटपुट का विश्लेषण नहीं किया जा सका",
   "diagnose.reason.wininetPac": "एक प्रॉक्सी ऑटो-कॉन्फ़िग (PAC) URL कॉन्फ़िगर है",
   "diagnose.reason.gitReadUnavailable": "git कॉन्फ़िगरेशन पढ़ा नहीं जा सका",
-  "migration.credentialsDropped": "otak-proxy v3 अपग्रेड के दौरान {count} डुप्लिकेट प्रॉक्सी क्रेडेंशियल को सुरक्षित संग्रहण में माइग्रेट नहीं कर सका। यदि कोई प्रॉक्सी प्रमाणीकरण करना बंद कर दे तो उन्हें फिर से दर्ज करें।"
+  "migration.credentialsDropped": "otak-proxy v3 अपग्रेड के दौरान {count} डुप्लिकेट प्रॉक्सी क्रेडेंशियल को सुरक्षित संग्रहण में माइग्रेट नहीं कर सका। यदि कोई प्रॉक्सी प्रमाणीकरण करना बंद कर दे तो उन्हें फिर से दर्ज करें।",
+  "diagnose.target.systemBypass": "सिस्टम प्रॉक्सी बायपास",
+  "diagnose.target.pipUserProxy": "pip उपयोगकर्ता प्रॉक्सी",
+  "diagnose.reason.gitSplitLossy": "Git HTTP और HTTPS रिमोट को एक http.proxy से ले जाता है; स्प्लिट प्रॉक्सी व्यक्त नहीं हो सकती",
+  "diagnose.reason.vscodeSplitLossy": "VS Code का http.proxy एक URL है; स्प्लिट HTTP/HTTPS व्यक्त नहीं हो सकता",
+  "diagnose.reason.pipSplitLossy": "pip प्रॉक्सी एक URL है; स्प्लिट HTTP/HTTPS व्यक्त नहीं हो सकता",
+  "diagnose.reason.bypassNotApplied": "सिस्टम प्रॉक्सी बायपास मिला, पर लागू नहीं किया गया",
+  "warning.splitProxyPartial": "अलग HTTP और HTTPS प्रॉक्सी मिले। npm और टर्मिनल को दोनों लिखे गए; Git और VS Code केवल एक URL रख सकते हैं।"
 }

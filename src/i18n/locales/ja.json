@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP プロキシの出力を解析できませんでした",
   "diagnose.reason.wininetPac": "プロキシ自動構成 (PAC) の URL が設定されています",
   "diagnose.reason.gitReadUnavailable": "git 設定を読み取れませんでした",
-  "migration.credentialsDropped": "otak-proxy は v3 へのアップグレード中に {count} 件の重複したプロキシ資格情報をセキュアストレージへ移行できませんでした。プロキシの認証が通らなくなった場合は再入力してください。"
+  "migration.credentialsDropped": "otak-proxy は v3 へのアップグレード中に {count} 件の重複したプロキシ資格情報をセキュアストレージへ移行できませんでした。プロキシの認証が通らなくなった場合は再入力してください。",
+  "diagnose.target.systemBypass": "システムプロキシのバイパス",
+  "diagnose.target.pipUserProxy": "pip ユーザープロキシ",
+  "diagnose.reason.gitSplitLossy": "Git は HTTP/HTTPS remote を単一の http.proxy で運ぶため、HTTP/HTTPS の分離は表現できません",
+  "diagnose.reason.vscodeSplitLossy": "VS Code の http.proxy は単一 URL のため、HTTP/HTTPS の分離は表現できません",
+  "diagnose.reason.pipSplitLossy": "pip のプロキシは単一 URL のため、HTTP/HTTPS の分離は表現できません",
+  "diagnose.reason.bypassNotApplied": "システムのプロキシバイパスを検出しましたが、適用していません",
+  "warning.splitProxyPartial": "HTTP と HTTPS で異なるプロキシを検出しました。npm とターミナルには両方を書きましたが、Git と VS Code は1つの URL しか保持できません。"
 }
