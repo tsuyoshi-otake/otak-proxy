@@ -12,6 +12,7 @@ import {
     createProxyConnectRequest,
     formatConnectDestination
 } from '../../utils/ProxyConnectRequest';
+import { stripIpv6Brackets } from '../../validation/ProxyHost';
 
 interface ConnectCase {
     name: string;
@@ -151,7 +152,7 @@ suite('ProxyConnectRequest default ports', () => {
             assert.strictEqual(options.port, connectCase.expectedRequestPort, 'request.port');
             assert.strictEqual(options.path, connectCase.expectedConnectPath, 'CONNECT path');
             assert.strictEqual(options.method, 'CONNECT');
-            assert.strictEqual(options.hostname, proxy.hostname);
+            assert.strictEqual(options.hostname, stripIpv6Brackets(proxy.hostname));
         });
     }
 
