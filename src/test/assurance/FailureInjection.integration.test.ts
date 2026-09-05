@@ -2,6 +2,7 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { GitConfigManager } from '../../config/GitConfigManager';
 import { ProxyConfigTarget } from '../../core/ProxyApplierTypes';
 import { updateProxyConfigTargetDetailed } from '../../core/ProxyConfigTargetRunner';
 import { ProxyMode } from '../../core/types';
@@ -116,6 +117,50 @@ suite('Assurance: deterministic failure injection and recovery', () => {
         assert.deepStrictEqual(success, { success: true, outcome: 'configured' });
         assert.deepStrictEqual(failure, { success: false, outcome: 'failed', errorType: 'CONFIG_ERROR' });
         assert.strictEqual(errors.hasErrors(), true);
+    });
+
+    test('F-GIT-UNSET-5-001: Git exit 5 with multiple-values is a visible failure, missing is idempotent', async () => {
+        const multiManager = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                if (args.includes('--get-all')) {
+                    return { stdout: 'http://one.example:8080\nhttp://two.example:8080\n', stderr: '' };
+                }
+                if (args.includes('--get-regexp')) {
+                    return {
+                        stdout: 'http.proxy http://one.example:8080\nhttp.proxy http://two.example:8080\n',
+                        stderr: ''
+                    };
+                }
+                throw Object.assign(new Error('warning: http.proxy has multiple values'), {
+                    code: 5,
+                    stderr: 'warning: http.proxy has multiple values'
+                });
+            }
+        });
+        const multi = await updateProxyConfigTargetDetailed(
+            { name: 'Git configuration', manager: multiManager },
+            false,
+            '',
+            new ErrorAggregator()
+        );
+        assert.strictEqual(multi.success, false);
+        assert.strictEqual(multi.outcome, 'failed');
+
+        const missingManager = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                if (args.includes('--get-all') || args.includes('--get-regexp')) {
+                    throw Object.assign(new Error('missing'), { code: 1, stderr: '' });
+                }
+                throw Object.assign(new Error('missing unset'), { code: 5, stderr: '' });
+            }
+        });
+        const missing = await updateProxyConfigTargetDetailed(
+            { name: 'Git configuration', manager: missingManager },
+            false,
+            '',
+            new ErrorAggregator()
+        );
+        assert.deepStrictEqual(missing, { success: true, outcome: 'cleared' });
     });
 
     test('F-DETECT-RETRY-001: detector retry resets on success and reports an explicit terminal failure at the bound', async () => {

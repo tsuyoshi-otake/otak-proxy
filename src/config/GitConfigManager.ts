@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
-import { getErrorCode } from '../utils/ErrorUtils';
+import { getErrorCode, getErrorMessage, getErrorStderr } from '../utils/ErrorUtils';
 import { classifyGitConfigError } from './GitConfigErrorClassifier';
 import {
     GIT_CONFIG_LOCK_RETRY_DELAYS_MS,
@@ -10,7 +10,7 @@ import {
     tryRemoveStaleGitConfigLock,
     withGitConfigWriteMutex
 } from './GitConfigLocking';
-import { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
+import { GitConfigOperationOptions, GitProxyKey, OperationResult } from './GitConfigTypes';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 
@@ -36,13 +36,38 @@ const defaultCommandRunner: GitCommandRunner = async (command, args, options) =>
     return await execFileAsync(command, args, options);
 };
 
-export type { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
+export type { GitConfigOperationOptions, GitProxyKey, OperationResult } from './GitConfigTypes';
 export const GIT_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
-export type GitProxyKey = 'http.proxy' | 'https.proxy';
 export interface GitProxyValues {
     'http.proxy': string | null;
     'https.proxy': string | null;
+}
+
+export interface GitProxyInspection extends ProxyConfigInspection<GitProxyValues> {
+    allValues?: Record<GitProxyKey, string[]>;
+}
+
+class GitConfigUnsetError extends Error {
+    readonly errorType = 'CONFIG_ERROR' as const;
+
+    constructor(message: string) {
+        super(message);
+        this.name = 'GitConfigUnsetError';
+    }
+}
+
+function isGitExitCode(error: unknown, expected: number): boolean {
+    const code = getErrorCode(error);
+    return code === expected || code === String(expected);
+}
+
+function isGitMultipleValuesError(error: unknown): boolean {
+    return /multiple values/i.test(`${getErrorMessage(error)}\n${getErrorStderr(error)}`);
+}
+
+function escapeGitValueRegex(value: string): string {
+    return `^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
 
 /**
@@ -98,10 +123,10 @@ export class GitConfigManager {
         try {
             await withGitConfigWriteMutex(async () => {
                 // Set http.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url], options);
+                await this.execGitConfigWithRetry(['config', '--global', '--replace-all', 'http.proxy', url], options);
 
                 // Set https.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url], options);
+                await this.execGitConfigWithRetry(['config', '--global', '--replace-all', 'https.proxy', url], options);
             }, options);
 
             return { success: true };
@@ -122,21 +147,110 @@ export class GitConfigManager {
         try {
             await withGitConfigWriteMutex(async () => {
                 for (const key of keys) {
-                    try {
-                        await this.execGitConfigWithRetry(['config', '--global', '--unset', key], options);
-                    } catch (error) {
-                        // Missing keys are already converged.
-                        const code = getErrorCode(error);
-                        if (code !== 5 && code !== '5') {
-                            throw error;
-                        }
-                    }
+                    await this.unsetOneKey(key, options);
                 }
+                await this.assertUnsetPostCondition(keys, options);
             }, options);
 
             return { success: true };
         } catch (error) {
+            if (error instanceof GitConfigUnsetError) {
+                return { success: false, error: error.message, errorType: error.errorType };
+            }
             return this.handleError(error);
+        }
+    }
+
+    private async readAllValues(key: GitProxyKey): Promise<string[]> {
+        try {
+            const { stdout } = await this.commandRunner('git', ['config', '--global', '--get-all', key], {
+                timeout: this.timeout,
+                encoding: 'utf8'
+            });
+            return stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        } catch (error) {
+            if (isGitExitCode(error, 1)) {
+                return [];
+            }
+            throw error;
+        }
+    }
+
+    private async unsetExactValue(key: GitProxyKey, value: string, options?: GitConfigOperationOptions): Promise<void> {
+        await this.execGitConfigWithRetry(
+            ['config', '--global', '--unset-all', key, escapeGitValueRegex(value)],
+            options
+        );
+    }
+
+    private async unsetOneKey(key: GitProxyKey, options?: GitConfigOperationOptions): Promise<void> {
+        const exact = options?.exactValues?.[key];
+        const current = await this.readAllValues(key);
+
+        if (exact && exact.length > 0) {
+            for (const value of exact) {
+                if (!current.includes(value)) {
+                    continue;
+                }
+                try {
+                    await this.unsetExactValue(key, value, options);
+                } catch (error) {
+                    const remaining = await this.readAllValues(key);
+                    if (isGitExitCode(error, 5) && !remaining.includes(value)) {
+                        continue;
+                    }
+                    if (isGitMultipleValuesError(error) && remaining.includes(value)) {
+                        throw new GitConfigUnsetError(`Git ${key} still has multiple matching values`);
+                    }
+                    throw error;
+                }
+            }
+            return;
+        }
+
+        if (current.length === 0) {
+            return;
+        }
+        if (current.length > 1) {
+            throw new GitConfigUnsetError(`Git ${key} has multiple values; refusing to delete unspecified values`);
+        }
+
+        try {
+            await this.unsetExactValue(key, current[0], options);
+        } catch (error) {
+            const remaining = await this.readAllValues(key);
+            if (remaining.length === 0 && isGitExitCode(error, 5)) {
+                return;
+            }
+            if (remaining.length > 1 || isGitMultipleValuesError(error)) {
+                throw new GitConfigUnsetError(`Git ${key} has multiple values; refusing to delete unspecified values`);
+            }
+            throw error;
+        }
+    }
+
+    private async assertUnsetPostCondition(
+        keys: readonly GitProxyKey[],
+        options?: GitConfigOperationOptions
+    ): Promise<void> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available') {
+            throw new GitConfigUnsetError('Git proxy inspect failed after cleanup');
+        }
+
+        for (const key of keys) {
+            const remaining = inspection.allValues?.[key]
+                ?? (inspection.values?.[key] ? [inspection.values[key] as string] : []);
+            const exact = options?.exactValues?.[key];
+            if (exact && exact.length > 0) {
+                if (exact.some(value => remaining.includes(value))) {
+                    throw new GitConfigUnsetError(`Git ${key} still contains a managed value after cleanup`);
+                }
+                continue;
+            }
+            if (remaining.length > 0) {
+                throw new GitConfigUnsetError(`Git ${key} still contains a value after cleanup`);
+            }
         }
     }
 
@@ -152,7 +266,7 @@ export class GitConfigManager {
         return inspection.values['http.proxy'] || inspection.values['https.proxy'];
     }
 
-    async inspectProxy(): Promise<ProxyConfigInspection<GitProxyValues>> {
+    async inspectProxy(): Promise<GitProxyInspection> {
         try {
             // Fetch both http.proxy and https.proxy in a single Git invocation to reduce overhead.
             const { stdout } = await this.commandRunner('git', ['config', '--global', '--get-regexp', '^(http|https)\\.proxy$'], {
@@ -175,15 +289,23 @@ export class GitConfigManager {
                 })
                 .filter((e): e is { key: string; value: string } => e !== null);
 
-            const httpProxy = entries.find(e => e.key === 'http.proxy')?.value;
-            const httpsProxy = entries.find(e => e.key === 'https.proxy')?.value;
+            const allValues: Record<GitProxyKey, string[]> = {
+                'http.proxy': [],
+                'https.proxy': []
+            };
+            for (const entry of entries) {
+                if (entry.key === 'http.proxy' || entry.key === 'https.proxy') {
+                    allValues[entry.key].push(entry.value);
+                }
+            }
 
             return {
                 status: 'available',
                 values: {
-                    'http.proxy': httpProxy || null,
-                    'https.proxy': httpsProxy || null
-                }
+                    'http.proxy': allValues['http.proxy'][0] ?? null,
+                    'https.proxy': allValues['https.proxy'][0] ?? null
+                },
+                allValues
             };
         } catch (error) {
             // If no matching config exists, git returns exit code 1
@@ -191,7 +313,8 @@ export class GitConfigManager {
             if (code === 1 || code === '1') {
                 return {
                     status: 'available',
-                    values: { 'http.proxy': null, 'https.proxy': null }
+                    values: { 'http.proxy': null, 'https.proxy': null },
+                    allValues: { 'http.proxy': [], 'https.proxy': [] }
                 };
             }
 

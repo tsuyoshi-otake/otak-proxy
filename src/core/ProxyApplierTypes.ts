@@ -9,6 +9,7 @@ export type ProxyConfigStatusReporter = (messageKey: string) => void;
 
 export interface ProxyConfigOperationOptions {
     onStatus?: ProxyConfigStatusReporter;
+    ownedObservations?: ReadonlyArray<{ targetId: string; value: string | null }>;
 }
 
 interface ProxyConfigOperationResult {

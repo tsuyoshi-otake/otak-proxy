@@ -199,11 +199,51 @@ suite('Assurance: external-boundary contracts', () => {
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/git'), { success: true });
         assert.deepStrictEqual(calls.map(call => call.command), ['git', 'git']);
         assert.deepStrictEqual(calls.map(call => call.args), [
-            ['config', '--global', 'http.proxy', 'safe://proxy/git'],
-            ['config', '--global', 'https.proxy', 'safe://proxy/git']
+            ['config', '--global', '--replace-all', 'http.proxy', 'safe://proxy/git'],
+            ['config', '--global', '--replace-all', 'https.proxy', 'safe://proxy/git']
         ]);
         assert.deepStrictEqual(calls.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS, GIT_CONFIG_COMMAND_TIMEOUT_MS]);
         assert.deepStrictEqual(calls.map(call => call.options.encoding), ['utf8', 'utf8']);
+    });
+
+    test('CT-CLI-GIT-002: Git unset exit 5 distinguishes missing from multi-value and never value-less --unset-all', async () => {
+        const calls: CommandCall[] = [];
+        const multi = new GitConfigManager({
+            commandRunner: async (command, args, options) => {
+                calls.push({ command, args, options });
+                if (args.includes('--get-all')) {
+                    return { stdout: 'http://one.example:8080\nhttp://two.example:8080\n', stderr: '' };
+                }
+                if (args.includes('--get-regexp')) {
+                    return {
+                        stdout: 'http.proxy http://one.example:8080\nhttp.proxy http://two.example:8080\n',
+                        stderr: ''
+                    };
+                }
+                if (args.includes('--unset')) {
+                    throw errorWithCode('warning: http.proxy has multiple values', '5', {
+                        stderr: 'warning: http.proxy has multiple values'
+                    });
+                }
+                return { stdout: '', stderr: '' };
+            }
+        });
+        const multiResult = await multi.unsetProxyKeys(['http.proxy']);
+        assert.strictEqual(multiResult.success, false);
+        assert.ok(calls.every(call => !(call.args.includes('--unset-all') && call.args.length === 4)));
+
+        const missing = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                if (args.includes('--get-all') || args.includes('--get-regexp')) {
+                    throw errorWithCode('not found', '1', { stderr: '' });
+                }
+                if (args.includes('--unset')) {
+                    throw errorWithCode('exit 5 missing', '5', { stderr: '' });
+                }
+                return { stdout: '', stderr: '' };
+            }
+        });
+        assert.deepStrictEqual(await missing.unsetProxyKeys(['http.proxy']), { success: true });
     });
 
     test('CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering', async () => {
