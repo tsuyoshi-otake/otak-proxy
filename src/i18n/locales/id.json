@@ -243,7 +243,7 @@
     "config.remediationFlapCooldownMs": "Cooldown applied after repeated remediation failures for the same issue fingerprint.",
     "config.notificationCooldownMs": "Minimum interval before showing another notification for the same proxy diagnostic issue.",
     "config.slowDiagnosticsTtlMs": "TTL for slow proxy diagnostics such as spawned Git, npm, or Windows commands.",
-    "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+    "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask HTTP_PROXY and HTTPS_PROXY (and lowercase variants on non-Windows) for newly created integrated terminals by replacing them with empty values. NO_PROXY, no_proxy, ALL_PROXY, and all_proxy are left unchanged unless otak-proxy previously wrote them.",
     "config.notificationLevel": "Controls how aggressively otak-proxy shows diagnostic notifications. Details are always available from the diagnose command.",
     "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
     "config.credentialTargetPolicy": "Controls whether otak-proxy may write authenticated proxy URLs to plaintext target config files. Secrets are still stored in VS Code SecretStorage where possible.",
