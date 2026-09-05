@@ -1,5 +1,6 @@
 import * as http from 'http';
 import * as https from 'https';
+import { stripIpv6Brackets } from '../validation/ProxyHost';
 
 const DEFAULT_HTTP_PORT = 80;
 const DEFAULT_HTTPS_PORT = 443;
@@ -47,7 +48,7 @@ export function buildConnectRequestOptions(
 ): http.RequestOptions {
     const proxyAuthorization = buildProxyAuthorizationHeader(proxy);
     return {
-        hostname: proxy.hostname,
+        hostname: stripIpv6Brackets(proxy.hostname),
         port: parsePort(proxy.port, getSchemeDefaultPort(proxy)),
         method: 'CONNECT',
         path: `${target.hostname}:${parsePort(target.port, getSchemeDefaultPort(target))}`,

@@ -115,6 +115,20 @@ suite('ProxyUrlValidator Test Suite', () => {
             const result = validator.validate('http://proxy server.example.com:8080');
             assert.strictEqual(result.isValid, false);
         });
+
+        test('should accept IPv4 literals as IPv4, not as DNS labels with colons', () => {
+            const result = validator.validate('http://192.0.2.10:8080');
+            assert.strictEqual(result.isValid, true);
+        });
+
+        test('should accept bracketed IPv6 and reject unbracketed IPv6', () => {
+            const accepted = validator.validate('http://[::1]:8080');
+            assert.strictEqual(accepted.isValid, true, accepted.errors.join(', '));
+
+            const rejected = validator.validate('http://::1:8080');
+            assert.strictEqual(rejected.isValid, false);
+            assert.ok(rejected.errors.some(error => error.toLowerCase().includes('bracket')));
+        });
     });
 
     suite('Shell Metacharacter Detection', () => {
@@ -379,9 +393,11 @@ suite('ProxyUrlValidator Test Suite', () => {
                         assert.ok(
                             result.errors.some(e => 
                                 e.toLowerCase().includes('hostname') || 
-                                e.toLowerCase().includes('invalid url format')
+                                e.toLowerCase().includes('invalid url format') ||
+                                e.toLowerCase().includes('ipv6') ||
+                                e.toLowerCase().includes('bracket')
                             ),
-                            `Error message should mention hostname requirements or invalid format for URL: ${url}. Errors: ${result.errors.join(', ')}`
+                            `Error message should mention hostname, IPv6, or invalid format for URL: ${url}. Errors: ${result.errors.join(', ')}`
                         );
                     }
                 ),

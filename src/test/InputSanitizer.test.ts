@@ -49,6 +49,14 @@ suite('InputSanitizer Test Suite', () => {
             assert.ok(!result.includes(token));
             assert.ok(result.includes('http://****@proxy.example.com:8080'));
         });
+
+        test('should mask IPv6 proxy passwords without leaking the secret', () => {
+            const secret = 's3cret-ipv6';
+            const result = sanitizer.maskPassword(`http://user:${secret}@[::1]:8080`);
+            assert.ok(!result.includes(secret), result);
+            assert.ok(result.includes('user:****@'), result);
+            assert.ok(result.includes('[::1]'), result);
+        });
     });
 
     suite('Edge Cases', () => {

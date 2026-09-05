@@ -14,6 +14,7 @@ import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
 import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { normalizeProxyForComparison } from '../utils/ProxyUrlIdentity';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -671,16 +672,7 @@ export class ProxyRuntimeDiagnostics {
         if (!observed) {
             return false;
         }
-        return this.normalizeProxyForComparison(observed) === this.normalizeProxyForComparison(expected);
-    }
-
-    private normalizeProxyForComparison(value: string): string {
-        const trimmed = value.trim();
-        try {
-            return new URL(trimmed).toString();
-        } catch {
-            return trimmed;
-        }
+        return normalizeProxyForComparison(observed) === normalizeProxyForComparison(expected);
     }
 
     private async readGitConfig(args: string[]): Promise<GitConfigRead> {

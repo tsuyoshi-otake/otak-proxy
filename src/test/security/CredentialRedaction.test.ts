@@ -38,6 +38,7 @@ suite('Credential redaction hardening', () => {
         test('redacts credentials with IPv6 hosts', () => {
             const result = redactor.redactString('http://user:secret@[::1]:8080');
             assert.ok(!result.includes('secret'), `password must not leak: ${result}`);
+            assert.strictEqual(result, 'http://<credentials>@[::1]:8080');
         });
 
         test('leaves credential-free URLs and prose untouched', () => {

@@ -7,6 +7,7 @@ import {
     PublicProxyRef
 } from '../core/v3Types';
 import { Logger } from '../utils/Logger';
+import { stripIpv6Brackets } from '../validation/ProxyHost';
 
 const PROXY_ENV_NAMES = [
     'HTTP_PROXY',
@@ -58,7 +59,7 @@ export function splitProxyUrl(rawUrl: string): SplitProxyUrlResult {
         publicRef: {
             kind: 'singleProxy',
             scheme: parsed.protocol.replace(/:$/, ''),
-            host: parsed.hostname,
+            host: stripIpv6Brackets(parsed.hostname),
             port: parsed.port ? Number(parsed.port) : undefined,
             path: parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : undefined,
             publicUrl
