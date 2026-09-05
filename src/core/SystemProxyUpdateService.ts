@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
-import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
+import { detectSystemProxySettingsWithSource, isProxyEndpointReachable } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
@@ -206,6 +206,6 @@ export class SystemProxyUpdateService {
 
         Logger.log(`Testing fallback proxy: ${proxyUrl}`);
         const testResult = await connectionTester.testProxyAuto(proxyUrl);
-        return testResult.success;
+        return isProxyEndpointReachable(testResult);
     }
 }

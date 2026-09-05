@@ -1,6 +1,6 @@
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { Logger } from '../utils/Logger';
-import { TestResult } from '../utils/ProxyUtils';
+import { isProxyEndpointReachable, isProxyEndpointUnreachable, TestResult } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState, ProxyTestResult } from './types';
@@ -60,7 +60,7 @@ export async function handleProxyTestComplete(
     }
 
     state.lastTestResult = testResult as ProxyTestResult;
-    state.proxyReachable = testResult.success;
+    state.proxyReachable = isProxyEndpointReachable(testResult);
     state.lastTestTimestamp = Date.now();
     updateAutoModeFromTestResult(state, testResult);
 
@@ -68,7 +68,7 @@ export async function handleProxyTestComplete(
     context.updateStatusBar?.(state);
     clearStartupPendingIfNeeded(startupTestState, testResult);
 
-    if (!testResult.success) {
+    if (isProxyEndpointUnreachable(testResult)) {
         await applyProxyThroughContext(context, '', false, { silent: true });
     }
 }
@@ -160,15 +160,17 @@ function notifyProxyChange(
 }
 
 function updateAutoModeFromTestResult(state: ProxyState, testResult: TestResult): void {
-    if (!testResult.success) {
+    if (isProxyEndpointUnreachable(testResult)) {
         state.autoModeOff = true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
-        Logger.info('Proxy test failed - Auto Mode OFF');
+        Logger.info('Proxy endpoint unreachable - Auto Mode OFF');
         return;
     }
 
-    state.autoModeOff = false;
+    if (testResult.success) {
+        state.autoModeOff = false;
+    }
 }
 
 function clearStartupPendingIfNeeded(startupTestState: StartupTestState, testResult: TestResult): void {

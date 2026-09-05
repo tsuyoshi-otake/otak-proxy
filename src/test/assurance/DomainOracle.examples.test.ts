@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
     APPLY_DECISION_TABLE,
     MODE_DECISION_TABLE,
+    REACHABILITY_DECISION_TABLE,
     SYNC_DECISION_TABLE,
     TARGET_DECISION_TABLE
 } from './oracle/DecisionTables';
@@ -11,6 +12,7 @@ import {
     expectedActiveProxy,
     expectedApplyState,
     expectedNextMode,
+    expectedShouldClearManagedProxy,
     expectedSyncWinner,
     expectedTargetOutcome,
     reduceLifecycle
@@ -20,6 +22,7 @@ import {
     activeProxyFromSut,
     applyStateFromSut,
     nextModeFromSut,
+    shouldClearManagedProxyFromSut,
     syncWinnerFromSut,
     targetOutcomeFromSut
 } from './oracle/SUTAdapters';
@@ -43,6 +46,16 @@ suite('Assurance: independent domain oracle examples', () => {
             assert.strictEqual(expected.terminal, row.expected.terminal);
             assert.strictEqual(expected.reasonCode, row.expected.reasonCode);
             assert.strictEqual(activeProxyFromSut(row.input), expected.value);
+        });
+    }
+
+    for (const row of REACHABILITY_DECISION_TABLE) {
+        test(`${row.oracleCaseId}: ${row.precondition}`, () => {
+            const expected = expectedShouldClearManagedProxy(row.input);
+            assert.strictEqual(expected.value, row.expected.value);
+            assert.strictEqual(expected.terminal, row.expected.terminal);
+            assert.strictEqual(expected.reasonCode, row.expected.reasonCode);
+            assert.strictEqual(shouldClearManagedProxyFromSut(row.input), expected.value);
         });
     }
 

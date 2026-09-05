@@ -13,6 +13,7 @@ import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostic
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
+import { buildConnectionTestObservation } from '../utils/ProxyTestFailure';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -175,6 +176,11 @@ export class ProxyRuntimeDiagnostics {
             npm: slowDiagnostics.npm?.observation,
             vscode: vscodeDiagnostics.observation
         }));
+
+        const connectionTest = buildConnectionTestObservation(state.lastTestResult);
+        if (connectionTest) {
+            observations.connectionTest = connectionTest;
+        }
 
         const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);

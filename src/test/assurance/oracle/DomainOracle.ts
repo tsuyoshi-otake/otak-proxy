@@ -1,6 +1,7 @@
 import {
     ApplyInput,
     CanonicalMode,
+    ConnectionTestInput,
     LifecycleDecision,
     LifecycleEvent,
     MAX_LOGICAL_CLOCK_DRIFT,
@@ -33,6 +34,8 @@ export function expectedActiveProxy(input: ModeInput): OracleDecision<string> {
     }
 
     if (input.autoModeOff) {
+        // Auto OFF is entered only for a truly unreachable proxy endpoint.
+        // Once set, every candidate URL stays suppressed (#18).
         return decision('', 'diagnosed', 'auto-off', ['DVA-2.2', 'DVA-2.4'], ['clear-proxy'], ['apply-proxy']);
     }
 
@@ -45,6 +48,18 @@ export function expectedActiveProxy(input: ModeInput): OracleDecision<string> {
         active === '' ? [] : ['apply-proxy'],
         []
     );
+}
+
+export function expectedShouldClearManagedProxy(input: ConnectionTestInput): OracleDecision<boolean> {
+    if (input.success) {
+        return decision(false, 'applied', 'canary-success', ['DVA-2.2', 'DVA-2.4'], [], ['clear-proxy']);
+    }
+
+    if (input.failureKind === 'endpointUnreachable') {
+        return decision(true, 'diagnosed', 'endpoint-unreachable', ['DVA-2.2', 'DVA-2.4'], ['clear-proxy'], ['apply-proxy']);
+    }
+
+    return decision(false, 'diagnosed', 'canary-failure-advisory', ['DVA-2.2', 'DVA-2.4'], [], ['clear-proxy']);
 }
 
 export function expectedNextMode(current: CanonicalMode): OracleDecision<CanonicalMode> {

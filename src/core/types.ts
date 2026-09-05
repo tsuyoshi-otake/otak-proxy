@@ -9,6 +9,8 @@
  * - Clear folder hierarchy (Requirement 1.5)
  */
 
+import type { TestResult } from '../utils/ProxyTestTypes';
+
 /**
  * Proxy operation modes
  *
@@ -28,14 +30,7 @@ export enum ProxyMode {
  * Feature: auto-mode-proxy-testing
  * @interface ProxyTestResult
  */
-export interface ProxyTestResult {
-    success: boolean;
-    testUrls: string[];
-    errors: Array<{ url: string; message: string }>;
-    proxyUrl?: string;
-    timestamp?: number;
-    duration?: number;
-}
+export type ProxyTestResult = TestResult;
 
 /**
  * Source that produced the currently applied Auto proxy URL.

@@ -3,11 +3,26 @@
  */
 
 /**
+ * Why a canary CONNECT failed. Canary failure is not the same as
+ * "the proxy endpoint is gone" — only `endpointUnreachable` means that.
+ */
+export type ProxyTestFailureKind =
+    | 'endpointUnreachable'
+    | 'authRequired'
+    | 'connectRejected'
+    | 'destinationForbidden'
+    | 'timeout'
+    | 'dns'
+    | 'protocol'
+    | 'unknown';
+
+/**
  * Error details for a single test URL.
  */
 export interface TestUrlError {
     url: string;
     message: string;
+    failureKind?: ProxyTestFailureKind;
 }
 
 /**
@@ -20,6 +35,9 @@ export interface TestResult {
     proxyUrl?: string;
     timestamp?: number;
     duration?: number;
+    failureKind?: ProxyTestFailureKind;
+    proxyEndpointOk?: boolean;
+    canaryHost?: string;
 }
 
 /**

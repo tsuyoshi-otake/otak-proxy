@@ -78,4 +78,40 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
             restoreConfig();
         }
     });
+
+    test('exposes canaryHost, failureKind, and proxyEndpointOk from the last test', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const runner: CommandRunner = async (_command, args) => {
+            if (args.includes('--json')) {
+                return { stdout: '{}', stderr: '' };
+            }
+            return { stdout: '', stderr: '' };
+        };
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            createContext(),
+            async () => ({
+                mode: ProxyMode.Auto,
+                lastTestResult: {
+                    success: false,
+                    testUrls: ['https://www.github.com'],
+                    errors: [{ url: 'https://www.github.com', message: 'Proxy CONNECT failed with status 407' }],
+                    failureKind: 'authRequired',
+                    proxyEndpointOk: true,
+                    canaryHost: 'www.github.com'
+                }
+            } as ProxyState),
+            { commandRunner: runner }
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            assert.deepStrictEqual(report.observations.connectionTest, {
+                canaryHost: 'www.github.com',
+                failureKind: 'authRequired',
+                proxyEndpointOk: true
+            });
+        } finally {
+            restoreConfig();
+        }
+    });
 });

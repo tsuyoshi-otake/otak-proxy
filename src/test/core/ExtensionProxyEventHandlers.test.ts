@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { handleProxyChanged, handleProxyTestComplete } from '../../core/ExtensionProxyEventHandlers';
+import { handleProxyChanged, handleProxyStateChanged, handleProxyTestComplete } from '../../core/ExtensionProxyEventHandlers';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
 import { ProxyDetectionResult } from '../../monitoring/ProxyMonitor';
 import { ProxyMode, ProxyState } from '../../core/types';
@@ -59,7 +59,10 @@ suite('ExtensionProxyEventHandlers Tests', () => {
             success: false,
             proxyUrl: 'http://proxy.example.com:8080',
             testUrls: ['https://example.com'],
-            errors: [{ url: 'https://example.com', message: 'timeout' }],
+            errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+            failureKind: 'endpointUnreachable',
+            proxyEndpointOk: false,
+            canaryHost: 'example.com',
             timestamp: 1234
         };
         const startupTestState = { isPending: true };
@@ -76,6 +79,94 @@ suite('ExtensionProxyEventHandlers Tests', () => {
         sinon.assert.calledWith(updateStatusBarStub, sinon.match({ autoModeOff: true, proxyReachable: false }));
         sinon.assert.calledOnceWithExactly(applyProxySettingsStub, '', false, sinon.match({ silent: true }));
         sinon.assert.callOrder(saveStateStub, publishStateStub, applyProxySettingsStub);
+    });
+
+    test('407 authRequired does not Auto OFF or clear managed targets', async () => {
+        const testResult: TestResult = {
+            success: false,
+            proxyUrl: 'http://proxy.example.com:8080',
+            testUrls: ['https://www.github.com'],
+            errors: [{ url: 'https://www.github.com', message: 'Proxy CONNECT failed with status 407' }],
+            failureKind: 'authRequired',
+            proxyEndpointOk: true,
+            canaryHost: 'www.github.com',
+            timestamp: 1234
+        };
+
+        await handleProxyTestComplete(context, { isPending: false }, testResult);
+
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.proxyReachable, true);
+        assert.strictEqual(state.usingFallbackProxy, true);
+        assert.strictEqual(state.fallbackProxyUrl, 'http://fallback.example.com:3128');
+        sinon.assert.calledOnce(saveStateStub);
+        sinon.assert.neverCalledWith(applyProxySettingsStub, '', false, sinon.match({ silent: true }));
+        sinon.assert.notCalled(applyProxySettingsStub);
+    });
+
+    test('403 destinationForbidden does not Auto OFF or clear managed targets', async () => {
+        const testResult: TestResult = {
+            success: false,
+            proxyUrl: 'http://proxy.example.com:8080',
+            testUrls: ['https://www.google.com'],
+            errors: [{ url: 'https://www.google.com', message: 'Proxy CONNECT failed with status 403' }],
+            failureKind: 'destinationForbidden',
+            proxyEndpointOk: true,
+            canaryHost: 'www.google.com',
+            timestamp: 1234
+        };
+
+        await handleProxyTestComplete(context, { isPending: false }, testResult);
+
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.proxyReachable, true);
+        sinon.assert.notCalled(applyProxySettingsStub);
+    });
+
+    test('timeout canary failure does not Auto OFF or clear managed targets', async () => {
+        const testResult: TestResult = {
+            success: false,
+            proxyUrl: 'http://proxy.example.com:8080',
+            testUrls: ['https://www.microsoft.com'],
+            errors: [{ url: 'https://www.microsoft.com', message: 'Connection timeout (3000ms)' }],
+            failureKind: 'timeout',
+            proxyEndpointOk: false,
+            canaryHost: 'www.microsoft.com',
+            timestamp: 1234
+        };
+
+        await handleProxyTestComplete(context, { isPending: false }, testResult);
+
+        assert.strictEqual(state.autoModeOff, false);
+        assert.strictEqual(state.proxyReachable, true);
+        sinon.assert.notCalled(applyProxySettingsStub);
+    });
+
+    test('success:false without failureKind is not enough to clear managed targets', async () => {
+        const testResult: TestResult = {
+            success: false,
+            proxyUrl: 'http://proxy.example.com:8080',
+            testUrls: ['https://example.com'],
+            errors: [{ url: 'https://example.com', message: 'timeout' }],
+            timestamp: 1234
+        };
+
+        await handleProxyTestComplete(context, { isPending: false }, testResult);
+
+        assert.strictEqual(state.autoModeOff, false);
+        sinon.assert.notCalled(applyProxySettingsStub);
+    });
+
+    test('reachability false still Auto OFF and disables managed targets', async () => {
+        await handleProxyStateChanged(context, {
+            proxyUrl: 'http://proxy.example.com:8080',
+            reachable: false,
+            previousState: true
+        });
+
+        assert.strictEqual(state.autoModeOff, true);
+        assert.strictEqual(state.proxyReachable, false);
+        sinon.assert.calledOnceWithExactly(applyProxySettingsStub, 'http://proxy.example.com:8080', false, sinon.match({ silent: true }));
     });
 
     test('null detection while fallback is engaged is ignored (issue #29 guard)', async () => {
