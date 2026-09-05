@@ -1,9 +1,12 @@
 import { execFile } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
+import {
+    createNpmNotInstalledError,
+    isCommandOnPath,
+    resolveNpmInvocation
+} from '../utils/NpmInvocation';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 import {
@@ -44,10 +47,10 @@ const defaultCommandRunner: NpmCommandRunner = async (command, args, options) =>
 };
 
 /**
- * npm on Windows starts through cmd.exe and npm.cmd before Node.js executes.
- * Under CPU, disk, or antivirus load that startup can exceed five seconds even
- * when npm is healthy. Keep the timeout bounded, but allow enough scheduler
- * headroom to avoid reporting a transient timeout as a configuration failure.
+ * npm on Windows starts node + npm-cli.js. Under CPU, disk, or antivirus load
+ * that startup can exceed five seconds even when npm is healthy. Keep the
+ * timeout bounded, but allow enough scheduler headroom to avoid reporting a
+ * transient timeout as a configuration failure.
  */
 export const NPM_CONFIG_COMMAND_TIMEOUT_MS = CONFIG_COMMAND_TIMEOUT_MS;
 
@@ -161,81 +164,13 @@ function classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | n
         : null;
 }
 
-function getPathEnvValue(env: NodeJS.ProcessEnv): string {
-    return env.PATH || env.Path || '';
-}
-
-function getWindowsPathExtensions(env: NodeJS.ProcessEnv): string[] {
-    const raw = env.PATHEXT || '.COM;.EXE;.BAT;.CMD';
-    return raw
-        .split(';')
-        .map(ext => ext.trim())
-        .filter(Boolean);
-}
-
-function getCommandCandidates(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): string[] {
-    if (!isWindows || path.extname(command)) {
-        return [command];
-    }
-
-    return [command, ...getWindowsPathExtensions(env).map(ext => `${command}${ext}`)];
-}
-
-function canRunCandidate(candidatePath: string, isWindows: boolean): boolean {
-    try {
-        if (isWindows) {
-            return fs.existsSync(candidatePath);
-        }
-
-        fs.accessSync(candidatePath, fs.constants.X_OK);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function isCommandOnPath(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): boolean {
-    const pathValue = getPathEnvValue(env);
-    if (!pathValue) {
-        return false;
-    }
-
-    const delimiter = isWindows ? ';' : ':';
-    const pathModule = isWindows ? path.win32 : path.posix;
-    const pathEntries = pathValue
-        .split(delimiter)
-        .map(entry => entry.trim())
-        .filter(Boolean);
-
-    return pathEntries.some(entry =>
-        getCommandCandidates(command, isWindows, env).some(candidate =>
-            canRunCandidate(pathModule.join(entry, candidate), isWindows)
-        )
-    );
-}
-
-function createNpmNotInstalledError(cause?: unknown): Error & {
-    code?: string;
-    stderr?: string;
-    cause?: unknown;
-} {
-    const missingError = new Error('npm is not installed or not in PATH') as Error & {
-        code?: string;
-        stderr?: string;
-        cause?: unknown;
-    };
-    missingError.code = 'ENOENT';
-    missingError.stderr = getErrorStderr(cause);
-    missingError.cause = cause;
-    return missingError;
-}
-
 /**
  * Manages npm proxy configuration with secure command execution.
- * Uses execFile() directly. On Windows, npm is a batch file (.cmd), so this
- * invokes npm via cmd.exe to avoid relying on `shell: true`.
- * Arguments are passed as an array to avoid unsafe string concatenation.
- * 
+ * Uses execFile() with an argument array. On Windows, npm is a `.cmd` wrapper
+ * that cannot be spawned directly (EINVAL) and must not go through `cmd.exe /c`
+ * because `%VAR%` expands and `&` splits commands. `resolveNpmInvocation`
+ * starts `node` + `npm-cli.js` instead.
+ *
  * Note: npm 11.x uses 'proxy' instead of 'http-proxy' for HTTP proxy settings.
  */
 export class NpmConfigManager {
@@ -264,8 +199,7 @@ export class NpmConfigManager {
     }
 
     /**
-     * Executes npm command with platform-appropriate options.
-     * On Windows, npm is a batch file (.cmd). We invoke it via cmd.exe so we don't need `shell: true`.
+     * Executes npm with platform-appropriate options and no shell.
      */
     private async execNpm(args: string[]): Promise<{ stdout: string; stderr: string }> {
         const fullArgs = this.userConfigPath ? ['--userconfig', this.userConfigPath, ...args] : args;
@@ -281,22 +215,13 @@ export class NpmConfigManager {
         delete env.NPM_CONFIG_PROXY;
         delete env.NPM_CONFIG_HTTPS_PROXY;
 
-        if (this.isWindows) {
-            this.ensureNpmAvailable(env);
-            const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe';
-            return this.commandRunner(comspec, ['/d', '/s', '/c', 'npm', ...fullArgs], {
-                timeout: this.timeout,
-                encoding: 'utf8',
-                env,
-                windowsHide: true
-            });
-        }
-
         this.ensureNpmAvailable(env);
-        return this.commandRunner('npm', fullArgs, {
+        const invocation = resolveNpmInvocation(fullArgs, { isWindows: this.isWindows, env });
+        return this.commandRunner(invocation.command, invocation.args, {
             timeout: this.timeout,
             encoding: 'utf8',
-            env
+            env,
+            ...(this.isWindows ? { windowsHide: true } : {})
         });
     }
 

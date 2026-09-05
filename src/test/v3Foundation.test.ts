@@ -101,11 +101,14 @@ function stubConfiguration(proxyUrl: string, httpProxy?: string, proxySupport = 
 }
 
 // #28 consolidated npm diagnostics into a single `npm config list --json`
-// read (spawned through %ComSpec% on Windows, so `command` may be cmd.exe
-// with npm inside the args). Fake runners answer that one call with the
-// JSON a scenario needs.
+// read. On Windows that is `node` + `npm-cli.js` (not cmd.exe). Fake runners
+// answer that one call with the JSON a scenario needs.
 function isNpmConfigListCall(command: string, args: string[]): boolean {
-    return (command === 'npm' || args.includes('npm')) &&
+    const invokesNpm = command === 'npm' ||
+        args.includes('npm') ||
+        /(?:^|[/\\])npm-cli\.js$/i.test(command) ||
+        args.some(arg => /(?:^|[/\\])npm-cli\.js$/i.test(arg));
+    return invokesNpm &&
         args.includes('config') && args.includes('list') && args.includes('--json');
 }
 

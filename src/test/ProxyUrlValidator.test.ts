@@ -212,16 +212,72 @@ suite('ProxyUrlValidator Test Suite', () => {
             assert.strictEqual(result.isValid, true);
         });
 
-        test('should reject credentials with special characters', () => {
-            const result = validator.validate('http://user!name:pass$word@proxy.example.com:8080');
+        test('should reject encoded shell metacharacters in credentials', () => {
+            const result = validator.validate('http://user:pass%26word@proxy.example.com:8080');
             assert.strictEqual(result.isValid, false);
-            assert.ok(result.errors.some(e => e.includes('Username') || e.includes('Password')));
+            assert.ok(result.errors.some(e =>
+                e.toLowerCase().includes('password') ||
+                e.toLowerCase().includes('shell') ||
+                e.toLowerCase().includes('metacharacter')
+            ));
         });
 
         test('should reject malformed percent encoding in credentials without throwing', () => {
             const result = validator.validate('http://user%ZZ:pass@proxy.example.com:8080');
             assert.strictEqual(result.isValid, false);
             assert.ok(result.errors.some(e => e.includes('Invalid URL format')));
+        });
+    });
+
+    suite('Encoded reserved credentials (#52)', () => {
+        const encodedPasswordCases: Array<{ label: string; url: string }> = [
+            { label: 'exclamation %21', url: 'http://user:abc%21def@proxy.example:8080' },
+            { label: 'plus %2B', url: 'http://user:ab%2Bcd@proxy.example:8080' },
+            { label: 'colon %3A', url: 'http://user:ab%3Acd@proxy.example:8080' },
+            { label: 'percent %25', url: 'http://user:ab%25cd@proxy.example:8080' },
+            { label: 'at %40', url: 'http://user:ab%40cd@proxy.example:8080' },
+            {
+                label: 'unicode',
+                url: `http://user:p${encodeURIComponent(String.fromCodePoint(0xE4))}ss@proxy.example:8080`
+            }
+        ];
+
+        for (const fixture of encodedPasswordCases) {
+            test(`should accept ${fixture.label} in password`, () => {
+                const result = validator.validate(fixture.url);
+                assert.strictEqual(result.isValid, true, result.errors.join(', '));
+            });
+        }
+
+        test('should accept encoded reserved characters in username', () => {
+            const result = validator.validate('http://us%21er:ab%2Bcd@proxy.example:8080');
+            assert.strictEqual(result.isValid, true, result.errors.join(', '));
+        });
+
+        const encodedMetacharCases = [
+            { label: 'ampersand %26', url: 'http://user:ab%26cd@proxy.example:8080' },
+            { label: 'pipe %7C', url: 'http://user:ab%7Ccd@proxy.example:8080' },
+            { label: 'semicolon %3B', url: 'http://user:ab%3Bcd@proxy.example:8080' },
+            { label: 'backtick %60', url: 'http://user:ab%60cd@proxy.example:8080' }
+        ];
+
+        for (const fixture of encodedMetacharCases) {
+            test(`should reject ${fixture.label} in password`, () => {
+                const result = validator.validate(fixture.url);
+                assert.strictEqual(result.isValid, false);
+                assert.ok(
+                    result.errors.some(e =>
+                        /shell|metacharacter|password|credential/i.test(e)
+                    ),
+                    result.errors.join(', ')
+                );
+            });
+        }
+
+        test('should not describe rejected credentials as alphanumeric-only', () => {
+            const result = validator.validate('http://user:ab%26cd@proxy.example:8080');
+            assert.strictEqual(result.isValid, false);
+            assert.ok(result.errors.every(e => !/alphanumeric/i.test(e)), result.errors.join(', '));
         });
     });
 
@@ -412,53 +468,41 @@ suite('ProxyUrlValidator Test Suite', () => {
          * For any proxy URL containing authentication credentials, the validator should verify
          * that the username and password contain only allowed characters and are properly formatted.
          */
-        test('Property 11: Credential format validation', () => {
+        test('Property 11: Encoded shell metacharacters in credentials are rejected', () => {
             fc.assert(
                 fc.property(
                     fc.constantFrom('http', 'https'),
-                    // Generate username with invalid characters (excluding shell metacharacters)
-                    fc.string({ minLength: 1, maxLength: 10 }).filter(s => {
-                        // Exclude shell metacharacters to focus on credential validation
-                        const shellMetachars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
-                        return !shellMetachars.some(char => s.includes(char));
-                    }),
-                    // Invalid characters for credentials (excluding shell metacharacters and @)
-                    fc.constantFrom('!', '#', '$', '%', '^', '*', '=', '+', '[', ']', '{', '}', ' ', '~', '/', '\\', '?', ',', '.', ':'),
-                    fc.string({ minLength: 0, maxLength: 10 }).filter(s => {
-                        // Exclude shell metacharacters to focus on credential validation
-                        const shellMetachars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
-                        return !shellMetachars.some(char => s.includes(char));
-                    }),
-                    fc.string({ minLength: 1, maxLength: 10 }).filter(s => {
-                        // Exclude shell metacharacters to focus on credential validation
-                        const shellMetachars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
-                        return !shellMetachars.some(char => s.includes(char));
-                    }),
+                    fc.stringMatching(/^[a-zA-Z0-9]{1,8}$/),
+                    fc.constantFrom(';', '|', '&', '`', '<', '>', '(', ')'),
+                    fc.stringMatching(/^[a-zA-Z0-9]{0,8}$/),
+                    fc.stringMatching(/^[a-zA-Z0-9]{1,8}$/),
                     fc.option(fc.integer({ min: 1, max: 65535 }), { nil: undefined }),
-                    (protocol, userBefore, invalidChar, userAfter, password, port) => {
-                        // Create username with invalid character
-                        const username = `${userBefore}${invalidChar}${userAfter}`;
-                        // Use a valid hostname to ensure we're testing credential validation, not hostname validation
+                    (protocol, userBefore, metachar, userAfter, password, port) => {
+                        const username = `${userBefore}${metachar}${userAfter}`;
                         const hostname = 'proxy.example.com';
                         let url = `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostname}`;
                         if (port) {
                             url += `:${port}`;
                         }
-                        
+
                         const result = validator.validate(url);
-                        
-                        // The URL should be rejected due to invalid credential characters
-                        assert.strictEqual(result.isValid, false, 
-                            `URL with invalid credential character '${invalidChar}' should be rejected: ${url}`);
-                        
-                        // The error message should mention username or password validation
+
+                        assert.strictEqual(result.isValid, false,
+                            `encoded shell metacharacter should be rejected (${metachar})`);
+
                         assert.ok(
-                            result.errors.some(e => 
-                                e.toLowerCase().includes('username') || 
+                            result.errors.some(e =>
+                                e.toLowerCase().includes('username') ||
                                 e.toLowerCase().includes('password') ||
-                                e.toLowerCase().includes('credential')
+                                e.toLowerCase().includes('credential') ||
+                                e.toLowerCase().includes('shell') ||
+                                e.toLowerCase().includes('metacharacter')
                             ),
-                            `Error message should mention credential validation for URL: ${url}. Errors: ${result.errors.join(', ')}`
+                            `Error should mention shell/credential rejection. Errors: ${result.errors.join(', ')}`
+                        );
+                        assert.ok(
+                            result.errors.every(e => !/alphanumeric/i.test(e)),
+                            `Rejection must not be alphanumeric-only. Errors: ${result.errors.join(', ')}`
                         );
                     }
                 ),

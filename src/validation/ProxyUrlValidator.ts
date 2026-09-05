@@ -14,15 +14,13 @@ export interface ValidationResult {
 /**
  * ProxyUrlValidator class for comprehensive proxy URL validation
  * 
- * Validates proxy URLs for format correctness and security, preventing
- * command injection through strict character whitelisting.
+ * Validates proxy URLs for format correctness and security. Credentials may
+ * contain WHATWG-encodable reserved characters; only shell metacharacters are
+ * rejected after decode so command argv semantics cannot change.
  */
 export class ProxyUrlValidator {
     // Shell metacharacters that could be used for command injection
     private static readonly SHELL_METACHARACTERS = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')'];
-
-    // Allowed characters for credentials (alphanumeric, hyphens, underscores, @)
-    private static readonly CREDENTIAL_PATTERN = /^[a-zA-Z0-9\-_@]+$/;
 
     /**
      * Validates a proxy URL for format and security
@@ -50,7 +48,7 @@ export class ProxyUrlValidator {
             return { isValid: false, errors: ['Invalid URL format'] };
         }
 
-        const errors = this.validateParsedUrl(parsed);
+        const errors = this.validateParsedUrl(parsed, url);
 
         return {
             isValid: errors.length === 0,
@@ -88,12 +86,12 @@ export class ProxyUrlValidator {
         }
     }
 
-    private validateParsedUrl(parsed: URL): string[] {
+    private validateParsedUrl(parsed: URL, originalUrl: string): string[] {
         const errors: string[] = [];
         this.validateProtocol(parsed, errors);
         this.validateHostname(parsed, errors);
         this.validatePort(parsed, errors);
-        return this.validateCredentials(parsed, errors);
+        return this.validateCredentials(parsed, originalUrl, errors);
     }
 
     private validateProtocol(parsed: URL, errors: string[]): void {
@@ -125,27 +123,54 @@ export class ProxyUrlValidator {
         }
     }
 
-    private validateCredentials(parsed: URL, errors: string[]): string[] {
+    private extractRawUserinfo(url: string): { username: string; password: string } | null {
+        const protocolMatch = url.match(/^(https?):\/\//);
+        if (!protocolMatch) {
+            return null;
+        }
+
+        const afterProtocol = url.substring(protocolMatch[0].length);
+        const at = afterProtocol.lastIndexOf('@');
+        if (at <= 0) {
+            return null;
+        }
+
+        const userinfo = afterProtocol.slice(0, at);
+        const colon = userinfo.indexOf(':');
+        if (colon === -1) {
+            return { username: userinfo, password: '' };
+        }
+
+        return {
+            username: userinfo.slice(0, colon),
+            password: userinfo.slice(colon + 1)
+        };
+    }
+
+    private validateCredentials(parsed: URL, originalUrl: string, errors: string[]): string[] {
         if (!parsed.username && !parsed.password) {
             return errors;
         }
 
-        let decodedUsername = '';
-        let decodedPassword = '';
-        try {
-            decodedUsername = parsed.username ? decodeURIComponent(parsed.username) : '';
-            decodedPassword = parsed.password ? decodeURIComponent(parsed.password) : '';
-        } catch {
-            errors.push('Invalid URL format');
-            return errors;
+        const raw = this.extractRawUserinfo(originalUrl);
+        let decodedUsername = parsed.username;
+        let decodedPassword = parsed.password;
+        if (raw) {
+            try {
+                decodedUsername = raw.username ? decodeURIComponent(raw.username) : '';
+                decodedPassword = raw.password ? decodeURIComponent(raw.password) : '';
+            } catch {
+                errors.push('Invalid URL format');
+                return errors;
+            }
         }
 
-        if (decodedUsername && !ProxyUrlValidator.CREDENTIAL_PATTERN.test(decodedUsername)) {
-            errors.push('Username contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)');
+        if (decodedUsername && this.containsShellMetacharacters(decodedUsername)) {
+            errors.push('Username contains dangerous shell characters');
         }
 
-        if (decodedPassword && !ProxyUrlValidator.CREDENTIAL_PATTERN.test(decodedPassword)) {
-            errors.push('Password contains invalid characters (only alphanumeric, hyphens, underscores, and @ allowed)');
+        if (decodedPassword && this.containsShellMetacharacters(decodedPassword)) {
+            errors.push('Password contains dangerous shell characters');
         }
 
         return errors;
