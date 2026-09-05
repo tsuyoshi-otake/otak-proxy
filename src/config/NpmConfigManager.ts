@@ -6,6 +6,15 @@ import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
+import {
+    compensatePartialProxyWrite,
+    getPartialWriteCompensation,
+    summarizePartialWriteCompensation,
+    UNREADABLE
+} from './PartialProxyWriteCompensation';
+import { InputSanitizer } from '../validation/InputSanitizer';
+
+const resultSanitizer = new InputSanitizer();
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +68,11 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
+    /**
+     * Keys that still hold the value this call wrote after a failed multi-key
+     * set. Empty/absent when compensation cleared or an external writer changed them.
+     */
+    residualKeys?: readonly string[];
 }
 
 export type NpmProxyKey = 'proxy' | 'https-proxy';
@@ -291,16 +305,25 @@ export class NpmConfigManager {
      * @returns Result with success status and any errors
      */
     async setProxy(url: string): Promise<OperationResult> {
+        const snapshot = await this.readProxySnapshot();
+        const written: NpmProxyKey[] = [];
         try {
-            // Set proxy (for HTTP - npm 11.x naming)
             await this.execNpm(['config', 'set', 'proxy', url]);
-
-            // Set https-proxy
+            written.push('proxy');
             await this.execNpm(['config', 'set', 'https-proxy', url]);
-
+            written.push('https-proxy');
+            await this.assertWrittenValues(url, written);
             return { success: true };
         } catch (error) {
-            return this.handleError(error);
+            if (written.length === 0) {
+                return this.handleError(error);
+            }
+            const failedKey = written.includes('https-proxy') ? undefined : 'https-proxy';
+            const compensation = await this.compensatePartialSet(written, url, snapshot);
+            compensation.summary = summarizePartialWriteCompensation(failedKey, compensation);
+            const wrapped = error instanceof Error ? error : new Error(String(error));
+            (wrapped as Error & { otakPartialWrite: typeof compensation }).otakPartialWrite = compensation;
+            return this.handleSetFailure(wrapped);
         }
     }
 
@@ -359,6 +382,71 @@ export class NpmConfigManager {
                 errorType: failure.errorType
             };
         }
+    }
+
+    private async readProxySnapshot(): Promise<NpmProxyValues | undefined> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return undefined;
+        }
+        return inspection.values;
+    }
+
+    private async readCurrentProxyValue(key: NpmProxyKey): Promise<string | null | typeof UNREADABLE> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return UNREADABLE;
+        }
+        return inspection.values[key];
+    }
+
+    private async assertWrittenValues(url: string, keys: readonly NpmProxyKey[]): Promise<void> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return;
+        }
+        const observed = keys.filter(key => inspection.values?.[key] !== null && inspection.values?.[key] !== undefined);
+        if (observed.length === 0) {
+            return;
+        }
+        const mismatched = keys.filter(key => inspection.values?.[key] !== url);
+        if (mismatched.length > 0) {
+            throw new Error('npm proxy write verify failed');
+        }
+    }
+
+    private async compensatePartialSet(
+        written: readonly NpmProxyKey[],
+        url: string,
+        snapshot: NpmProxyValues | undefined
+    ) {
+        return compensatePartialProxyWrite<NpmProxyKey>({
+            writtenKeys: written,
+            writtenValue: url,
+            snapshot,
+            readCurrent: key => this.readCurrentProxyValue(key),
+            restore: async (key, previous) => {
+                await this.execNpm(['config', 'set', key, previous]);
+            },
+            clear: async key => {
+                await this.execNpm(['config', 'delete', key]);
+            }
+        });
+    }
+
+    private handleSetFailure(error: unknown): OperationResult {
+        const failure = this.handleError(error);
+        const compensation = getPartialWriteCompensation<NpmProxyKey>(error);
+        if (!compensation) {
+            return failure;
+        }
+        const errorText = [failure.error, compensation.summary].filter(Boolean).join('; ');
+        Logger.warn(`npm partial write compensation: ${compensation.summary}`);
+        return {
+            ...failure,
+            error: resultSanitizer.maskPassword(errorText),
+            residualKeys: compensation.residualKeys.length > 0 ? compensation.residualKeys : undefined
+        };
     }
 
     /**
