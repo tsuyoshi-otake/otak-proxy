@@ -189,26 +189,49 @@ async function withConnectServer(
 suite('Assurance: external-boundary contracts', () => {
     test('CT-CLI-GIT-001: Git command port preserves executable, argv, timeout, stdout and stderr contract', async () => {
         const calls: CommandCall[] = [];
+        const store: { 'http.proxy': string | null; 'https.proxy': string | null } = {
+            'http.proxy': null,
+            'https.proxy': null
+        };
         const manager = new GitConfigManager({
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
+                if (args.includes('--get-regexp')) {
+                    const lines = [
+                        store['http.proxy'] ? `http.proxy ${store['http.proxy']}` : '',
+                        store['https.proxy'] ? `https.proxy ${store['https.proxy']}` : ''
+                    ].filter(Boolean);
+                    if (lines.length === 0) {
+                        throw Object.assign(new Error('missing'), { code: 1 });
+                    }
+                    return { stdout: `${lines.join('\n')}\n`, stderr: '' };
+                }
+                if (args.includes('http.proxy') && !args.includes('--unset')) {
+                    store['http.proxy'] = args[args.length - 1];
+                }
+                if (args.includes('https.proxy') && !args.includes('--unset')) {
+                    store['https.proxy'] = args[args.length - 1];
+                }
                 return { stdout: '', stderr: '' };
             }
         });
 
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/git'), { success: true });
-        assert.deepStrictEqual(calls.map(call => call.command), ['git', 'git']);
-        assert.deepStrictEqual(calls.map(call => call.args), [
+        const writes = calls.filter(call => !call.args.includes('--get-regexp'));
+        assert.deepStrictEqual(writes.map(call => call.command), ['git', 'git']);
+        assert.deepStrictEqual(writes.map(call => call.args), [
             ['config', '--global', 'http.proxy', 'safe://proxy/git'],
             ['config', '--global', 'https.proxy', 'safe://proxy/git']
         ]);
-        assert.deepStrictEqual(calls.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS, GIT_CONFIG_COMMAND_TIMEOUT_MS]);
-        assert.deepStrictEqual(calls.map(call => call.options.encoding), ['utf8', 'utf8']);
+        assert.deepStrictEqual(writes.map(call => call.options.timeout), [GIT_CONFIG_COMMAND_TIMEOUT_MS, GIT_CONFIG_COMMAND_TIMEOUT_MS]);
+        assert.deepStrictEqual(writes.map(call => call.options.encoding), ['utf8', 'utf8']);
     });
 
     test('CT-CLI-NPM-001: npm command port removes overriding environment values and keeps argv ordering', async () => {
         const calls: CommandCall[] = [];
-        const manager = new NpmConfigManager(path.join(os.tmpdir(), 'assurance-npmrc'), {
+        const store: { proxy: string | null; 'https-proxy': string | null } = { proxy: null, 'https-proxy': null };
+        const userconfig = path.join(os.tmpdir(), 'assurance-npmrc');
+        const manager = new NpmConfigManager(userconfig, {
             isWindows: false,
             env: {
                 PATH: '/test/path',
@@ -218,22 +241,70 @@ suite('Assurance: external-boundary contracts', () => {
             commandAvailable: () => true,
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
+                const key = args.includes('https-proxy') ? 'https-proxy' : args.includes('proxy') ? 'proxy' : undefined;
+                if (args.includes('get') && key) {
+                    return { stdout: `${store[key] ?? 'null'}\n`, stderr: '' };
+                }
+                if (args.includes('set') && key) {
+                    store[key] = args[args.length - 1];
+                }
                 return { stdout: '', stderr: '' };
             }
         });
 
         assert.deepStrictEqual(await manager.setProxy('safe://proxy/npm'), { success: true });
-        assert.deepStrictEqual(calls.map(call => call.command), ['npm', 'npm']);
-        assert.deepStrictEqual(calls.map(call => call.args), [
-            ['--userconfig', path.join(os.tmpdir(), 'assurance-npmrc'), 'config', 'set', 'proxy', 'safe://proxy/npm'],
-            ['--userconfig', path.join(os.tmpdir(), 'assurance-npmrc'), 'config', 'set', 'https-proxy', 'safe://proxy/npm']
+        const writes = calls.filter(call => call.args.includes('set'));
+        assert.deepStrictEqual(writes.map(call => call.command), ['npm', 'npm']);
+        assert.deepStrictEqual(writes.map(call => call.args), [
+            ['--userconfig', userconfig, 'config', 'set', 'proxy', 'safe://proxy/npm'],
+            ['--userconfig', userconfig, 'config', 'set', 'https-proxy', 'safe://proxy/npm']
         ]);
-        assert.deepStrictEqual(calls.map(call => call.options.timeout), [NPM_CONFIG_COMMAND_TIMEOUT_MS, NPM_CONFIG_COMMAND_TIMEOUT_MS]);
+        assert.deepStrictEqual(writes.map(call => call.options.timeout), [NPM_CONFIG_COMMAND_TIMEOUT_MS, NPM_CONFIG_COMMAND_TIMEOUT_MS]);
         for (const call of calls) {
             const env = call.options.env as NodeJS.ProcessEnv;
             assert.strictEqual(env.npm_config_proxy, undefined);
             assert.strictEqual(env.NPM_CONFIG_HTTPS_PROXY, undefined);
         }
+    });
+
+    test('CT-CLI-GIT-003: a failed https.proxy write compensates http.proxy without inventing --replace-all', async () => {
+        const calls: string[][] = [];
+        const store: { 'http.proxy': string | null; 'https.proxy': string | null } = {
+            'http.proxy': null,
+            'https.proxy': null
+        };
+        const manager = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                calls.push(args);
+                if (args.includes('--get-regexp')) {
+                    const lines = [
+                        store['http.proxy'] ? `http.proxy ${store['http.proxy']}` : '',
+                        store['https.proxy'] ? `https.proxy ${store['https.proxy']}` : ''
+                    ].filter(Boolean);
+                    if (lines.length === 0) {
+                        throw Object.assign(new Error('missing'), { code: 1 });
+                    }
+                    return { stdout: `${lines.join('\n')}\n`, stderr: '' };
+                }
+                if (args.includes('--unset')) {
+                    store['http.proxy'] = args.includes('https.proxy') ? store['http.proxy'] : null;
+                    store['https.proxy'] = args.includes('https.proxy') ? null : store['https.proxy'];
+                    return { stdout: '', stderr: '' };
+                }
+                if (args.includes('https.proxy')) {
+                    throw Object.assign(new Error('injected https write failure'), { code: 128, stderr: 'error: write failed' });
+                }
+                store['http.proxy'] = args[args.length - 1];
+                return { stdout: '', stderr: '' };
+            }
+        });
+
+        const result = await manager.setProxy('safe://proxy/git');
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(store['http.proxy'], null);
+        assert.ok(calls.some(args => args.includes('--unset') && args.includes('http.proxy')));
+        assert.ok(!calls.some(args => args.includes('--replace-all')));
+        assert.ok(!JSON.stringify(result).includes('safe://proxy/git'));
     });
 
     test('CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol', async () => {

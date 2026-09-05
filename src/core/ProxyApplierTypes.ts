@@ -15,6 +15,7 @@ interface ProxyConfigOperationResult {
     success: boolean;
     error?: string;
     errorType?: string;
+    residualKeys?: readonly string[];
 }
 
 interface ProxyConfigManagerLike {
@@ -33,6 +34,7 @@ export interface ProxyConfigTargetUpdateResult {
     success: boolean;
     outcome: ProxyTargetOutcome;
     errorType?: string;
+    residualKeys?: readonly string[];
 }
 
 export interface ProxyOwnershipObservation {

@@ -121,6 +121,30 @@ function createApplier(targets: FakeTargetSet, ownershipStore: TargetOwnershipSt
 }
 
 suite('Ownership-safe proxy disable integration', () => {
+    test('Off removes an uncompensated first-key residual after a failed Git setProxy', async () => {
+        const targets = createTargets();
+        const ownedUrl = 'http://partial.example:8080';
+        targets.git.setProxy = async (url: string) => {
+            targets.git.values['http.proxy'] = url;
+            return {
+                success: false,
+                error: 'https.proxy write failed; residual remains: http.proxy',
+                errorType: 'UNKNOWN',
+                residualKeys: ['http.proxy']
+            };
+        };
+        const applier = createApplier(targets, createOwnershipStore());
+
+        const applied = await applier.applyProxyDetailed(ownedUrl, true, { silent: true });
+        assert.strictEqual(applied.success, false);
+        assert.strictEqual(targets.git.values['http.proxy'], ownedUrl);
+
+        const disabled = await applier.disableProxyDetailed({ silent: true });
+        assert.strictEqual(disabled.success, true);
+        assert.strictEqual(targets.git.values['http.proxy'], null);
+        assert.deepStrictEqual(targets.git.unsetCalls, [['http.proxy']]);
+    });
+
     test('clears only keys whose current values still match otak-proxy fingerprints', async () => {
         const targets = createTargets();
         const applier = createApplier(targets, createOwnershipStore());

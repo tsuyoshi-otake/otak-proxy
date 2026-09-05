@@ -13,6 +13,15 @@ import {
 import { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
+import {
+    compensatePartialProxyWrite,
+    getPartialWriteCompensation,
+    summarizePartialWriteCompensation,
+    UNREADABLE
+} from './PartialProxyWriteCompensation';
+import { InputSanitizer } from '../validation/InputSanitizer';
+
+const resultSanitizer = new InputSanitizer();
 
 const execFileAsync = promisify(execFile);
 
@@ -97,16 +106,30 @@ export class GitConfigManager {
     async setProxy(url: string, options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
             await withGitConfigWriteMutex(async () => {
-                // Set http.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url], options);
-
-                // Set https.proxy
-                await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url], options);
+                const snapshot = await this.readProxySnapshot();
+                const written: GitProxyKey[] = [];
+                try {
+                    await this.execGitConfigWithRetry(['config', '--global', 'http.proxy', url], options);
+                    written.push('http.proxy');
+                    await this.execGitConfigWithRetry(['config', '--global', 'https.proxy', url], options);
+                    written.push('https.proxy');
+                    await this.assertWrittenValues(url, written);
+                } catch (error) {
+                    if (written.length === 0) {
+                        throw error;
+                    }
+                    const failedKey = written.includes('https.proxy') ? undefined : 'https.proxy';
+                    const compensation = await this.compensatePartialSet(written, url, snapshot, options);
+                    compensation.summary = summarizePartialWriteCompensation(failedKey, compensation);
+                    const wrapped = error instanceof Error ? error : new Error(String(error));
+                    (wrapped as Error & { otakPartialWrite: typeof compensation }).otakPartialWrite = compensation;
+                    throw wrapped;
+                }
             }, options);
 
             return { success: true };
         } catch (error) {
-            return this.handleError(error);
+            return this.handleSetFailure(error);
         }
     }
 
@@ -205,6 +228,79 @@ export class GitConfigManager {
                 errorType: failure.errorType
             };
         }
+    }
+
+    private async readProxySnapshot(): Promise<GitProxyValues | undefined> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return undefined;
+        }
+        return inspection.values;
+    }
+
+    private async readCurrentProxyValue(key: GitProxyKey): Promise<string | null | typeof UNREADABLE> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return UNREADABLE;
+        }
+        return inspection.values[key];
+    }
+
+    private async assertWrittenValues(url: string, keys: readonly GitProxyKey[]): Promise<void> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available' || !inspection.values) {
+            return;
+        }
+        const observed = keys.filter(key => inspection.values?.[key] !== null && inspection.values?.[key] !== undefined);
+        if (observed.length === 0) {
+            return;
+        }
+        const mismatched = keys.filter(key => inspection.values?.[key] !== url);
+        if (mismatched.length > 0) {
+            throw new Error('Git proxy write verify failed');
+        }
+    }
+
+    private async compensatePartialSet(
+        written: readonly GitProxyKey[],
+        url: string,
+        snapshot: GitProxyValues | undefined,
+        options?: GitConfigOperationOptions
+    ) {
+        return compensatePartialProxyWrite<GitProxyKey>({
+            writtenKeys: written,
+            writtenValue: url,
+            snapshot,
+            readCurrent: key => this.readCurrentProxyValue(key),
+            restore: async (key, previous) => {
+                await this.execGitConfigWithRetry(['config', '--global', key, previous], options);
+            },
+            clear: async key => {
+                try {
+                    await this.execGitConfigWithRetry(['config', '--global', '--unset', key], options);
+                } catch (error) {
+                    const code = getErrorCode(error);
+                    if (code !== 5 && code !== '5') {
+                        throw error;
+                    }
+                }
+            }
+        });
+    }
+
+    private handleSetFailure(error: unknown): OperationResult {
+        const failure = this.handleError(error);
+        const compensation = getPartialWriteCompensation<GitProxyKey>(error);
+        if (!compensation) {
+            return failure;
+        }
+        const errorText = [failure.error, compensation.summary].filter(Boolean).join('; ');
+        Logger.warn(`Git partial write compensation: ${compensation.summary}`);
+        return {
+            ...failure,
+            error: resultSanitizer.maskPassword(errorText),
+            residualKeys: compensation.residualKeys.length > 0 ? compensation.residualKeys : undefined
+        };
     }
 
     /**

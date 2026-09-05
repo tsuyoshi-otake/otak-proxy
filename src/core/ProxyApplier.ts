@@ -354,8 +354,12 @@ export class ProxyApplier {
             errorAggregator,
             options
         );
-        if (enabled && result.outcome === 'configured' && this.ownershipStore && target.ownership) {
-            await this.markTargetOwned(target, proxyUrl);
+        if (enabled && this.ownershipStore && target.ownership) {
+            if (result.outcome === 'configured') {
+                await this.markTargetOwned(target, proxyUrl);
+            } else if (result.residualKeys && result.residualKeys.length > 0) {
+                await this.markResidualOwned(target, proxyUrl, result.residualKeys);
+            }
         }
         return result;
     }
@@ -371,6 +375,49 @@ export class ProxyApplier {
             })),
             proxyUrl
         );
+    }
+
+    private residualTargetMatches(targetId: string, residualKeys: readonly string[]): boolean {
+        return residualKeys.some(key => targetId.endsWith(`.${key}`));
+    }
+
+    private async markResidualOwned(
+        target: ProxyConfigTarget,
+        proxyUrl: string,
+        residualKeys: readonly string[]
+    ): Promise<void> {
+        const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl;
+        let inspection: ProxyOwnershipInspection;
+        try {
+            inspection = await target.ownership!.inspect();
+        } catch {
+            Logger.warn(`${target.name} residual ownership skipped: inspect failed after partial write`);
+            return;
+        }
+        if (inspection.status !== 'available' || !inspection.observations) {
+            Logger.warn(`${target.name} residual ownership skipped: ${inspection.error || 'inspect unavailable'}`);
+            return;
+        }
+
+        const snapshots = inspection.observations
+            .filter(observation => this.residualTargetMatches(observation.targetId, residualKeys))
+            .filter(observation => observation.value === proxyUrl || observation.value === publicUrl)
+            .map(observation => {
+                const host = target.ownership!.targets.find(entry => entry.targetId === observation.targetId)?.targetHost
+                    ?? 'workspaceHost';
+                return {
+                    targetId: observation.targetId,
+                    targetHost: host,
+                    value: publicUrl
+                };
+            });
+
+        if (snapshots.length === 0) {
+            return;
+        }
+
+        await this.ownershipStore!.bootstrapFromSnapshot(publicUrl, snapshots, proxyUrl);
+        Logger.warn(`${target.name} recorded ownership for residual keys: ${residualKeys.join(', ')}`);
     }
 
     private async disableOwnedTarget(

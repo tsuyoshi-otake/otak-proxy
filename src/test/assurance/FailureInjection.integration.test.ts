@@ -2,6 +2,7 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { GitConfigManager } from '../../config/GitConfigManager';
 import { ProxyConfigTarget } from '../../core/ProxyApplierTypes';
 import { updateProxyConfigTargetDetailed } from '../../core/ProxyConfigTargetRunner';
 import { ProxyMode } from '../../core/types';
@@ -91,6 +92,54 @@ suite('Assurance: deterministic failure injection and recovery', () => {
         } finally {
             fs.rmSync(directory, { recursive: true, force: true });
         }
+    });
+
+    test('F-PARTIAL-WRITE-001: Git https.proxy write failure compensates the http.proxy write', async () => {
+        const store: { 'http.proxy': string | null; 'https.proxy': string | null } = {
+            'http.proxy': null,
+            'https.proxy': null
+        };
+        const manager = new GitConfigManager({
+            commandRunner: async (_command, args) => {
+                if (args.includes('--get-regexp')) {
+                    const lines = [
+                        store['http.proxy'] ? `http.proxy ${store['http.proxy']}` : '',
+                        store['https.proxy'] ? `https.proxy ${store['https.proxy']}` : ''
+                    ].filter(Boolean);
+                    if (lines.length === 0) {
+                        throw Object.assign(new Error('missing'), { code: 1 });
+                    }
+                    return { stdout: `${lines.join('\n')}\n`, stderr: '' };
+                }
+                if (args.includes('--unset')) {
+                    if (args.includes('http.proxy')) {
+                        store['http.proxy'] = null;
+                    }
+                    if (args.includes('https.proxy')) {
+                        store['https.proxy'] = null;
+                    }
+                    return { stdout: '', stderr: '' };
+                }
+                if (args.includes('https.proxy')) {
+                    throw Object.assign(new Error('injected https write failure'), { code: 128, stderr: 'error: write failed' });
+                }
+                store['http.proxy'] = args[args.length - 1];
+                return { stdout: '', stderr: '' };
+            }
+        });
+        const errors = new ErrorAggregator();
+        const result = await updateProxyConfigTargetDetailed(
+            { name: 'Git configuration', manager },
+            true,
+            'safe://proxy/partial-write',
+            errors
+        );
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.outcome, 'failed');
+        assert.strictEqual(store['http.proxy'], null);
+        assert.strictEqual(store['https.proxy'], null);
+        assert.strictEqual(errors.hasErrors(), true);
+        assert.ok(!JSON.stringify(result).includes('safe://proxy/partial-write'));
     });
 
     test('F-PARTIAL-001: one target failure stays visible while other target results remain terminal', async () => {
