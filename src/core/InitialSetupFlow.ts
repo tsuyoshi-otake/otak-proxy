@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { I18nManager } from '../i18n/I18nManager';
 import { detectSystemProxySettingsWithSource, validateProxyUrl } from '../utils/ProxyUtils';
-import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
@@ -178,5 +178,6 @@ export class InitialSetupFlow {
         state.usingFallbackProxy = fallback;
         state.fallbackProxyUrl = fallback ? proxyUrl : undefined;
         state.lastDetectionSource = fallback ? 'fallback' : detectedSource;
+        setRequiresAuthFromLiveUrls(state);
     }
 }

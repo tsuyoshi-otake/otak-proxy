@@ -816,4 +816,34 @@ suite('v3 Phase 1 diagnostics foundation', () => {
             restoreConfig();
         }
     });
+
+    test('ProxyRuntimeDiagnostics reports unresolved local credentials without applying a public URL', async () => {
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const context = createContext(store, secrets);
+        const restoreConfig = stubConfiguration('');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://proxy.example.com:8080/',
+                    requiresAuth: true
+                }),
+                {
+                    commandRunner: async () => ({ stdout: '', stderr: '' })
+                }
+            );
+
+            const report = await diagnostics.run();
+            const unresolved = report.issues.find(issue => issue.id === 'proxy.localCredential.unresolved');
+            assert.ok(unresolved, 'missing local credentials must surface as an explicit issue');
+            assert.strictEqual(unresolved?.category, 'needsCredentialConsent');
+            assert.strictEqual(unresolved?.autoAction, 'skipped');
+            assert.strictEqual(unresolved?.evidence.localCredentialAvailability, 'missingOnThisMachine');
+            assert.ok(!JSON.stringify(report).includes('s3cret'));
+        } finally {
+            restoreConfig();
+        }
+    });
 });

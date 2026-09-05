@@ -11,8 +11,9 @@ import {
 import { ExecutionContextDetector } from './ExecutionContextDetector';
 import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostics';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
-import { splitProxyUrl } from '../security/ProxyCredentialStore';
+import { ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
+import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -169,6 +170,8 @@ export class ProxyRuntimeDiagnostics {
                 evidence: { workspaceHostKind: executionContext.workspaceHostKind }
             }));
         }
+
+        issues.push(...await this.collectCredentialIssues(state));
 
         issues.push(...this.collectManagedConvergenceIssues(state, {
             git: slowDiagnostics.git?.observation,
@@ -589,6 +592,50 @@ export class ProxyRuntimeDiagnostics {
         return issues;
     }
 
+    private async collectCredentialIssues(state: ProxyState): Promise<ProxyIssue[]> {
+        if (this.expectsProxyDisabled(state)) {
+            return [];
+        }
+
+        const expected = state.mode === ProxyMode.Auto
+            ? (state.autoProxyUrl || state.fallbackProxyUrl)
+            : state.manualProxyUrl;
+        if (!expected) {
+            return [];
+        }
+
+        const required = state.requiresAuth === true || hasProxyCredentials(expected);
+        const publicUrl = getProxyPublicUrl(expected) || expected;
+        const resolution = await new ProxyCredentialStore(this.context.secrets).resolveLocalCredentials(
+            publicUrl,
+            required
+        );
+
+        if (resolution.availability === 'notRequired' || resolution.availability === 'availableOnThisMachine') {
+            return [];
+        }
+
+        const secretStorageUnavailable = resolution.availability === 'secretStorageUnavailable';
+        return [this.issue(
+            'proxy.localCredential.unresolved',
+            secretStorageUnavailable ? 'capabilityUnavailable' : 'needsCredentialConsent',
+            'requiresUserDecision',
+            'proxy.credentials',
+            'workspaceHost',
+            {
+                expectedSanitized: publicUrl,
+                source: 'localCredential',
+                capability: secretStorageUnavailable ? 'unsupported' : 'permissionRequired',
+                autoAction: 'skipped',
+                userAction: resolution.availability === 'needsReEntry' ? 'changeSetting' : 'showDetails',
+                evidence: {
+                    localCredentialAvailability: resolution.availability,
+                    requiresAuth: state.requiresAuth === true
+                }
+            }
+        )];
+    }
+
     private expectedActiveProxyUrl(state: ProxyState): string | undefined {
         if (state.mode === ProxyMode.Off) {
             return undefined;
@@ -597,7 +644,11 @@ export class ProxyRuntimeDiagnostics {
             if (state.autoModeOff === true) {
                 return undefined;
             }
-            return state.autoProxyUrl || state.fallbackProxyUrl;
+            const url = state.autoProxyUrl || state.fallbackProxyUrl;
+            if (state.requiresAuth === true && url && !hasProxyCredentials(url)) {
+                return undefined;
+            }
+            return url;
         }
         return state.manualProxyUrl;
     }

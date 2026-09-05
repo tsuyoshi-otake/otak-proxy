@@ -92,6 +92,12 @@ export interface ProxyState {
     lastSystemProxyUrl?: string;         // Last detected system proxy URL
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
     lastDetectionSource?: AppliedProxySource; // Provenance of autoProxyUrl (issue #29 echo suppression)
+    /**
+     * Non-secret metadata: the active Auto/fallback endpoint requires credentials.
+     * Persisted and synced so a receiver can refuse a credentialless apply.
+     * Never contains userinfo.
+     */
+    requiresAuth?: boolean;
 }
 
 export interface IProxyStateManager {

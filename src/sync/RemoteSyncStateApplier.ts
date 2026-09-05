@@ -1,4 +1,8 @@
 import { ProxyMode, ProxyState } from '../core/types';
+import {
+    shouldSkipUnauthenticatedApply,
+    UNRESOLVED_LOCAL_CREDENTIAL_ERROR
+} from '../utils/ProxyStateSanitizer';
 
 export interface RemoteSyncApplyContext {
     saveState(state: ProxyState): Promise<void>;
@@ -23,6 +27,23 @@ export async function applyRemoteSyncState(
     await context.saveState(remoteState);
     const localState = await context.getState();
     const activeUrl = context.getActiveProxyUrl(localState);
+
+    if (shouldSkipUnauthenticatedApply(localState, activeUrl)) {
+        await context.saveState({
+            ...localState,
+            lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR,
+            proxyReachable: false
+        });
+        if (localState.mode === ProxyMode.Auto) {
+            await context.startMonitoring();
+        } else {
+            await context.stopMonitoring();
+        }
+        context.updateStatus(await context.getState());
+        context.onApplyFailure?.();
+        return false;
+    }
+
     const shouldEnable = localState.mode !== ProxyMode.Off && Boolean(activeUrl);
     const applied = await context.applyProxy(shouldEnable ? activeUrl : '', shouldEnable);
 

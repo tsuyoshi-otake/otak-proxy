@@ -150,6 +150,44 @@ suite('ProxyStateManager Unit Tests', () => {
 
         const runtimeState = await stateManager.getState();
         assert.strictEqual(runtimeState.manualProxyUrl, testState.manualProxyUrl);
+        assert.strictEqual(runtimeState.autoProxyUrl, testState.autoProxyUrl);
+        assert.strictEqual(runtimeState.requiresAuth, true);
+        assert.ok(credentialSecretFor('http://auto.example.com:8080/'));
+    });
+
+    test('getState should hydrate persisted Auto proxy credentials from SecretStorage', async () => {
+        const originalGetConfiguration = vscode.workspace.getConfiguration;
+        (vscode.workspace as any).getConfiguration = (section?: string) => {
+            if (section === 'otakProxy') {
+                return {
+                    get: (_key: string, defaultValue?: any) => defaultValue,
+                    update: async () => {}
+                };
+            }
+            return originalGetConfiguration(section);
+        };
+
+        try {
+            await stateManager.saveState({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://user:s3cret@auto.example.com:8080'
+            });
+
+            assert.strictEqual(storedState!.autoProxyUrl, 'http://auto.example.com:8080/');
+            assert.strictEqual(storedState!.requiresAuth, true);
+            assert.ok(!JSON.stringify(storedState).includes('s3cret'));
+
+            const receivingWindow = new ProxyStateManager(context);
+            const hydrated = await receivingWindow.getState();
+            assert.strictEqual(hydrated.autoProxyUrl, 'http://user:s3cret@auto.example.com:8080');
+            assert.strictEqual(hydrated.requiresAuth, true);
+            assert.strictEqual(
+                receivingWindow.getActiveProxyUrl(hydrated),
+                'http://user:s3cret@auto.example.com:8080'
+            );
+        } finally {
+            (vscode.workspace as any).getConfiguration = originalGetConfiguration;
+        }
     });
 
     test('getState should hydrate persisted manual proxy credentials from configuration', async () => {

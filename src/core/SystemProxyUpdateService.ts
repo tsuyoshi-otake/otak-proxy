@@ -5,6 +5,7 @@ import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
+import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 export class SystemProxyUpdateService {
     constructor(
@@ -87,6 +88,7 @@ export class SystemProxyUpdateService {
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         state.lastDetectionSource = detectedSource;
+        setRequiresAuthFromLiveUrls(state);
     }
 
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
@@ -148,6 +150,7 @@ export class SystemProxyUpdateService {
     ): Promise<void> {
         state.autoProxyUrl = detectedProxy || undefined;
         state.lastDetectionSource = detectedProxy ? detectedSource : undefined;
+        setRequiresAuthFromLiveUrls(state);
         await this.saveAndPublishState(state);
     }
 
@@ -178,6 +181,7 @@ export class SystemProxyUpdateService {
                 state.usingFallbackProxy = true;
                 state.fallbackProxyUrl = state.manualProxyUrl;
                 state.lastDetectionSource = 'fallback';
+                setRequiresAuthFromLiveUrls(state);
                 Logger.log(`Using fallback proxy: ${state.manualProxyUrl}`);
                 return;
             }
@@ -187,6 +191,7 @@ export class SystemProxyUpdateService {
             state.usingFallbackProxy = false;
             state.fallbackProxyUrl = undefined;
             state.lastDetectionSource = undefined;
+            setRequiresAuthFromLiveUrls(state);
             Logger.log('Fallback proxy not reachable - Auto Mode OFF');
             return;
         }
@@ -196,6 +201,7 @@ export class SystemProxyUpdateService {
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         state.lastDetectionSource = undefined;
+        setRequiresAuthFromLiveUrls(state);
     }
 
     private async isFallbackReachable(proxyUrl: string): Promise<boolean> {

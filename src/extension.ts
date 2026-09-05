@@ -35,6 +35,10 @@ import { readV3Settings } from './core/V3Settings';
 import { TargetOwnershipStore } from './core/TargetOwnershipStore';
 import { ProxyCredentialStore } from './security/ProxyCredentialStore';
 import { applyRemoteSyncState as convergeRemoteSyncState } from './sync/RemoteSyncStateApplier';
+import {
+    shouldSkipUnauthenticatedApply,
+    UNRESOLVED_LOCAL_CREDENTIAL_ERROR
+} from './utils/ProxyStateSanitizer';
 
 // Module-level instances
 let proxyStateManager: ProxyStateManager;
@@ -368,6 +372,16 @@ async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: Te
 
     if (shouldEnsureStartupProxyDisabled(state, activeUrl)) {
         await clearManagedStartupProxyState(terminalEnvManager);
+        return;
+    }
+
+    if (shouldSkipUnauthenticatedApply(state, activeUrl)) {
+        await proxyStateManager.saveState({
+            ...state,
+            lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR,
+            proxyReachable: false
+        });
+        statusBarManager.update(await proxyStateManager.getState());
         return;
     }
 

@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import { ProxyMode, ProxyState } from '../../core/types';
 import { applyRemoteSyncState, RemoteSyncApplyContext } from '../../sync/RemoteSyncStateApplier';
+import { UNRESOLVED_LOCAL_CREDENTIAL_ERROR } from '../../utils/ProxyStateSanitizer';
 
 suite('RemoteSyncStateApplier integration', () => {
     function createContext(applyResult = true) {
@@ -81,5 +82,47 @@ suite('RemoteSyncStateApplier integration', () => {
         assert.strictEqual(fixture.statuses.length, 1);
         assert.strictEqual(fixture.statuses[0].lastError, 'sync convergence failed');
         assert.strictEqual(fixture.statuses[0].targetOutcomes?.terminalEnv, 'failed');
+    });
+
+    test('applies the locally reconstructed authenticated URL after a credentialless sync payload', async () => {
+        const authenticatedUrl = 'http://user:s3cret@proxy.example.com:8080';
+        const syncPayload: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example.com:8080/',
+            requiresAuth: true
+        };
+        assert.ok(!JSON.stringify(syncPayload).includes('s3cret'));
+
+        const fixture = createContext();
+        fixture.context.getState = async () => ({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: authenticatedUrl,
+            requiresAuth: true
+        });
+        fixture.context.getActiveProxyUrl = current => current.autoProxyUrl || '';
+
+        const applied = await applyRemoteSyncState(syncPayload, fixture.context);
+
+        assert.strictEqual(applied, true);
+        assert.deepStrictEqual(fixture.calls, [{ url: authenticatedUrl, enabled: true }]);
+        assert.ok(!JSON.stringify(syncPayload).includes('s3cret'));
+    });
+
+    test('skips apply when credentials are required but unavailable locally', async () => {
+        const fixture = createContext();
+
+        const applied = await applyRemoteSyncState({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example.com:8080/',
+            requiresAuth: true
+        }, fixture.context);
+
+        assert.strictEqual(applied, false);
+        assert.deepStrictEqual(fixture.calls, []);
+        assert.strictEqual(fixture.getState().lastError, UNRESOLVED_LOCAL_CREDENTIAL_ERROR);
+        assert.strictEqual(fixture.getState().proxyReachable, false);
+        assert.strictEqual(fixture.getState().requiresAuth, true);
+        assert.strictEqual(fixture.getState().autoProxyUrl, 'http://proxy.example.com:8080/');
+        assert.deepStrictEqual(fixture.monitoring, ['start']);
     });
 });
