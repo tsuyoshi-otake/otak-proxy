@@ -13,6 +13,10 @@ export interface WindowsProxyServerParse {
 const FALLBACK_MACOS_SERVICES = ['Wi-Fi', 'Ethernet', 'Thunderbolt Ethernet'];
 const REG_VALUE_LINE_PATTERN = /^\s*(\S+)\s+REG_\w+\s+(.+)$/i;
 
+function noneDetection(source: ProxyDetectionWithSource['source'] = null): ProxyDetectionWithSource {
+    return { proxyUrl: null, source, kind: 'direct', capability: 'supported' };
+}
+
 export async function detectPlatformProxyWithSource(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     try {
         switch (process.platform) {
@@ -53,7 +57,7 @@ function dwordIsEnabled(value: string | undefined): boolean {
     return /0x0*1\b/i.test(value) || value === '1';
 }
 
-async function detectWindowsProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
+export async function detectWindowsProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     try {
         const { stdout } = await exec('reg', ['query', WINDOWS_INTERNET_SETTINGS_KEY]);
         const proxyEnable = dwordIsEnabled(parseRegValue(stdout, 'ProxyEnable'));
@@ -106,10 +110,10 @@ async function detectWindowsProxy(exec: CommandExecutor): Promise<ProxyDetection
             };
         }
 
-        return { proxyUrl: null, source: null };
+        return noneDetection();
     } catch (error) {
         Logger.error('Windows registry query failed:', error);
-        return { proxyUrl: null, source: null };
+        return noneDetection();
     }
 }
 
@@ -170,7 +174,7 @@ async function listMacOSNetworkServices(exec: CommandExecutor): Promise<string[]
     return [...FALLBACK_MACOS_SERVICES];
 }
 
-async function detectMacOSProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
+export async function detectMacOSProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     const interfaces = await listMacOSNetworkServices(exec);
     let firstPacUrl: string | undefined;
 
@@ -196,7 +200,7 @@ async function detectMacOSProxy(exec: CommandExecutor): Promise<ProxyDetectionWi
             kind: 'pac',
             capability: 'unsupported',
             issue: createUnsupportedAutoConfigIssue({
-                id: 'macos.networksetup.pac',
+                id: 'macos.autoproxy.pac',
                 targetId: 'macos.networksetup',
                 targetHost: 'unavailable',
                 source: 'networksetup',
@@ -206,7 +210,7 @@ async function detectMacOSProxy(exec: CommandExecutor): Promise<ProxyDetectionWi
         };
     }
 
-    return { proxyUrl: null, source: null };
+    return noneDetection();
 }
 
 async function readMacNetworkProxy(
@@ -244,11 +248,19 @@ async function readMacAutoProxyUrl(exec: CommandExecutor, iface: string): Promis
     return undefined;
 }
 
-async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
+export async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
     try {
         const { stdout: mode } = await exec('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
 
         if (mode.includes('auto')) {
+            let autoConfigUrl: string | undefined;
+            try {
+                const { stdout: rawUrl } = await exec('gsettings', ['get', 'org.gnome.system.proxy', 'autoconfig-url']);
+                const cleaned = rawUrl.replace(/'/g, '').trim();
+                autoConfigUrl = cleaned || undefined;
+            } catch {
+                autoConfigUrl = undefined;
+            }
             return {
                 proxyUrl: null,
                 source: 'linux',
@@ -259,13 +271,14 @@ async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDetectionWi
                     targetId: 'linux.gsettings',
                     targetHost: 'unavailable',
                     source: 'gsettings',
-                    kind: 'pac'
+                    kind: 'pac',
+                    autoConfigUrl
                 })
             };
         }
 
         if (!mode.includes('manual')) {
-            return { proxyUrl: null, source: null };
+            return noneDetection();
         }
 
         const http = await readGnomeSchemeProxy(exec, 'http');
@@ -277,7 +290,7 @@ async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDetectionWi
         });
     } catch (error) {
         Logger.error('Linux gsettings query failed (gsettings not available or not GNOME):', error);
-        return { proxyUrl: null, source: null };
+        return noneDetection();
     }
 }
 

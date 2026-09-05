@@ -356,6 +356,7 @@ export async function testProxyConnectionParallel(
                         testUrl,
                         false,
                         errorMsg,
+                        undefined,
                         classifyConnectError(error instanceof Error ? error : errorMsg)
                     );
                 }

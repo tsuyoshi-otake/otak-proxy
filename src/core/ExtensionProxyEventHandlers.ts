@@ -34,7 +34,7 @@ export async function handleProxyChanged(
     }
 
     if (isUnsupportedAutoConfig(result)) {
-        await recordUnsupportedAutoConfig(context, state, result);
+        await recordUnsupportedAutoConfig(context, started, state, result);
         return;
     }
 
@@ -73,6 +73,7 @@ export async function handleProxyChanged(
 
 async function recordUnsupportedAutoConfig(
     context: InitializerContext,
+    started: LogicalGeneration,
     state: ProxyState,
     result: ProxyDetectionResult
 ): Promise<void> {
@@ -85,8 +86,15 @@ async function recordUnsupportedAutoConfig(
         state.lastDetectionSource = result.source;
     }
 
-    await saveAndPublishProxyState(context, state);
-    context.updateStatusBar?.(state);
+    await commitAndPublish(context, started, 'detection', current => ({
+        ...current,
+        systemProxyDetected: true,
+        autoModeOff: false,
+        lastDetectionKind: result.kind,
+        lastDetectionCapability: result.capability,
+        lastDetectionSource: result.source ?? current.lastDetectionSource
+    }));
+    context.updateStatusBar?.(await context.proxyStateManager.getState());
 
     if (previousKind !== 'pac' && previousKind !== 'wpad') {
         context.userNotifier.showWarning(
