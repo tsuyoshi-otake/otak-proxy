@@ -30,7 +30,7 @@
   "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "Birden fazla VSCode/Cursor örneği arasında eşitlemeyi etkinleştirin. Etkinleştirildiğinde proxy ayarları tüm örnekler arasında paylaşılır.",
   "config.syncInterval": "Milisaniye cinsinden eşitleme denetim aralığı (100-5000). Diğer örneklerden gelen değişikliklerin ne sıklıkta denetleneceği.",
-  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask HTTP_PROXY and HTTPS_PROXY (and lowercase variants on non-Windows) for newly created integrated terminals by replacing them with empty values. NO_PROXY, no_proxy, ALL_PROXY, and all_proxy are left unchanged unless otak-proxy previously wrote them.",
   "config.testInterval": "Saniye cinsinden proxy bağlantı testi aralığı (yalnızca Otomatik mod). Aralık: 30-600 saniye. Varsayılan: 60 saniye.",
   "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
   "extension.description": "VSCode, Git, npm ve entegre terminaller için tek tıkla proxy yönetimi."

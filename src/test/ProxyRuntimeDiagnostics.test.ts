@@ -82,4 +82,40 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
             restoreConfig();
         }
     });
+
+    test('terminal observation reports ownedVars and maskedVars without treating empty NO_PROXY as no proxy', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const collection = new Map<string, { type: number; value: string; options: object }>([
+            ['HTTP_PROXY', { type: 1, value: '', options: {} }],
+            ['HTTPS_PROXY', { type: 1, value: '', options: {} }],
+            ['NO_PROXY', { type: 1, value: '', options: {} }]
+        ]);
+        Object.assign(collection, {
+            persistent: true,
+            description: 'Managed by otak-proxy for newly created terminals.'
+        });
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            {
+                extension: { extensionKind: vscode.ExtensionKind.Workspace },
+                environmentVariableCollection: collection
+            } as unknown as vscode.ExtensionContext,
+            async () => ({ mode: ProxyMode.Off } as ProxyState),
+            { commandRunner: async () => ({ stdout: '', stderr: '' }) }
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            const terminal = report.observations.terminal as {
+                ownedVars: string[];
+                maskedVars: string[];
+                mutators: Record<string, { value: string }>;
+            };
+            assert.deepStrictEqual(terminal.ownedVars, ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']);
+            assert.deepStrictEqual(terminal.maskedVars, ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']);
+            assert.strictEqual(terminal.mutators.NO_PROXY.value, '');
+            assert.ok(!('noProxyConfigured' in terminal));
+        } finally {
+            restoreConfig();
+        }
+    });
 });

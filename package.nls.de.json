@@ -30,7 +30,7 @@
   "config.statusBarTooltip": "Show the detailed status bar hover tooltip. otak-proxy status bar items are left-aligned so right-side VS Code notifications stay visible.",
   "config.syncEnabled": "Synchronisierung zwischen mehreren VSCode/Cursor-Instanzen aktivieren. Wenn aktiviert, werden die Proxy-Einstellungen über alle Instanzen hinweg geteilt.",
   "config.syncInterval": "Prüfintervall der Synchronisierung in Millisekunden (100-5000). Legt fest, wie oft auf Änderungen anderer Instanzen geprüft wird.",
-  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask inherited proxy variables for newly created integrated terminals by replacing them with empty values.",
+  "config.terminalOffMaskingEnabled": "When proxy mode is Off, mask HTTP_PROXY and HTTPS_PROXY (and lowercase variants on non-Windows) for newly created integrated terminals by replacing them with empty values. NO_PROXY, no_proxy, ALL_PROXY, and all_proxy are left unchanged unless otak-proxy previously wrote them.",
   "config.testInterval": "Intervall für den Proxy-Verbindungstest in Sekunden (nur im Auto-Modus). Bereich: 30-600 Sekunden. Standard: 60 Sekunden.",
   "config.windowsActionsEnabled": "Allow user-approved Windows proxy actions. Read-only Windows diagnostics do not require this setting.",
   "extension.description": "Proxy-Verwaltung per Klick für VSCode, Git, npm und integrierte Terminals."

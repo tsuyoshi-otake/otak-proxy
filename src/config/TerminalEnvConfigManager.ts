@@ -8,6 +8,10 @@ type EnvCollectionDeleteLike = {
     delete(name: string): void;
 };
 
+type EnvCollectionGetLike = {
+    get(name: string): unknown;
+};
+
 type EnvCollectionMetadataLike = {
     persistent?: boolean;
     description?: string;
@@ -24,8 +28,9 @@ export interface TerminalEnvConfigOptions {
     description?: string;
 }
 
-const UPPER_MASK_ENV_VARS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY'] as const;
-const LOWER_MASK_ENV_VARS = ['http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'] as const;
+const UPPER_PROXY_ENV_VARS = ['HTTP_PROXY', 'HTTPS_PROXY'] as const;
+const LOWER_PROXY_ENV_VARS = ['http_proxy', 'https_proxy'] as const;
+const OPTIONAL_BYPASS_ENV_VARS = ['ALL_PROXY', 'NO_PROXY', 'all_proxy', 'no_proxy'] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
@@ -37,6 +42,14 @@ function canReplace(value: unknown): value is EnvCollectionReplaceLike {
 
 function canDelete(value: unknown): value is EnvCollectionDeleteLike {
     return isRecord(value) && typeof value.delete === 'function';
+}
+
+function canGet(value: unknown): value is EnvCollectionGetLike {
+    return isRecord(value) && typeof value.get === 'function';
+}
+
+function isIterableCollection(value: unknown): value is Iterable<readonly [string, unknown]> {
+    return typeof value === 'object' && value !== null && typeof (value as Iterable<unknown>)[Symbol.iterator] === 'function';
 }
 
 /**
@@ -55,7 +68,10 @@ export interface OperationResult {
  * - HTTP_PROXY / HTTPS_PROXY
  * - http_proxy / https_proxy
  *
- * NO_PROXY is intentionally left untouched unless a future config is added.
+ * Off masking (`maskOnUnset`) applies only to those HTTP(S)_PROXY variables
+ * otak-proxy writes. NO_PROXY / ALL_PROXY are left untouched unless this
+ * manager previously wrote them (`options.noProxy`). Leftover empty mutators
+ * from older Off masks are deleted so inherited bypass values return.
  */
 export class TerminalEnvConfigManager {
     constructor(
@@ -90,6 +106,8 @@ export class TerminalEnvConfigManager {
                 }
             }
 
+            this.deleteUnownedOptionalMutators();
+
             return { success: true };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -104,6 +122,7 @@ export class TerminalEnvConfigManager {
                 for (const variable of this.getMaskVariables()) {
                     this.envCollection.replace(variable, '', this.mutationOptions());
                 }
+                this.deleteUnownedOptionalMutators();
                 return { success: true };
             }
 
@@ -115,6 +134,7 @@ export class TerminalEnvConfigManager {
             for (const variable of this.getMaskVariables()) {
                 this.envCollection.delete(variable);
             }
+            this.deleteUnownedOptionalMutators();
 
             return { success: true };
         } catch (error) {
@@ -132,12 +152,63 @@ export class TerminalEnvConfigManager {
         return this.options.includeLowercase ?? true;
     }
 
-    private getMaskVariables(): string[] {
-        const variables: string[] = [...UPPER_MASK_ENV_VARS];
+    private getSetProxyVariables(): string[] {
+        const variables: string[] = [...UPPER_PROXY_ENV_VARS];
         if (this.includeLowercase()) {
-            variables.push(...LOWER_MASK_ENV_VARS);
+            variables.push(...LOWER_PROXY_ENV_VARS);
         }
         return variables;
+    }
+
+    private getOwnedOptionalVariables(): string[] {
+        if (!this.options.noProxy) {
+            return [];
+        }
+
+        const variables = ['NO_PROXY'];
+        if (this.includeLowercase()) {
+            variables.push('no_proxy');
+        }
+        return variables;
+    }
+
+    /**
+     * Variables Off may empty-replace. Limited to proxy vars otak writes,
+     * plus NO_PROXY only when this manager set it.
+     */
+    private getMaskVariables(): string[] {
+        return [...this.getSetProxyVariables(), ...this.getOwnedOptionalVariables()];
+    }
+
+    private hasMutator(name: string): boolean {
+        if (canGet(this.envCollection)) {
+            const mutator = this.envCollection.get(name);
+            return mutator !== undefined && mutator !== null;
+        }
+
+        if (!isIterableCollection(this.envCollection)) {
+            return false;
+        }
+
+        for (const entry of this.envCollection) {
+            if (Array.isArray(entry) && entry[0] === name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private deleteUnownedOptionalMutators(): void {
+        if (!canDelete(this.envCollection)) {
+            return;
+        }
+
+        const owned = new Set(this.getOwnedOptionalVariables());
+        for (const name of OPTIONAL_BYPASS_ENV_VARS) {
+            if (!owned.has(name) && this.hasMutator(name)) {
+                this.envCollection.delete(name);
+            }
+        }
     }
 
     private mutationOptions(): TerminalEnvMutationOptions {
@@ -158,4 +229,3 @@ export class TerminalEnvConfigManager {
         }
     }
 }
-

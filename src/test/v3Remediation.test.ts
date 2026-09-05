@@ -1106,7 +1106,7 @@ suite('v3 remediation foundation', () => {
         await manager.unsetProxy();
         assert.strictEqual(replaced.HTTP_PROXY, '');
         assert.strictEqual(replaced.HTTPS_PROXY, '');
-        assert.strictEqual(replaced.ALL_PROXY, '');
+        assert.strictEqual(replaced.ALL_PROXY, undefined);
         assert.strictEqual(replaced.NO_PROXY, '');
         assert.deepStrictEqual(deleted, []);
     });

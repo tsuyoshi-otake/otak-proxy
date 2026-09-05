@@ -30,7 +30,7 @@
   "config.statusBarTooltip": "ステータスバーの詳細ホバーツールチップを表示する。otak-proxyのステータスバー項目は左側に配置されるため、右側のVS Code通知を隠しません。",
   "config.syncEnabled": "複数のVSCode/Cursorインスタンス間で同期を有効にする。有効な場合、Proxy設定がすべてのインスタンス間で共有されます。",
   "config.syncInterval": "同期チェック間隔（ミリ秒、100-5000）。他のインスタンスからの変更をチェックする頻度。",
-  "config.terminalOffMaskingEnabled": "ProxyモードがOffの場合、新しく作成される統合ターミナル向けに、継承されたProxy環境変数を空値でマスクします。",
+  "config.terminalOffMaskingEnabled": "ProxyモードがOffの場合、新しく作成される統合ターミナル向けに HTTP_PROXY / HTTPS_PROXY（非Windowsでは小文字も）を空値でマスクします。NO_PROXY / no_proxy / ALL_PROXY / all_proxy は、otak-proxy が書き込んだ場合を除き変更しません。",
   "config.testInterval": "Proxy接続テストの間隔（秒単位、Autoモード専用）。範囲: 30-600秒。デフォルト: 60秒。",
   "config.windowsActionsEnabled": "ユーザー承認済みのWindows Proxy操作を許可します。読み取り専用のWindows診断には不要です。",
   "extension.description": "VSCode、Git、npm、統合ターミナルのProxyをワンクリックで管理します。"
