@@ -1,17 +1,16 @@
 import * as http from 'http';
 import * as https from 'https';
 
-const DEFAULT_HTTP_PROXY_PORT = 8080;
-const DEFAULT_HTTPS_PROXY_PORT = 443;
-const DEFAULT_TARGET_PORT = 443;
+const DEFAULT_HTTP_PORT = 80;
+const DEFAULT_HTTPS_PORT = 443;
 
 function parsePort(port: string, fallback: number): number {
     const parsed = Number(port);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function getDefaultProxyPort(proxy: URL): number {
-    return proxy.protocol === 'https:' ? DEFAULT_HTTPS_PROXY_PORT : DEFAULT_HTTP_PROXY_PORT;
+function getSchemeDefaultPort(url: URL): number {
+    return url.protocol === 'https:' ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT;
 }
 
 function decodeProxyCredential(value: string): string {
@@ -49,9 +48,9 @@ export function buildConnectRequestOptions(
     const proxyAuthorization = buildProxyAuthorizationHeader(proxy);
     return {
         hostname: proxy.hostname,
-        port: parsePort(proxy.port, getDefaultProxyPort(proxy)),
+        port: parsePort(proxy.port, getSchemeDefaultPort(proxy)),
         method: 'CONNECT',
-        path: `${target.hostname}:${parsePort(target.port, DEFAULT_TARGET_PORT)}`,
+        path: `${target.hostname}:${parsePort(target.port, getSchemeDefaultPort(target))}`,
         timeout,
         headers: proxyAuthorization ? { 'Proxy-Authorization': proxyAuthorization } : undefined
     };
@@ -66,4 +65,17 @@ export function formatConnectFailure(response: http.IncomingMessage): string {
     const statusCode = response.statusCode ?? 'unknown';
     const statusMessage = response.statusMessage ? ` ${response.statusMessage}` : '';
     return `Proxy CONNECT failed with status ${statusCode}${statusMessage}`;
+}
+
+/**
+ * Credential-free destination summary for failure logs.
+ * Never include headers, username, or password.
+ */
+export function formatConnectDestination(options: http.RequestOptions): string {
+    const hostname = typeof options.hostname === 'string' && options.hostname.length > 0
+        ? options.hostname
+        : 'unknown-host';
+    const port = options.port ?? '';
+    const connectPath = typeof options.path === 'string' ? options.path : '';
+    return `proxy ${hostname}:${port} CONNECT ${connectPath}`;
 }

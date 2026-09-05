@@ -10,6 +10,7 @@ import {
 import {
     buildConnectRequestOptions,
     createProxyConnectRequest,
+    formatConnectDestination,
     formatConnectFailure,
     isConnectResponseSuccessful
 } from './ProxyConnectRequest';
@@ -105,6 +106,7 @@ function createProxyConnectionAttempt(
 
             requestSettled = true;
             if (error) {
+                Logger.error('Proxy CONNECT failed:', formatConnectDestination(requestOptions), error);
                 errors.push({ url: testUrl, message: error });
             }
             resolve(success);
@@ -231,7 +233,12 @@ export async function testProxyConnectionParallel(
                 }
             };
 
-            const onTestResult = (testUrl: string, success: boolean, error?: string) => {
+            const onTestResult = (
+                testUrl: string,
+                success: boolean,
+                error?: string,
+                requestOptions?: http.RequestOptions
+            ) => {
                 if (settled) {
                     return;
                 }
@@ -249,6 +256,11 @@ export async function testProxyConnectionParallel(
                 }
 
                 if (error) {
+                    if (requestOptions) {
+                        Logger.error('Proxy CONNECT failed:', formatConnectDestination(requestOptions), error);
+                    } else {
+                        Logger.error('Proxy CONNECT failed:', error);
+                    }
                     errors.push({ url: testUrl, message: error });
                 }
 
@@ -274,12 +286,12 @@ export async function testProxyConnectionParallel(
                         if (isConnectResponseSuccessful(response)) {
                             onTestResult(testUrl, true);
                         } else {
-                            onTestResult(testUrl, false, formatConnectFailure(response));
+                            onTestResult(testUrl, false, formatConnectFailure(response), requestOptions);
                         }
                     });
 
                     req.on('error', (error: Error) => {
-                        onTestResult(testUrl, false, error.message || 'Connection failed');
+                        onTestResult(testUrl, false, error.message || 'Connection failed', requestOptions);
                     });
 
                     req.on('timeout', () => {
@@ -288,7 +300,7 @@ export async function testProxyConnectionParallel(
                         } catch {
                             // Ignore destroy errors
                         }
-                        onTestResult(testUrl, false, `Connection timeout (${timeout}ms)`);
+                        onTestResult(testUrl, false, `Connection timeout (${timeout}ms)`, requestOptions);
                     });
 
                     req.end();
