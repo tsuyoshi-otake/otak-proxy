@@ -13,6 +13,7 @@ import {
 import { GitConfigOperationOptions, OperationResult } from './GitConfigTypes';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
+import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,6 +44,14 @@ export type GitProxyKey = 'http.proxy' | 'https.proxy';
 export interface GitProxyValues {
     'http.proxy': string | null;
     'https.proxy': string | null;
+}
+
+/**
+ * git config value-pattern is a POSIX regex. Anchor and escape so an owned
+ * URL is matched literally, not as a wildcard.
+ */
+export function exactGitConfigValuePattern(value: string): string {
+    return `^${value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}$`;
 }
 
 /**
@@ -120,8 +129,19 @@ export class GitConfigManager {
 
     async unsetProxyKeys(keys: readonly GitProxyKey[], options?: GitConfigOperationOptions): Promise<OperationResult> {
         try {
+            const preservedKeys: GitProxyKey[] = [];
             await withGitConfigWriteMutex(async () => {
+                const expectedValues = options?.expectedValues;
                 for (const key of keys) {
+                    const expected = expectedValues?.[key];
+                    if (expected !== undefined) {
+                        const result = await this.unsetOwnedGitValue(key, expected, options);
+                        if (result.preserved) {
+                            preservedKeys.push(key);
+                        }
+                        continue;
+                    }
+
                     try {
                         await this.execGitConfigWithRetry(['config', '--global', '--unset', key], options);
                     } catch (error) {
@@ -134,10 +154,58 @@ export class GitConfigManager {
                 }
             }, options);
 
-            return { success: true };
+            return preservedKeys.length > 0
+                ? { success: true, preservedKeys }
+                : { success: true };
         } catch (error) {
             return this.handleError(error);
         }
+    }
+
+    /**
+     * Value-specific delete. Git can remove only lines matching the owned value.
+     *
+     * Non-guarantee: if an external writer replaces the value in the same
+     * instant as `git config --unset-all` rewrites the file, Git's own
+     * last-writer-wins apply. otak-proxy locks cannot serialize those writers.
+     */
+    private async unsetOwnedGitValue(
+        key: GitProxyKey,
+        expected: string,
+        options?: GitConfigOperationOptions
+    ): Promise<{ preserved: boolean }> {
+        const outcome = await compareThenDelete({
+            expected,
+            read: async () => {
+                const inspection = await this.inspectProxy();
+                if (inspection.status !== 'available' || !inspection.values) {
+                    return UNSET_UNREADABLE;
+                }
+                return inspection.values[key];
+            },
+            deleteKey: async () => {
+                try {
+                    await this.execGitConfigWithRetry(
+                        ['config', '--global', '--unset-all', key, exactGitConfigValuePattern(expected)],
+                        options
+                    );
+                } catch (error) {
+                    const code = getErrorCode(error);
+                    if (code !== 5 && code !== '5') {
+                        throw error;
+                    }
+                }
+            }
+        });
+
+        if (!outcome.ok) {
+            throw new Error(
+                outcome.reason === 'unreadable'
+                    ? 'Git proxy re-read failed; refusing to unset'
+                    : 'Git owned proxy value remained after unset'
+            );
+        }
+        return { preserved: outcome.preserved };
     }
 
     /**

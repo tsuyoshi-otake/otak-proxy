@@ -9,12 +9,14 @@ export type ProxyConfigStatusReporter = (messageKey: string) => void;
 
 export interface ProxyConfigOperationOptions {
     onStatus?: ProxyConfigStatusReporter;
+    expectedValue?: string;
 }
 
 interface ProxyConfigOperationResult {
     success: boolean;
     error?: string;
     errorType?: string;
+    preservedKeys?: readonly string[];
 }
 
 interface ProxyConfigManagerLike {
@@ -47,10 +49,18 @@ export interface ProxyOwnershipInspection {
     errorType?: string;
 }
 
+export interface OwnedTargetUnsetRequest {
+    targetId: string;
+    expectedValue: string;
+}
+
 export interface ProxyOwnershipAdapter {
     targets: Array<{ targetId: string; targetHost: TargetHost }>;
     inspect(): Promise<ProxyOwnershipInspection>;
-    unsetTargets(targetIds: readonly string[], options?: ProxyConfigOperationOptions): Promise<ProxyConfigOperationResult>;
+    unsetTargets(
+        targets: readonly OwnedTargetUnsetRequest[],
+        options?: ProxyConfigOperationOptions
+    ): Promise<ProxyConfigOperationResult>;
 }
 
 export interface ProxyConfigTarget {

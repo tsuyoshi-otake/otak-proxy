@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Logger } from '../utils/Logger';
 import { getErrorMessage } from '../utils/ErrorUtils';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
+import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
 
 /**
  * Result of a VSCode configuration operation
@@ -10,6 +11,7 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'CONFIG_WRITE_FAILED' | 'CONFIG_READ_FAILED' | 'UNKNOWN';
+    preservedKeys?: readonly string[];
 }
 
 /**
@@ -37,8 +39,47 @@ export class VscodeConfigManager {
      * Removes VSCode global proxy configuration
      * @returns Result with success status and any errors
      */
-    async unsetProxy(): Promise<OperationResult> {
+    /**
+     * Removes VSCode global proxy configuration.
+     * When `options.expectedValue` is provided, compare/delete + post-read: a
+     * different current value is preserved. The VS Code API has no compare-and-swap.
+     *
+     * Non-guarantee: `config.update` is last-write-wins. An external writer
+     * during that update can still be overwritten.
+     */
+    async unsetProxy(options?: { expectedValue?: string }): Promise<OperationResult> {
         try {
+            const expectedValue = options?.expectedValue;
+            if (expectedValue !== undefined) {
+                const outcome = await compareThenDelete({
+                    expected: expectedValue,
+                    read: async () => {
+                        const inspection = await this.inspectProxy();
+                        if (inspection.status !== 'available') {
+                            return UNSET_UNREADABLE;
+                        }
+                        return inspection.values?.proxy ?? null;
+                    },
+                    deleteKey: async () => {
+                        const config = vscode.workspace.getConfiguration('http');
+                        await config.update('proxy', '', vscode.ConfigurationTarget.Global);
+                    }
+                });
+                if (!outcome.ok) {
+                    return this.handleError(
+                        new Error(
+                            outcome.reason === 'unreadable'
+                                ? 'VS Code proxy re-read failed; refusing to unset'
+                                : 'VS Code owned proxy value remained after unset'
+                        ),
+                        outcome.reason === 'unreadable' ? 'get' : 'unset'
+                    );
+                }
+                return outcome.preserved
+                    ? { success: true, preservedKeys: ['http.proxy'] }
+                    : { success: true };
+            }
+
             const config = vscode.workspace.getConfiguration('http');
             await config.update('proxy', '', vscode.ConfigurationTarget.Global);
             

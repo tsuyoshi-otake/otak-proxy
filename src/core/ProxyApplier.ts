@@ -18,7 +18,9 @@ import {
     ProxyConfigStatusReporter,
     ProxyConfigTarget,
     ProxyConfigTargetUpdateResult,
-    ProxyOwnershipInspection
+    ProxyOwnershipInspection,
+    ProxyOwnershipObservation,
+    OwnedTargetUnsetRequest
 } from './ProxyApplierTypes';
 import { updateProxyConfigTargetDetailed } from './ProxyConfigTargetRunner';
 import { saveProxyConfigResults } from './ProxyConfigStateTracker';
@@ -396,30 +398,41 @@ export class ProxyApplier {
             return { success: false, outcome: 'failed', errorType: inspection.errorType };
         }
 
-        const ownedTargetIds: string[] = [];
-        let preservedExternal = false;
-        for (const observation of inspection.observations ?? []) {
-            if (!observation.value) {
-                // An absent value is converged. Drop stale ownership so a future
-                // external value equal to an old proxy cannot be deleted by mistake.
-                await this.ownershipStore!.remove(observation.targetId);
-                continue;
-            }
-
-            const owned = await this.ownershipStore!.isOwnedByOtakProxy(
-                observation.targetId,
-                observation.value,
-                hasProxyCredentials(observation.value)
-            );
-            if (owned) {
-                ownedTargetIds.push(observation.targetId);
-            } else {
-                preservedExternal = true;
-                Logger.info(`${target.name} value preserved because ownership did not match: ${observation.targetId}`);
-            }
+        // Re-inspect + value-aware unset close the check-then-key-unset window.
+        // Locks cannot serialize `git config` / `npm config` / settings.json
+        // writers outside this process.
+        const firstPass = await this.classifyOwnedObservations(target.name, inspection.observations ?? []);
+        if (firstPass.owned.length === 0) {
+            return {
+                success: true,
+                outcome: firstPass.preservedExternal ? 'preservedExternal' : 'cleared'
+            };
         }
 
-        if (ownedTargetIds.length === 0) {
+        let confirmation: ProxyOwnershipInspection;
+        try {
+            confirmation = await target.ownership!.inspect();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errorAggregator.addError(target.name, message);
+            return { success: false, outcome: 'failed' };
+        }
+        if (confirmation.status === 'unavailable') {
+            Logger.info(`${target.name} cleanup skipped:`, confirmation.error);
+            return { success: true, outcome: 'skippedUnavailable', errorType: confirmation.errorType };
+        }
+        if (confirmation.status === 'error') {
+            errorAggregator.addError(
+                target.name,
+                confirmation.error || `Failed to re-inspect ${target.name}`,
+                confirmation.errorType
+            );
+            return { success: false, outcome: 'failed', errorType: confirmation.errorType };
+        }
+
+        const confirmed = await this.classifyOwnedObservations(target.name, confirmation.observations ?? []);
+        const preservedExternal = firstPass.preservedExternal || confirmed.preservedExternal;
+        if (confirmed.owned.length === 0) {
             return {
                 success: true,
                 outcome: preservedExternal ? 'preservedExternal' : 'cleared'
@@ -427,23 +440,91 @@ export class ProxyApplier {
         }
 
         try {
-            const result = await target.ownership!.unsetTargets(ownedTargetIds, options);
+            const result = await target.ownership!.unsetTargets(confirmed.owned, options);
             if (!result.success) {
                 errorAggregator.addError(target.name, result.error || `Failed to clear ${target.name}`, result.errorType);
                 return { success: false, outcome: 'failed', errorType: result.errorType };
             }
-            for (const targetId of ownedTargetIds) {
-                await this.ownershipStore!.remove(targetId);
+
+            let after: ProxyOwnershipInspection;
+            try {
+                after = await target.ownership!.inspect();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                errorAggregator.addError(target.name, message);
+                return { success: false, outcome: 'failed' };
             }
+            if (after.status === 'error') {
+                errorAggregator.addError(
+                    target.name,
+                    after.error || `Failed to verify ${target.name} after unset`,
+                    after.errorType
+                );
+                return { success: false, outcome: 'failed', errorType: after.errorType };
+            }
+
+            let stillPreserved = preservedExternal || (result.preservedKeys?.length ?? 0) > 0;
+            if (after.status === 'available') {
+                const afterPass = await this.classifyOwnedObservations(
+                    target.name,
+                    after.observations ?? [],
+                    { logPreserve: false }
+                );
+                if (afterPass.owned.length > 0) {
+                    errorAggregator.addError(target.name, `Owned ${target.name} value remained after unset`);
+                    return { success: false, outcome: 'failed' };
+                }
+                stillPreserved = stillPreserved || afterPass.preservedExternal;
+                for (const request of confirmed.owned) {
+                    const remaining = after.observations?.find(observation => observation.targetId === request.targetId);
+                    if (!remaining?.value) {
+                        await this.ownershipStore!.remove(request.targetId);
+                    }
+                }
+            }
+
             return {
                 success: true,
-                outcome: preservedExternal ? 'preservedExternal' : 'cleared'
+                outcome: stillPreserved ? 'preservedExternal' : 'cleared'
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             errorAggregator.addError(target.name, message);
             return { success: false, outcome: 'failed' };
         }
+    }
+
+    private async classifyOwnedObservations(
+        targetName: string,
+        observations: readonly ProxyOwnershipObservation[],
+        options: { logPreserve?: boolean } = {}
+    ): Promise<{ owned: OwnedTargetUnsetRequest[]; preservedExternal: boolean }> {
+        const owned: OwnedTargetUnsetRequest[] = [];
+        let preservedExternal = false;
+        const logPreserve = options.logPreserve !== false;
+        for (const observation of observations) {
+            if (!observation.value) {
+                // An absent value is converged. Drop stale ownership so a future
+                // external value equal to an old proxy cannot be deleted by mistake.
+                await this.ownershipStore!.remove(observation.targetId);
+                continue;
+            }
+
+            const isOwned = await this.ownershipStore!.isOwnedByOtakProxy(
+                observation.targetId,
+                observation.value,
+                hasProxyCredentials(observation.value)
+            );
+            if (isOwned) {
+                owned.push({ targetId: observation.targetId, expectedValue: observation.value });
+            } else {
+                preservedExternal = true;
+                if (logPreserve) {
+                    Logger.info(`${targetName} value preserved because ownership did not match: ${observation.targetId}`);
+                }
+            }
+        }
+        return { owned, preservedExternal };
     }
 
     private getApplyTargets(): ProxyConfigTarget[] {
@@ -503,10 +584,19 @@ export class ProxyApplier {
                             : undefined
                     };
                 },
-                unsetTargets: (targetIds, options) => this.gitManager.unsetProxyKeys(
-                    (Object.keys(ids) as GitProxyKey[]).filter(key => targetIds.includes(ids[key])),
-                    options
-                )
+                unsetTargets: (owned, options) => {
+                    const expectedValues: Partial<Record<GitProxyKey, string>> = {};
+                    for (const request of owned) {
+                        const key = (Object.keys(ids) as GitProxyKey[]).find(candidate => ids[candidate] === request.targetId);
+                        if (key) {
+                            expectedValues[key] = request.expectedValue;
+                        }
+                    }
+                    return this.gitManager.unsetProxyKeys(
+                        (Object.keys(ids) as GitProxyKey[]).filter(key => key in expectedValues),
+                        { ...options, expectedValues }
+                    );
+                }
             }
         };
     }
@@ -532,9 +622,19 @@ export class ProxyApplier {
                             : undefined
                     };
                 },
-                unsetTargets: targetIds => this.npmManager.unsetProxyKeys(
-                    (Object.keys(ids) as NpmProxyKey[]).filter(key => targetIds.includes(ids[key]))
-                )
+                unsetTargets: owned => {
+                    const expectedValues: Partial<Record<NpmProxyKey, string>> = {};
+                    for (const request of owned) {
+                        const key = (Object.keys(ids) as NpmProxyKey[]).find(candidate => ids[candidate] === request.targetId);
+                        if (key) {
+                            expectedValues[key] = request.expectedValue;
+                        }
+                    }
+                    return this.npmManager.unsetProxyKeys(
+                        (Object.keys(ids) as NpmProxyKey[]).filter(key => key in expectedValues),
+                        expectedValues
+                    );
+                }
             }
         };
     }
@@ -555,7 +655,7 @@ export class ProxyApplier {
                         observations: result.values ? [{ targetId, value: result.values.proxy }] : undefined
                     };
                 },
-                unsetTargets: () => this.vscodeManager.unsetProxy()
+                unsetTargets: owned => this.vscodeManager.unsetProxy({ expectedValue: owned[0]?.expectedValue })
             }
         };
     }
@@ -576,7 +676,7 @@ export class ProxyApplier {
                         observations: result.values ? [{ targetId, value: result.values.proxy }] : undefined
                     };
                 },
-                unsetTargets: () => this.pipManager!.unsetProxy()
+                unsetTargets: owned => this.pipManager!.unsetProxy({ expectedValue: owned[0]?.expectedValue })
             }
         };
     }

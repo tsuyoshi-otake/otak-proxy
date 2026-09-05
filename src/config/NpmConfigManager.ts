@@ -6,6 +6,7 @@ import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
+import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +60,7 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
+    preservedKeys?: readonly string[];
 }
 
 export type NpmProxyKey = 'proxy' | 'https-proxy';
@@ -312,17 +314,67 @@ export class NpmConfigManager {
         return this.unsetProxyKeys(['proxy', 'https-proxy']);
     }
 
-    async unsetProxyKeys(keys: readonly NpmProxyKey[]): Promise<OperationResult> {
+    async unsetProxyKeys(
+        keys: readonly NpmProxyKey[],
+        expectedValues?: Readonly<Partial<Record<NpmProxyKey, string>>>
+    ): Promise<OperationResult> {
         try {
+            const preservedKeys: NpmProxyKey[] = [];
             for (const key of keys) {
+                const expected = expectedValues?.[key];
+                if (expected !== undefined) {
+                    const result = await this.unsetOwnedNpmValue(key, expected);
+                    if (result.preserved) {
+                        preservedKeys.push(key);
+                    }
+                    continue;
+                }
+
                 // Prefer deleting keys to keep npmrc clean. Deletion is idempotent.
                 await this.execNpm(['config', 'delete', key]);
             }
 
-            return { success: true };
+            return preservedKeys.length > 0
+                ? { success: true, preservedKeys }
+                : { success: true };
         } catch (error) {
             return this.handleError(error);
         }
+    }
+
+    /**
+     * npm has no value-specific delete. Compare, then `config delete`, then
+     * post-read.
+     *
+     * Non-guarantee: `npm config delete` is key-level. An external writer
+     * that replaces the value during that delete cannot be restored.
+     */
+    private async unsetOwnedNpmValue(
+        key: NpmProxyKey,
+        expected: string
+    ): Promise<{ preserved: boolean }> {
+        const outcome = await compareThenDelete({
+            expected,
+            read: async () => {
+                const inspection = await this.inspectProxy();
+                if (inspection.status !== 'available' || !inspection.values) {
+                    return UNSET_UNREADABLE;
+                }
+                return inspection.values[key];
+            },
+            deleteKey: async () => {
+                await this.execNpm(['config', 'delete', key]);
+            }
+        });
+
+        if (!outcome.ok) {
+            throw new Error(
+                outcome.reason === 'unreadable'
+                    ? 'npm proxy re-read failed; refusing to unset'
+                    : 'npm owned proxy value remained after unset'
+            );
+        }
+        return { preserved: outcome.preserved };
     }
 
     /**

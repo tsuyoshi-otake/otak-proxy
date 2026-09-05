@@ -255,5 +255,33 @@ suite('NpmConfigManager Test Suite', () => {
 
             await npmConfigManager.unsetProxyKeys(['https-proxy']);
         });
+
+        test('preserves an external value that replaced the owned value before delete', async function() {
+            this.timeout(135000);
+            const owned = 'http://owned-proxy.example.com:8080';
+            const external = 'http://external-proxy.example.com:8080';
+            const setResult = await npmConfigManager.setProxy(owned);
+            if (!setResult.success && setResult.errorType === 'NOT_INSTALLED') {
+                this.skip();
+                return;
+            }
+            assert.strictEqual(setResult.success, true, setResult.error);
+
+            const overwrite = await npmConfigManager.setProxy(external);
+            assert.strictEqual(overwrite.success, true, overwrite.error);
+
+            const unsetResult = await npmConfigManager.unsetProxyKeys(
+                ['proxy', 'https-proxy'],
+                { proxy: owned, 'https-proxy': owned }
+            );
+            assert.strictEqual(unsetResult.success, true, unsetResult.error);
+
+            const after = await npmConfigManager.inspectProxy();
+            assert.strictEqual(after.status, 'available');
+            assert.deepStrictEqual(after.values, {
+                proxy: external,
+                'https-proxy': external
+            });
+        });
     });
 });
