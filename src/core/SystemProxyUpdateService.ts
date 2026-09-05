@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
+import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptionsFromState } from '../config/DetectedProxyValue';
 import { detectSystemProxySettingsWithSource } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
+import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 
 export class SystemProxyUpdateService {
     constructor(
@@ -34,11 +36,11 @@ export class SystemProxyUpdateService {
         state.systemProxyDetected = !!detectedProxy;
 
         if (state.mode === ProxyMode.Auto) {
-            await this.updateAutoProxyState(state, detectedProxy, detectedSource);
+            await this.updateAutoProxyState(state, detected, detectedSource);
             return;
         }
 
-        await this.saveDetectedProxyForNonAutoMode(state, detectedProxy, detectedSource);
+        await this.saveDetectedProxyForNonAutoMode(state, detected, detectedSource);
     }
 
     private shouldSkipRecentNonAutoCheck(state: ProxyState, now: number): boolean {
@@ -52,20 +54,23 @@ export class SystemProxyUpdateService {
 
     private async updateAutoProxyState(
         state: ProxyState,
-        detectedProxy: string | null,
+        detected: ProxyDetectionWithSource,
         detectedSource: AppliedProxySource | undefined
     ): Promise<void> {
         const previousProxy = state.autoProxyUrl;
+        const previousHttps = state.autoHttpsProxyUrl;
         const wasAutoModeOff = state.autoModeOff === true;
+        const detectedProxy = detected.proxyUrl;
 
         if (detectedProxy) {
-            this.applyDetectedProxyState(state, detectedProxy, detectedSource);
+            this.applyDetectedProxyState(state, detected, detectedSource);
         } else {
             await this.applyFallbackProxyState(state);
         }
 
         if (
             previousProxy === state.autoProxyUrl &&
+            previousHttps === state.autoHttpsProxyUrl &&
             !wasAutoModeOff &&
             !this.hasKnownConvergenceFailure(state, Boolean(state.autoProxyUrl)) &&
             !this.shouldEnsureDisabledProxy(state)
@@ -79,14 +84,16 @@ export class SystemProxyUpdateService {
 
     private applyDetectedProxyState(
         state: ProxyState,
-        detectedProxy: string,
+        detected: ProxyDetectionWithSource,
         detectedSource: AppliedProxySource | undefined
     ): void {
-        state.autoProxyUrl = detectedProxy;
+        assignDetectedProxyToState(state, detected);
         state.autoModeOff = false;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
-        state.lastDetectionSource = detectedSource;
+        if (detectedSource) {
+            state.lastDetectionSource = detectedSource;
+        }
     }
 
     private async saveAndApplyAutoProxyState(state: ProxyState, previousProxy: string | undefined): Promise<void> {
@@ -96,7 +103,7 @@ export class SystemProxyUpdateService {
             this.context,
             activeProxyUrl,
             Boolean(activeProxyUrl),
-            activeProxyUrl ? undefined : { silent: true }
+            activeProxyUrl ? splitApplyOptionsFromState(state) : { silent: true }
         );
         if (applied) {
             this.notifyAutoProxyChange(state, previousProxy);
@@ -143,11 +150,19 @@ export class SystemProxyUpdateService {
 
     private async saveDetectedProxyForNonAutoMode(
         state: ProxyState,
-        detectedProxy: string | null,
+        detected: ProxyDetectionWithSource,
         detectedSource: AppliedProxySource | undefined
     ): Promise<void> {
-        state.autoProxyUrl = detectedProxy || undefined;
-        state.lastDetectionSource = detectedProxy ? detectedSource : undefined;
+        if (detected.proxyUrl) {
+            assignDetectedProxyToState(state, detected);
+            if (detectedSource) {
+                state.lastDetectionSource = detectedSource;
+            }
+        } else {
+            state.autoProxyUrl = undefined;
+            state.lastDetectionSource = undefined;
+            clearDetectedSplitFields(state);
+        }
         await this.saveAndPublishState(state);
     }
 
@@ -178,6 +193,7 @@ export class SystemProxyUpdateService {
                 state.usingFallbackProxy = true;
                 state.fallbackProxyUrl = state.manualProxyUrl;
                 state.lastDetectionSource = 'fallback';
+                clearDetectedSplitFields(state);
                 Logger.log(`Using fallback proxy: ${state.manualProxyUrl}`);
                 return;
             }
@@ -187,6 +203,7 @@ export class SystemProxyUpdateService {
             state.usingFallbackProxy = false;
             state.fallbackProxyUrl = undefined;
             state.lastDetectionSource = undefined;
+            clearDetectedSplitFields(state);
             Logger.log('Fallback proxy not reachable - Auto Mode OFF');
             return;
         }
@@ -196,6 +213,7 @@ export class SystemProxyUpdateService {
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         state.lastDetectionSource = undefined;
+        clearDetectedSplitFields(state);
     }
 
     private async isFallbackReachable(proxyUrl: string): Promise<boolean> {

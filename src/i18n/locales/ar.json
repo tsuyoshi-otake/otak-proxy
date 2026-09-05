@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "تعذّر تحليل مخرجات وكيل WinHTTP",
   "diagnose.reason.wininetPac": "تم تهيئة عنوان URL للتكوين التلقائي للوكيل (PAC)",
   "diagnose.reason.gitReadUnavailable": "تعذّرت قراءة تكوين git",
-  "migration.credentialsDropped": "تعذّر على otak-proxy ترحيل {count} من بيانات اعتماد الوكيل المكررة إلى التخزين الآمن أثناء الترقية إلى v3. أعد إدخالها إذا توقف أحد الوكلاء عن المصادقة."
+  "migration.credentialsDropped": "تعذّر على otak-proxy ترحيل {count} من بيانات اعتماد الوكيل المكررة إلى التخزين الآمن أثناء الترقية إلى v3. أعد إدخالها إذا توقف أحد الوكلاء عن المصادقة.",
+  "diagnose.target.systemBypass": "تجاوز وكيل النظام",
+  "diagnose.target.pipUserProxy": "وكيل مستخدم pip",
+  "diagnose.reason.gitSplitLossy": "ينقل Git مستودعات HTTP وHTTPS عبر http.proxy واحد؛ لا يمكن تمثيل الوكيل المنفصل",
+  "diagnose.reason.vscodeSplitLossy": "http.proxy في VS Code عنوان واحد؛ لا يمكن تمثيل وكيل HTTP/HTTPS المنفصل",
+  "diagnose.reason.pipSplitLossy": "وكيل pip عنوان واحد؛ لا يمكن تمثيل وكيل HTTP/HTTPS المنفصل",
+  "diagnose.reason.bypassNotApplied": "تم اكتشاف تجاوز وكيل النظام ولم يُطبَّق",
+  "warning.splitProxyPartial": "اكتُشف وكيلا HTTP وHTTPS مختلفان. كُتبا إلى npm والجهاز الطرفي؛ لا يستطيع Git وVS Code حفظ سوى عنوان واحد."
 }

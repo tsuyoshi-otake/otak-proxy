@@ -9,6 +9,8 @@
  * - Clear folder hierarchy (Requirement 1.5)
  */
 
+import type { ProxyValueKind } from './v3Types';
+
 /**
  * Proxy operation modes
  *
@@ -92,6 +94,10 @@ export interface ProxyState {
     lastSystemProxyUrl?: string;         // Last detected system proxy URL
     fallbackProxyUrl?: string;           // Currently used fallback proxy URL
     lastDetectionSource?: AppliedProxySource; // Provenance of autoProxyUrl (issue #29 echo suppression)
+    autoProxyKind?: ProxyValueKind;
+    autoHttpProxyUrl?: string;
+    autoHttpsProxyUrl?: string;
+    detectedBypass?: string;
 }
 
 export interface IProxyStateManager {

@@ -52,7 +52,13 @@ const DIAGNOSE_KEYS = [
     'diagnose.reason.npmNoproxy',
     'diagnose.reason.winhttpParseUnavailable',
     'diagnose.reason.wininetPac',
-    'diagnose.reason.gitReadUnavailable'
+    'diagnose.reason.gitReadUnavailable',
+    'diagnose.target.systemBypass',
+    'diagnose.target.pipUserProxy',
+    'diagnose.reason.gitSplitLossy',
+    'diagnose.reason.vscodeSplitLossy',
+    'diagnose.reason.pipSplitLossy',
+    'diagnose.reason.bypassNotApplied'
 ];
 
 function localesDir(): string {

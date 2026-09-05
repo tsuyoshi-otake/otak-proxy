@@ -24,8 +24,6 @@ export interface TerminalEnvConfigOptions {
     description?: string;
 }
 
-const UPPER_PROXY_ENV_VARS = ['HTTP_PROXY', 'HTTPS_PROXY'] as const;
-const LOWER_PROXY_ENV_VARS = ['http_proxy', 'https_proxy'] as const;
 const UPPER_MASK_ENV_VARS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY'] as const;
 const LOWER_MASK_ENV_VARS = ['http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'] as const;
 
@@ -68,14 +66,21 @@ export class TerminalEnvConfigManager {
     }
 
     async setProxy(url: string): Promise<OperationResult> {
+        return this.setProxyByScheme(url, url);
+    }
+
+    async setProxyByScheme(httpUrl: string, httpsUrl: string): Promise<OperationResult> {
         try {
             if (!canReplace(this.envCollection)) {
                 Logger.warn('environmentVariableCollection is not available; skipping terminal env proxy set');
                 return { success: true };
             }
 
-            for (const variable of this.getSetProxyVariables()) {
-                this.envCollection.replace(variable, url, this.mutationOptions());
+            this.envCollection.replace('HTTP_PROXY', httpUrl, this.mutationOptions());
+            this.envCollection.replace('HTTPS_PROXY', httpsUrl, this.mutationOptions());
+            if (this.includeLowercase()) {
+                this.envCollection.replace('http_proxy', httpUrl, this.mutationOptions());
+                this.envCollection.replace('https_proxy', httpsUrl, this.mutationOptions());
             }
 
             if (this.options.noProxy) {
@@ -125,14 +130,6 @@ export class TerminalEnvConfigManager {
 
     private includeLowercase(): boolean {
         return this.options.includeLowercase ?? true;
-    }
-
-    private getSetProxyVariables(): string[] {
-        const variables: string[] = [...UPPER_PROXY_ENV_VARS];
-        if (this.includeLowercase()) {
-            variables.push(...LOWER_PROXY_ENV_VARS);
-        }
-        return variables;
     }
 
     private getMaskVariables(): string[] {

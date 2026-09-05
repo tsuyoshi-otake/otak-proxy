@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "no se pudo analizar la salida del proxy WinHTTP",
   "diagnose.reason.wininetPac": "hay configurada una URL de configuración automática de proxy (PAC)",
   "diagnose.reason.gitReadUnavailable": "no se pudo leer la configuración de git",
-  "migration.credentialsDropped": "otak-proxy no pudo migrar {count} credencial(es) de proxy duplicada(s) al almacenamiento seguro durante la actualización a v3. Vuelve a introducirlas si un proxy deja de autenticar."
+  "migration.credentialsDropped": "otak-proxy no pudo migrar {count} credencial(es) de proxy duplicada(s) al almacenamiento seguro durante la actualización a v3. Vuelve a introducirlas si un proxy deja de autenticar.",
+  "diagnose.target.systemBypass": "Omisiones del proxy del sistema",
+  "diagnose.target.pipUserProxy": "Proxy de usuario de pip",
+  "diagnose.reason.gitSplitLossy": "Git enruta remotos HTTP y HTTPS con un solo http.proxy; el proxy por esquema no es representable",
+  "diagnose.reason.vscodeSplitLossy": "http.proxy de VS Code es una sola URL; el proxy HTTP/HTTPS separado no es representable",
+  "diagnose.reason.pipSplitLossy": "El proxy de pip es una sola URL; el proxy HTTP/HTTPS separado no es representable",
+  "diagnose.reason.bypassNotApplied": "Se detectó la omisión de proxy del sistema, pero no se aplicó",
+  "warning.splitProxyPartial": "Se detectaron proxies HTTP y HTTPS distintos. npm y el terminal recibieron ambos; Git y VS Code solo pueden guardar una URL."
 }

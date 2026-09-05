@@ -31,7 +31,9 @@ const TARGET_LABEL_KEYS: Record<string, string> = {
     'diagnostics.childProcess': 'diagnose.target.diagnosticsChildProcess',
     'windows': 'diagnose.target.windows',
     'windows.winhttp': 'diagnose.target.windowsWinhttp',
-    'windows.wininet': 'diagnose.target.windowsWininet'
+    'windows.wininet': 'diagnose.target.windowsWininet',
+    'system.bypass': 'diagnose.target.systemBypass',
+    'pip.user.global.proxy': 'diagnose.target.pipUserProxy'
 };
 
 function targetLabel(issue: ProxyIssue): string {
@@ -71,6 +73,14 @@ function issueReasonKey(issue: ProxyIssue): string | undefined {
             return 'diagnose.reason.effectiveOverride';
         case 'npm.noproxy':
             return 'diagnose.reason.npmNoproxy';
+        case 'git.splitProxy.notRepresentable':
+            return 'diagnose.reason.gitSplitLossy';
+        case 'vscode.splitProxy.notRepresentable':
+            return 'diagnose.reason.vscodeSplitLossy';
+        case 'pip.splitProxy.notRepresentable':
+            return 'diagnose.reason.pipSplitLossy';
+        case 'system.bypass.notApplied':
+            return 'diagnose.reason.bypassNotApplied';
         default:
             return undefined;
     }

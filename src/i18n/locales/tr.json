@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "WinHTTP proxy çıktısı ayrıştırılamadı",
   "diagnose.reason.wininetPac": "bir proxy otomatik yapılandırma (PAC) URL'si yapılandırılmış",
   "diagnose.reason.gitReadUnavailable": "git yapılandırması okunamadı",
-  "migration.credentialsDropped": "otak-proxy, v3 yükseltmesi sırasında {count} yinelenen proxy kimlik bilgisini güvenli depolamaya taşıyamadı. Bir proxy kimlik doğrulamayı durdurursa bunları yeniden girin."
+  "migration.credentialsDropped": "otak-proxy, v3 yükseltmesi sırasında {count} yinelenen proxy kimlik bilgisini güvenli depolamaya taşıyamadı. Bir proxy kimlik doğrulamayı durdurursa bunları yeniden girin.",
+  "diagnose.target.systemBypass": "Sistem vekil özel durumları",
+  "diagnose.target.pipUserProxy": "pip kullanıcı vekili",
+  "diagnose.reason.gitSplitLossy": "Git HTTP ve HTTPS uzaklarını tek bir http.proxy ile taşır; ayrık vekil temsil edilemez",
+  "diagnose.reason.vscodeSplitLossy": "VS Code http.proxy tek bir URL’dir; ayrık HTTP/HTTPS vekil temsil edilemez",
+  "diagnose.reason.pipSplitLossy": "pip vekili tek bir URL’dir; ayrık HTTP/HTTPS vekil temsil edilemez",
+  "diagnose.reason.bypassNotApplied": "Sistem vekil özel durumları algılandı ancak uygulanmadı",
+  "warning.splitProxyPartial": "Farklı HTTP ve HTTPS vekilleri algılandı. npm ve terminal ikisini de aldı; Git ve VS Code yalnızca bir URL saklayabilir."
 }

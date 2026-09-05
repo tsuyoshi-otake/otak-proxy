@@ -297,5 +297,12 @@
   "diagnose.reason.winhttpParseUnavailable": "無法解析 WinHTTP Proxy 輸出",
   "diagnose.reason.wininetPac": "設定了 Proxy 自動設定 (PAC) URL",
   "diagnose.reason.gitReadUnavailable": "無法讀取 git 設定",
-  "migration.credentialsDropped": "在升級到 v3 期間，otak-proxy 無法將 {count} 個重複的 Proxy 認證遷移到安全儲存。如果 Proxy 停止驗證，請重新輸入。"
+  "migration.credentialsDropped": "在升級到 v3 期間，otak-proxy 無法將 {count} 個重複的 Proxy 認證遷移到安全儲存。如果 Proxy 停止驗證，請重新輸入。",
+  "diagnose.target.systemBypass": "系統 Proxy 略過清單",
+  "diagnose.target.pipUserProxy": "pip 使用者 Proxy",
+  "diagnose.reason.gitSplitLossy": "Git 以單一 http.proxy 承載 HTTP 與 HTTPS remote，無法完整表示分流 Proxy",
+  "diagnose.reason.vscodeSplitLossy": "VS Code 的 http.proxy 是單一 URL，無法完整表示分流 Proxy",
+  "diagnose.reason.pipSplitLossy": "pip Proxy 是單一 URL，無法完整表示分流 Proxy",
+  "diagnose.reason.bypassNotApplied": "已偵測到系統 Proxy 略過清單，但尚未套用",
+  "warning.splitProxyPartial": "偵測到不同的 HTTP 與 HTTPS Proxy。已分別寫入 npm 與終端機；Git 與 VS Code 只能保存一個 URL。"
 }

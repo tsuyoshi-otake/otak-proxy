@@ -76,6 +76,12 @@ export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState 
     if ('autoProxyUrl' in state) {
         sanitized.autoProxyUrl = removeProxyCredentials(state.autoProxyUrl);
     }
+    if ('autoHttpProxyUrl' in state) {
+        sanitized.autoHttpProxyUrl = removeProxyCredentials(state.autoHttpProxyUrl);
+    }
+    if ('autoHttpsProxyUrl' in state) {
+        sanitized.autoHttpsProxyUrl = removeProxyCredentials(state.autoHttpsProxyUrl);
+    }
     if ('lastSystemProxyUrl' in state) {
         sanitized.lastSystemProxyUrl = removeProxyCredentials(state.lastSystemProxyUrl);
     }

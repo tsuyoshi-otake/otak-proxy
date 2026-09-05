@@ -13,6 +13,8 @@ import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostic
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
+import { isPerSchemeProxy } from '../config/DetectedProxyValue';
+import { splitCapabilityIssues } from '../core/ProxyTargetCapability';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
     bypassSlowCache?: boolean;
@@ -175,6 +177,7 @@ export class ProxyRuntimeDiagnostics {
             npm: slowDiagnostics.npm?.observation,
             vscode: vscodeDiagnostics.observation
         }));
+        issues.push(...this.collectSplitProxyIssues(state));
 
         const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
@@ -195,6 +198,8 @@ export class ProxyRuntimeDiagnostics {
         const values = [
             state.manualProxyUrl,
             state.autoProxyUrl,
+            state.autoHttpProxyUrl,
+            state.autoHttpsProxyUrl,
             state.lastSystemProxyUrl,
             state.fallbackProxyUrl
         ];
@@ -487,9 +492,11 @@ export class ProxyRuntimeDiagnostics {
 
         const npmProxy = this.observedString(observations.npm, 'proxy');
         const npmHttpsProxy = this.observedString(observations.npm, 'httpsProxy');
+        const expectedNpmHttp = state.autoHttpProxyUrl || expectedProxy;
+        const expectedNpmHttps = state.autoHttpsProxyUrl || expectedProxy;
         if (state.npmConfigured &&
-            (!this.proxyMatchesExpected(npmProxy, expectedProxy) ||
-                !this.proxyMatchesExpected(npmHttpsProxy, expectedProxy))) {
+            (!this.proxyMatchesExpected(npmProxy, expectedNpmHttp) ||
+                !this.proxyMatchesExpected(npmHttpsProxy, expectedNpmHttps))) {
             issues.push(this.issue('npm.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
                 expectedSanitized: expectedProxy,
                 actualSanitized: npmProxy ?? npmHttpsProxy ?? 'unset',
@@ -500,6 +507,8 @@ export class ProxyRuntimeDiagnostics {
                     autoModeOff: state.autoModeOff,
                     npmConfigured: state.npmConfigured,
                     expectedProxy,
+                    expectedHttpProxy: expectedNpmHttp,
+                    expectedHttpsProxy: expectedNpmHttps,
                     proxy: npmProxy,
                     httpsProxy: npmHttpsProxy
                 }
@@ -587,6 +596,22 @@ export class ProxyRuntimeDiagnostics {
         }
 
         return issues;
+    }
+
+    private collectSplitProxyIssues(state: ProxyState): ProxyIssue[] {
+        if (this.expectsProxyDisabled(state)) {
+            return [];
+        }
+        if (!isPerSchemeProxy(state.autoProxyKind, state.autoHttpProxyUrl, state.autoHttpsProxyUrl) && !state.detectedBypass) {
+            return [];
+        }
+        return splitCapabilityIssues({
+            kind: state.autoProxyKind,
+            httpUrl: state.autoHttpProxyUrl,
+            httpsUrl: state.autoHttpsProxyUrl,
+            bypass: state.detectedBypass,
+            source: state.lastDetectionSource ?? 'detection'
+        });
     }
 
     private expectedActiveProxyUrl(state: ProxyState): string | undefined {

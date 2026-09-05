@@ -291,12 +291,17 @@ export class NpmConfigManager {
      * @returns Result with success status and any errors
      */
     async setProxy(url: string): Promise<OperationResult> {
-        try {
-            // Set proxy (for HTTP - npm 11.x naming)
-            await this.execNpm(['config', 'set', 'proxy', url]);
+        return this.setProxyKeys({ proxy: url, 'https-proxy': url });
+    }
 
-            // Set https-proxy
-            await this.execNpm(['config', 'set', 'https-proxy', url]);
+    async setProxyKeys(values: Partial<NpmProxyValues>): Promise<OperationResult> {
+        try {
+            for (const key of ['proxy', 'https-proxy'] as const) {
+                const value = values[key];
+                if (value) {
+                    await this.execNpm(['config', 'set', key, value]);
+                }
+            }
 
             return { success: true };
         } catch (error) {
