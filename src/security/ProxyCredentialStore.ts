@@ -2,10 +2,20 @@ import * as crypto from 'crypto';
 import type * as vscode from 'vscode';
 import {
     CredentialRef,
+    LocalCredentialAvailability,
     ProxyCredentials,
     PublicProxyRef
 } from '../core/v3Types';
 import { Logger } from '../utils/Logger';
+
+const PROXY_ENV_NAMES = [
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'all_proxy'
+];
 
 const CREDENTIAL_PREFIX = 'otakProxy.v3.credentials.';
 const HMAC_KEY = 'otakProxy.v3.hmacKey';
@@ -61,6 +71,44 @@ export function getCredentialKeyForPublicUrl(publicUrl: string): string {
     return `${CREDENTIAL_PREFIX}${sha256(publicUrl)}`;
 }
 
+export interface LocalCredentialResolution {
+    availability: LocalCredentialAvailability;
+    resolvedUrl?: string;
+}
+
+function publicUrlsMatch(left: string, right: string): boolean {
+    try {
+        return normalizePublicUrl(new URL(left)) === normalizePublicUrl(new URL(right));
+    } catch {
+        return left === right;
+    }
+}
+
+export function credentialsFromProcessEnv(
+    publicUrl: string,
+    env: NodeJS.ProcessEnv = process.env
+): ProxyCredentials | undefined {
+    for (const name of PROXY_ENV_NAMES) {
+        const value = env[name];
+        if (!value) {
+            continue;
+        }
+        try {
+            const split = splitProxyUrl(value);
+            if (split.credentials && publicUrlsMatch(split.publicUrl, publicUrl)) {
+                return split.credentials;
+            }
+        } catch {
+            // Ignore malformed process-env values.
+        }
+    }
+    return undefined;
+}
+
+function hasUsableCredentials(credentials: ProxyCredentials | undefined): boolean {
+    return Boolean(credentials?.username || credentials?.password);
+}
+
 export function buildProxyUrlWithCredentials(publicUrl: string, credentials: ProxyCredentials): string {
     const parsed = new URL(publicUrl);
     if (credentials.username) {
@@ -106,6 +154,58 @@ export class ProxyCredentialStore {
             return undefined;
         }
         return buildProxyUrlWithCredentials(publicUrl, credentials);
+    }
+
+    async resolveLocalCredentials(
+        publicUrl: string,
+        required: boolean,
+        env: NodeJS.ProcessEnv = process.env
+    ): Promise<LocalCredentialResolution> {
+        if (!publicUrl) {
+            return { availability: 'notRequired' };
+        }
+
+        try {
+            const embedded = splitProxyUrl(publicUrl);
+            if (hasUsableCredentials(embedded.credentials)) {
+                return { availability: 'availableOnThisMachine', resolvedUrl: publicUrl };
+            }
+        } catch {
+            // Treat unparsable values as public endpoints.
+        }
+
+        const fromEnv = credentialsFromProcessEnv(publicUrl, env);
+        if (fromEnv) {
+            return {
+                availability: 'availableOnThisMachine',
+                resolvedUrl: buildProxyUrlWithCredentials(publicUrl, fromEnv)
+            };
+        }
+
+        if (!required) {
+            return { availability: 'notRequired' };
+        }
+
+        if (!this.secrets) {
+            return { availability: 'secretStorageUnavailable' };
+        }
+
+        try {
+            const stored = await this.getCredentialsForPublicUrl(publicUrl);
+            if (hasUsableCredentials(stored)) {
+                return {
+                    availability: 'availableOnThisMachine',
+                    resolvedUrl: buildProxyUrlWithCredentials(publicUrl, stored!)
+                };
+            }
+            if (stored) {
+                return { availability: 'needsReEntry' };
+            }
+        } catch {
+            return { availability: 'needsReEntry' };
+        }
+
+        return { availability: 'missingOnThisMachine' };
     }
 
     async deleteCredentialsForPublicUrl(publicUrl: string): Promise<void> {

@@ -15,7 +15,7 @@ import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
-import { removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 /**
  * Execute the import proxy command
@@ -171,6 +171,7 @@ async function handleUseAutoMode(
         state.lastTestResult = undefined;
         state.lastTestTimestamp = undefined;
         state.systemProxyDetected = true;
+        setRequiresAuthFromLiveUrls(state);
         await ctx.saveProxyState(state);
         await ctx.applyProxySettings(detectedProxy, true);
         ctx.updateStatusBar(state);

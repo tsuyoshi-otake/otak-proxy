@@ -20,6 +20,7 @@ import {
 } from '../utils/ProxyUtils';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
+import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 let toggleQueue: Promise<void> = Promise.resolve();
 
@@ -53,6 +54,7 @@ function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
     target.fallbackProxyUrl = source.fallbackProxyUrl;
     target.autoModeOff = source.autoModeOff;
     target.lastDetectionSource = source.lastDetectionSource;
+    target.requiresAuth = source.requiresAuth;
 }
 
 function setAutoModeOff(state: ProxyState): void {
@@ -62,6 +64,7 @@ function setAutoModeOff(state: ProxyState): void {
     state.usingFallbackProxy = false;
     state.fallbackProxyUrl = undefined;
     state.lastDetectionSource = undefined;
+    setRequiresAuthFromLiveUrls(state);
 }
 
 async function testFallbackProxy(proxyUrl: string): Promise<ProxyTestResult> {
@@ -129,6 +132,7 @@ async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyStat
     state.fallbackProxyUrl = manualProxyUrl;
     state.autoProxyUrl = manualProxyUrl;
     state.lastDetectionSource = 'fallback';
+    setRequiresAuthFromLiveUrls(state);
 
     const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
     Logger.log(`Fallback to Manual Proxy: ${sanitizedManualProxyUrl}`);

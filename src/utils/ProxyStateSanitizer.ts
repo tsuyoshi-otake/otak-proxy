@@ -70,6 +70,36 @@ export function sanitizeProxyTestResultForPersistence(result: ProxyTestResult | 
     return sanitized;
 }
 
+export const UNRESOLVED_LOCAL_CREDENTIAL_ERROR =
+    'Proxy credentials are required but unavailable on this machine';
+
+export function proxyUrlsHaveCredentials(state: Pick<ProxyState,
+    'autoProxyUrl' | 'fallbackProxyUrl' | 'lastSystemProxyUrl' | 'manualProxyUrl'
+>): boolean {
+    return [
+        state.autoProxyUrl,
+        state.fallbackProxyUrl,
+        state.lastSystemProxyUrl,
+        state.manualProxyUrl
+    ].some(url => Boolean(url && hasProxyCredentials(url)));
+}
+
+export function deriveRequiresAuth(state: ProxyState): boolean {
+    return proxyUrlsHaveCredentials(state) || state.requiresAuth === true;
+}
+
+export function setRequiresAuthFromLiveUrls(state: ProxyState): void {
+    if (proxyUrlsHaveCredentials(state)) {
+        state.requiresAuth = true;
+        return;
+    }
+    delete state.requiresAuth;
+}
+
+export function shouldSkipUnauthenticatedApply(state: ProxyState, activeUrl: string): boolean {
+    return Boolean(activeUrl) && state.requiresAuth === true && !hasProxyCredentials(activeUrl);
+}
+
 export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState {
     const sanitized: ProxyState = { ...state };
 
@@ -90,6 +120,12 @@ export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState 
     }
     if ('lastTestResult' in state) {
         sanitized.lastTestResult = sanitizeProxyTestResultForPersistence(state.lastTestResult);
+    }
+
+    if (deriveRequiresAuth(state)) {
+        sanitized.requiresAuth = true;
+    } else {
+        delete sanitized.requiresAuth;
     }
 
     return sanitized;

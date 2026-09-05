@@ -12,6 +12,7 @@ import {
 } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { ProxyMode, ProxyState, ProxyTestResult } from './types';
+import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 export interface StartupTestState {
     isPending: boolean;
@@ -234,6 +235,8 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
         state.lastTestTimestamp = Date.now();
         updateAutoModeFromTestResult(state, result.testResult);
     }
+
+    setRequiresAuthFromLiveUrls(state);
 }
 
 function notifyProxyChange(

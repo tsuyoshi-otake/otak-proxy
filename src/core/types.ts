@@ -110,6 +110,12 @@ export interface ProxyState {
      * used so a completion for a different bypass cannot land on the new one.
      */
     noProxy?: string;
+    /**
+     * Non-secret metadata: the active Auto/fallback endpoint requires credentials.
+     * Persisted and synced so a receiver can refuse a credentialless apply.
+     * Never contains userinfo.
+     */
+    requiresAuth?: boolean;
 }
 
 /**
