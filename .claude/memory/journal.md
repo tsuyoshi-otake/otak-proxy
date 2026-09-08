@@ -8,6 +8,7 @@ Append-only log of non-trivial work. Newest entries at the bottom.
 
 **Issue**: [#73](https://github.com/tsuyoshi-otake/otak-proxy/issues/73)
 **Base commit**: `cf5ad58`
+**Fix commit**: `c885f9d` (branch `fix/73-atomicity-and-write-postconditions`)
 
 ### Symptom
 
