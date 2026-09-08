@@ -1,17 +1,34 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { getErrorCode, getErrorMessage, getErrorStderr } from '../utils/ErrorUtils';
+import { getErrorMessage, getErrorStderr } from '../utils/ErrorUtils';
+import { FileLease } from '../utils/FileLease';
 import { Logger } from '../utils/Logger';
 import { GitConfigOperationOptions } from './GitConfigTypes';
 import { GIT_CONFIG_MUTEX_STALE_MS, GIT_CONFIG_MUTEX_TIMEOUT_MS } from './ConfigCommandTimeouts';
 
 export const GIT_CONFIG_LOCK_RETRY_DELAYS_MS = [50, 100, 200, 400] as const;
 
-const mutexFilePath = path.join(os.tmpdir(), 'otak-proxy.gitconfig.mutex');
-const MUTEX_TIMEOUT_MS = GIT_CONFIG_MUTEX_TIMEOUT_MS;
+/** Exported so tests can inspect the lock this module actually uses. */
+export const GIT_CONFIG_MUTEX_PATH = path.join(os.tmpdir(), 'otak-proxy.gitconfig.mutex');
+
 const MUTEX_STALE_MS = GIT_CONFIG_MUTEX_STALE_MS;
 const MUTEX_RETRY_DELAY_MS = 25;
+
+/*
+ * One Git write runs several sequential `git config` invocations, so a holder
+ * can legitimately stay inside the critical section past the stale window. With
+ * an anonymous lock file that made the holder delete its successor's lock on the
+ * way out and let a third writer in (#73); the lease keeps the lock owned and
+ * refreshed for as long as this process is alive.
+ */
+const gitConfigLease = new FileLease({
+    lockPath: GIT_CONFIG_MUTEX_PATH,
+    leaseMs: MUTEX_STALE_MS,
+    acquireTimeoutMs: GIT_CONFIG_MUTEX_TIMEOUT_MS,
+    retryDelayMs: MUTEX_RETRY_DELAY_MS,
+    name: 'Git config mutex'
+});
 
 export async function sleep(ms: number): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, ms));
@@ -21,13 +38,9 @@ export async function withGitConfigWriteMutex<T>(
     fn: () => Promise<T>,
     options?: GitConfigOperationOptions
 ): Promise<T> {
-    await acquireWriteMutex(options);
-
-    try {
-        return await fn();
-    } finally {
-        releaseWriteMutex();
-    }
+    return gitConfigLease.run(fn, {
+        onWaiting: () => options?.onStatus?.('progress.gitConfigWaiting')
+    });
 }
 
 export function isGitConfigLockError(error: unknown): boolean {
@@ -83,69 +96,11 @@ function normalizeConfigPathToFsPath(p: string): string {
     return /^[A-Za-z]:\//.test(p) ? p.replace(/\//g, '\\') : p;
 }
 
+/**
+ * Staleness of git's *own* `.lock` file, which git writes and this extension
+ * only ever cleans up after. It carries no owner, so mtime is all there is.
+ */
 function isStaleLockFile(lockPath: string): boolean {
     const stat = fs.statSync(lockPath);
     return Date.now() - stat.mtimeMs > MUTEX_STALE_MS;
-}
-
-async function acquireWriteMutex(options?: GitConfigOperationOptions): Promise<void> {
-    const start = Date.now();
-    let waitingReported = false;
-
-    while (true) {
-        if (tryCreateMutexFile()) {
-            return;
-        }
-
-        if (removeStaleMutexIfNeeded()) {
-            continue;
-        }
-
-        if (!waitingReported) {
-            options?.onStatus?.('progress.gitConfigWaiting');
-            waitingReported = true;
-        }
-
-        if (Date.now() - start > MUTEX_TIMEOUT_MS) {
-            throw new Error('Timed out acquiring Git config mutex');
-        }
-
-        await sleep(MUTEX_RETRY_DELAY_MS);
-    }
-}
-
-function tryCreateMutexFile(): boolean {
-    try {
-        const fd = fs.openSync(mutexFilePath, 'wx');
-        fs.closeSync(fd);
-        return true;
-    } catch (error) {
-        if (getErrorCode(error) === 'EEXIST') {
-            return false;
-        }
-
-        throw error;
-    }
-}
-
-function removeStaleMutexIfNeeded(): boolean {
-    try {
-        const stat = fs.statSync(mutexFilePath);
-        if (Date.now() - stat.mtimeMs <= MUTEX_STALE_MS) {
-            return false;
-        }
-
-        fs.unlinkSync(mutexFilePath);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function releaseWriteMutex(): void {
-    try {
-        fs.unlinkSync(mutexFilePath);
-    } catch {
-        // ignore
-    }
 }

@@ -463,16 +463,29 @@ export class GitConfigManager {
         return inspection.values[key];
     }
 
+    /**
+     * Confirms the value we just wrote is the value Git now reports.
+     *
+     * This is fail-closed on purpose (#73). Returning early when the config is
+     * unreadable, or when the key comes back missing, reports a successful apply
+     * for a proxy that was never configured - and because a "successful" apply
+     * also records ownership, the next Off would try to clean up a value that is
+     * not there. An unverifiable write is a failed write; the compensation path
+     * then marks the key residual so ownership tracking still sees it.
+     */
     private async assertWrittenValues(url: string, keys: readonly GitProxyKey[]): Promise<void> {
         const inspection = await this.inspectProxy();
         if (inspection.status !== 'available' || !inspection.values) {
-            return;
+            throw new Error('Git proxy write verify failed: config could not be read back');
         }
-        const observed = keys.filter(key => inspection.values?.[key] !== null && inspection.values?.[key] !== undefined);
-        if (observed.length === 0) {
-            return;
+
+        const values = inspection.values;
+        const missing = keys.filter(key => values[key] === null || values[key] === undefined);
+        if (missing.length > 0) {
+            throw new Error(`Git proxy write verify failed: ${missing.join(', ')} is not set`);
         }
-        const mismatched = keys.filter(key => inspection.values?.[key] !== url);
+
+        const mismatched = keys.filter(key => values[key] !== url);
         if (mismatched.length > 0) {
             throw new Error('Git proxy write verify failed');
         }
@@ -485,8 +498,7 @@ export class GitConfigManager {
         options?: GitConfigOperationOptions
     ) {
         return compensatePartialProxyWrite<GitProxyKey>({
-            writtenKeys: written,
-            writtenValue: url,
+            written: written.map(key => ({ key, value: url })),
             snapshot,
             readCurrent: key => this.readCurrentProxyValue(key),
             restore: async (key, previous) => {

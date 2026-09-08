@@ -1,0 +1,100 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 2026090801 with 1 worker on 16 cores with 14014MB heap and 64MB offheap memory [pid: 42872] (Windows 11 10.0 amd64, Microsoft 11.0.31 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file C:\Codes\tsuyoshi-otake\otak-proxy\formal\SharedStateCas.tla
+Parsing file C:\Users\developer\AppData\Local\Temp\Naturals.tla
+Parsing file C:\Users\developer\AppData\Local\Temp\FiniteSets.tla
+Parsing file C:\Users\developer\AppData\Local\Temp\Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module SharedStateCas
+Starting... (2026-09-09 00:21:55)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-09 00:21:55.
+Error: Invariant NoLostUpdate is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "idle" @@ a2 :> "idle")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 2: <Sample line 57, col 5 to line 60, col 61 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "sampled" @@ a2 :> "idle")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 3: <Sample line 57, col 5 to line 60, col 61 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "sampled" @@ a2 :> "sampled")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 4: <Acquire line 64, col 5 to line 68, col 60 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "holding" @@ a2 :> "sampled")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 5: <Acquire line 64, col 5 to line 68, col 60 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "holding" @@ a2 :> "holding")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 6: <CasRead line 72, col 5 to line 75, col 61 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "compared" @@ a2 :> "holding")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 7: <CasRead line 72, col 5 to line 75, col 61 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 0
+/\ outcome = (a1 :> "none" @@ a2 :> "none")
+/\ phase = (a1 :> "compared" @@ a2 :> "compared")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 8: <CasCommit line 81, col 5 to line 91, col 38 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 1
+/\ outcome = (a1 :> "written" @@ a2 :> "none")
+/\ phase = (a1 :> "done" @@ a2 :> "compared")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+State 9: <CasCommit line 81, col 5 to line 91, col 38 of module SharedStateCas>
+/\ seen = (a1 :> 0 @@ a2 :> 0)
+/\ owner = none
+/\ fileVersion = 1
+/\ outcome = (a1 :> "written" @@ a2 :> "written")
+/\ phase = (a1 :> "done" @@ a2 :> "done")
+/\ pulse = 0
+/\ base = (a1 :> 0 @@ a2 :> 0)
+
+127 states generated, 59 distinct states found, 10 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-09-09 00:21:55)

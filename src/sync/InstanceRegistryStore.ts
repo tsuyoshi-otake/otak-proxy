@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getErrorCode } from '../utils/ErrorUtils';
+import { FileLease } from '../utils/FileLease';
 import { Logger } from '../utils/Logger';
 import {
     INSTANCE_LOCK_FILE_NAME,
@@ -16,12 +17,20 @@ import { InstancesLockFile } from './InstanceRegistryTypes';
 export class InstanceRegistryStore {
     private readonly syncDir: string;
     private readonly lockFilePath: string;
-    private readonly mutexFilePath: string;
+    private readonly mutex: FileLease;
 
     constructor(baseDir: string, private readonly pid: number) {
         this.syncDir = path.join(baseDir, SYNC_DIR_NAME);
         this.lockFilePath = path.join(this.syncDir, INSTANCE_LOCK_FILE_NAME);
-        this.mutexFilePath = `${this.lockFilePath}.mutex`;
+        // Same lease primitive as the Git config mutex and the publish lock: an
+        // anonymous lock file lets a slow holder delete its successor's lock (#73).
+        this.mutex = new FileLease({
+            lockPath: `${this.lockFilePath}.mutex`,
+            leaseMs: MUTEX_STALE_MS,
+            acquireTimeoutMs: MUTEX_TIMEOUT_MS,
+            retryDelayMs: MUTEX_RETRY_DELAY_MS,
+            name: 'instance registry mutex'
+        });
     }
 
     async readLockFile(): Promise<InstancesLockFile> {
@@ -70,13 +79,7 @@ export class InstanceRegistryStore {
 
     async withLock<T>(fn: () => Promise<T>): Promise<T> {
         await this.ensureSyncDir();
-        await this.acquireMutex();
-
-        try {
-            return await fn();
-        } finally {
-            this.releaseMutex();
-        }
+        return this.mutex.run(fn);
     }
 
     private createEmptyLockFile(): InstancesLockFile {
@@ -86,48 +89,6 @@ export class InstanceRegistryStore {
     private async ensureSyncDir(): Promise<void> {
         if (!fs.existsSync(this.syncDir)) {
             fs.mkdirSync(this.syncDir, { recursive: true });
-        }
-    }
-
-    private async acquireMutex(): Promise<void> {
-        const start = Date.now();
-        while (true) {
-            try {
-                const fd = fs.openSync(this.mutexFilePath, 'wx');
-                fs.closeSync(fd);
-                return;
-            } catch (error) {
-                if (getErrorCode(error) !== 'EEXIST') {
-                    throw error;
-                }
-
-                this.removeStaleMutexIfNeeded();
-
-                if (Date.now() - start > MUTEX_TIMEOUT_MS) {
-                    throw new Error('Timed out acquiring instance registry mutex');
-                }
-
-                await new Promise(resolve => setTimeout(resolve, MUTEX_RETRY_DELAY_MS));
-            }
-        }
-    }
-
-    private removeStaleMutexIfNeeded(): void {
-        try {
-            const stat = fs.statSync(this.mutexFilePath);
-            if (Date.now() - stat.mtimeMs > MUTEX_STALE_MS) {
-                fs.unlinkSync(this.mutexFilePath);
-            }
-        } catch {
-            // If stat/unlink fails, retry acquisition normally.
-        }
-    }
-
-    private releaseMutex(): void {
-        try {
-            fs.unlinkSync(this.mutexFilePath);
-        } catch {
-            // ignore
         }
     }
 

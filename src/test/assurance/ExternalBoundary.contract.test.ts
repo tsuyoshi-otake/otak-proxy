@@ -1,4 +1,5 @@
 import * as assert from 'node:assert';
+import { createFakeNpmConfig, createFakePipConfig } from '../fakeConfigStores';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as net from 'node:net';
@@ -374,13 +375,14 @@ suite('Assurance: external-boundary contracts', () => {
         const calls: CommandCall[] = [];
         const url = 'http://user:x%25OS%25y@proxy.example:8080';
         const windowsNpm = fakeWindowsNpmEnv();
+        const npm = createFakeNpmConfig();
         const manager = new NpmConfigManager(path.join(os.tmpdir(), 'assurance-npmrc-win'), {
             isWindows: true,
             env: windowsNpm.env,
             commandAvailable: () => true,
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
-                return { stdout: '', stderr: '' };
+                return npm.runner(command, args, options);
             }
         });
 
@@ -404,11 +406,12 @@ suite('Assurance: external-boundary contracts', () => {
 
     test('CT-CLI-PIP-001: pip command runner retains candidate prefix, timeout and error protocol', async () => {
         const calls: CommandCall[] = [];
+        const pip = createFakePipConfig();
         const manager = new PipConfigManager({
             candidates: [{ command: 'python-test', argsPrefix: ['-m', 'pip'] }],
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
-                return { stdout: '', stderr: '' };
+                return pip.runner(command, args, options);
             }
         });
 

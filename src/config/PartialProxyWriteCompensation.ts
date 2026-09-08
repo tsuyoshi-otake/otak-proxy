@@ -14,9 +14,21 @@ export interface PartialWriteCompensation<K extends string> {
     summary: string;
 }
 
+/** One key this call wrote, paired with the value it wrote there. */
+export interface PartialWriteEntry<K extends string> {
+    key: K;
+    value: string;
+}
+
 export interface CompensatePartialProxyWriteInput<K extends string> {
-    writtenKeys: readonly K[];
-    writtenValue: string;
+    /**
+     * Keys written by this call, in write order, each with its own value.
+     *
+     * A split proxy apply writes different values to `proxy` and `https-proxy`,
+     * so a single `writtenValue` shared by every key made compensation judge one
+     * key against the other's value and call our own write an external conflict (#73).
+     */
+    written: readonly PartialWriteEntry<K>[];
     snapshot: Partial<Record<K, string | null>> | undefined;
     readCurrent: (key: K) => Promise<string | null | typeof UNREADABLE>;
     restore: (key: K, previous: string) => Promise<void>;
@@ -64,9 +76,9 @@ export async function compensatePartialProxyWrite<K extends string>(
     const residualKeys: K[] = [];
     const conflictedKeys: K[] = [];
 
-    for (const key of input.writtenKeys) {
+    for (const { key, value: writtenValue } of input.written) {
         const previous = input.snapshot?.[key] ?? null;
-        const introduced = input.snapshot === undefined || previous !== input.writtenValue;
+        const introduced = input.snapshot === undefined || previous !== writtenValue;
         if (!introduced) {
             keys.push({ key, action: 'unchanged' });
             continue;
@@ -82,7 +94,7 @@ export async function compensatePartialProxyWrite<K extends string>(
             keys.push({ key, action: 'absent' });
             continue;
         }
-        if (current !== input.writtenValue) {
+        if (current !== writtenValue) {
             conflictedKeys.push(key);
             keys.push({ key, action: 'conflict' });
             continue;
@@ -101,7 +113,7 @@ export async function compensatePartialProxyWrite<K extends string>(
 
             await input.clear(key);
             const after = await input.readCurrent(key);
-            if (after === input.writtenValue || after === UNREADABLE) {
+            if (after === writtenValue || after === UNREADABLE) {
                 throw new Error('clear verify failed');
             }
             keys.push({ key, action: 'cleared' });

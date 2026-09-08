@@ -78,6 +78,33 @@ const runs = [
     expected: { kind: 'invariant-violation', invariant: 'NeverPublishedDivergence' },
     purpose: 'Required transient-state reachability: publish is observable before convergence.',
     constraints: 'expected counterexample proves adversarial ordering is represented'
+  },
+  {
+    id: 'TLC-CAS-UNGUARDED-LOST-UPDATE',
+    spec: 'SharedStateCas',
+    config: 'SharedStateCas.unguarded.cfg',
+    seed: 2026090801,
+    expected: { kind: 'invariant-violation', invariant: 'NoLostUpdate' },
+    purpose: 'Forbidden-state reachability: an unserialised read-compare-write lets two publishers both win against one version.',
+    constraints: 'publish split into its filesystem steps; expected counterexample is the lost update the file lock must rule out'
+  },
+  {
+    id: 'TLC-CAS-GUARDED',
+    spec: 'SharedStateCas',
+    config: 'SharedStateCas.guarded.cfg',
+    seed: 2026090802,
+    expected: { kind: 'success' },
+    purpose: 'Safety/Liveness/deadlock once the read-compare-write runs under an owner-checked, heartbeat-refreshed lease.',
+    constraints: 'same finite abstraction as the unguarded run; contended acquisition assumed strongly fair'
+  },
+  {
+    id: 'TLC-CAS-LEASE-ABA',
+    spec: 'SharedStateCas',
+    config: 'SharedStateCas.lease-aba.cfg',
+    seed: 2026090803,
+    expected: { kind: 'invariant-violation', invariant: 'MutualExclusion' },
+    purpose: 'Forbidden-state reachability: a lease with no heartbeat and no ownership check on release admits two holders.',
+    constraints: 'expected counterexample proves why the lock file must carry owner identity'
   }
 ];
 
