@@ -5,6 +5,7 @@ import { CONFIG_COMMAND_TIMEOUT_MS } from './ConfigCommandTimeouts';
 import { ProxyConfigInspection } from './ProxyConfigInspection';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
+import { UNREADABLE } from './PartialProxyWriteCompensation';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,8 +13,18 @@ export interface OperationResult {
     success: boolean;
     error?: string;
     errorType?: 'NOT_INSTALLED' | 'NO_PERMISSION' | 'TIMEOUT' | 'CONFIG_ERROR' | 'UNKNOWN';
+    /**
+     * Set when a failed write left the value behind. Ownership tracking needs it
+     * so the next cleanup knows there is something to remove.
+     */
+    residualKeys?: readonly string[];
     preservedKeys?: readonly string[];
 }
+
+/** pip stores the proxy under a single key. */
+export type PipProxyKey = 'global.proxy';
+
+const PIP_PROXY_KEY: PipProxyKey = 'global.proxy';
 
 interface PipErrorDetails {
     errorMessage: string;
@@ -183,13 +194,62 @@ export class PipConfigManager {
         this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     }
 
+    /**
+     * Writes the pip proxy and proves it stuck.
+     *
+     * `pip config set` exiting 0 was previously the whole post-condition, so a
+     * write that pip accepted but never persisted - a read-only or shadowed user
+     * config - was reported as a successful apply, and the recorded ownership
+     * then pointed at a value that was never there (#73). Git and npm re-read
+     * after writing; pip now does too.
+     *
+     * There is nothing to roll back on failure. pip stores the proxy under a
+     * single key, so a failed verify means the key does not hold our value -
+     * it is absent, unreadable, or someone else's. Only the unreadable case is
+     * reported as residual, because that is the only one where our value may
+     * still be sitting there waiting to be cleaned up.
+     */
     async setProxy(url: string): Promise<OperationResult> {
         try {
-            await this.execPip(['config', '--user', 'set', 'global.proxy', url]);
-            return { success: true };
+            await this.execPip(['config', '--user', 'set', PIP_PROXY_KEY, url]);
         } catch (error) {
             return this.handleError(error);
         }
+
+        const current = await this.readCurrentProxyValue();
+        if (current === url) {
+            return { success: true };
+        }
+
+        return this.reportUnverifiedWrite(current);
+    }
+
+    private async readCurrentProxyValue(): Promise<string | null | typeof UNREADABLE> {
+        const inspection = await this.inspectProxy();
+        if (inspection.status !== 'available') {
+            return UNREADABLE;
+        }
+        return inspection.values?.proxy ?? null;
+    }
+
+    private reportUnverifiedWrite(current: string | null | typeof UNREADABLE): OperationResult {
+        if (current === UNREADABLE) {
+            Logger.warn('pip proxy write could not be verified; treating the key as residual');
+            return {
+                success: false,
+                error: 'pip proxy write verify failed: config could not be read back',
+                errorType: 'CONFIG_ERROR',
+                residualKeys: [PIP_PROXY_KEY]
+            };
+        }
+
+        return {
+            success: false,
+            error: current === null
+                ? `pip proxy write verify failed: ${PIP_PROXY_KEY} is not set`
+                : `pip proxy write verify failed: ${PIP_PROXY_KEY} was changed by another writer`,
+            errorType: 'CONFIG_ERROR'
+        };
     }
 
     /**

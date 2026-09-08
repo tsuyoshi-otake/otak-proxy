@@ -7,6 +7,7 @@ import {
     GIT_ROUTING_PROXY_KEY,
     GitConfigManager
 } from '../config/GitConfigManager';
+import { createFakeGitConfig } from './fakeConfigStores';
 
 const execFileAsync = promisify(execFile);
 
@@ -50,10 +51,11 @@ suite('GitConfigManager Test Suite', () => {
 
         test('passes encoded credential URLs to git as a single argv without a shell', async () => {
             const calls: Array<{ command: string; args: string[] }> = [];
+            const git = createFakeGitConfig();
             const manager = new GitConfigManager({
-                commandRunner: async (command, args) => {
+                commandRunner: async (command, args, options) => {
                     calls.push({ command, args });
-                    return { stdout: '', stderr: '' };
+                    return git.runner(command, args, options);
                 }
             });
             const url = 'http://user:abc%21def@proxy.example:8080';
@@ -71,10 +73,11 @@ suite('GitConfigManager Test Suite', () => {
 
         test('setProxy writes only the http.proxy routing key', async () => {
             const calls: Array<{ command: string; args: string[] }> = [];
+            const git = createFakeGitConfig();
             const manager = new GitConfigManager({
-                commandRunner: async (command, args) => {
+                commandRunner: async (command, args, options) => {
                     calls.push({ command, args });
-                    return { stdout: '', stderr: '' };
+                    return git.runner(command, args, options);
                 }
             });
 
@@ -85,6 +88,8 @@ suite('GitConfigManager Test Suite', () => {
                 ['config', '--global', '--replace-all', GIT_ROUTING_PROXY_KEY, 'http://proxy.example.com:8080']
             ]);
             assert.ok(!writes.some(call => call.args.includes(GIT_LEGACY_NON_ROUTING_PROXY_KEY)));
+            assert.strictEqual(git.get(GIT_ROUTING_PROXY_KEY), 'http://proxy.example.com:8080');
+            assert.strictEqual(git.get(GIT_LEGACY_NON_ROUTING_PROXY_KEY), null);
         });
 
         test('getProxy ignores leftover https.proxy and does not treat it as routing', async () => {

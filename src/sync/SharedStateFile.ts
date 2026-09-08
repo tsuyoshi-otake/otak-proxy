@@ -18,6 +18,7 @@ import * as path from 'path';
 import { ProxyState, ProxyTestResult } from '../core/types';
 import { Logger } from '../utils/Logger';
 import { getErrorCode } from '../utils/ErrorUtils';
+import { FileLease, FileLeaseTimeoutError } from '../utils/FileLease';
 import {
     sanitizeProxyStateForPersistence,
     sanitizeProxyTestResultForPersistence
@@ -111,6 +112,28 @@ const SYNC_DIR_NAME = 'otak-proxy-sync';
 const STATE_FILE_NAME = 'sync-state.json';
 
 /**
+ * Lock file serialising compare-and-swap across windows.
+ *
+ * Deliberately not `*.tmp`: recover() sweeps temp files, and it must not delete
+ * a lock that another window is actively holding. FileWatcher filters the sync
+ * directory by the state file's basename, so this file raises no change events.
+ */
+const PUBLISH_LOCK_FILE_NAME = 'sync-state.lock';
+
+/**
+ * A publish is a read plus one atomic rename, so the critical section is short.
+ * The lease only has to outlive a slow disk; a window that dies mid-publish must
+ * not block its peers for long.
+ */
+const PUBLISH_LEASE_MS = 10_000;
+
+/**
+ * Waiting longer than this is pointless: whatever the other window is writing is
+ * newer than what this one sampled, so the publish is stale by then anyway.
+ */
+const PUBLISH_ACQUIRE_TIMEOUT_MS = 2_000;
+
+/**
  * Temp file suffix for atomic writes
  */
 const TEMP_FILE_SUFFIX = '.tmp';
@@ -138,6 +161,7 @@ export class SharedStateFile implements ISharedStateFile {
     private readonly stateFilePath: string;
     private readonly fileSystem: SharedStateFileSystem;
     private readonly sleep: (ms: number) => Promise<void>;
+    private readonly publishLease: FileLease;
     private unknownSignatureSeq = 0;
 
     /**
@@ -150,6 +174,14 @@ export class SharedStateFile implements ISharedStateFile {
         this.stateFilePath = path.join(this.syncDir, STATE_FILE_NAME);
         this.fileSystem = options.fileSystem ?? fs;
         this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
+        // The lock is a real-filesystem concern shared with the other windows,
+        // so it is never routed through an injected in-memory filesystem.
+        this.publishLease = new FileLease({
+            lockPath: path.join(this.syncDir, PUBLISH_LOCK_FILE_NAME),
+            leaseMs: PUBLISH_LEASE_MS,
+            acquireTimeoutMs: PUBLISH_ACQUIRE_TIMEOUT_MS,
+            name: 'shared state publish lock'
+        });
     }
 
     /**
@@ -248,15 +280,42 @@ export class SharedStateFile implements ISharedStateFile {
         }
     }
 
+    /**
+     * Write only when the on-disk version still matches `expectedVersion`.
+     *
+     * The read and the write have to be one indivisible step. Without a lock
+     * two windows both read version N, both find it equal to what they expected
+     * and both write N+1: the second write silently replaces the first, while
+     * SyncManager tells the first window its state was published (#73).
+     *
+     * The version is therefore re-read *inside* the critical section. The one
+     * sampled by the caller before acquiring is only a hint - by the time the
+     * lock is held it may already belong to the previous holder's write.
+     */
     async compareAndSwap(expectedVersion: number | undefined, state: SharedState): Promise<'written' | 'stale'> {
-        const current = await this.read();
-        const currentVersion = current?.version;
-        if (currentVersion !== expectedVersion) {
-            return 'stale';
-        }
+        await this.ensureSyncDir();
 
-        await this.write(state);
-        return 'written';
+        try {
+            return await this.publishLease.run(async () => {
+                const current = await this.read();
+                if (current?.version !== expectedVersion) {
+                    return 'stale' as const;
+                }
+
+                await this.write(state);
+                return 'written' as const;
+            });
+        } catch (error) {
+            if (error instanceof FileLeaseTimeoutError) {
+                // Another window is mid-publish. Reporting 'stale' makes the
+                // caller adopt the newer state instead of overwriting it, which
+                // is the same outcome as losing the compare.
+                Logger.warn('Timed out waiting to publish shared state; treating this publish as stale');
+                return 'stale';
+            }
+
+            throw error;
+        }
     }
 
     /**

@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import { createFakeGitConfig } from './fakeConfigStores';
 import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -135,15 +136,16 @@ suite('GitConfigManager multi-value exit 5 (#44)', () => {
 
         test('setProxy uses --replace-all so a later write cannot stack a second value', async () => {
             const calls: string[][] = [];
+            const git = createFakeGitConfig();
             const manager = new GitConfigManager({
-                commandRunner: async (_command, args) => {
+                commandRunner: async (command, args, options) => {
                     calls.push(args);
-                    return { stdout: '', stderr: '' };
+                    return git.runner(command, args, options);
                 }
             });
 
             const result = await manager.setProxy('http://proxy.example:8080');
-            assert.strictEqual(result.success, true);
+            assert.strictEqual(result.success, true, result.error);
             assert.ok(calls.some(args =>
                 args.includes('--replace-all') &&
                 args.includes('http.proxy') &&

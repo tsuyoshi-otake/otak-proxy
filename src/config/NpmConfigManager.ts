@@ -12,6 +12,7 @@ import { ProxyConfigInspection } from './ProxyConfigInspection';
 import {
     compensatePartialProxyWrite,
     getPartialWriteCompensation,
+    PartialWriteEntry,
     summarizePartialWriteCompensation,
     UNREADABLE
 } from './PartialProxyWriteCompensation';
@@ -237,8 +238,10 @@ export class NpmConfigManager {
 
     async setProxyKeys(values: Partial<NpmProxyValues>): Promise<OperationResult> {
         const snapshot = await this.readProxySnapshot();
-        const written: NpmProxyKey[] = [];
-        const writtenValues: Partial<Record<NpmProxyKey, string>> = {};
+        // In write order, each key with the value written to it. A split apply
+        // gives `proxy` and `https-proxy` different values, so compensation has
+        // to judge each key against its own (#73).
+        const written: PartialWriteEntry<NpmProxyKey>[] = [];
         try {
             for (const key of ['proxy', 'https-proxy'] as const) {
                 const value = values[key];
@@ -246,29 +249,20 @@ export class NpmConfigManager {
                     continue;
                 }
                 await this.execNpm(['config', 'set', key, value]);
-                written.push(key);
-                writtenValues[key] = value;
+                written.push({ key, value });
             }
-            for (const key of written) {
-                await this.assertWrittenValues(writtenValues[key]!, [key]);
+            for (const entry of written) {
+                await this.assertWrittenValues(entry.value, [entry.key]);
             }
             return { success: true };
         } catch (error) {
             if (written.length === 0) {
                 return this.handleError(error);
             }
-            const lastWritten = written[written.length - 1];
-            const lastValue = writtenValues[lastWritten] ?? Object.values(writtenValues)[0] ?? '';
-            const failedKey = written.length < Object.keys(values).filter(key => values[key as NpmProxyKey]).length
-                ? (['proxy', 'https-proxy'] as const).find(key => values[key] && !written.includes(key))
-                : undefined;
-            let compensation = await this.compensatePartialSet(written, lastValue, snapshot);
-            for (const key of written) {
-                const value = writtenValues[key];
-                if (value && value !== lastValue) {
-                    compensation = await this.compensatePartialSet([key], value, snapshot);
-                }
-            }
+            const writtenKeys = written.map(entry => entry.key);
+            const requestedKeys = (['proxy', 'https-proxy'] as const).filter(key => values[key]);
+            const failedKey = requestedKeys.find(key => !writtenKeys.includes(key));
+            const compensation = await this.compensatePartialSet(written, snapshot);
             compensation.summary = summarizePartialWriteCompensation(failedKey, compensation);
             const wrapped = error instanceof Error ? error : new Error(String(error));
             (wrapped as Error & { otakPartialWrite: typeof compensation }).otakPartialWrite = compensation;
@@ -399,29 +393,36 @@ export class NpmConfigManager {
         return inspection.values[key];
     }
 
+    /**
+     * Confirms the value we just wrote is the value npm now reports.
+     *
+     * Fail-closed for the same reason as Git (#73): an unreadable config or a
+     * key that comes back missing is an unverified write, not a successful one.
+     */
     private async assertWrittenValues(url: string, keys: readonly NpmProxyKey[]): Promise<void> {
         const inspection = await this.inspectProxy();
         if (inspection.status !== 'available' || !inspection.values) {
-            return;
+            throw new Error('npm proxy write verify failed: config could not be read back');
         }
-        const observed = keys.filter(key => inspection.values?.[key] !== null && inspection.values?.[key] !== undefined);
-        if (observed.length === 0) {
-            return;
+
+        const values = inspection.values;
+        const missing = keys.filter(key => values[key] === null || values[key] === undefined);
+        if (missing.length > 0) {
+            throw new Error(`npm proxy write verify failed: ${missing.join(', ')} is not set`);
         }
-        const mismatched = keys.filter(key => inspection.values?.[key] !== url);
+
+        const mismatched = keys.filter(key => values[key] !== url);
         if (mismatched.length > 0) {
             throw new Error('npm proxy write verify failed');
         }
     }
 
     private async compensatePartialSet(
-        written: readonly NpmProxyKey[],
-        url: string,
+        written: readonly PartialWriteEntry<NpmProxyKey>[],
         snapshot: NpmProxyValues | undefined
     ) {
         return compensatePartialProxyWrite<NpmProxyKey>({
-            writtenKeys: written,
-            writtenValue: url,
+            written,
             snapshot,
             readCurrent: key => this.readCurrentProxyValue(key),
             restore: async (key, previous) => {

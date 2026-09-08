@@ -13,3 +13,6 @@
 | TLC-SYNC-RELIABLE-MEDIUM | Safety/Liveness/deadlock pass | passed | 2026081512 | 489 / 146 | 8 | false |
 | TLC-SYNC-LOSS-BOUNDARY | Expected ConvergedWhenQuiescent trace | passed | 2026081513 | 6 / 6 | 3 | false |
 | TLC-SYNC-DIVERGENCE-REACHABILITY | Expected NeverPublishedDivergence trace | passed | 2026081514 | 2 / 2 | 2 | false |
+| TLC-CAS-UNGUARDED-LOST-UPDATE | Expected NoLostUpdate trace | passed | 2026090801 | 127 / 59 | 9 | false |
+| TLC-CAS-GUARDED | Safety/Liveness/deadlock pass | passed | 2026090802 | 129 / 60 | 10 | false |
+| TLC-CAS-LEASE-ABA | Expected MutualExclusion trace | passed | 2026090803 | 65 / 36 | 6 | false |

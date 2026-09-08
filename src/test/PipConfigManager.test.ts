@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import { createFakePipConfig } from './fakeConfigStores';
 import {
     classifyPipConfigError,
     PIP_CONFIG_COMMAND_TIMEOUT_MS,
@@ -45,9 +46,10 @@ function noSuchKeyError(): Error & { code?: string | number; stderr?: string } {
 suite('PipConfigManager Test Suite', () => {
     test('setProxy should write global.proxy through python -m pip config --user', async () => {
         const calls: CommandCall[] = [];
-        const runner: PipCommandRunner = async (command, args) => {
+        const pip = createFakePipConfig();
+        const runner: PipCommandRunner = async (command, args, options) => {
             calls.push({ command, args });
-            return { stdout: 'Writing to user config\n', stderr: '' };
+            return pip.runner(command, args, options);
         };
         const manager = new PipConfigManager({
             commandRunner: runner,
@@ -57,17 +59,26 @@ suite('PipConfigManager Test Suite', () => {
         const result = await manager.setProxy('http://proxy.example.com:8080');
 
         assert.deepStrictEqual(result, { success: true });
-        assert.deepStrictEqual(calls, [{
-            command: 'python3',
-            args: ['-m', 'pip', 'config', '--user', 'set', 'global.proxy', 'http://proxy.example.com:8080']
-        }]);
+        // The write is followed by a read-back: pip exiting 0 is not proof that
+        // the value was persisted (#73).
+        assert.deepStrictEqual(calls, [
+            {
+                command: 'python3',
+                args: ['-m', 'pip', 'config', '--user', 'set', 'global.proxy', 'http://proxy.example.com:8080']
+            },
+            {
+                command: 'python3',
+                args: ['-m', 'pip', 'config', '--user', 'get', 'global.proxy']
+            }
+        ]);
     });
 
     test('uses the shared high-load command timeout by default', async () => {
         let observedTimeout: number | undefined;
-        const runner: PipCommandRunner = async (_command, _args, options) => {
+        const pip = createFakePipConfig();
+        const runner: PipCommandRunner = async (command, args, options) => {
             observedTimeout = options.timeout;
-            return { stdout: 'Writing to user config\n', stderr: '' };
+            return pip.runner(command, args, options);
         };
         const manager = new PipConfigManager({
             commandRunner: runner,
@@ -147,12 +158,13 @@ suite('PipConfigManager Test Suite', () => {
 
     test('should try the next Python candidate when the first command is missing', async () => {
         const calls: CommandCall[] = [];
-        const runner: PipCommandRunner = async (command, args) => {
+        const pip = createFakePipConfig();
+        const runner: PipCommandRunner = async (command, args, options) => {
             calls.push({ command, args });
             if (command === 'python3') {
                 throw commandError('spawn python3 ENOENT', { code: 'ENOENT' });
             }
-            return { stdout: 'Writing to user config\n', stderr: '' };
+            return pip.runner(command, args, options);
         };
         const manager = new PipConfigManager({
             commandRunner: runner,
@@ -165,7 +177,14 @@ suite('PipConfigManager Test Suite', () => {
         const result = await manager.setProxy('http://proxy.example.com:8080');
 
         assert.deepStrictEqual(result, { success: true });
-        assert.deepStrictEqual(calls.map(call => call.command), ['python3', 'python']);
+        // Both pip invocations - the write and the read-back that verifies it -
+        // fall through the missing candidate to the working one.
+        const firstSet = calls.findIndex(call => call.args.includes('set'));
+        assert.deepStrictEqual(
+            calls.slice(firstSet, firstSet + 2).map(call => call.command),
+            ['python3', 'python']
+        );
+        assert.ok(calls.some(call => call.command === 'python' && call.args.includes('get')));
     });
 
     test('should return NOT_INSTALLED when Python or pip cannot be resolved', async () => {

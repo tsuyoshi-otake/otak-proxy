@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import { createFakeNpmConfig } from './fakeConfigStores';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -200,6 +201,7 @@ suite('NpmConfigManager Test Suite', () => {
 
         test('does not invoke cmd.exe when setting a reserved-character credential URL', async () => {
             const calls: Array<{ command: string; args: string[] }> = [];
+            const npm = createFakeNpmConfig();
             const url = 'http://user:x%25OS%25y@proxy.example:8080';
             const windowsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-npm-win-'));
             fs.mkdirSync(path.join(windowsRoot, 'node_modules', 'npm', 'bin'), { recursive: true });
@@ -213,9 +215,9 @@ suite('NpmConfigManager Test Suite', () => {
                     PATHEXT: '.COM;.EXE;.BAT;.CMD'
                 },
                 commandAvailable: () => true,
-                commandRunner: async (command, args) => {
+                commandRunner: async (command, args, options) => {
                     calls.push({ command, args });
-                    return { stdout: '', stderr: '' };
+                    return npm.runner(command, args, options);
                 }
             });
 
