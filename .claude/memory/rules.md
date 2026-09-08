@@ -19,8 +19,14 @@
   分離を用意しているのは `scripts/run-unit-tests.mjs` と `.vscode-test.mjs` の側であって
   mocha ではない。`npx mocha ...` を直に実行すると `GitConfigManager.test.ts` の
   Basic Operations / Round Trip が **実物の `git config --global`** を叩き、
-  開発マシンの `~/.gitconfig` を書き換える。2026-09-09 に実際に発生（`~/.gitconfig` が
-  0 バイトになり `user.email` が消えた）。全件実行の前に必ず:
+  開発マシンの `~/.gitconfig` を書き換える。2026-09-09 に実際に発生し、
+  `~/.gitconfig` が 0 バイトのファイルとして作られた。
+
+  ただし**既存の設定が消えるわけではない**（検証済み: `[user]` セクションを持つ
+  gitconfig に対して `git config --global --replace-all http.proxy <url>` →
+  `--unset-all http.proxy` を実行しても `[user]` は残る）。テストは set した値を
+  unset して片付けるので、元から存在しなかった場合にだけ 0 バイトのファイルが残る。
+  それでも他人のホームディレクトリを汚すので、全件実行の前に必ず:
 
   ```
   GIT_CONFIG_GLOBAL=<temp>/gitconfig NPM_CONFIG_USERCONFIG=<temp>/npmrc npx mocha ...
