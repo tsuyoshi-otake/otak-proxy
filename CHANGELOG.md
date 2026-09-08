@@ -1,5 +1,17 @@
 # Change Log
 
+## [3.2.8] - 2026-09-09
+
+### Fixed
+- Serialize `SharedStateFile.compareAndSwap()` under a publish lease and re-read the version inside the critical section, so two windows that observe the same version can no longer both report `written` (#73).
+- Replace the anonymous mtime-based Git config and instance registry mutexes with an owner-token lease (heartbeat renewal, re-read before reclaim, owner-checked release) so a slow holder can no longer delete a successor's lock (#73).
+- Make Git and npm proxy write verification fail-closed: an unreadable config, a missing key, or a mismatched value is now reported as a failure instead of success (#73).
+- Verify the pip proxy write by reading it back, reporting the key as residual when the written value cannot be confirmed (#73).
+- Judge each npm proxy key against the value written to that key, so a split HTTP/HTTPS proxy is no longer mistaken for an external change during partial-write compensation (#73).
+
+### Changed
+- Consolidate every cross-process critical section on a single `FileLease` primitive (`src/utils/FileLease.ts`) instead of three separate lock implementations (#73).
+
 ## [3.2.7] - 2026-09-05
 
 ### Fixed
