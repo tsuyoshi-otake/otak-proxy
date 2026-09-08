@@ -15,6 +15,17 @@
   全件を見たいときは `out/test/**/*.test.js` から VS Code 依存と `.integration.` を除いた
   一覧を作り、`npx mocha --require ./scripts/vscode-shim.cjs --ui tdd --exit` を直接叩く。
 
+- **mocha を直接叩くときは `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を自分で設定する。**
+  分離を用意しているのは `scripts/run-unit-tests.mjs` と `.vscode-test.mjs` の側であって
+  mocha ではない。`npx mocha ...` を直に実行すると `GitConfigManager.test.ts` の
+  Basic Operations / Round Trip が **実物の `git config --global`** を叩き、
+  開発マシンの `~/.gitconfig` を書き換える。2026-09-09 に実際に発生（`~/.gitconfig` が
+  0 バイトになり `user.email` が消えた）。全件実行の前に必ず:
+
+  ```
+  GIT_CONFIG_GLOBAL=<temp>/gitconfig NPM_CONFIG_USERCONFIG=<temp>/npmrc npx mocha ...
+  ```
+
 - **テスト後にプロセスが本当に終了したか確認する。** `Get-CimInstance Win32_Process` で
   `mocha|vscode-test` を grep。残っていたら CPU を焼き続ける。
 
