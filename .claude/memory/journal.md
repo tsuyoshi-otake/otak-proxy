@@ -101,3 +101,61 @@ VS Code host の 9 失敗は `git stash -u` で HEAD (`cf5ad58`) に戻して再
 5. **Bash ツールのヒアドキュメントはバックスラッシュを食う。**
    `<<'PY'` の中の `\\n` や `\\` が壊れて、パッチスクリプトが無言で不一致になる。
    バックスラッシュを含むスクリプトは Write ツールでファイルに書いてから実行する。
+
+---
+
+## 2026-09-09 — v3.2.8 リリース（#73 の修正を公開）
+
+**Issue**: [#73](https://github.com/tsuyoshi-otake/otak-proxy/issues/73)（PR の `Closes #73` で自動クローズ）
+**PR**: [#74](https://github.com/tsuyoshi-otake/otak-proxy/pull/74)
+**Release commit**: `c81df7f` (`chore(release): 3.2.8`)
+**Merge commit**: `d785daa`
+**Tag**: `v3.2.8`（annotated / `Release v3.2.8`）
+**CI run**: [34249427770](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/34249427770)
+
+### やったこと
+
+3.2.7 → 3.2.8（patch。バグ修正のみで contributed command / setting の増減なし）。
+`d829fa5 chore(release): 3.2.7` と同じ形（`CHANGELOG.md` + `package.json` + `package-lock.json`
+の 3 ファイルだけを触るリリースコミット）を踏襲し、PR 経由で main に merge してから
+main HEAD に annotated tag を打った。タグ push が publish workflow の唯一のトリガ。
+
+### Verification
+
+タグ push は Marketplace / Open VSX への公開を起動する不可逆操作なので、
+push 前に CI と同じゲートをローカルで先に通した。
+
+| ゲート | ローカル (Windows) | CI (Ubuntu, run 34249427770) |
+| --- | --- | --- |
+| `npm run lint` | pass (602 files scanned) | pass |
+| unit | 963 passing / 0 failing（全件、`--bail` なし） | 905 passing（`test:unit:parallel` は `--bail` 付き） |
+| `npm run test:smoke` | 4 passing | 4 passing |
+| `npm run lint:unicode:dist` | pass (282 artifacts) | pass |
+| `vsce package` | — | `otak-proxy-3.2.8.vsix` (157 files, 622.36 KB) |
+| VS Marketplace | — | `Published odangoo.otak-proxy v3.2.8.` |
+| Open VSX | — | `Published odangoo.otak-proxy v3.2.8` |
+
+VS Code extension host の既存 9 失敗はこのリリースの gate ではない
+（publish workflow が回すのは `test:unit:parallel` と `test:smoke` のみ）。
+
+### Learning
+
+1. **タグを打つ前に CI と同じゲートをローカルで通す。**
+   v3.2.7 のときは `chore(release): 3.2.7` に対するタグ run が Linux CI で失敗し、
+   修正コミット (`cf5ad58`) を足して再実行している。タグ push は publish の起動なので、
+   失敗すると「タグは存在するが公開されていない」状態が残る。
+   ローカルで通すべき最小セットは `lint` / `test:unit:parallel` / `test:smoke` /
+   `lint:unicode:dist` の 4 つ（workflow の publish 前ステップと同じ）。
+
+2. **`vsce publish` / `ovsx publish` の成功ログは「アップロード成功」であって
+   「公開反映」ではない。** 両レジストリとも検証・インデックスのパイプラインを挟むため、
+   publish 直後の API は旧バージョンを返す。実測: Open VSX は publish から約 3 分、VS Marketplace は約 5〜6 分で
+   API が新バージョンを返すようになった（それまでは Open VSX が HTTP 404、
+   Marketplace の latest が旧バージョン）。
+   → publish ステップの成功だけを根拠に「公開済み」と報告せず、レジストリ API で
+   実際にバージョンが切り替わったことを確認する。
+
+3. **Open VSX / Marketplace のバージョン一覧に 3.2.4 と 3.2.5 が無い。**
+   どちらのレジストリにも欠けているので、当時のタグ run が publish まで到達しなかった
+   可能性が高い。今回とは無関係だが、リリース後にレジストリ側を確認する習慣がないと
+   こうした取りこぼしに気付けない、という実例。

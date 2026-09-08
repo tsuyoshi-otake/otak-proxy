@@ -70,6 +70,21 @@
   バグの存在証明（`invariant-violation` を expected にする run）と
   修正後の証明（`success`）を対にすると回帰に強い。
 
+## リリース
+
+- **`v*` タグの push が publish の唯一のトリガで、不可逆。** `.github/workflows/publish-vscode.yml`
+  が VS Marketplace と Open VSX の両方に publish する。タグを打つ前に CI と同じゲートを
+  ローカルで通す: `npm run lint` / `npm run test:unit:parallel` / `npm run test:smoke` /
+  `npm run lint:unicode:dist`。VS Code host の全件 (`npm test`) は gate ではない。
+
+- **リリースコミットは `CHANGELOG.md` + `package.json` + `package-lock.json` の 3 ファイルだけ。**
+  版上げは `npm version <x.y.z> --no-git-tag-version`（lifecycle script なし）。
+  タグは annotated で `Release vX.Y.Z`。PR を main に merge してから main HEAD に打つ。
+
+- **`vsce publish` / `ovsx publish` の成功ログは「アップロード成功」であって「公開反映」ではない。**
+  実測で Open VSX 約 3 分 / Marketplace 約 5〜6 分の遅延がある。
+  レジストリ API でバージョンが切り替わるまで「公開済み」と報告しない。
+
 ## ツール操作
 
 - **Bash ツールのヒアドキュメントはバックスラッシュを食う。**
