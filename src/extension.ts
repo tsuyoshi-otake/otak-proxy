@@ -25,6 +25,8 @@ import { getSystemProxyDetector } from './utils/ProxyUtilityInstances';
 import { UserNotifier } from './errors/UserNotifier';
 import { Logger } from './utils/Logger';
 import { ProxyMonitor } from './monitoring/ProxyMonitor';
+import { startWindowsProxyEnvironmentNotification } from './monitoring/WindowsProxyEnvironmentNotification';
+import { WindowsProxyEnvironmentMonitor } from './monitoring/WindowsProxyEnvironment';
 import { ProxyChangeLogger } from './monitoring/ProxyChangeLogger';
 import { I18nManager } from './i18n/I18nManager';
 import { StatusBarManager } from './ui/StatusBarManager';
@@ -52,6 +54,7 @@ let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
 let proxyRemediationService: ProxyRemediationService;
 let userNotifier: UserNotifier;
+let environmentNotificationMonitor: WindowsProxyEnvironmentMonitor | undefined;
 
 // The first-run setup prompt is user-driven and may remain open indefinitely.
 // It must not block activation or command availability.
@@ -521,6 +524,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     Logger.log('Extension "otak-proxy" is now active.');
 
     initializeI18n();
+    environmentNotificationMonitor?.dispose();
+    environmentNotificationMonitor = startWindowsProxyEnvironmentNotification();
+    if (environmentNotificationMonitor) {
+        context.subscriptions.push(environmentNotificationMonitor);
+    }
     const services = createCoreServices(context);
     initializeCoreManagers(context, services);
     initializeSync(context);
@@ -605,6 +613,8 @@ async function settleStartupApplication(timeoutMs: number): Promise<void> {
 }
 
 export async function deactivate(): Promise<void> {
+    environmentNotificationMonitor?.dispose();
+    environmentNotificationMonitor = undefined;
     // Supersede any in-flight startup task so it does not start monitoring/sync
     // after teardown (e.g. if the bounded settle below times out), then let it
     // settle (bounded) before tearing down so we do not stop it mid-apply (#12).

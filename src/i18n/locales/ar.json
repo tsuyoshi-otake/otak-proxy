@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "تختلف متغيرات بيئة الوكيل المحفوظة في Windows عن عملية VS Code الحالية: {names}. احفظ عملك، وأغلق جميع نوافذ VS Code بالكامل، ثم أعد تشغيله وافتح نوافذ طرفية جديدة. قد لا تؤدي إعادة تحميل النافذة وحدها إلى تحديث البيئة.",
     "extension.description": "إدارة الوكيل بنقرة واحدة لـ VSCode وGit وnpm والأطراف الطرفية المدمجة.",
     "command.toggleProxy": "otak: تبديل الوكيل",
     "command.testProxy": "otak: اختبار الوكيل",

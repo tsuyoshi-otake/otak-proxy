@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Windows में सहेजे गए प्रॉक्सी पर्यावरण चर इस VS Code प्रक्रिया से अलग हैं: {names}। अपना काम सहेजें, सभी VS Code विंडो पूरी तरह बंद करें, VS Code फिर शुरू करें और नए टर्मिनल खोलें। केवल विंडो फिर लोड करने से पर्यावरण अपडेट नहीं हो सकता है।",
     "extension.description": "VSCode, Git, npm और इंटीग्रेटेड टर्मिनल के लिए एक-क्लिक proxy प्रबंधन।",
     "command.toggleProxy": "otak: Proxy टॉगल करें",
     "command.testProxy": "otak: Proxy परीक्षण करें",

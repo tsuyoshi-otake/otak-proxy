@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Windows に保存されたプロキシ環境変数（{names}）が、現在の VS Code の環境と異なります。作業を保存し、すべての VS Code を完全に終了してから起動し直し、ターミナルも開き直してください。ウィンドウの再読み込みだけでは反映されない場合があります。",
     "extension.description": "VSCode、Git、npm、統合ターミナルのProxyをワンクリックで管理します。",
     "command.toggleProxy": "otak: Proxyを切り替え",
     "command.testProxy": "otak: Proxyをテスト",

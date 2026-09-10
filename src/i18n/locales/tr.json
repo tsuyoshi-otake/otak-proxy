@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Windows’ta kaydedilen proxy ortam değişkenleri bu VS Code işleminden farklı: {names}. Çalışmanızı kaydedin, tüm VS Code pencerelerini tamamen kapatıp yeniden başlatın ve yeni terminaller açın. Pencereyi yeniden yüklemek ortamı güncellemeyebilir.",
     "extension.description": "VSCode, Git, npm ve entegre terminaller için tek tıkla proxy yönetimi.",
     "command.toggleProxy": "otak: Proxy'yi Aç/Kapat",
     "command.testProxy": "otak: Proxy'yi Test Et",

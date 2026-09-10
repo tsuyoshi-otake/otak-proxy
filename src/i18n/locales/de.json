@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Die in Windows gespeicherten Proxy-Umgebungsvariablen unterscheiden sich von diesem VS Code-Prozess: {names}. Speichern Sie Ihre Arbeit, beenden Sie alle VS Code-Fenster vollständig, starten Sie VS Code neu und öffnen Sie neue Terminals. Das Neuladen des Fensters aktualisiert die Umgebung möglicherweise nicht.",
     "extension.description": "Proxy-Verwaltung per Klick für VSCode, Git, npm und integrierte Terminals.",
     "command.toggleProxy": "otak: Proxy umschalten",
     "command.testProxy": "otak: Proxy testen",
