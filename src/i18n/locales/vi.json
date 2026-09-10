@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Biến môi trường proxy đã lưu trong Windows khác với tiến trình VS Code hiện tại: {names}. Hãy lưu công việc, thoát hoàn toàn mọi cửa sổ VS Code, khởi động lại và mở terminal mới. Chỉ tải lại cửa sổ có thể không cập nhật môi trường.",
     "extension.description": "Quản lý proxy cho VS Code, Git, npm và terminal tích hợp chỉ với một thao tác.",
     "command.toggleProxy": "otak: Bật/tắt Proxy",
     "command.testProxy": "otak: Kiểm tra Proxy",

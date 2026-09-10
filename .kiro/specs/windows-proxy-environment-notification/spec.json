@@ -1,0 +1,7 @@
+{
+  "feature_name": "windows-proxy-environment-notification",
+  "language": "ja",
+  "tracking_issue": 76,
+  "phase": "implementation-complete",
+  "authorization": "ユーザーが設計・Issue作成・対応を依頼し、検出・適用を変えず不一致を通知する方針を明示選択した"
+}

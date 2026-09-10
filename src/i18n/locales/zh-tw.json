@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Windows 中儲存的 Proxy 環境變數與目前 VS Code 處理程序不同：{names}。請儲存工作，完全結束所有 VS Code 視窗後重新啟動，並開啟新終端機。僅重新載入視窗可能不會更新環境。",
     "extension.description": "一鍵管理 VS Code、Git、npm 和整合式終端機的代理設定。",
     "command.toggleProxy": "otak: 切換代理",
     "command.testProxy": "otak: 測試代理",

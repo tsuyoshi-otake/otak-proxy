@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Windows에 저장된 프록시 환경 변수가 현재 VS Code 프로세스와 다릅니다: {names}. 작업을 저장하고 모든 VS Code 창을 완전히 종료한 뒤 다시 실행하고 새 터미널을 여세요. 창 다시 로드만으로는 환경이 갱신되지 않을 수 있습니다.",
     "extension.description": "VS Code, Git, npm 및 통합 터미널의 프록시를 한 번의 클릭으로 관리합니다.",
     "command.toggleProxy": "otak: 프록시 전환",
     "command.testProxy": "otak: 프록시 테스트",

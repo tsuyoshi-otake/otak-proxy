@@ -1,5 +1,11 @@
 # Change Log
 
+## [3.2.9] - 2026-09-10
+
+### Added
+- Notify Windows users when saved `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, or `NO_PROXY` values have not reached the current VS Code process, without exposing proxy URLs or credentials (#76).
+- Explain that VS Code must be fully restarted and existing terminals reopened before the updated environment takes effect (#76).
+
 ## [3.2.8] - 2026-09-09
 
 ### Fixed

@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Variabel lingkungan proxy yang tersimpan di Windows berbeda dari proses VS Code ini: {names}. Simpan pekerjaan Anda, tutup sepenuhnya semua jendela VS Code, mulai ulang, dan buka terminal baru. Memuat ulang jendela saja mungkin tidak memperbarui lingkungan.",
     "extension.description": "Manajemen proxy sekali klik untuk VSCode, Git, npm, dan terminal terintegrasi.",
     "command.toggleProxy": "otak: Alihkan Proxy",
     "command.testProxy": "otak: Uji Proxy",

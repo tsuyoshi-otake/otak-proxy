@@ -129,6 +129,10 @@ macOS: services are enumerated with `networksetup -listallnetworkservices` (disa
 
 ### Integrated Terminal Environment
 
+ローカル Windows では、保存済みのユーザー・システム環境変数 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` と、現在の VS Code プロセスの値に食い違いがある場合、該当する**変数名**を通知します。比較ではユーザー設定を優先し、値や認証情報は通知に表示しません。フォーカス中に起動時・約 60 秒間隔で確認し、同じ不一致の通知を抑制します。読み取り失敗時は確認間隔を延ばします。`otakProxy.notificationLevel: "off"` で通知を無効にできます。
+
+通知された場合は作業を保存し、すべての VS Code を完全に終了してから起動し直し、ターミナルも開き直してください。ウィンドウの再読み込みだけでは環境が更新されない場合があります。起動元のランチャーやシェルにも古い環境が残る場合は、そちらの再起動や再サインインが必要になることがあります。この通知機能は環境変数の書き換えや Auto の検出・適用を行いません。起動時からプロセスにだけ存在する設定は意図的な一時設定と区別できないため、通知しません。保存値を一度確認した後の削除は通知対象です。
+
 When the proxy is enabled, otak-proxy sets these variables for **newly created** VS Code integrated terminals:
 
 - `HTTP_PROXY` / `HTTPS_PROXY`

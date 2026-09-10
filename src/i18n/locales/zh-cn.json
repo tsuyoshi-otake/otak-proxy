@@ -1,4 +1,5 @@
 {
+    "warning.proxyEnvironmentRestart": "Windows 中保存的代理环境变量与当前 VS Code 进程不同：{names}。请保存工作，完全退出所有 VS Code 窗口后重新启动，并打开新终端。仅重新加载窗口可能不会刷新环境。",
     "extension.description": "一键管理 VS Code、Git、npm 和集成终端的代理设置。",
     "command.toggleProxy": "otak: 切换代理",
     "command.testProxy": "otak: 测试代理",
