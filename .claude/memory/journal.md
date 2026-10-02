@@ -287,3 +287,57 @@ merge 前に fresh-context レビュー（sonnet）を 1 回かけ、指摘 8 �
    「失敗した書き込みは観測対象が無いので issue が出ない」ケースで食い違った。
    派生フィールドは `runtimeState` から導く。
    → rules.md「診断レポート」に昇格。
+
+## 2026-10-02 — README.md の最新化と英語統一
+
+**Branch**: `docs/readme-english-refresh`（main `dad2b3e` から作成）
+**Issue**: [#81](https://github.com/tsuyoshi-otake/otak-proxy/issues/81)（ユーザー依頼「README.mdを最新化して言語も英語で統一」）
+**PR**: [#82](https://github.com/tsuyoshi-otake/otak-proxy/pull/82)
+**Commit**: `8c4b50d`（README）
+
+### Symptom
+
+- README.md の Windows 環境変数チェックの説明（旧 132–134 行）だけが日本語だった。
+- コードと README の食い違いが 10 件あった。
+
+### 食い違いと修正
+
+| # | README（修正前） | コード上の事実 | 根拠 |
+| --- | --- | --- | --- |
+| 1 | pip に触れていない | user `global.proxy` を書く。Windows は `py` → `python` → `python3`、それ以外は `python3` → `python`。未導入なら skippedUnavailable | `src/config/PipConfigManager.ts:70-83`、`ProxyConfigTargetRunner.ts` |
+| 2 | Off は管理対象を消す | 所有 fingerprint と一致する値だけを消し、外部の値は残す (#27) | `ProxyApplier.ts:659-695`、`ValueAwareUnset.ts` |
+| 3 | `ask` は「ローカルで確認」 | 公開 URL fingerprint ごと・マシンごとに 1 回確認。同意前のバックグラウンド適用はスキップ。`block` は適用全体を止める | `ProxyRemediationService.ts:529-575` |
+| 4 | `ignoreSelfWrittenVSCodeProxy` が無い | 既定 true の設定として存在 | `package.json:120`、`SystemProxyDetector.ts:229-247` |
+| 5 | `legacyEnvFirstAutoDetection` は v2 順序を保つ | 読み込まれるだけで、どこからも使われない（効果なし） | `V3Settings.ts:61` |
+| 6 | `diagnosticsEnabled` は diagnose コマンドにも効く | apply 後の自動診断だけが見る。コマンドは設定を無視する | `ProxyRemediationService.ts:403`、`DiagnoseProxyCommand.ts:167-170` |
+| 7 | 診断キャッシュの説明が一般論 | コマンドは常に最新値。自動診断も成功・リトライ・ロック待ちスキップの後は最新値。キャッシュを使うのは「失敗してリトライしない」と「認証情報ポリシーで止まった」の 2 つだけ | `ProxyRemediationService.ts:135,164,247-248,356` |
+| 8 | 初回プロンプトの記載なし | Auto (System) / Manual Setup / Skip | `InitialSetupFlow.ts:26-31` |
+| 9 | フォールバックの事前テストの記載が曖昧 | Auto へのトグル時、システム proxy が無ければ到達確認してから使う | `ToggleProxyCommand.ts:143-163,226-240` |
+| 10 | VSIX 手順が `otak-proxy-3.1.4.vsix` と `npx @vscode/vsce` | `npm ci` → `npm run package:vsix` | `package.json` scripts |
+
+あわせて：
+- 設定表に範囲（最小–最大）を追加。
+- ⚠ が「失敗またはブロック時に任意の状態のアイコンを置き換える」ことを追記。
+- 言語一覧を「英語名 (自称)」に変更。
+- 表現を全体的に平易にした。
+
+ASCII 図 2 つ（トグル図、Status Indicators 図）は HEAD とバイト一致のまま。冒頭図はキャプションに pip を追加しただけ。
+
+### Verification
+
+- `npm run lint:unicode`: pass（612 files scanned）
+- 改行: 384 行すべて CRLF（Write ツールは LF で書くので、書いたあとに変換した）
+- fresh-context の rubric-verifier（sonnet）で 13 項目を照合
+  - 初回: C9（診断キャッシュの説明が過大）だけ fail。軽微な指摘が 2 件（`diagnosticsEnabled` と `legacyEnvFirstAutoDetection` の文言）
+  - 修正後の再判定 1 回目: 5 項目中 4 項目 pass。C9 はまだ過大（ロック待ちのスキップは最新値を読む: `ProxyRemediationService.ts:164`）
+  - 再判定 2 回目: C9 pass、CRLF pass。全項目 pass
+- 残存リスク: 実機での表示確認はしていない（Markdown のレンダリングは GitHub / Marketplace 依存）
+
+### Learning
+
+1. **README の設定説明は `package.json` / `en.json` の description を写さず、読み手のコードを確認する。**
+   `diagnosticsEnabled` の description（en.json:243）は「diagnose コマンドでも」と書いているが、コマンドは設定を見ない。
+   description 自体が間違っていることがある。
+2. **キャッシュの有無は呼び出し元ごとに違う。** 「診断はキャッシュする」は `run()` の能力の説明で、実際の呼び出し元（コマンド、apply 成功後、失敗後、ロック待ちスキップ後）の挙動ではなかった。
+   「失敗・スキップ」のようにまとめた言い方は、分岐ごとに引数を確認してから書く（スキップでも理由によって挙動が逆だった）。
+3. **Write ツールは LF で書く。** CRLF の作業ツリー（core.autocrlf=true、.gitattributes なし）では、書いたあとに CRLF へ戻して件数を確認する。
