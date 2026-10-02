@@ -341,3 +341,60 @@ ASCII 図 2 つ（トグル図、Status Indicators 図）は HEAD とバイト�
 2. **キャッシュの有無は呼び出し元ごとに違う。** 「診断はキャッシュする」は `run()` の能力の説明で、実際の呼び出し元（コマンド、apply 成功後、失敗後、ロック待ちスキップ後）の挙動ではなかった。
    「失敗・スキップ」のようにまとめた言い方は、分岐ごとに引数を確認してから書く（スキップでも理由によって挙動が逆だった）。
 3. **Write ツールは LF で書く。** CRLF の作業ツリー（core.autocrlf=true、.gitattributes なし）では、書いたあとに CRLF へ戻して件数を確認する。
+
+## 2026-10-02 — v3.2.11 リリース（README の英語化と最新化を公開）
+
+**Issue**: [#81](https://github.com/tsuyoshi-otake/otak-proxy/issues/81)（#82 の merge でクローズ済み。リリース PR は `Refs`）
+**PR**: [#83](https://github.com/tsuyoshi-otake/otak-proxy/pull/83)
+**Commits**: `4ab0a2a`（README のレビュー指摘）、`1751d97`（Issue テンプレートのリンク）、`169f52f`（`chore(release): v3.2.11`）
+**Merge commit**: `08916be`
+**Tag**: `v3.2.11`（annotated / `Release v3.2.11`）
+**CI run**: [37003590405](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/37003590405)
+
+前のエントリ（README の最新化）の PR #82 は `df96ce6` で merge 済み。
+
+### やったこと
+
+3.2.10 → 3.2.11（patch。拡張のコード変更なし）。Marketplace と Open VSX の掲載ページは VSIX 内の README を表示するので、#82 の README は新しい版を出すまで利用者に見えなかった。
+
+1. **merge 済み #82 への Codex 指摘 2 件（P2）を修正**（`4ab0a2a`）
+   - フォールバック proxy の到達確認は、ステータスバーから Auto にしてシステム proxy が無いときだけ実行される（`ToggleProxyCommand.ts`）。初回セットアップで入力した URL は確認なしで適用される（`InitialSetupFlow.handleManualSetup`）。README は「Auto にするとき」とだけ書いていて、すべての経路で確認するように読めた。
+   - managed mismatch は、記録上 configured の対象（`gitConfigured` / `npmConfigured` / `vscodeConfigured`）だけが報告対象（`ProxyRuntimeDiagnostics.ts` `collectManagedConvergenceIssues`）。configured フラグは失敗・skippedUnavailable では前の値を保つ（`ProxyConfigStateTracker.ts` `nextConfiguredState`）ので、「最後の apply で」とは書かず「記録している」とした。
+   - あわせて、Off 時に otak-proxy が書いていない値として残したもの（`targetOutcomes.<target> === 'preservedExternal'`）の残留は advisory（`advisoryResidualRisk`）であって失敗ではない、と追記した。
+2. **Issue テンプレートのリンク修正**（`1751d97`）
+   - リリース前チェック（CLAUDE.md の MUST）で、`.github/ISSUE_TEMPLATE/` の 5 ファイルが前の所有者アカウントのリポジトリを指していることが分かった。`tsuyoshi-otake/otak-proxy` に直した。
+   - Discussions は無効（`hasDiscussionsEnabled: false`）なので、`config.yml` の Discussions へのリンクは削除した。
+3. **リリースコミット**（`169f52f`）: `npm version 3.2.11 --no-git-tag-version` と CHANGELOG。3 ファイルだけ。
+
+### リリース前チェックの結果（CLAUDE.md の MUST）
+
+| 観点 | 結果 | 対応 |
+| --- | --- | --- |
+| tracked files の個人情報らしき文字列 | テストの fixture（example.com 等）と、上記の Issue テンプレートのリンクだけ | テンプレートは `1751d97` で修正 |
+| コミット履歴の author / committer | 前のアカウント名と勤務先ドメインのメールアドレスのコミットが 50 件、`unknown` 名でローカルドメインのコミットが 2 件 | **未対応**。直すには履歴の書き換えと force push が必要で、既存タグとリリースがすべて壊れる。リポジトリはすでに public で、VSIX には git 履歴が入らないので、リリースは止めずにユーザー判断に回した |
+| 公開設定・タグ・リリース | PUBLIC。`v3.2.11` タグは未作成だった。GitHub Release の最新は v3.2.9（v3.2.10 は作っていない） | 先例に合わせ、v3.2.11 も GitHub Release は作らない |
+| LICENSE | MIT あり | — |
+
+### Verification
+
+| ゲート | ローカル (Windows) | CI (Ubuntu, run 37003590405) |
+| --- | --- | --- |
+| `npm run lint` | pass (612 files scanned) | pass (596 files scanned) |
+| unit | 930 + 58 passing / 0 failing | 930 + 57 passing（v3.2.10 と同じく 1 件差。理由は未確認） |
+| `npm run test:smoke` | 4 passing | 4 passing |
+| `npm run lint:unicode:dist` | pass (289 artifacts) | pass (289 artifacts) |
+| `vsce package` | — | `otak-proxy-3.2.11.vsix` (160 files, 633.13 KB) |
+| VS Marketplace | API で 3.2.11 を確認（12:03:38Z。`lastUpdated` 12:02:27Z、publish 11:56:12Z から約 6 分） | `Published odangoo.otak-proxy v3.2.11.` |
+| Open VSX | API で 3.2.11 を確認（11:58:13Z。11:57:27Z の時点ではまだ 3.2.10。publish 11:56:14Z から 2 分以内） | `Published odangoo.otak-proxy v3.2.11` |
+| 公開された README | 両レジストリの 3.2.11 の README に、`4ab0a2a` で追加した 3 つの文言が入っていることを確認 | — |
+
+テスト後の runner プロセス残存 0 件。PR #83 は Codex レビュー完了（指摘なし）。CodeRabbit は merge 時点でレビュー中だった（ドキュメントと版上げだけなので待たなかった）。
+
+### Learning
+
+1. **README を変えたリリースは、レジストリ側の README まで確認する。** 版が切り替わっても、掲載ページが新しい README か別に確かめないと「README が公開された」とは言えない。
+   - Open VSX: `https://open-vsx.org/api/<publisher>/<name>/<version>` の `files.readme`。
+   - Marketplace: `https://<publisher>.gallery.vsassets.io/_apis/public/gallery/publisher/<publisher>/extension/<name>/<version>/assetbyname/Microsoft.VisualStudio.Services.Content.Details`。`marketplace.visualstudio.com/_apis/public/gallery/publishers/.../assetbyname/...` は 404 だった。
+   → rules.md「リリース」に追加。
+2. **リリース前チェックで `.github/` の中も検索する。** 前の所有者アカウントの URL が Issue テンプレートに残っていた。ソースや README だけを見ていると見落とす。`git grep` の対象はリポジトリ全体にする。
+3. **公開遅延の実測は今回も同じだった**（Open VSX 約 2 分、Marketplace 約 6 分）。rules.md の値は変えない。
