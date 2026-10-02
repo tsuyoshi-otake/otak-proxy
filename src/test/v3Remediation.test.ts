@@ -4,10 +4,14 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
+import { createFencedApply } from '../core/GenerationFence';
+import { captureLogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult } from '../core/ProxyApplierTypes';
-import { ProxyMode } from '../core/types';
+import { saveProxyConfigResults } from '../core/ProxyConfigStateTracker';
+import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../core/types';
 import { ProxyIssue } from '../core/v3Types';
 import { ProxyDiagnosticReport, ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
+import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { ApplyLockRequest, ApplyLockService } from '../remediation/ApplyLockService';
 import { FlapTracker, FlapTrackerSettings } from '../remediation/FlapTracker';
 import { ProxyRemediationService } from '../remediation/ProxyRemediationService';
@@ -101,6 +105,10 @@ function diagnosticReport(issues: ProxyIssue[] = []): ProxyDiagnosticReport {
     return {
         generatedAt: new Date(0).toISOString(),
         runtimeState: 'diagnosed',
+        recordedRuntimeState: 'diagnosed',
+        desired: { mode: ProxyMode.Off, proxyEnabled: false },
+        // The report contract ties converged to runtimeState === 'applied'.
+        converged: false,
         executionContext: {
             uiKind: 'desktop',
             extensionHostLocation: 'localUi',
@@ -263,6 +271,9 @@ suite('v3 remediation foundation', () => {
             assert.strictEqual(result.retryAttempted, true);
             assert.strictEqual(result.retrySuppressed, false);
             assert.strictEqual(result.diagnosticReport?.issueCount, 0);
+            assert.strictEqual(result.outcome.stopReason, 'converged');
+            assert.strictEqual(result.outcome.retryAttempted, true);
+            assert.ok(!JSON.stringify(result.outcome).includes('s3cr3t'), 'the outcome must not carry credentials');
             assert.deepStrictEqual(calls, [
                 'http://alice:s3cr3t@proxy.example.com:8080',
                 'http://alice:s3cr3t@proxy.example.com:8080'
@@ -312,6 +323,9 @@ suite('v3 remediation foundation', () => {
             assert.strictEqual(result.success, false);
             assert.strictEqual(result.retryAttempted, false);
             assert.strictEqual(calls, 1);
+            assert.strictEqual(result.outcome.stopReason, 'notRetryable');
+            assert.deepStrictEqual(result.outcome.errorTypes, ['CONFIG_ERROR']);
+            assert.ok(!JSON.stringify(result.outcome).includes('configuration is invalid'), 'error messages stay out of the outcome');
         } finally {
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });
@@ -576,6 +590,7 @@ suite('v3 remediation foundation', () => {
                 true,
                 'flap must trip after maxAttempts even though the failing target changes each attempt'
             );
+            assert.strictEqual(results[2].outcome.stopReason, 'flapSuppressed');
         } finally {
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });
@@ -737,6 +752,9 @@ suite('v3 remediation foundation', () => {
                 { enabled: false, silent: undefined },
                 { enabled: false, silent: true }
             ]);
+            assert.strictEqual(result.outcome.stopReason, 'converged');
+            assert.strictEqual(result.outcome.retryAttempted, true);
+            assert.strictEqual(result.outcome.desiredEnabled, false);
             assert.ok(diagnosticOptions.every(option =>
                 typeof option === 'object' &&
                 option !== null &&
@@ -866,6 +884,7 @@ suite('v3 remediation foundation', () => {
             assert.strictEqual(result.success, false);
             assert.strictEqual(calls, 0);
             assert.strictEqual(result.retryAttempted, false);
+            assert.strictEqual(result.outcome.stopReason, 'consentRequired');
         } finally {
             restoreConfig();
         }
@@ -911,6 +930,8 @@ suite('v3 remediation foundation', () => {
             assert.strictEqual(result.success, false);
             assert.strictEqual(result.lockSkipped, true);
             assert.strictEqual(calls, 0);
+            assert.strictEqual(result.outcome.stopReason, 'lockSkipped');
+            assert.strictEqual(service.getLastOutcome()?.stopReason, 'lockSkipped');
         } finally {
             await lockService.release(held.handle);
             restoreConfig();
@@ -1109,5 +1130,203 @@ suite('v3 remediation foundation', () => {
         assert.strictEqual(replaced.ALL_PROXY, undefined);
         assert.strictEqual(replaced.NO_PROXY, '');
         assert.deepStrictEqual(deleted, []);
+    });
+});
+
+/**
+ * #78: every apply request ends with exactly one traceable stop reason, and a
+ * remediation retry composed with the real generation fence reaches the applier.
+ */
+suite('Remediation terminal outcome (#78)', () => {
+    interface FenceHarness {
+        state: ProxyState;
+        realApplies: number;
+        manager: {
+            getState: () => Promise<ProxyState>;
+            saveState: (next: ProxyState) => Promise<void>;
+            commitState: (expected: number, next: ProxyState) => Promise<StateCommitResult>;
+        };
+    }
+
+    function createFenceHarness(initial: ProxyState): FenceHarness {
+        const harness = { state: { revision: 1, ...initial }, realApplies: 0 } as FenceHarness;
+        harness.manager = {
+            getState: async () => ({ ...harness.state }),
+            saveState: async (next: ProxyState) => {
+                harness.state = { ...next, revision: stateRevision(harness.state) + 1 };
+            },
+            commitState: async (expected: number, next: ProxyState): Promise<StateCommitResult> => {
+                if (stateRevision(harness.state) !== expected) {
+                    return { kind: 'superseded', current: { ...harness.state } };
+                }
+                harness.state = { ...next, revision: expected + 1 };
+                return { kind: 'committed', revision: expected + 1, state: { ...harness.state } };
+            }
+        };
+        return harness;
+    }
+
+    /** Composed like extension.ts: ProxyApplier commits its own results, wrapped in the real fence. */
+    function fencedOffApply(harness: FenceHarness) {
+        return createFencedApply(
+            harness.manager,
+            captureLogicalGeneration(harness.state),
+            'manual',
+            async (proxyUrl, enabled) => {
+                const generation = captureLogicalGeneration(harness.state);
+                harness.realApplies += 1;
+                const results = {
+                    gitSuccess: true,
+                    vscodeSuccess: true,
+                    npmSuccess: true,
+                    terminalEnvSuccess: true,
+                    gitOutcome: 'cleared' as const,
+                    vscodeOutcome: 'cleared' as const,
+                    npmOutcome: 'cleared' as const,
+                    terminalEnvOutcome: 'cleared' as const
+                };
+                const committedRevision = await saveProxyConfigResults(
+                    harness.manager as never, enabled, results, new ErrorAggregator(), generation
+                );
+                return { success: true, enabled, proxyUrl, results, errors: [], committedRevision };
+            }
+        );
+    }
+
+    async function withService<T>(
+        settings: Record<string, unknown>,
+        reports: ProxyDiagnosticReport[],
+        run: (service: ProxyRemediationService) => Promise<T>
+    ): Promise<T> {
+        const restoreConfig = stubOtakProxyConfiguration({
+            notificationLevel: 'off',
+            credentialTargetPolicy: 'allowPlaintextTargets',
+            remediationDelayedRetryMs: 0,
+            hostUserLockEnabled: false,
+            ...settings
+        });
+        const service = new ProxyRemediationService(
+            createContext(new Map()),
+            async () => ({ mode: ProxyMode.Off }),
+            {
+                diagnostics: { run: async () => reports.shift() ?? diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+        try {
+            return await run(service);
+        } finally {
+            restoreConfig();
+        }
+    }
+
+    const residual = () => managedConvergenceIssue('git.managedProxyResidual', 'git.global.proxy');
+
+    test('a residual retry through the real generation fence reaches the applier', async () => {
+        const harness = createFenceHarness({ mode: ProxyMode.Off });
+        const result = await withService({}, [diagnosticReport([residual()]), diagnosticReport()], service =>
+            service.applyWithSafety('', false, { trigger: 'manual' }, fencedOffApply(harness))
+        );
+
+        assert.strictEqual(harness.realApplies, 2, 'our own result commit must not discard the retry as stale');
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.outcome.stopReason, 'converged');
+        assert.strictEqual(result.outcome.retryAttempted, true);
+        assert.strictEqual(result.outcome.superseded, false);
+        assert.strictEqual(result.outcome.converged, true);
+    });
+
+    test('a residual that survives the single retry stops as retryExhausted', async () => {
+        const harness = createFenceHarness({ mode: ProxyMode.Off });
+        const result = await withService({}, [diagnosticReport([residual()]), diagnosticReport([residual()])], service =>
+            service.applyWithSafety('', false, { trigger: 'startup' }, fencedOffApply(harness))
+        );
+
+        assert.strictEqual(harness.realApplies, 2, 'bounded: exactly one retry');
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.outcome.stopReason, 'retryExhausted');
+        assert.strictEqual(result.outcome.converged, false);
+        assert.deepStrictEqual(result.outcome.remainingBlockerIds, ['git.managedProxyResidual']);
+        assert.deepStrictEqual(result.outcome.targetOutcomes, {
+            git: 'cleared',
+            vscode: 'cleared',
+            npm: 'cleared',
+            terminalEnv: 'cleared'
+        });
+        assert.ok(!JSON.stringify(result.outcome).includes('stale.example.com'), 'observed values stay out of the outcome');
+    });
+
+    test('a residual with automatic retry disabled stops as retryDisabled without a retry', async () => {
+        const harness = createFenceHarness({ mode: ProxyMode.Off });
+        const result = await withService({ automaticRetryEnabled: false }, [diagnosticReport([residual()])], service =>
+            service.applyWithSafety('', false, { trigger: 'manual' }, fencedOffApply(harness))
+        );
+
+        assert.strictEqual(harness.realApplies, 1);
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.outcome.stopReason, 'retryDisabled');
+        assert.strictEqual(result.outcome.retryAttempted, false);
+    });
+
+    test('a desired-state change before the retry stops as superseded without writing', async () => {
+        const harness = createFenceHarness({ mode: ProxyMode.Off });
+        const apply = fencedOffApply(harness);
+        let first = true;
+        const result = await withService({}, [diagnosticReport([residual()])], service =>
+            service.applyWithSafety('', false, { trigger: 'manual' }, async (proxyUrl, enabled, options) => {
+                const applied = await apply(proxyUrl, enabled, options);
+                if (first) {
+                    first = false;
+                    harness.state = {
+                        ...harness.state,
+                        mode: ProxyMode.Auto,
+                        autoProxyUrl: 'http://proxy.example.com:8080',
+                        revision: stateRevision(harness.state) + 1
+                    };
+                }
+                return applied;
+            })
+        );
+
+        assert.strictEqual(harness.realApplies, 1, 'the superseded retry must not write');
+        assert.strictEqual(result.success, true, 'no work is owed for the replaced generation');
+        assert.strictEqual(result.outcome.stopReason, 'superseded');
+        assert.strictEqual(result.outcome.superseded, true);
+        assert.strictEqual(result.outcome.retryAttempted, false);
+        assert.strictEqual(result.outcome.converged, false, 'superseded is never reported as converged');
+    });
+
+    test('writes without fresh diagnostics stop as unverified, never converged', async () => {
+        const result = await withService({ diagnosticsEnabled: false }, [], service =>
+            service.applyWithSafety('', false, { trigger: 'manual' }, async () => detailedResult(true, [], false))
+        );
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(result.outcome.stopReason, 'unverified');
+        assert.strictEqual(result.outcome.converged, undefined);
+    });
+
+    test('an older request finishing after a newer one does not replace its outcome', async () => {
+        let releaseOlder: () => void = () => undefined;
+        const olderGate = new Promise<void>(resolve => {
+            releaseOlder = resolve;
+        });
+        await withService({}, [], async service => {
+            const older = service.applyWithSafety('', false, { trigger: 'startup' }, async () => {
+                await olderGate;
+                return detailedResult(false, [{ target: 'Git', message: 'denied', errorType: 'CONFIG_ERROR' }], false);
+            });
+            const newer = await service.applyWithSafety('', false, { trigger: 'manual' }, async () =>
+                detailedResult(true, [], false)
+            );
+            releaseOlder();
+            const olderResult = await older;
+
+            assert.strictEqual(olderResult.outcome.stopReason, 'notRetryable');
+            assert.strictEqual(newer.outcome.stopReason, 'converged');
+            assert.ok(olderResult.outcome.attempt < newer.outcome.attempt);
+            assert.strictEqual(service.getLastOutcome()?.attempt, newer.outcome.attempt);
+            assert.strictEqual(service.getLastOutcome()?.stopReason, 'converged');
+        });
     });
 });

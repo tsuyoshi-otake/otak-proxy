@@ -47,7 +47,17 @@ const PROXY_ENV_NAMES = [
 
 export interface ProxyDiagnosticReport {
     generatedAt: string;
+    /** Recorded apply state corrected by this run's issues: never 'applied' while a blocker remains (#78). */
     runtimeState: RuntimeApplyState;
+    /** What the last committed apply recorded, before this run's observation. */
+    recordedRuntimeState: RuntimeApplyState;
+    /** Desired routing from stored state, independent of whether targets converged. */
+    desired: { mode: ProxyMode; proxyEnabled: boolean };
+    /**
+     * Same verdict as runtimeState === 'applied': a recorded failed or blocked apply is not
+     * converged even when this run cannot observe a mismatch (#78).
+     */
+    converged: boolean;
     executionContext: ExecutionContext;
     issueCount: number;
     highestPriorityCategory?: string;
@@ -204,9 +214,14 @@ export class ProxyRuntimeDiagnostics {
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
         const highest = getHighestPriorityIssue(sanitizedIssues);
 
+        const runtimeState = deriveRuntimeApplyStateFromProxyState(state, issues);
+
         return {
             generatedAt: new Date().toISOString(),
-            runtimeState: deriveRuntimeApplyStateFromProxyState(state),
+            runtimeState,
+            recordedRuntimeState: deriveRuntimeApplyStateFromProxyState(state),
+            desired: { mode: state.mode, proxyEnabled: !this.expectsProxyDisabled(state) },
+            converged: runtimeState === 'applied',
             executionContext,
             issueCount: sanitizedIssues.length,
             highestPriorityCategory: highest?.category,

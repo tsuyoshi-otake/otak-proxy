@@ -12,6 +12,7 @@ import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyState
 import { Logger } from '../utils/Logger';
 import { ApplyLockRequest, ApplyLockService } from './ApplyLockService';
 import { FlapTracker, FlapTrackerSettings } from './FlapTracker';
+import { buildRemediationOutcome, RemediationOutcome } from './RemediationOutcome';
 
 export type ProxyApplyTrigger =
     | 'manual'
@@ -44,7 +45,11 @@ export interface SafeProxyApplyResult {
     retryAttempted: boolean;
     retrySuppressed: boolean;
     lockSkipped: boolean;
+    /** Secret-free terminal record of this request, including why it stopped (#78). */
+    outcome: RemediationOutcome;
 }
+
+type UnrecordedApplyResult = Omit<SafeProxyApplyResult, 'outcome'>;
 
 interface ConvergenceRetryResult {
     applyResult: ProxyApplyDetailedResult;
@@ -96,6 +101,8 @@ export class ProxyRemediationService {
     private readonly diagnostics: ProxyRuntimeDiagnostics;
     private readonly sleep: (ms: number) => Promise<void>;
     private readonly redactor = new ProxySecretRedactor();
+    private attemptSequence = 0;
+    private lastOutcome: RemediationOutcome | undefined;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -108,29 +115,38 @@ export class ProxyRemediationService {
         this.sleep = options.sleep ?? defaultSleep;
     }
 
+    /**
+     * Terminal record of the most recently started request that has finished in
+     * this window. A request that finishes after a newer one never replaces it.
+     */
+    getLastOutcome(): RemediationOutcome | undefined {
+        return this.lastOutcome;
+    }
+
     async applyWithSafety(
         proxyUrl: string,
         enabled: boolean,
         options: SafeProxyApplyOptions,
         applyDetailed: ProxyApplyDetailedDelegate
     ): Promise<SafeProxyApplyResult> {
+        const attempt = ++this.attemptSequence;
         const settings = readV3Settings();
         if (!(await this.ensureCredentialTargetConsent(proxyUrl, options, settings))) {
             const diagnosticReport = await this.runDiagnosticsIfEnabled(settings);
-            return {
+            return this.recordOutcome(attempt, enabled, options, settings, {
                 success: false,
                 diagnosticReport,
                 retryAttempted: false,
                 retrySuppressed: false,
                 lockSkipped: false
-            };
+            }, true);
         }
 
         const targets = this.getWriteTargets();
         const task = async () => await this.applyInsideLocks(proxyUrl, enabled, options, applyDetailed, settings);
 
         if (!settings.hostUserLockEnabled) {
-            return await task();
+            return this.recordOutcome(attempt, enabled, options, settings, await task());
         }
 
         const lockResult = await this.lockService.withLocks(targets, DEFAULT_LOCK_TTL_MS, task, {
@@ -138,7 +154,7 @@ export class ProxyRemediationService {
             sleep: this.sleep
         });
         if (lockResult.acquired) {
-            return lockResult.value;
+            return this.recordOutcome(attempt, enabled, options, settings, lockResult.value);
         }
 
         // Fresh diagnostics AFTER the bounded wait: by now the winning window
@@ -148,13 +164,54 @@ export class ProxyRemediationService {
         const diagnosticReport = await this.runDiagnosticsIfEnabled(settings, true);
         Logger.warn('Skipped proxy apply because another otak-proxy window still owns the apply lock after the bounded wait.');
         this.notifyAfterApply(() => this.notifyLockDivergenceIfNeeded(diagnosticReport, settings, options));
-        return {
+        return this.recordOutcome(attempt, enabled, options, settings, {
             success: false,
             diagnosticReport,
             retryAttempted: false,
             retrySuppressed: false,
             lockSkipped: true
-        };
+        });
+    }
+
+    private recordOutcome(
+        attempt: number,
+        enabled: boolean,
+        options: SafeProxyApplyOptions,
+        settings: V3Settings,
+        result: UnrecordedApplyResult,
+        consentDenied = false
+    ): SafeProxyApplyResult {
+        const applyResult = result.applyResult;
+        const retryableFailure = applyResult !== undefined && (
+            applyResult.success
+                ? this.getRetryableConvergenceIssue(result.diagnosticReport) !== undefined
+                : this.hasRetryableErrorType(applyResult)
+        );
+        const outcome = buildRemediationOutcome({
+            attempt,
+            trigger: options.trigger,
+            finishedAt: Date.now(),
+            desiredEnabled: enabled,
+            success: result.success,
+            applyResult,
+            observedIssues: result.diagnosticReport?.issues,
+            retryAttempted: result.retryAttempted,
+            retrySuppressed: result.retrySuppressed,
+            lockSkipped: result.lockSkipped,
+            consentDenied,
+            retryableFailure,
+            retryEnabled: settings.automaticRemediationEnabled && settings.automaticRetryEnabled
+        });
+        if (!this.lastOutcome || attempt > this.lastOutcome.attempt) {
+            this.lastOutcome = outcome;
+        }
+        if (outcome.stopReason !== 'converged') {
+            Logger.info(
+                `Proxy apply (${outcome.trigger}) stopped: ${outcome.stopReason}` +
+                (outcome.remainingBlockerIds.length > 0 ? `; blockers: ${outcome.remainingBlockerIds.join(', ')}` : '')
+            );
+        }
+        return { ...result, outcome };
     }
 
     private async applyInsideLocks(
@@ -163,7 +220,7 @@ export class ProxyRemediationService {
         options: SafeProxyApplyOptions,
         applyDetailed: ProxyApplyDetailedDelegate,
         settings: V3Settings
-    ): Promise<SafeProxyApplyResult> {
+    ): Promise<UnrecordedApplyResult> {
         let applyResult = await applyDetailed(proxyUrl, enabled, {
             silent: options.silent,
             showProgress: options.showProgress
@@ -206,8 +263,12 @@ export class ProxyRemediationService {
         }
 
         const convergenceIssue = this.getRetryableConvergenceIssue(diagnosticReport);
-        const success = applyResult.success && !convergenceIssue;
-        if (success) {
+        const converged = applyResult.success && !convergenceIssue;
+        // A superseded request owes no further work: the newer generation's own
+        // apply reports its convergence. It is not a real success either, so it
+        // must not reset the flap bucket.
+        const success = Boolean(applyResult.superseded) || converged;
+        if (converged && !applyResult.superseded) {
             await this.flapTracker.reset(fingerprint);
         } else if (!applyResult.success && (retryAttempted || retrySuppressed)) {
             const convergence = await this.flapTracker.recordNonConvergence(
@@ -245,10 +306,14 @@ export class ProxyRemediationService {
     ): boolean {
         return settings.automaticRemediationEnabled &&
             settings.automaticRetryEnabled &&
-            applyResult.errors.some(error =>
-                typeof error.errorType === 'string' &&
-                RETRYABLE_APPLY_ERROR_TYPES.has(error.errorType)
-            );
+            this.hasRetryableErrorType(applyResult);
+    }
+
+    private hasRetryableErrorType(applyResult: ProxyApplyDetailedResult): boolean {
+        return applyResult.errors.some(error =>
+            typeof error.errorType === 'string' &&
+            RETRYABLE_APPLY_ERROR_TYPES.has(error.errorType)
+        );
     }
 
     private async retryOnceForConvergenceIssue(
@@ -278,6 +343,16 @@ export class ProxyRemediationService {
 
         await this.sleep(settings.delayedRetryMs);
         const retriedApplyResult = await applyDetailed(proxyUrl, enabled, { silent: true });
+        if (retriedApplyResult.superseded) {
+            // Nothing was written for this generation, so there is no new
+            // observation to make and no non-convergence to charge.
+            return {
+                applyResult: retriedApplyResult,
+                diagnosticReport,
+                retryAttempted: false,
+                retrySuppressed: false
+            };
+        }
         const retriedDiagnosticReport = await this.runDiagnosticsIfEnabled(settings, true);
         const remainingIssue = this.getRetryableConvergenceIssue(retriedDiagnosticReport);
         if (retriedApplyResult.success && !remainingIssue) {
@@ -310,7 +385,8 @@ export class ProxyRemediationService {
     ): boolean {
         return settings.automaticRemediationEnabled &&
             settings.automaticRetryEnabled &&
-            applyResult.success;
+            applyResult.success &&
+            !applyResult.superseded;
     }
 
     private getRetryableConvergenceIssue(report: ProxyDiagnosticReport | undefined): ProxyIssue | undefined {

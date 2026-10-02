@@ -270,6 +270,12 @@ When otak-proxy starts in Off or Auto: OFF, it also uses the disable path so sta
 
 When `otakProxy.automaticRemediationEnabled` is enabled, otak-proxy performs only bounded safe remediation after apply operations. It retries one eligible apply failure or residual/mismatch convergence issue after `otakProxy.remediationDelayedRetryMs`, then runs fresh diagnostics. Repeated non-converging repairs are suppressed by the flap window and cooldown settings. Host/user locks prevent overlapping writers from multiple windows. Disruptive Windows actions, such as WinHTTP reset, still require an explicit user command and `otakProxy.windowsActionsEnabled`.
 
+The diagnostics report keeps the recorded result and the fresh observation apart:
+
+- `recordedRuntimeState` is what the last apply recorded. `runtimeState` also counts fresh convergence-blocking issues, so a recorded success with a fresh residual is reported as `partial`, not `applied`.
+- `desired` is the selected mode, and `converged` says whether the tool settings actually match it. Off being selected does not by itself mean the settings were cleared. `converged` is `true` only when `runtimeState` is `applied`, so a failed or blocked apply is never reported as converged.
+- `lastRemediation` is the outcome of the most recent proxy apply in this VS Code window: per-target results, whether the retry ran, the stop reason (`converged`, `unverified`, `retryExhausted`, `retryDisabled`, `notRetryable`, `flapSuppressed`, `lockSkipped`, `superseded`, or `consentRequired`), and the remaining blocker IDs. It never contains proxy URLs, credentials, or command output, and it is `null` until the first apply in the window finishes.
+
 ## Language Support
 
 The interface follows your VS Code display language — 16 languages covering all G20 countries:
