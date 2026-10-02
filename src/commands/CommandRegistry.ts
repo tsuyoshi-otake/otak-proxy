@@ -18,6 +18,7 @@ import { executeTestProxy } from './TestProxyCommand';
 import { executeImportProxy } from './ImportProxyCommand';
 import { executeToggleShowProxyUrl } from './ToggleShowProxyUrlCommand';
 import { executeDiagnoseProxy } from './DiagnoseProxyCommand';
+import type { RemediationOutcome } from '../remediation/RemediationOutcome';
 import { executeResetWinHttpProxy } from '../remediation/WindowsProxyActionService';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
@@ -31,6 +32,8 @@ export interface CommandRegistryConfig {
 
     // State management functions
     getProxyState: (context: vscode.ExtensionContext) => Promise<ProxyState>;
+    /** Terminal record of the last apply in this window, shown by the diagnose command (#78). */
+    getLastRemediationOutcome?: () => RemediationOutcome | undefined;
     saveProxyState: (context: vscode.ExtensionContext, state: ProxyState) => Promise<void>;
     getActiveProxyUrl: (state: ProxyState) => string;
     getNextMode: (currentMode: ProxyMode) => ProxyMode;
@@ -187,7 +190,11 @@ export class CommandRegistry {
     private registerDiagnoseProxy(context: vscode.ExtensionContext): void {
         const disposable = vscode.commands.registerCommand(
             'otak-proxy.diagnoseProxy',
-            async () => executeDiagnoseProxy(context, () => this.config.getProxyState(context))
+            async () => executeDiagnoseProxy(
+                context,
+                () => this.config.getProxyState(context),
+                () => this.config.getLastRemediationOutcome?.()
+            )
         );
         context.subscriptions.push(disposable);
     }

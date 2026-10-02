@@ -290,14 +290,17 @@ export class ProxyApplier {
         );
 
         // Track configuration state if stateManager is provided
-        await saveProxyConfigResults(this.stateManager, true, results, errorAggregator, applyGeneration);
+        const committedRevision = await saveProxyConfigResults(this.stateManager, true, results, errorAggregator, applyGeneration);
 
         const success = this.areConfigResultsSuccessful(results);
         
         // Requirement 2.5: Use ErrorAggregator to display all errors together
         this.notifyApplyResult(proxyUrl, options, errorAggregator, capabilityIssues);
 
-        return this.buildDetailedResult(success, true, proxyUrl, results, errorAggregator, capabilityIssues);
+        return {
+            ...this.buildDetailedResult(success, true, proxyUrl, results, errorAggregator, capabilityIssues),
+            committedRevision
+        };
     }
 
     /**
@@ -341,14 +344,17 @@ export class ProxyApplier {
         );
 
         // Track configuration state if stateManager is provided
-        await saveProxyConfigResults(this.stateManager, false, results, errorAggregator, applyGeneration);
+        const committedRevision = await saveProxyConfigResults(this.stateManager, false, results, errorAggregator, applyGeneration);
 
         const success = this.areConfigResultsSuccessful(results);
         
         // Use ErrorAggregator for any failures and UserNotifier for feedback
         this.notifyDisableResult(options, errorAggregator);
 
-        return this.buildDetailedResult(success, false, '', results, errorAggregator);
+        return {
+            ...this.buildDetailedResult(success, false, '', results, errorAggregator),
+            committedRevision
+        };
     }
 
     private emptyResults(): ProxyConfigResults {

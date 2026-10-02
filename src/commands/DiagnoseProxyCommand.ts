@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ProxyState } from '../core/types';
 import { getHighestPriorityIssue, type ProxyIssue } from '../core/v3Types';
 import { ProxyRuntimeDiagnostics, type ProxyDiagnosticReport } from '../diagnostics/ProxyRuntimeDiagnostics';
+import type { RemediationOutcome } from '../remediation/RemediationOutcome';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
@@ -142,9 +143,23 @@ export function formatDiagnosticsNotification(report: Pick<ProxyDiagnosticReport
     });
 }
 
+/**
+ * What the diagnostics channel prints: this run's observation plus the terminal
+ * record of the last apply in this window, so a reader can see both that a
+ * blocker remains and where automatic remediation stopped (#78). `null` means
+ * no apply has finished in this window since activation.
+ */
+export function buildDiagnosticsOutput(
+    report: ProxyDiagnosticReport,
+    lastRemediation: RemediationOutcome | undefined
+): ProxyDiagnosticReport & { lastRemediation: RemediationOutcome | null } {
+    return { ...report, lastRemediation: lastRemediation ?? null };
+}
+
 export async function executeDiagnoseProxy(
     context: vscode.ExtensionContext,
-    getProxyState: () => Promise<ProxyState>
+    getProxyState: () => Promise<ProxyState>,
+    getLastRemediation: () => RemediationOutcome | undefined = () => undefined
 ): Promise<void> {
     const i18n = I18nManager.getInstance();
     const redactor = new ProxySecretRedactor();
@@ -155,7 +170,7 @@ export async function executeDiagnoseProxy(
         const report = await diagnostics.run({ bypassSlowCache: true });
         const channel = getDiagnosticsChannel();
         channel.info(i18n.t('diagnose.generatedAt', { timestamp: String(report.generatedAt) }));
-        channel.info(JSON.stringify(redactor.redactValue(report), null, 2));
+        channel.info(JSON.stringify(redactor.redactValue(buildDiagnosticsOutput(report, getLastRemediation())), null, 2));
         channel.show();
         if (shouldShowDiagnosticsNotification(report)) {
             void vscode.window.showInformationMessage(

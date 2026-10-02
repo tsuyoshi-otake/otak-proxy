@@ -101,4 +101,17 @@ export interface ProxyApplyDetailedResult {
         errorType?: string;
     }>;
     issues?: ProxyIssue[];
+    /**
+     * True when the apply was skipped because a newer logical generation
+     * replaced the one it was started for. Nothing was written; `success` only
+     * means "no work is owed for this generation", never that targets converged.
+     */
+    superseded?: boolean;
+    /**
+     * Revision written by this apply's own result commit. Undefined when that
+     * commit was discarded as stale, could not be attributed, or was not
+     * reported (blocked applies). Only a reported revision lets a generation
+     * fence treat the revision change as its own (#78).
+     */
+    committedRevision?: number;
 }

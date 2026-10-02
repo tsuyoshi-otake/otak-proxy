@@ -8,7 +8,8 @@
  */
 
 import * as vscode from 'vscode';
-import { captureLogicalGeneration, isStaleGeneration } from './core/LogicalGeneration';
+import { captureLogicalGeneration } from './core/LogicalGeneration';
+import { createFencedApply } from './core/GenerationFence';
 import { ProxyMode, ProxyState } from './core/types';
 import { ProxyStateManager } from './core/ProxyStateManager';
 import { ProxyApplier } from './core/ProxyApplier';
@@ -206,31 +207,12 @@ async function applyProxySafely(
     trigger: ProxyApplyTrigger,
     options?: ProxyApplyOptions
 ): Promise<boolean> {
-    const started = captureLogicalGeneration(await proxyStateManager.getState());
-    const applyIfCurrent = async (
-        proxyUrl: string,
-        shouldEnable: boolean,
-        applyOptions?: ProxyApplyOptions
-    ) => {
-        const current = await proxyStateManager.getState();
-        if (isStaleGeneration(started, current)) {
-            Logger.warn(`Discarding stale ${trigger} apply/retry for a superseded generation.`);
-            return {
-                success: true,
-                enabled: shouldEnable,
-                proxyUrl,
-                results: {
-                    gitSuccess: true,
-                    vscodeSuccess: true,
-                    npmSuccess: true,
-                    terminalEnvSuccess: true
-                },
-                errors: []
-            };
-        }
-
-        return proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions);
-    };
+    const applyIfCurrent = createFencedApply(
+        proxyStateManager,
+        captureLogicalGeneration(await proxyStateManager.getState()),
+        trigger,
+        (proxyUrl, shouldEnable, applyOptions) => proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions)
+    );
 
     if (!proxyRemediationService) {
         return (await applyIfCurrent(url, enabled, options)).success;
@@ -327,6 +309,7 @@ function registerExtensionCommands(context: vscode.ExtensionContext, services: C
     createCommandRegistry({
         context,
         getProxyState: () => proxyStateManager.getState(),
+        getLastRemediationOutcome: () => proxyRemediationService?.getLastOutcome(),
         saveProxyState: async (_ctx, s) => {
             await proxyStateManager.saveState(s);
             await publishProxyState(s);

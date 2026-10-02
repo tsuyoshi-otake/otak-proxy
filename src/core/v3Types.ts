@@ -240,8 +240,17 @@ export function createApplyBlockedIssue(
     };
 }
 
-export function deriveRuntimeApplyStateFromProxyState(state: ProxyState): RuntimeApplyState {
-    const issues: ProxyIssue[] = [];
+/**
+ * Runtime state recorded by the last committed apply, optionally corrected by a
+ * fresh observation. Only observed `blocksConvergence` issues are folded in:
+ * they can turn a recorded 'applied' into 'partial' and change nothing else, so
+ * stored success never outvotes what diagnostics just observed (#78).
+ */
+export function deriveRuntimeApplyStateFromProxyState(
+    state: ProxyState,
+    observedIssues: readonly ProxyIssue[] = []
+): RuntimeApplyState {
+    const issues: ProxyIssue[] = observedIssues.filter(issue => issue.impact === 'blocksConvergence');
     if (state.applyBlocked) {
         issues.push(createApplyBlockedIssue(state.applyBlocked));
     } else if (state.lastError || Object.values(state.targetOutcomes ?? {}).some(outcome => outcome === 'failed')) {

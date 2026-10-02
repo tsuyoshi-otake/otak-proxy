@@ -119,6 +119,41 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
         }
     });
 
+    test('a fresh residual turns a recorded success into partial and separates desired Off from convergence (#78)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const runner: CommandRunner = async (command, args) => {
+            if (command === 'git' && args.join(' ') === 'config --global --get http.proxy') {
+                return { stdout: 'http://stale.example.com:3128\n', stderr: '' };
+            }
+            if (args.includes('--json')) {
+                return { stdout: JSON.stringify({ registry: 'https://registry.npmjs.org/' }), stderr: '' };
+            }
+            return { stdout: '', stderr: '' };
+        };
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            createContext(),
+            async () => ({
+                mode: ProxyMode.Off,
+                gitConfigured: false,
+                targetOutcomes: { git: 'cleared', vscode: 'cleared', npm: 'cleared', terminalEnv: 'cleared' }
+            } as ProxyState),
+            { commandRunner: runner }
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            assert.ok(report.issues.some(issue =>
+                issue.id === 'git.managedProxyResidual' && issue.impact === 'blocksConvergence'
+            ));
+            assert.strictEqual(report.recordedRuntimeState, 'applied', 'what the last apply recorded');
+            assert.strictEqual(report.runtimeState, 'partial', 'stored success must not outvote the fresh blocker');
+            assert.deepStrictEqual(report.desired, { mode: ProxyMode.Off, proxyEnabled: false });
+            assert.strictEqual(report.converged, false);
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('reports applyBlocked untrustedWorkspace without leaking proxy credentials', async () => {
         const restoreConfig = stubOtakProxyConfiguration();
         const restoreTrust = (() => {

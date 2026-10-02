@@ -1,7 +1,13 @@
 import * as assert from 'assert';
-import { formatDiagnosticsNotification, shouldShowDiagnosticsNotification } from '../../commands/DiagnoseProxyCommand';
+import {
+    buildDiagnosticsOutput,
+    formatDiagnosticsNotification,
+    shouldShowDiagnosticsNotification
+} from '../../commands/DiagnoseProxyCommand';
 import { ProxyIssue } from '../../core/v3Types';
+import { ProxyDiagnosticReport } from '../../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../../i18n/I18nManager';
+import { RemediationOutcome } from '../../remediation/RemediationOutcome';
 
 suite('DiagnoseProxyCommand Unit Tests', () => {
     suiteSetup(() => {
@@ -120,5 +126,26 @@ suite('DiagnoseProxyCommand Unit Tests', () => {
 
         assert.ok(message.includes('Git/npm diagnostics'));
         assert.ok(message.includes('could not be inspected'));
+    });
+
+    test('diagnostics output carries the last remediation outcome, or an explicit null (#78)', () => {
+        const report = {
+            runtimeState: 'partial',
+            recordedRuntimeState: 'applied',
+            converged: false,
+            issueCount: 1,
+            issues: [issue('git.managedProxyResidual', 'git.global.proxy')]
+        } as unknown as ProxyDiagnosticReport;
+        const outcome = { attempt: 3, stopReason: 'retryExhausted' } as unknown as RemediationOutcome;
+
+        const none = buildDiagnosticsOutput(report, undefined);
+        assert.strictEqual(none.lastRemediation, null, 'absence is stated, not omitted');
+        assert.strictEqual(none.runtimeState, 'partial');
+        assert.strictEqual(none.recordedRuntimeState, 'applied');
+
+        const withOutcome = buildDiagnosticsOutput(report, outcome);
+        assert.strictEqual(withOutcome.lastRemediation, outcome);
+        assert.strictEqual(withOutcome.issues, report.issues);
+        assert.ok(!('lastRemediation' in report), 'the report itself is not mutated');
     });
 });
