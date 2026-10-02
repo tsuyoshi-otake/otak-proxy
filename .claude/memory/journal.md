@@ -159,3 +159,73 @@ VS Code extension host の既存 9 失敗はこのリリースの gate ではな
    どちらのレジストリにも欠けているので、当時のタグ run が publish まで到達しなかった
    可能性が高い。今回とは無関係だが、リリース後にレジストリ側を確認する習慣がないと
    こうした取りこぼしに気付けない、という実例。
+
+## 2026-10-01 — #78 残留検出と成功表示・自己修復の停止理由がつながっていない（コード側の修正）
+
+**Issue**: [#78](https://github.com/tsuyoshi-otake/otak-proxy/issues/78)
+**Base commit**: `d149845`
+**Fix commit**: 未コミット (branch `fix/78-remediation-convergence-state`)
+
+### Symptom
+
+- 診断が `*.managedProxyResidual`（`blocksConvergence`）を出しているのに `runtimeState: applied`（成功表示）になる。
+- 自己修復がどこで・なぜ止まったかを後から追えない。
+- 報告者の端末で修復できなかった直接原因は**未確定**（下記「未確定のもの」）。このエントリはコードで再現できた不整合だけを扱う。
+
+### Root cause（コードで再現できたもの）
+
+1. **A: 修復リトライが自分自身のコミットで stale 扱いされていた。**
+   apply は per-target 結果を CAS で commit し revision を +1 する。リトライは同じ generation fence を使い回すので、
+   2 回目は「別の writer が書いた」と判定されて superseded → 実際には何も書かない no-op が success として返っていた。
+2. **B: `deriveRuntimeApplyStateFromProxyState` が記録済みの `targetOutcomes` だけを見ていた。**
+   新鮮な診断の blocker を加味しないので、記録上の成功が残留を上書きして `applied` を表示していた。
+3. **C: 停止理由の記録が無かった。** retry 実施有無・停止理由・残った blocker を外から観測する手段が無い。
+
+### Fix
+
+- A: `createFencedApply`（`src/core/GenerationFence.ts`）が 1 リクエスト（初回 + リトライ）分の fence を持つ。
+  fence を前進させるのは、apply 自身が報告した `committedRevision === fence.revision + 1` のときだけ。
+  `saveProxyConfigResults` が CAS で書いた revision を返し、`ProxyApplyDetailedResult.committedRevision` で運ぶ。
+  `src/extension.ts` の `applyProxySafely` がこれを使う。
+- B: 観測した `blocksConvergence` issue があれば `applied` → `partial`。
+  診断レポートに `recordedRuntimeState`（記録上の状態）/ `desired`（{mode, proxyEnabled}）/ `converged` を追加し、
+  「desired が Off」と「実際に収束した」を分けた。
+- C: `src/remediation/RemediationOutcome.ts`（stopReason 8 種: consentRequired / lockSkipped / superseded /
+  converged・unverified / retryExhausted / flapSuppressed / retryDisabled / notRetryable、secret-free）。
+  `ProxyRemediationService.getLastOutcome()` は attempt 順で、古い要求の遅い完了が新しい結果を上書きしない。
+  `otak: Diagnose Proxy` の出力に `lastRemediation`（無ければ明示的に `null`）。
+- 変えていないもの: 通知仕様（warnings 既定の抑制、mismatch の diagnostics-only、terminal advisory、lock race）、
+  ステータスバー表示、所有権判定（外部値・読めない値は消さない）、リトライ上限（1 回）。
+
+### Verification
+
+| ゲート | 結果 |
+| --- | --- |
+| `tsc` | clean |
+| `npm run lint` | pass（612 files、invisible Unicode なし） |
+| `npm run test:unit` | 930 + 58 passing / 0 failing（ベースライン 917 + 58 → +13） |
+| `npm test`（VS Code host） | 482 passing / 1 pending / 9 failing。9 件は rules.md の既知 9 件と suite・テスト名で一致。新規 #78 host テスト 7 件は全 pass |
+| `npm run test:smoke` | 4 passing |
+| mutation（`out/core/GenerationFence.js`） | `no-rebase` → FencedApply テスト 1 が fail / `rebase-any` → テスト 3 が fail（両 mutant kill、復元済み） |
+| runner プロセス | 残存なし（`Get-CimInstance Win32_Process` で確認） |
+
+未実施: 報告者端末での実機確認。成功扱いしない。
+
+### 未確定のもの（報告者端末の直接原因）
+
+仮説のみ・未検証。別 Issue 候補:
+
+1. トグル Off の apply が `lockSkipped` でも mode Off だけは保存される。
+2. トグル経路の診断がトグル前の状態を見ている。
+
+### Learning
+
+1. **「revision +1 かつ identity が同じ」という観測では、自分のコミットかどうか判定できない。**
+   Auto OFF は mode と URL を保ったまま revision を進める（`autoModeOff` は `LogicalGeneration` の identity に入っていない）。
+   書いた本人が committed revision を報告する契約にする。最初の実装は観測ベースで誤っており、
+   「他 writer の Auto OFF が apply 中に入る」unit テストで検出した。
+2. **修復リトライのテストは本物の fence 合成を通す。** fake applier だけのテストでは A が見えない
+   （既存の v3Remediation テストは修正前から全部 pass していた）。
+3. **Write ツールは行末空白を削る。** 空白だけの行を含むパッチのアンカーが一致しなくなる。アンカーに空白行を入れない。
+4. **`npm run test:unit` はビルドし直す。** `out/` に mutant を入れて検証するときは、
+   hermetic な `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を付けて mocha を直接叩く。
