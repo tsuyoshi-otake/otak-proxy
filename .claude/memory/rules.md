@@ -100,6 +100,11 @@
   実測で Open VSX 約 3 分 / Marketplace 約 5〜6 分の遅延がある。
   レジストリ API でバージョンが切り替わるまで「公開済み」と報告しない。
 
+- **README を変えたリリースは、レジストリが配信している README まで確認する。** 版の切り替わりだけでは足りない。
+  Open VSX は `https://open-vsx.org/api/<publisher>/<name>/<version>` の `files.readme`。
+  Marketplace は `https://<publisher>.gallery.vsassets.io/_apis/public/gallery/publisher/<publisher>/extension/<name>/<version>/assetbyname/Microsoft.VisualStudio.Services.Content.Details`
+  （`marketplace.visualstudio.com/_apis/public/gallery/publishers/.../assetbyname/...` は 404。v3.2.11 で確認）。
+
 ## ドキュメント
 
 - **README の設定・挙動の説明は、description 文字列ではなく値を読むコードから書く。**
