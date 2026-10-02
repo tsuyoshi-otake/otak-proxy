@@ -273,7 +273,7 @@ When `otakProxy.automaticRemediationEnabled` is enabled, otak-proxy performs onl
 The diagnostics report keeps the recorded result and the fresh observation apart:
 
 - `recordedRuntimeState` is what the last apply recorded. `runtimeState` also counts fresh convergence-blocking issues, so a recorded success with a fresh residual is reported as `partial`, not `applied`.
-- `desired` is the selected mode, and `converged` says whether the tool settings actually match it. Off being selected does not by itself mean the settings were cleared.
+- `desired` is the selected mode, and `converged` says whether the tool settings actually match it. Off being selected does not by itself mean the settings were cleared. `converged` is `true` only when `runtimeState` is `applied`, so a failed or blocked apply is never reported as converged.
 - `lastRemediation` is the outcome of the most recent proxy apply in this VS Code window: per-target results, whether the retry ran, the stop reason (`converged`, `unverified`, `retryExhausted`, `retryDisabled`, `notRetryable`, `flapSuppressed`, `lockSkipped`, `superseded`, or `consentRequired`), and the remaining blocker IDs. It never contains proxy URLs, credentials, or command output, and it is `null` until the first apply in the window finishes.
 
 ## Language Support

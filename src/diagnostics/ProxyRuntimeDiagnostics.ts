@@ -53,7 +53,10 @@ export interface ProxyDiagnosticReport {
     recordedRuntimeState: RuntimeApplyState;
     /** Desired routing from stored state, independent of whether targets converged. */
     desired: { mode: ProxyMode; proxyEnabled: boolean };
-    /** False while any issue from this run blocks convergence. */
+    /**
+     * Same verdict as runtimeState === 'applied': a recorded failed or blocked apply is not
+     * converged even when this run cannot observe a mismatch (#78).
+     */
     converged: boolean;
     executionContext: ExecutionContext;
     issueCount: number;
@@ -211,12 +214,14 @@ export class ProxyRuntimeDiagnostics {
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
         const highest = getHighestPriorityIssue(sanitizedIssues);
 
+        const runtimeState = deriveRuntimeApplyStateFromProxyState(state, issues);
+
         return {
             generatedAt: new Date().toISOString(),
-            runtimeState: deriveRuntimeApplyStateFromProxyState(state, issues),
+            runtimeState,
             recordedRuntimeState: deriveRuntimeApplyStateFromProxyState(state),
             desired: { mode: state.mode, proxyEnabled: !this.expectsProxyDisabled(state) },
-            converged: !issues.some(issue => issue.impact === 'blocksConvergence'),
+            converged: runtimeState === 'applied',
             executionContext,
             issueCount: sanitizedIssues.length,
             highestPriorityCategory: highest?.category,

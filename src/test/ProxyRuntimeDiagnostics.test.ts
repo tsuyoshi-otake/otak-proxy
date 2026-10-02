@@ -154,6 +154,31 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
         }
     });
 
+    test('a recorded failed target is not converged even without a fresh blocker (#78)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration();
+        const diagnostics = new ProxyRuntimeDiagnostics(
+            createContext(),
+            async () => ({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                targetOutcomes: { git: 'failed' }
+            } as ProxyState),
+            { commandRunner: async () => ({ stdout: '', stderr: '' }) }
+        );
+
+        try {
+            const report = await diagnostics.run({ bypassSlowCache: true });
+            assert.ok(
+                !report.issues.some(issue => issue.impact === 'blocksConvergence'),
+                'precondition: the failed write leaves nothing for this run to compare against'
+            );
+            assert.notStrictEqual(report.runtimeState, 'applied');
+            assert.strictEqual(report.converged, false);
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('reports applyBlocked untrustedWorkspace without leaking proxy credentials', async () => {
         const restoreConfig = stubOtakProxyConfiguration();
         const restoreTrust = (() => {
@@ -186,6 +211,7 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
             assert.strictEqual(report.observations.applyBlocked, 'untrustedWorkspace');
             assert.ok(report.issues.some(issue => issue.evidence.applyBlocked === 'untrustedWorkspace'));
             assert.notStrictEqual(report.runtimeState, 'applied');
+            assert.strictEqual(report.converged, false);
             assert.ok(!serialized.includes('s3cr3t'));
         } finally {
             restoreTrust();

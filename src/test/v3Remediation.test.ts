@@ -107,7 +107,8 @@ function diagnosticReport(issues: ProxyIssue[] = []): ProxyDiagnosticReport {
         runtimeState: 'diagnosed',
         recordedRuntimeState: 'diagnosed',
         desired: { mode: ProxyMode.Off, proxyEnabled: false },
-        converged: !issues.some(issue => issue.impact === 'blocksConvergence'),
+        // The report contract ties converged to runtimeState === 'applied'.
+        converged: false,
         executionContext: {
             uiKind: 'desktop',
             extensionHostLocation: 'localUi',
