@@ -1,5 +1,14 @@
 # Change Log
 
+## [3.2.10] - 2026-10-02
+
+### Fixed
+- Let the bounded remediation retry actually reach the tool settings after the first attempt's own result commit. The retry was previously fenced out as superseded and reported success without writing. The fence now follows only the revision the apply itself reports, so another writer's change, including Auto turning off, still stops the retry (#78).
+- Report `runtimeState: partial` instead of `applied` when fresh diagnostics find a convergence-blocking residual or mismatch, and separate the selected state from actual convergence in the diagnostics report (`recordedRuntimeState`, `desired`, `converged`) (#78).
+
+### Added
+- Record why each proxy apply stopped (per-target results, whether the retry ran, the stop reason, remaining blocker IDs) without proxy URLs or credentials, and show the latest one as `lastRemediation` in `otak: Diagnose Proxy State`. An older request that finishes late no longer replaces a newer result (#78).
+
 ## [3.2.9] - 2026-09-10
 
 ### Added
