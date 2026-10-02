@@ -1,5 +1,11 @@
 # Change Log
 
+## [3.2.11] - 2026-10-02
+
+### Changed
+- Rewrite the README in English only and bring it up to date with the current behavior: pip support, value ownership on Off, the credential target policy, first-run setup, the fallback proxy test, diagnostics, and the VSIX build steps (#81).
+- Point the issue template links at the current repository and remove the link to GitHub Discussions, which is not enabled (#81).
+
 ## [3.2.10] - 2026-10-02
 
 ### Fixed
