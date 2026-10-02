@@ -229,3 +229,61 @@ VS Code extension host の既存 9 失敗はこのリリースの gate ではな
 3. **Write ツールは行末空白を削る。** 空白だけの行を含むパッチのアンカーが一致しなくなる。アンカーに空白行を入れない。
 4. **`npm run test:unit` はビルドし直す。** `out/` に mutant を入れて検証するときは、
    hermetic な `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を付けて mocha を直接叩く。
+
+## 2026-10-02 — v3.2.10 リリース（#78 のコード側修正を公開）
+
+**Issue**: [#78](https://github.com/tsuyoshi-otake/otak-proxy/issues/78)（`Refs #78`。報告者端末の直接原因が未確定のためオープンのまま）
+**PR**: [#79](https://github.com/tsuyoshi-otake/otak-proxy/pull/79)
+**Commits**: `a4507ff`（fix）、`82526cd`（memory）、`d23fb0a`（`chore(release): 3.2.10`）、`ee7f8a1`（`converged` の修正）
+**Merge commit**: `f992bce`
+**Tag**: `v3.2.10`（annotated / `Release v3.2.10`）
+**CI run**: [36948677395](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/36948677395)
+
+前のエントリ（2026-10-01 #78）の「Fix commit: 未コミット」は、上の `a4507ff` / `ee7f8a1` が該当する。
+
+### やったこと
+
+3.2.9 → 3.2.10（patch。contributed command / setting の増減なし）。
+リリースコミットは 3.2.8 / 3.2.9 と同じく `CHANGELOG.md` + `package.json` + `package-lock.json` だけ。
+PR を merge commit で main に入れ、main HEAD（`f992bce`）に annotated tag を打って push した。
+
+merge 前に fresh-context レビュー（sonnet）を 1 回かけ、指摘 8 件を分類した。
+
+| 指摘 | 判断 |
+| --- | --- |
+| `converged` が `runtimeState` の failed / partial / awaitingUser と食い違う | 正しい。`ee7f8a1` で `converged = runtimeState === 'applied'` に統一 |
+| superseded を success=true で返す | 意図どおり（修正前の stale stub も成功形）。維持 |
+| `getLastOutcome` の順序、throw 時に古い outcome が残る | 低。follow-up |
+| 停止理由の曖昧さ（consentRequired が平文ポリシーも含む等） | 低 |
+| superseded リトライでも flap を数える | 既存挙動 |
+| fence をロック取得前に capture | 既存挙動（修正前も同じ） |
+| `desired.proxyEnabled` の境界 | 診断自身の `expectsProxyDisabled` と一致 |
+| トグルは apply 後に mode を保存するので、トグル中の診断がトグル前の mode で評価される | 既存の欠陥。仮説 2 の強い根拠。同期の公開順序を変えるため 3.2.10 では直さず #78 に記録 |
+
+### Verification
+
+| ゲート | ローカル (Windows) | CI (Ubuntu, run 36948677395) |
+| --- | --- | --- |
+| `npm run lint` | pass (612 files scanned) | pass (596 files scanned) |
+| unit | 930 + 58 passing / 0 failing | 930 + 57 passing（`--bail` 付き。2 本目がローカルより 1 件少ない理由は未確認） |
+| `npm run test:smoke` | 4 passing | 4 passing |
+| `npm run lint:unicode:dist` | pass (289 artifacts) | pass (289 artifacts) |
+| VS Code extension host 全件 | 483 passing / 9 failing（9 件は既知の既存失敗と同一） | —（publish workflow の gate ではない） |
+| `vsce package` | — | `otak-proxy-3.2.10.vsix` (160 files, 632.68 KB) |
+| VS Marketplace | API で 3.2.10 を確認（01:08:03Z。`lastUpdated` 01:07:07Z、publish から約 6 分） | `Published odangoo.otak-proxy v3.2.10.` |
+| Open VSX | API で 3.2.10 を確認（01:02:59Z。publish 01:00:54Z から 2 分以内） | `Published odangoo.otak-proxy v3.2.10` |
+
+テスト後の runner プロセス残存 0 件。
+
+### Learning
+
+1. **CodeRabbit / Codex は push ごとに再レビューするが、merge のブロッカーではない。**
+   このリポジトリには PR CI も branch protection も無い。`ee7f8a1` の push で CodeRabbit が
+   PENDING に戻ったが、直前の `d23fb0a` に対するレビューは「actionable なし」で、
+   追加コミットはローカルの全ゲートを通した小さな修正だったので、待たずに merge した。
+   大きな追加コミットなら再レビュー完了を待つ。
+2. **レポートの真偽値フィールドは、同じ判定元から 1 回だけ計算する。**
+   `converged` を issue リストから、`runtimeState` を記録 + issue から別々に計算していたため、
+   「失敗した書き込みは観測対象が無いので issue が出ない」ケースで食い違った。
+   派生フィールドは `runtimeState` から導く。
+   → rules.md「診断レポート」に昇格。
