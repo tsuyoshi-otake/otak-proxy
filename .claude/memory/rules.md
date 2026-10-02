@@ -54,6 +54,13 @@
 - **修復リトライのテストは本物の `createFencedApply` を通す。** fake applier だけでは
   「自分のコミットでリトライが superseded になる」欠陥が見えない（#78 で既存テストは全 pass だった）。
 
+## 診断レポート
+
+- **派生フィールドは `runtimeState` から導き、issue リストから別に計算しない。**
+  失敗した書き込みは観測対象が無いので issue が出ず、untrusted workspace は requiresUserDecision で
+  blocksConvergence ではない。別計算だと `runtimeState` と食い違う。`converged` は
+  `runtimeState === 'applied'`（#78, `ee7f8a1`）。
+
 ## 排他制御
 
 - **cross-process な排他は `src/utils/FileLease` だけを使う。** 新しく mtime ベースの
