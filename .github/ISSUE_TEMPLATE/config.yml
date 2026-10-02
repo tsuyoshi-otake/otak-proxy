@@ -1,8 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Existing Issues
-    url: https://github.com/tsuyoshi-otake-system-exe-jp/otak-proxy/issues?q=is%3Aissue
+    url: https://github.com/tsuyoshi-otake/otak-proxy/issues?q=is%3Aissue
     about: Please check if a similar issue already exists
-  - name: Questions & Discussions
-    url: https://github.com/tsuyoshi-otake-system-exe-jp/otak-proxy/discussions
-    about: Please ask questions in Discussions

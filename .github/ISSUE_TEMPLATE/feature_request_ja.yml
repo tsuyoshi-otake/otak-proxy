@@ -7,7 +7,7 @@ body:
       value: |
         ## 重要: Issue作成前の確認事項
         Issue作成の前に、以下の手順で同様の提案がされていないか確認してください：
-        1. [既存のIssue](https://github.com/tsuyoshi-otake-system-exe-jp/otak-proxy/issues)を検索
+        1. [既存のIssue](https://github.com/tsuyoshi-otake/otak-proxy/issues)を検索
         2. 「Open」と「Closed」の両方のIssueを確認
         3. 類似のキーワードで検索
 

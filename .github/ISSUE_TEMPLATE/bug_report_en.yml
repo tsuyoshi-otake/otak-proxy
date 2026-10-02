@@ -7,7 +7,7 @@ body:
       value: |
         ## Important: Before Creating an Issue
         Please check if a similar issue already exists by following these steps:
-        1. Search [existing issues](https://github.com/tsuyoshi-otake-system-exe-jp/otak-proxy/issues)
+        1. Search [existing issues](https://github.com/tsuyoshi-otake/otak-proxy/issues)
         2. Check both "Open" and "Closed" issues
         3. Search with similar keywords (e.g., "proxy", "error")
 
