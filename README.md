@@ -49,7 +49,7 @@ Working behind a corporate proxy usually means editing several configuration fil
 1. Run `otak: Configure Manual Proxy`.
 2. Enter a fallback proxy URL (for example, `http://proxy.example.com:8080`).
 
-Auto mode uses this URL when no system proxy is detected. When you switch to Auto and no system proxy is found, otak-proxy first tests the fallback proxy and uses it only if it is reachable. If the URL includes credentials, read [Security & Privacy](#security--privacy) before allowing otak-proxy to write it to VS Code, Git, npm, or pip configuration files.
+Auto mode uses this URL when no system proxy is detected. When you switch to Auto from the status bar and no system proxy is found, otak-proxy first tests the fallback proxy and uses it only if it is reachable. A URL entered during first-run setup is applied without this test. If the URL includes credentials, read [Security & Privacy](#security--privacy) before allowing otak-proxy to write it to VS Code, Git, npm, or pip configuration files.
 
 ## Capabilities
 
@@ -278,8 +278,8 @@ Run `otak: Diagnose Proxy State` to inspect the current proxy state. Diagnostics
 
 Diagnostics also check whether the actual tool settings match the selected state:
 
-- In Auto with an active proxy, diagnostics report a mismatch when VS Code, Git `http.proxy`, or npm does not hold the expected proxy URL. A leftover Git `https.proxy` is reported for information only, because Git does not route traffic through it.
-- In Off, or in Auto while it shows `Auto: OFF`, diagnostics report a residual when VS Code, Git, or npm still has a proxy configured.
+- In Auto with an active proxy, diagnostics report a mismatch when VS Code, Git `http.proxy`, or npm no longer holds the expected proxy URL. This check covers only the targets that otak-proxy has recorded as configured. A leftover Git `https.proxy` is reported for information only, because Git does not route traffic through it.
+- In Off, or in Auto while it shows `Auto: OFF`, diagnostics report a residual when VS Code, Git, or npm still has a proxy configured. A value that otak-proxy left in place when it cleared proxy settings, because otak-proxy did not write it, is reported as an advisory, not as a failure.
 - In remote, WSL, container, or web extension hosts, local Windows checks that cannot run there are reported as capability limits instead of being forced.
 
 When otak-proxy starts in Off or `Auto: OFF`, it runs the same disable path as switching Off, so leftover VS Code, Git, or npm proxy entries that otak-proxy manages are detected and cleared.
