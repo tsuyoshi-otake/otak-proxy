@@ -917,7 +917,7 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 ## 2026-10-03 — #102 同じ URL の split 変化が、同じチェックのテストで捨てられる不具合の修正（PR #104）
 
 **Issue**: [#102](https://github.com/tsuyoshi-otake/otak-proxy/issues/102)
-**PR**: [#104](https://github.com/tsuyoshi-otake/otak-proxy/pull/104)（未マージ）
+**PR**: [#104](https://github.com/tsuyoshi-otake/otak-proxy/pull/104)（マージ済み、merge commit `025a49b`）
 **コミット**: `6757708`（fix/102-split-change-same-check、基準 `2867a78`）
 
 ### 症状
@@ -961,3 +961,52 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 - scheduler のテストがチェック開始から proxyChanged までの間にコミットすると、proxyChanged はまだ stale になる（scheduler の結果には印がない。`pollingInterval > connectionTestInterval` のときだけ）。
 - 先の handler と proxyChanged の間に toggle / sync がコミットすると、判定は stale のイベントと一緒に消える。状態はその writer のもの。Off で何も有効にならないことはテストで固定した。
 - 実ネットワーク・実 VPN 切替では未確認。
+
+## 2026-10-03 — #103 unit lane の parallel worker ごとに tmpdir と Git / npm 設定を分ける（PR #105）
+
+**Issue**: [#103](https://github.com/tsuyoshi-otake/otak-proxy/issues/103)
+**PR**: [#105](https://github.com/tsuyoshi-otake/otak-proxy/pull/105)（#104 の後にマージ）
+**コミット**: `e42121e`（fix/103-unit-worker-isolation、基準 `2867a78`）
+
+### 症状
+
+- v3.2.15 の 1 回目の unit ゲートで `GitConfigLocking.aba` の slow-holder テストが `Timed out acquiring Git config mutex` で失敗した（単体では 5/5 成功、全体の再実行も成功）。
+- `scripts/run-unit-tests.mjs` は hermetic ディレクトリを消さないので、unit 実行ごとに system temp に `otak-proxy-unit-*` が 1 つ残っていた（この時点で 33 個）。
+
+### 原因
+
+- Git config の mutex は `os.tmpdir()/otak-proxy.gitconfig.mutex` の固定パスで、parallel の全 worker が同じ tmpdir と同じ hermetic gitconfig / npmrc を使っていた。実物の git で書く worker 同士と、インストール済みの拡張がこの 1 ファイルを取り合い、ABA suite はこのファイルを unlink・上書き・mtime 変更する。
+- probe（`scripts/fixtures/unit-isolation/`）で確認した: 修正前は 2 worker（別 pid）が tmpdir、mutex パス、gitconfig、npmrc をすべて共有していた。
+
+### 修正（テスト基盤のみ、`src/` は無変更）
+
+- `scripts/lib/unit-mocha.mjs` の `runUnitMocha()`: run ディレクトリを作って hook に渡し、mocha 終了後に結果に関係なく消す。
+- `scripts/unit-worker-isolation.cjs`（mocha `--require`、shim より前）: プロセスごとのディレクトリを作り、`TEMP` / `TMP` / `TMPDIR` / `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` / `npm_config_userconfig` を向ける。root が無ければ何もしない（直接の mocha 実行は従来どおり）。
+- 後片付けは runner が持つ。`--bail` は worker pool を強制終了するので、worker の exit handler は当てにならない（Issue の提案「worker が終了時に消す」からの変更、PR に明記）。
+- `npm run test:unit:isolation` を追加し、`test:mvp` に組み込んだ。CLAUDE.md の Testing に隔離と範囲外（直接 mocha、拡張ホスト lane）を書いた。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| hook 前（runner の純粋な抽出のみ）の検査 | 9 failures（tmpdir・mutex・gitconfig・npmrc 共有、run ディレクトリ残留） |
+| hook 後の検査 | pass（2 worker） |
+| ミューテーション（隔離の壊し方 8 通り） | 8/8 で検査が失敗 |
+| `npm run test:unit:parallel` × 3 | 各回 1036 + 74 passing、0 failing、mutex timeout なし |
+| `GitConfigLocking.aba` | 3/3 pass（slow-holder 62〜77 ms） |
+| `otak-proxy-unit-*` の数 | 各回の前後で 33 のまま |
+| `npm run lint` | pass |
+| テストランナーの残存プロセス | なし |
+| 独立 verifier（rubric 10 項目） | 10/10 pass（M8 は共有の検出ではなく mocha の異常終了で kill） |
+
+### Learning
+
+1. mocha `--parallel` の worker は `--require` を読む。プロセスごとの環境（tmpdir・設定ファイル）はここで分けられる。モジュール読み込み時に `os.tmpdir()` を固定する定数（`GIT_CONFIG_MUTEX_PATH`）も、hook がテストモジュールより先に動くので worker ごとになる。
+2. worker の後片付けは exit handler に置かない。`--bail` は pool を強制終了する。親（runner）が run ディレクトリを `finally` で消す。
+3. 「worker ごとに分かれている」は、別 pid の 2 worker が実際に何を見たかを probe で記録して確かめる。1 worker で 2 ファイルを走らせた結果では何も比べられないので、pid が 2 つあることも検査の条件にする。
+
+### 残留リスク
+
+- 拡張ホスト lane と直接の mocha 実行は system temp のままで、mutex パスは共有のまま。`scripts/assurance` の runner も未変更。
+- 過去の実行が残した `otak-proxy-unit-*`（33 個）は消していない（ユーザーの判断待ち）。
+- 隔離の検査は system temp の `otak-proxy-unit-*` を前後で比べるので、別の unit 実行と同時に走らせると誤って失敗する。
