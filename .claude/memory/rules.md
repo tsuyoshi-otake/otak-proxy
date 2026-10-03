@@ -15,6 +15,9 @@
   全件を見たいときは `out/test/**/*.test.js` から VS Code 依存と `.integration.` を除いた
   一覧を作り、`npx mocha --require ./scripts/vscode-shim.cjs --ui tdd --exit` を直接叩く。
 
+- **unit lane は worker ごとに tmpdir と Git / npm 設定を分けている（#103）。** `scripts/lib/unit-mocha.mjs` と
+  `scripts/unit-worker-isolation.cjs` が持つ。runner を変えたら `npm run test:unit:isolation` を通す。後片付けは
+  runner の `finally` で行い、worker の exit handler には置かない（`--bail` が worker を強制終了する）。
 - **mocha を直接叩くときは `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を自分で設定する。**
   分離を用意しているのは `scripts/run-unit-tests.mjs` と `.vscode-test.mjs` の側であって
   mocha ではない。`npx mocha ...` を直に実行すると `GitConfigManager.test.ts` の
