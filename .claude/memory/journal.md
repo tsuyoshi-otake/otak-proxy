@@ -770,3 +770,32 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 - 期限切れロックの ABA、読めないロックの 3 ウィンドウ競合と `fs.link` の制約。
 - 通知と挙動の変化（Off / Auto: OFF の PAC/WPAD でロックスキップ通知が出ない、https / bypass だけの変化で通知が出る、`RemediationOutcome` の収束扱い）。
 - `0379c62` のコミットメッセージの「13 mutations killed」は誤りで、正しくは 15（11 + 4）。force push を避けて修正していない。journal の #93 エントリは正しい件数。
+
+## 2026-10-03 — #97 Auto: OFF のまま proxy を有効にする経路の調査と起票（コード変更なし）
+
+**Issue**: [#97](https://github.com/tsuyoshi-otake/otak-proxy/issues/97)（起票、未修正）
+**基準コミット**: `fb74a0b`（main）
+
+### 症状
+
+#93 の独立 verifier の指摘: `Auto: OFF` で、407 / 403 / timeout canary などの失敗テスト結果付きの検出を受けると、`autoModeOff` が `true` のまま proxy が有効になる。
+
+### 原因（コード読み）
+
+`updateAutoModeFromTestResult` は success のときだけ `autoModeOff` を `false` にする。`handleProxyChanged` の `shouldEnable` と `applyReachabilityChange` は `isProxyEndpointReachable`（endpoint unreachable 以外は到達可）で判断する。#67 で Auto OFF の条件を endpoint unreachable に限ったが、戻す条件は success のまま残った。end-to-end では、Auto: OFF（proxy なし）から新しい system proxy が現れて最初のテストが 407 / timeout のとき、`handleProxyTestComplete` は stale、`handleProxyStateChanged` は URL 違いで捨て、`handleProxyChanged` だけが apply する。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| handler 単体の再現 | 一時テスト 2 件（Auto: OFF + 同じ URL + 407、Auto: OFF（proxy なし）+ 新しい URL + timeout）で、どちらも `applyProxySettings(url, true)` が 1 回、apply 時点と終了時の `autoModeOff` が `true` |
+| 一時テストの後始末 | `git checkout` でソースを戻し、`tsc` で `out/` を作り直して `REPRO` が 0 件。mocha プロセスの残存なし |
+| モニタのイベント列 | コード読みだけ。拡張ホスト・実機では未確認 |
+
+### Learning
+
+1. 失敗の分類を変えたら（#67）、状態に入る条件だけでなく、状態から出る条件も同じ分類で見直す。`Auto: OFF` に入る条件は endpoint unreachable に変わったが、出る条件は success のままで、3 つの handler の結論が揃わなくなった。→ rules.md「診断レポート」には書かない（#97 の仕様判断待ち。決まったら rules に昇格する）。
+
+### 残留リスク
+
+- 仕様（A: 到達可の失敗で Auto ON にする / B: success まで有効にしない）が未決。#97 で判断を求めている。
