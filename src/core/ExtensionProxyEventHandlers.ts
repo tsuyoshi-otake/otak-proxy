@@ -13,6 +13,7 @@ import {
     sameLogicalIdentity
 } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
+import type { ManualFallbackOutcome } from './SystemProxyUpdateService';
 import { ProxyMode, ProxyState, ProxyTestResult } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
@@ -22,7 +23,8 @@ export interface StartupTestState {
 
 export async function handleProxyChanged(
     context: InitializerContext,
-    result: ProxyDetectionResult
+    result: ProxyDetectionResult,
+    resolveManualFallback?: (state: ProxyState) => Promise<ManualFallbackOutcome>
 ): Promise<void> {
     const state = await context.proxyStateManager.getState();
     const started = result.startedGeneration ?? captureLogicalGeneration(state);
@@ -49,8 +51,24 @@ export async function handleProxyChanged(
     const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
 
+    // A system proxy lost mid-session resolves like one missing at startup:
+    // the manual fallback, or Auto OFF when it does not answer (#85). The
+    // fallback test awaits; the generation fence below drops the result if a
+    // toggle or sync committed meanwhile.
+    const fallback = !result.proxyUrl && resolveManualFallback
+        ? await resolveFallbackOrClear(resolveManualFallback, state)
+        : undefined;
+    const fallbackEngaged = fallback === 'engaged';
+
     const recoveredFromAutoOff = wasAutoModeOff && state.autoModeOff === false;
-    if (previousProxy === state.autoProxyUrl && !recoveredFromAutoOff && !hasKnownEnableFailure(state)) {
+    // An engaged fallback always goes through apply, even when its URL equals
+    // the lost system proxy: the fallback flags are only saved on that path.
+    if (
+        previousProxy === state.autoProxyUrl &&
+        !recoveredFromAutoOff &&
+        !fallbackEngaged &&
+        !hasKnownEnableFailure(state)
+    ) {
         await commitAndPublish(context, started, 'detection', current => ({
             ...current,
             lastTestResult: state.lastTestResult,
@@ -62,13 +80,31 @@ export async function handleProxyChanged(
     }
 
     await saveApplyThenPublish(context, started, 'detection', state, async () => {
-        const shouldEnable = Boolean(state.autoProxyUrl && (result.proxyReachable !== false));
+        // result.proxyReachable describes the lost system proxy; the fallback
+        // was just tested reachable.
+        const shouldEnable = Boolean(state.autoProxyUrl && (fallbackEngaged || result.proxyReachable !== false));
         const applied = await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
         context.updateStatusBar?.(await context.proxyStateManager.getState());
         if (applied) {
-            notifyProxyChange(context, state, result, previousProxy);
+            notifyProxyChange(context, state, result, previousProxy, fallbackEngaged);
         }
     });
+}
+
+/**
+ * A fallback that cannot be resolved must not leave the lost proxy applied.
+ * Report 'notConfigured' so the caller clears it, as it did before #85.
+ */
+async function resolveFallbackOrClear(
+    resolveManualFallback: (state: ProxyState) => Promise<ManualFallbackOutcome>,
+    state: ProxyState
+): Promise<ManualFallbackOutcome> {
+    try {
+        return await resolveManualFallback(state);
+    } catch (error) {
+        Logger.warn('Manual fallback resolution failed; clearing the lost system proxy:', error);
+        return 'notConfigured';
+    }
 }
 
 async function recordUnsupportedAutoConfig(
@@ -290,8 +326,17 @@ function notifyProxyChange(
     context: InitializerContext,
     state: ProxyState,
     result: ProxyDetectionResult,
-    previousProxy: string | undefined
+    previousProxy: string | undefined,
+    fallbackEngaged: boolean
 ): void {
+    if (fallbackEngaged && state.autoProxyUrl) {
+        context.userNotifier.showSuccess(
+            'fallback.usingManualProxy',
+            { url: context.sanitizer.maskPassword(state.autoProxyUrl) }
+        );
+        return;
+    }
+
     if (state.autoProxyUrl && result.proxyReachable !== false) {
         context.userNotifier.showSuccess(
             'message.systemProxyChanged',

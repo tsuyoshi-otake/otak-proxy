@@ -12,6 +12,8 @@ import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
+export type ManualFallbackOutcome = 'engaged' | 'unreachable' | 'notConfigured';
+
 export class SystemProxyUpdateService {
     constructor(
         private readonly context: InitializerContext,
@@ -316,33 +318,50 @@ export class SystemProxyUpdateService {
         );
     }
 
-    private async applyFallbackProxyState(state: ProxyState): Promise<void> {
+    /**
+     * Auto's rule for "no system proxy": use the manual URL when fallback is
+     * enabled and the URL answers, otherwise turn Auto OFF. Startup detection
+     * and the monitor's proxyChanged path both resolve through here, so a proxy
+     * lost mid-session (VPN disconnect) ends up where a proxy missing at
+     * startup would (#85).
+     *
+     * Mutates `state` for 'engaged' and 'unreachable'. 'notConfigured' leaves
+     * it untouched: each caller keeps its own no-fallback behavior.
+     */
+    async resolveManualFallback(state: ProxyState): Promise<ManualFallbackOutcome> {
         const config = vscode.workspace.getConfiguration('otakProxy');
         const fallbackEnabled = config.get<boolean>('enableFallback', true);
+        const manualProxyUrl = state.manualProxyUrl;
 
-        if (fallbackEnabled && state.manualProxyUrl) {
-            const fallbackReachable = await this.isFallbackReachable(state.manualProxyUrl);
+        if (!fallbackEnabled || !manualProxyUrl) {
+            return 'notConfigured';
+        }
 
-            if (fallbackReachable) {
-                state.autoProxyUrl = state.manualProxyUrl;
-                state.autoModeOff = false;
-                state.usingFallbackProxy = true;
-                state.fallbackProxyUrl = state.manualProxyUrl;
-                state.lastDetectionSource = 'fallback';
-                clearDetectedSplitFields(state);
-                setRequiresAuthFromLiveUrls(state);
-                Logger.log(`Using fallback proxy: ${state.manualProxyUrl}`);
-                return;
-            }
-
-            state.autoProxyUrl = undefined;
-            state.autoModeOff = true;
-            state.usingFallbackProxy = false;
-            state.fallbackProxyUrl = undefined;
-            state.lastDetectionSource = undefined;
+        if (await this.isFallbackReachable(manualProxyUrl)) {
+            state.autoProxyUrl = manualProxyUrl;
+            state.autoModeOff = false;
+            state.usingFallbackProxy = true;
+            state.fallbackProxyUrl = manualProxyUrl;
+            state.lastDetectionSource = 'fallback';
             clearDetectedSplitFields(state);
             setRequiresAuthFromLiveUrls(state);
-            Logger.log('Fallback proxy not reachable - Auto Mode OFF');
+            Logger.log(`Using fallback proxy: ${manualProxyUrl}`);
+            return 'engaged';
+        }
+
+        state.autoProxyUrl = undefined;
+        state.autoModeOff = true;
+        state.usingFallbackProxy = false;
+        state.fallbackProxyUrl = undefined;
+        state.lastDetectionSource = undefined;
+        clearDetectedSplitFields(state);
+        setRequiresAuthFromLiveUrls(state);
+        Logger.log('Fallback proxy not reachable - Auto Mode OFF');
+        return 'unreachable';
+    }
+
+    private async applyFallbackProxyState(state: ProxyState): Promise<void> {
+        if (await this.resolveManualFallback(state) !== 'notConfigured') {
             return;
         }
 

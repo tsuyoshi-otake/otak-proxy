@@ -383,7 +383,8 @@ suite('Assurance: external-boundary contracts', () => {
             commandRunner: async (command, args, options) => {
                 calls.push({ command, args, options });
                 return npm.runner(command, args, options);
-            }
+            },
+            readUserConfigFile: npm.readUserConfigFile
         });
 
         try {

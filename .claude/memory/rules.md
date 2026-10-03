@@ -46,6 +46,21 @@
 
 - **ポストコンディションが落ちたテストは、本番側を緩めて直さない。** スタブを実物に近づける。
 
+- **実ツールが返さない値は、fake でも返さない。** npm（11.16.0 で確認）は認証情報付きの
+  `proxy` / `https-proxy` を `config get` で返さず、`The proxy option is protected` で exit 1 にする。
+  `createFakeNpmConfig` がこれを模倣していなかったので、認証情報付き URL の npm 書き込み検証と
+  Off の削除が実機で必ず失敗することがテストで見えなかった（CFG-1）。#85 で fake も拒否するようにし、
+  user config ファイルの中身は `readUserConfigFile` で返す。
+
+## npm
+
+- **npm 11 の `config get` は、redact される値をすべて拒否する。** 判定は `isProtected(key) || redact(value) !== value`。
+  redact 対象は URL のパスワード、npm token、UUID。`userconfig` のパスも UUID を含むと拒否される
+  （scratchpad のパスで実測）。拒否された値は user config ファイルから読み、ファイルの場所が分からない・
+  読めない・認証情報付き URL として確かめられないときは推測せず fail-closed にする（#85）。
+- **npm は `config delete` で最後のキーを消すと、user config ファイル自体を消す。**
+  実 npm テストで削除後にファイルを読むなら、先に存在を確かめる（#85）。
+
 ## 世代フェンス
 
 - **fence を前進させてよいのは、apply が報告した `committedRevision === fence.revision + 1` のときだけ。**
@@ -112,6 +127,10 @@
   `legacyEnvFirstAutoDetection` は読まれるだけで未使用）。「失敗・スキップ時は〜」のようなまとめた言い方は、
   分岐ごとに引数を確認してから書く（スキップでも理由で挙動が逆だった）。書いたら fresh-context で照合する。
 
+- **README に載せるコマンドは、隔離した設定で実際に実行して出力を確かめる。**
+  Troubleshooting の `npm config get proxy` が認証情報付きの値で失敗すること、`npm config get userconfig` が
+  UUID を含むパスで失敗すること（#85 の修正漏れ）は、README 更新中に実行して初めて分かった。
+
 ## ツール操作
 
 - **Bash ツールのヒアドキュメントはバックスラッシュを食う。**
@@ -123,6 +142,12 @@
 
 - **Write ツールは行末空白を削る。** 空白だけの行を含むパッチのアンカーは一致しなくなる。
   アンカーに空白行を入れない（#78）。
+
+- **Write / Edit ツールは `\u` + `FEFF` の形のエスケープを、実体の BOM にして書く。** 不可視文字はテストでも
+  `String.fromCodePoint(0xFEFF)` で組み立てる（`otak/no-invisible-unicode` と `lint:unicode` が検出した。rules.md 自体にも一度混入した、#85）。
+
+- **Git Bash の `grep -c $'\r$'` は CR を数えられない。** LF だけのファイルでも全行が一致した。
+  改行コードは node で `\r\n` と `\n` の数を数えて確かめる（#85）。
 
 - `package.nls*.json` は `npm run gen:nls` の生成物。手で編集しない。
   作業ツリーで modified に見えていても中身は改行コード差だけのことがある（`git diff` で確認）。

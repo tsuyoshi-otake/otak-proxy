@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { promises as fsPromises } from 'fs';
 import { promisify } from 'util';
 import { Logger } from '../utils/Logger';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
@@ -18,6 +19,7 @@ import {
 } from './PartialProxyWriteCompensation';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
+import { readTopLevelNpmrcString } from './NpmUserConfigValue';
 
 const resultSanitizer = new InputSanitizer();
 
@@ -41,6 +43,8 @@ export interface NpmConfigManagerOptions {
     isWindows?: boolean;
     env?: NodeJS.ProcessEnv;
     commandAvailable?: (env: NodeJS.ProcessEnv) => boolean;
+    /** Reads the npm user config file for values `config get` refuses to print (#85). */
+    readUserConfigFile?: (path: string) => Promise<string>;
 }
 
 const defaultCommandRunner: NpmCommandRunner = async (command, args, options) => {
@@ -166,6 +170,37 @@ function classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | n
 }
 
 /**
+ * npm 11 refuses `config get` for any value it would redact (a URL password,
+ * an npm token, a UUID), including values in the user's own config (#85).
+ */
+function isProtectedGetRefusal(error: unknown): boolean {
+    const details = getNpmErrorDetails(error);
+    return /option is protected, and cannot be retrieved/i.test(`${details.errorMessage}\n${details.stderr}`);
+}
+
+function hasUrlPassword(value: string): boolean {
+    try {
+        return new URL(value).password !== '';
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * npm refused to print `key`, so the value npm loads is one it redacts. The
+ * user-file value is accepted only when it is a credentialed URL too; anything
+ * else means the refused value lives in another layer, so the read is
+ * unverifiable rather than empty.
+ */
+function readProtectedUserValue(userConfigText: string, key: NpmProxyKey): string {
+    const value = normalizeNpmValue(readTopLevelNpmrcString(userConfigText, key));
+    if (!value || !hasUrlPassword(value)) {
+        throw new Error(`npm ${key} is protected and the user config does not hold a credentialed URL for it`);
+    }
+    return value;
+}
+
+/**
  * Manages npm proxy configuration with secure command execution.
  * Uses execFile() with an argument array. On Windows, npm is a `.cmd` wrapper
  * that cannot be spawned directly (EINVAL) and must not go through `cmd.exe /c`
@@ -181,6 +216,7 @@ export class NpmConfigManager {
     private readonly commandRunner: NpmCommandRunner;
     private readonly baseEnv: NodeJS.ProcessEnv;
     private readonly commandAvailable: (env: NodeJS.ProcessEnv) => boolean;
+    private readonly readUserConfigFile: (path: string) => Promise<string>;
 
     /**
      * @param userConfigPath Optional override for npm user config file (useful for tests).
@@ -191,6 +227,7 @@ export class NpmConfigManager {
         this.isWindows = options.isWindows ?? process.platform === 'win32';
         this.baseEnv = options.env ?? process.env;
         this.commandAvailable = options.commandAvailable ?? (env => isCommandOnPath('npm', this.isWindows, env));
+        this.readUserConfigFile = options.readUserConfigFile ?? (path => fsPromises.readFile(path, 'utf8'));
     }
 
     private ensureNpmAvailable(env: NodeJS.ProcessEnv): void {
@@ -353,17 +390,14 @@ export class NpmConfigManager {
         return inspection.values.proxy || inspection.values['https-proxy'];
     }
 
+    /**
+     * Reads `proxy` and `https-proxy` as npm loads them. npm 11 will not print
+     * a credentialed value, so such a key is read from the user config file,
+     * the layer `config set` and `config delete` act on (#85).
+     */
     async inspectProxy(): Promise<ProxyConfigInspection<NpmProxyValues>> {
         try {
-            const { stdout: proxyStdout } = await this.execNpm(['config', 'get', 'proxy']);
-            const { stdout: httpsProxyStdout } = await this.execNpm(['config', 'get', 'https-proxy']);
-            return {
-                status: 'available',
-                values: {
-                    proxy: normalizeNpmValue(proxyStdout),
-                    'https-proxy': normalizeNpmValue(httpsProxyStdout)
-                }
-            };
+            return { status: 'available', values: await this.readProxyValues() };
         } catch (error) {
             const failure = this.handleError(error);
             if (failure.errorType !== 'NOT_INSTALLED') {
@@ -374,6 +408,51 @@ export class NpmConfigManager {
                 error: failure.error,
                 errorType: failure.errorType
             };
+        }
+    }
+
+    private async readProxyValues(): Promise<NpmProxyValues> {
+        const values: NpmProxyValues = { proxy: null, 'https-proxy': null };
+        let userConfigText: Promise<string> | undefined;
+        for (const key of ['proxy', 'https-proxy'] as const) {
+            try {
+                const { stdout } = await this.execNpm(['config', 'get', key]);
+                values[key] = normalizeNpmValue(stdout);
+            } catch (error) {
+                if (!isProtectedGetRefusal(error)) {
+                    throw error;
+                }
+                userConfigText ??= this.readUserConfigText();
+                values[key] = readProtectedUserValue(await userConfigText, key);
+            }
+        }
+        return values;
+    }
+
+    /**
+     * The user config file as npm resolves it, so `--userconfig` is honoured.
+     * npm also refuses to print a path containing text it redacts (a UUID);
+     * the location is then unknown and no file is guessed.
+     */
+    private async readUserConfigText(): Promise<string> {
+        let path: string | null;
+        try {
+            path = normalizeNpmValue((await this.execNpm(['config', 'get', 'userconfig'])).stdout);
+        } catch (error) {
+            if (isProtectedGetRefusal(error)) {
+                throw new Error('npm user config location is protected');
+            }
+            throw error;
+        }
+        if (!path) {
+            throw new Error('npm user config location is unknown');
+        }
+        try {
+            return await this.readUserConfigFile(path);
+        } catch (error) {
+            // Rethrown without the fs message: ENOENT would classify as "npm not installed".
+            Logger.warn('npm user config could not be read:', error);
+            throw new Error('npm user config could not be read');
         }
     }
 

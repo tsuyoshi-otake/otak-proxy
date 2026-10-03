@@ -100,7 +100,11 @@ export class ExtensionInitializer {
 
         // Set up proxyChanged event handler
         this.proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
-            this.enqueueProxyMonitorEvent(() => handleProxyChanged(this.context, result));
+            this.enqueueProxyMonitorEvent(() => handleProxyChanged(
+                this.context,
+                result,
+                state => this.systemProxyUpdateService.resolveManualFallback(state)
+            ));
         });
 
         // Feature: auto-mode-proxy-testing - Handle test complete events
