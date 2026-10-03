@@ -48,6 +48,10 @@ async function testProxyConnectionSequential(
 ): Promise<TestResult> {
     const errors: TestUrlError[] = [];
     const startTime = Date.now();
+    let proxyConnected = false;
+    const markProxyConnected = () => {
+        proxyConnected = true;
+    };
 
     const finalize = (success: boolean): TestResult => ({
         success,
@@ -58,14 +62,15 @@ async function testProxyConnectionSequential(
         duration: Date.now() - startTime,
         ...(success
             ? { proxyEndpointOk: true }
-            : summarizeFailedProxyTest(errors, testUrls))
+            : summarizeFailedProxyTest(errors, testUrls)),
+        ...(proxyConnected ? { proxyConnected: true } : {})
     });
 
     try {
         const proxyParsed = new URL(proxyUrl);
 
         for (const testUrl of testUrls) {
-            if (await testSingleProxyUrl(proxyParsed, testUrl, timeout, errors)) {
+            if (await testSingleProxyUrl(proxyParsed, testUrl, timeout, errors, markProxyConnected)) {
                 return finalize(true);
             }
         }
@@ -83,12 +88,20 @@ async function testSingleProxyUrl(
     proxyParsed: URL,
     testUrl: string,
     timeout: number,
-    errors: TestUrlError[]
+    errors: TestUrlError[],
+    onProxyConnected: () => void
 ): Promise<boolean> {
     try {
         const testParsed = new URL(testUrl);
         const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
-        return await createProxyConnectionAttempt(proxyParsed, testUrl, timeout, errors, requestOptions);
+        return await createProxyConnectionAttempt(
+            proxyParsed,
+            testUrl,
+            timeout,
+            errors,
+            requestOptions,
+            onProxyConnected
+        );
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         errors.push({
@@ -105,10 +118,12 @@ function createProxyConnectionAttempt(
     testUrl: string,
     timeout: number,
     errors: TestUrlError[],
-    requestOptions: http.RequestOptions
+    requestOptions: http.RequestOptions,
+    onProxyConnected: () => void
 ): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
         const req = createProxyConnectRequest(proxyParsed, requestOptions);
+        trackProxyConnect(req, onProxyConnected);
         let requestSettled = false;
 
         const finish = (success: boolean, error?: string, failureKind?: ProxyTestFailureKind) => {
@@ -158,6 +173,17 @@ function createProxyConnectionAttempt(
         });
 
         req.end();
+    });
+}
+
+/**
+ * Reports when the request's socket opens a TCP connection to the proxy
+ * itself. That proves the endpoint is up even when CONNECT then times out
+ * (#97). A reused socket reports nothing, which only loses that proof.
+ */
+function trackProxyConnect(req: http.ClientRequest, onConnect: () => void): void {
+    req.once('socket', (socket: net.Socket) => {
+        socket.once('connect', onConnect);
     });
 }
 
@@ -214,6 +240,10 @@ export async function testProxyConnectionParallel(
         let settled = false;
         let completedCount = 0;
         let overallTimer: ReturnType<typeof setTimeout> | null = null;
+        let proxyConnected = false;
+        const markProxyConnected = () => {
+            proxyConnected = true;
+        };
 
         const finalize = (result: Omit<TestResult, 'timestamp' | 'duration'>): TestResult => {
             const classified = result.success
@@ -222,6 +252,7 @@ export async function testProxyConnectionParallel(
             return {
                 ...result,
                 ...classified,
+                ...(proxyConnected ? { proxyConnected: true } : {}),
                 errors: [...result.errors],
                 timestamp: Date.now(),
                 duration: Date.now() - startTime
@@ -306,6 +337,7 @@ export async function testProxyConnectionParallel(
                     const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
 
                     const req = createProxyConnectRequest(proxyParsed, requestOptions);
+                    trackProxyConnect(req, markProxyConnected);
                     requests.push(req);
                     req.setTimeout(timeout);
 

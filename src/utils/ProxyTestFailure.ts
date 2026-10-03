@@ -101,6 +101,32 @@ export function isProxyEndpointReachable(
     return result.success === true || !isProxyEndpointUnreachable(result);
 }
 
+/**
+ * What one connection test proves about the proxy endpoint (#97).
+ *
+ * - `unreachable`: every attempt was refused or could not reach the proxy.
+ * - `alive`: the canary succeeded, the proxy answered (407/403/5xx), or at
+ *   least one attempt opened a TCP connection to the proxy.
+ * - `unknown`: neither — a DNS failure, a TLS failure, or a timeout before
+ *   any TCP connection can come from a dead proxy or from a slow network.
+ *
+ * Auto: OFF is entered on `unreachable` and left on `alive`; `unknown`
+ * keeps the current verdict for the same endpoint.
+ */
+export type ProxyEndpointVerdict = 'unreachable' | 'alive' | 'unknown';
+
+export function proxyEndpointVerdict(
+    result: Pick<TestResult, 'success' | 'failureKind' | 'proxyEndpointOk' | 'proxyConnected'>
+): ProxyEndpointVerdict {
+    if (isProxyEndpointUnreachable(result)) {
+        return 'unreachable';
+    }
+    if (result.success || result.proxyEndpointOk === true || result.proxyConnected === true) {
+        return 'alive';
+    }
+    return 'unknown';
+}
+
 export function buildConnectionTestObservation(
     result?: Pick<TestResult, 'failureKind' | 'proxyEndpointOk' | 'canaryHost' | 'testUrls' | 'errors'>
 ): { canaryHost?: string; failureKind?: ProxyTestFailureKind; proxyEndpointOk?: boolean } | undefined {

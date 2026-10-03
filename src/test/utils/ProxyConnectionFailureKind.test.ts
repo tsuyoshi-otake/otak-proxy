@@ -71,6 +71,7 @@ suite('Proxy connection failure classification', () => {
             });
             await assertClassifiedFailure(result, 'authRequired', '407');
             assert.strictEqual(result.proxyEndpointOk, true);
+            assert.strictEqual(result.proxyConnected, true);
             assert.strictEqual(result.canaryHost, 'www.github.com');
         } finally {
             await close(server);
@@ -122,6 +123,11 @@ suite('Proxy connection failure classification', () => {
         });
         await assertClassifiedFailure(result, 'endpointUnreachable');
         assert.strictEqual(result.proxyEndpointOk, false);
+        assert.notStrictEqual(result.proxyConnected, true);
+
+        const parallel = await testProxyConnectionParallel(`http://127.0.0.1:${port}`, ['https://www.github.com'], 1000);
+        await assertClassifiedFailure(parallel, 'endpointUnreachable');
+        assert.notStrictEqual(parallel.proxyConnected, true);
     });
 
     test('CONNECT hang is timeout, not endpointUnreachable', async function() {
@@ -139,6 +145,12 @@ suite('Proxy connection failure classification', () => {
             await assertClassifiedFailure(result, 'timeout', 'timeout');
             assert.notStrictEqual(result.failureKind, 'endpointUnreachable');
             assert.strictEqual(result.proxyEndpointOk, false);
+            // The proxy took the connection; the wait is behind it (#97).
+            assert.strictEqual(result.proxyConnected, true);
+
+            const parallel = await testProxyConnectionParallel(`http://127.0.0.1:${port}`, ['https://www.github.com'], 200);
+            await assertClassifiedFailure(parallel, 'timeout', 'timeout');
+            assert.strictEqual(parallel.proxyConnected, true);
         } finally {
             for (const socket of sockets) {
                 socket.destroy();
@@ -155,5 +167,6 @@ suite('Proxy connection failure classification', () => {
         });
         await assertClassifiedFailure(result, 'dns');
         assert.notStrictEqual(result.failureKind, 'endpointUnreachable');
+        assert.notStrictEqual(result.proxyConnected, true);
     });
 });

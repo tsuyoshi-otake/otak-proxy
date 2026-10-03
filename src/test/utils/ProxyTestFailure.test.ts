@@ -5,6 +5,7 @@ import {
     classifyConnectStatus,
     isProxyEndpointReachable,
     isProxyEndpointUnreachable,
+    proxyEndpointVerdict,
     summarizeFailedProxyTest
 } from '../../utils/ProxyTestFailure';
 
@@ -44,6 +45,32 @@ suite('ProxyTestFailure', () => {
         assert.strictEqual(isProxyEndpointUnreachable({ success: true, failureKind: 'endpointUnreachable' }), false);
         assert.strictEqual(isProxyEndpointReachable({ success: false, failureKind: 'authRequired' }), true);
         assert.strictEqual(isProxyEndpointReachable({ success: false, failureKind: 'endpointUnreachable' }), false);
+    });
+
+    test('endpoint verdict needs proof either way (#97)', () => {
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'endpointUnreachable' }), 'unreachable');
+
+        assert.strictEqual(proxyEndpointVerdict({ success: true }), 'alive');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'authRequired', proxyEndpointOk: true }), 'alive');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'connectRejected', proxyEndpointOk: true }), 'alive');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'timeout', proxyConnected: true }), 'alive');
+
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'timeout' }), 'unknown');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'dns' }), 'unknown');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'protocol', proxyConnected: false }), 'unknown');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, failureKind: 'unknown', proxyEndpointOk: false }), 'unknown');
+        assert.strictEqual(proxyEndpointVerdict({ success: false }), 'unknown');
+    });
+
+    test('one attempt that reached the proxy outweighs a refused one (#97)', () => {
+        const summary = summarizeFailedProxyTest([
+            { url: 'https://www.github.com', message: 'connect ECONNREFUSED 127.0.0.1:9', failureKind: 'endpointUnreachable' },
+            { url: 'https://www.google.com', message: 'Connection timeout (3000ms)', failureKind: 'timeout' }
+        ], ['https://www.github.com', 'https://www.google.com']);
+
+        assert.strictEqual(summary.failureKind, 'timeout');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, ...summary, proxyConnected: true }), 'alive');
+        assert.strictEqual(proxyEndpointVerdict({ success: false, ...summary }), 'unknown');
     });
 
     test('observation exposes canaryHost, failureKind, and proxyEndpointOk without secrets', () => {
