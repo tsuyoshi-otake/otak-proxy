@@ -1010,3 +1010,54 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 - 拡張ホスト lane と直接の mocha 実行は system temp のままで、mutex パスは共有のまま。`scripts/assurance` の runner も未変更。
 - 過去の実行が残した `otak-proxy-unit-*`（33 個）は消していない（ユーザーの判断待ち）。
 - 隔離の検査は system temp の `otak-proxy-unit-*` を前後で比べるので、別の unit 実行と同時に走らせると誤って失敗する。
+
+## 2026-10-03 — v3.2.16 リリース（#102 の split 変化の修正を公開、#103 のテスト基盤を同梱）
+
+**Issue**: [#102](https://github.com/tsuyoshi-otake/otak-proxy/issues/102)、[#103](https://github.com/tsuyoshi-otake/otak-proxy/issues/103)（どちらも `Refs`、#104 / #105 の merge でクローズ済み）
+**PR**: [#106](https://github.com/tsuyoshi-otake/otak-proxy/pull/106)（3.2.16 のリリース）
+**Commits**: `a5ea926`（`chore(release): v3.2.16 (#102)`）
+**Merge commit**: `1d627d3`（#106）
+**Tag**: `v3.2.16`（`1d627d3`、annotated / `Release v3.2.16`）
+**CI run**: [37119143768](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/37119143768)（成功）
+
+### 内容
+
+#102（主 URL が同じままの scheme 別 HTTPS URL / bypass の変化が、同じチェックの接続テストか reachability の反転と重なると捨てられた不具合）の修正と、その通知の変化を公開した。#103 は unit lane のテスト基盤だけで、VSIX の中身には影響しない。リリースコミットは `CHANGELOG.md` / `package.json` / `package-lock.json` の 3 ファイルだけ。README は v3.2.15 から変更なし。
+
+### リリース前チェックの結果（CLAUDE.md の MUST）
+
+| 観点 | 結果 | 対応 |
+| --- | --- | --- |
+| tracked files の個人情報らしき文字列 | v3.2.15..v3.2.16 の追加行（`package-lock.json` を除く、21 files）のホストは github.com と example.com 系だけ。メールアドレス・UUID・ローカルのユーザーパス・トークン・社内向け IP の一致なし | — |
+| コミット履歴の author / committer | v3.2.15..main は既存の ID（`otak@odangoo.com` の 2 表記）と GitHub の merge コミットだけ。新しい ID なし | 書き換えない（2026-10-03 の決定） |
+| 公開設定・タグ・リリース | PUBLIC。タグは v3.2.15 まで。GitHub Release の最新は v3.2.9 | 先例に合わせ GitHub Release は作らない |
+| LICENSE | MIT あり | — |
+
+### Verification
+
+| ゲート | ローカル (Windows) | CI (Ubuntu, run 37119143768) |
+| --- | --- | --- |
+| `npm run lint` | pass (623 files scanned) | pass (607 files scanned。差の 16 は未追跡の PBT evidence JSON) |
+| unit | 1055 + 74 passing / 0 failing | 1055 + 73 passing / 1 pending（Windows 専用テスト） |
+| `npm run test:smoke` | 4 passing | 4 passing |
+| `npm run lint:unicode:dist` | pass (294 artifacts) | pass (294 artifacts) |
+| `vsce package` | — | `otak-proxy-3.2.16.vsix` (161 files, 643.8 KB) |
+| VS Marketplace | `extensionquery` で 3.2.16 を確認（11:25:42Z。`lastUpdated` 11:25:30Z、upload 11:19:40Z から約 6 分。11:24:40Z の時点ではまだ 3.2.15。版別アセットは 11:20:33Z から 200（学び 1）） | `Published odangoo.otak-proxy v3.2.16.`（11:19:40Z） |
+| Open VSX | API で 3.2.16 を確認（11:23:08Z。`timestamp` 11:19:42Z、約 3.5 分。11:22:37Z の時点ではまだ 3.2.15） | `Published odangoo.otak-proxy v3.2.16`（11:19:42Z） |
+
+extension-host lane は #104 で #102 のコードに対して実行済み（502 passing / 1 pending / 9 failing、9 件は既知の baseline）。版上げだけのこの PR では再実行していない。unit ゲートの前後で system temp の `otak-proxy-unit-*` は 33 のまま（#103 の後片付けが効いている）、mutex timeout なし。テスト後の runner プロセス残存 0 件。
+
+### Learning
+
+1. Marketplace の版別アセット（`.../extension/otak-proxy/3.2.16/assetbyname/Microsoft.VisualStudio.Services.Content.Details`）は upload から 1 分以内（11:20:33Z）に 200 を返したが、拡張の検索 API（`extensionquery`）の最新版は 11:25:42Z まで 3.2.15 のままだった。版別アセットの 200 は公開の証拠にならない。公開の判定は `extensionquery` の `versions[0].version`（と `lastUpdated`）で行う。→ rules.md「リリース」
+2. 新しく学んだ失敗はほかになし。rules.md「リリース」の手順（3 ファイルのリリースコミット、annotated タグ、CI との件数差 lint 16 / unit 1 pending、レジストリ API での確認）でそのまま通った。
+3. #103 の後、v3.2.15 の 1 回目のゲートで出た `GitConfigLocking.aba` の mutex timeout は、このリリースのゲートでは出なかった（1 回の観測で、再発しないことの証明ではない）。
+
+### 残留リスク
+
+#102 / #103 のエントリの残留リスクがそのまま公開された:
+
+- scheduler のテストがチェック開始から proxyChanged までの間にコミットすると、proxyChanged はまだ stale になる（`pollingInterval > connectionTestInterval` のときだけ）。
+- 先の handler と proxyChanged の間に toggle / sync がコミットすると、判定は stale のイベントと一緒に消える。
+- 拡張ホスト lane と直接の mocha 実行は system temp の mutex を共有したまま。過去の実行が残した `otak-proxy-unit-*`（33 個）は未削除（ユーザーの判断待ち）。
+- 実ネットワーク・実 VPN 切替では未確認。
