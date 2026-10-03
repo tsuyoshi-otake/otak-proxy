@@ -657,3 +657,60 @@ v3.2.11 から、リリース前チェック（CLAUDE.md の MUST）で、前の
 
 リリース前チェックでは、前回から新しい author / committer の ID が増えていないかだけを確かめて報告する。
 既存のコミットについて書き換えの判断はもう求めない。→ rules.md「リリース」
+
+## 2026-10-03 — #93 診断の誤った状態（npm 読み取り失敗、Off の PAC/WPAD、読めないロック、古い split URL、web UI）
+
+**Issue**: [#93](https://github.com/tsuyoshi-otake/otak-proxy/issues/93)
+**コミット**: `42c4211`（修正・テスト）。PR [#94](https://github.com/tsuyoshi-otake/otak-proxy/pull/94)（merge commit で main に入れる）
+
+### 症状
+
+1. npm の `config list --json` が失敗すると（タイムアウト、PATH に npm が無い）、「npm に proxy が無い」と扱われた。Auto では偽の `npm.managedProxyMismatch` でリトライし、Off では残留チェックが何も見ずに収束扱いになり得た。
+2. Windows の PAC/WPAD が、Off（と、フォールバックの無い Auto: OFF）でも `blocksConvergence` になり、何も適用しないはずなのに `runtimeState` が `partial` になった。
+3. 空や途中までのロックファイル（`open('wx')` と書き込みの間でプロセスが死んだ）が残ると、どのウィンドウも永久に `lockSkipped` になった。
+4. モニタが新しい proxy を検出しても、前回の `autoHttpProxyUrl` / `autoHttpsProxyUrl` / 検出 bypass が state に残り、npm を古い https 値と比べて偽の mismatch を出した。
+5. UI がブラウザ（`uiKind === Web`）で拡張機能がリモートの Node ホストで動くとき、child_process とレジストリが必要なチェックがすべて無効になり、ホストが `web` と報告された（実機では未確認）。
+
+### 原因
+
+1. `readNpmConfigValues()` が catch で `{}` を返し、「読めない」と「未設定」が同じ値になっていた。git は #16 で `readFailed` と informational の `git.readUnavailable` に分けていた。
+2. PAC/WPAD の issue は `impact: 'blocksConvergence'` 固定で、split proxy や認証情報のチェックにある `expectsProxyDisabled` のガードが無かった。Windows の PAC/WPAD は状態に依存しない slow cache から来る。
+3. `tryAcquire` は読めないロックを古さを見ずに `held` にしていた。`tryCreateLock` は `open('wx')` 後の書き込みが失敗すると 0 バイトのファイルを残した。
+4. `ProxyDetectionResult` と `detectProxyWithRetry` が split フィールドを落とし、`applyProxyDetectionResultToState` は更新もクリアもしなかった。さらに `ProxyMonitor` は主 URL が変わったときしか `proxyChanged` を出さず、ハンドラも主 URL だけで「変化なし」と判定していた。
+5. `ExecutionContextDetector.detect()` が capability と場所を `uiKind` だけから導いていた。この拡張機能は `browser` エントリが無く `extensionKind: ["workspace"]` なので、常に Node の拡張ホストで動く。
+
+### 修正
+
+1. npm の観測に `readFailed` を足し、読み取り失敗は informational の `npm.readUnavailable`（npm が対象のときだけ）にして、mismatch と残留チェックを飛ばす。16 ロケールに理由文を足した。
+2. `expectsProxyDisabled` のとき、PAC/WPAD の issue を実行ごとのコピーで informational に下げる（`asProxyDisabledUnsupportedAutoConfig`）。cache の issue は書き換えない。proxy が期待される Auto では `blocksConvergence` のまま。
+3. 読めないロックは、mtime が TTL より古く（壁時計）、再確認でも読めず mtime が同じときだけ回収する。rename のあとで退避したファイルが読めたら、別ウィンドウが先に回収して作った生きたロックを動かしたことになるので、`fs.link`（上書きしない）で戻して `held` を返す。書き込み失敗時は自分のファイルを消してから例外を投げる。
+4. 検出結果に `httpUrl` / `httpsUrl` / `bypass` を通し、ハンドラが state に入れる（proxy が無ければクリア）。モニタの emit とハンドラの「変化なし」判定は、`DetectedProxyValue` の同じ規則（`routingSplit`）で split の同一性を比べる。単一 proxy の http/https の写しは数えない。Auto: OFF で主 URL が同じで新しい接続テストが無い検出は、保存だけにして apply しない（verifier の指摘、下記）。保存の経路でも検出種別と split フィールドを保存し、到達性の回復時の apply がそれを読む。新しいテスト結果付きの検出は従来どおり。
+5. capability は拡張ホストの実行環境（Node かどうか）から導く。web UI でも `remoteName` から場所とホスト種別を決め、`uiKind` は `web` のまま報告する。純粋関数 `deriveExecutionContext` に分けてテストした。
+
+### 検証
+
+- 各修正を 1 つずつ戻すミューテーション 11 件（5 項目）を、戻す前の基準実行が緑であることを確かめてから実行し、11 件とも対象テストが落ちた（KILLED）。ソースはバイト単位で元に戻ることを確認。
+- `npm run lint`、`test:unit:parallel`（976 + 74 passing）、`test:smoke`、`lint:unicode:dist` が通過。
+- VS Code host lane は 502 passing / 1 pending / 9 failing。1 回目は `Extension startup OFF self-repair` の途中で mocha の集計なしに止まり（189 件で終了、拡張ホストは exit code 0）、1 回だけ再実行して完走した。失敗は変更前の baseline と同じ 9 件。
+- 独立 verifier（fresh context、sonnet）: 1 回目は 11 基準すべて pass だったが、項目 4 の回帰を 1 件見つけた。Auto: OFF（到達できず proxy を外した状態）で split だけが変わると、モニタは接続テストをしないので `proxyReachable` が undefined になり、`!== false` の判定で到達できない proxy を有効にしていた。1 回目の修正（split の変化を Auto: OFF では apply 扱いにしない）は再確認で不十分と判定された。disable 後は各ターゲットの `*Configured` が false になり、`hasKnownEnableFailure` が先に apply へ送っていた。新テストは setup の `*Configured: true`（disable 後にはあり得ない状態）で pass していた。2 回目の修正で「Auto: OFF・主 URL が同じ・テスト結果なし」を保存だけの経路にし、テストを disable 後の実際の state で作り直した。ガードの 3 条件と保存フィールドを戻すミューテーション 4 件はすべて KILLED。2 回目の再確認は 7 基準すべて pass。低優先度の指摘 2 件: (1) 起動後の最初のポーリング（自動テスト無効）で、保存済みの Auto: OFF のまま同じ URL を検出すると、以前は検証なしに proxy を有効にしていた（ステータスは Auto: OFF のまま）。今は外したままになる。PR と CHANGELOG で開示。(2) Auto: OFF で 407 / 403 / timeout canary のテスト結果付きの同 URL 検出は、`autoModeOff` が true のまま enable=true で apply される。既存の挙動で今回の範囲外。
+- テストランナーの残存プロセス: 各 gate とミューテーションの後に `mocha|vscode-test` のプロセスを確認し、残存なし。
+- 未確認: 項目 5 の実機（ブラウザ UI + リモートホスト）。PAC/WPAD の実際の Windows 設定。
+
+### 学び
+
+1. 観測オブジェクトに項目を足すと、`deepStrictEqual` で観測全体を比べているテストが落ちる（`ProxyRuntimeDiagnostics.test.ts` の npm）。host lane で初めて見えた。→ rules.md「診断レポート」
+2. 「変化があったら適用する」判定は、モニタの emit とハンドラの両方にある。片方だけ直すと、split だけの変化はイベント自体が来ない。両方を同じ関数で比べる。→ rules.md「診断レポート」
+3. 読めないロックを mtime で回収すると、回収どうしが競合して生きたロックを動かす ABA になる。rename のあとで中身を確かめて戻す。→ rules.md「排他制御」
+4. `MOCHA_GREP` で host lane を絞るとき、grep が既存の失敗テスト（`Auto + unsupported PAC + reachable fallback`）にも一致した。ミューテーションの基準実行が緑でないと判定が成り立たないので、grep は Issue 番号で絞る。→ rules.md「検証・回帰」
+5. ExecutionContext の capability は `uiKind` ではなく拡張ホストで決まる。→ rules.md「診断レポート」
+6. host lane が mocha の集計なしで途中終了したのは 2 回目（1 回目は #85 の verifier）。今回は `Extension activation with first-run setup` の直後、`Extension startup OFF self-repair`（実 git と activate/deactivate を使う）の途中で、拡張ホストが exit code 0 で終わった。再実行は baseline と一致した。原因は特定していない。→ rules.md「検証・回帰」
+7. 「変化があったら適用する」条件を広げると、Auto: OFF でも apply に入る。split だけの変化は接続テストが走らず到達性が不明なので、`proxyReachable !== false` が真になる。条件を広げたら Auto: OFF の経路も確かめる。→ rules.md「診断レポート」
+8. テストの state を実際には起きない値で作ると、回帰経路を通らずに pass する。Auto: OFF のテストが `*Configured: true` のままだったので、1 回目の修正が不十分なことをテストが見逃した。ミューテーションも同じ state で走るので KILLED になり、検出できなかった。state はその状態に至る操作の結果（disable 後は `*Configured: false`）で作る。→ rules.md「診断レポート」
+
+### 残留リスク
+
+- 項目 5 は faked `vscode.env` の unit テストだけ。remoteName の無い web UI + Node ホスト（serve-web など）は `localUi` と報告される（capability は正しい）。
+- Auto: OFF で 407 / 403 / timeout canary の失敗テスト付き検出が、`autoModeOff` を true のまま proxy を有効にする（既存、verifier の指摘）。
+- Auto: OFF のガードの `Boolean(result.proxyUrl)`（proxy が無い検出では fallback の解決を飛ばさない）はテストで固定していない。モニタは「proxy なし → proxy なし」を emit しないため、到達する経路を確認できなかった防御。
+- 期限切れロックの回収経路の ABA は既存のまま（範囲外）。読めないロックの経路も、3 ウィンドウの競合や、確認中に相手が書き込み途中のときは二重保持が残り得る。`fs.link` が使えないファイルシステムでは生きたロックを失い得る。
+- 通知の変化: Off / Auto: OFF の PAC/WPAD ではロックスキップ通知が出なくなった（#30 の規則の帰結、#93 のコメントで開示）。https だけ・bypass だけの変化で「システム proxy が変わりました」が出るようになった（`SystemProxyUpdateService` と同じ）。`RemediationOutcome` も `blocksConvergence` で判定するので、Off / Auto: OFF の PAC/WPAD はそこでも収束扱いになった。
