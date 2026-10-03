@@ -32,6 +32,14 @@
   GIT_CONFIG_GLOBAL=<temp>/gitconfig NPM_CONFIG_USERCONFIG=<temp>/npmrc npx mocha ...
   ```
 
+- **ミューテーション確認は、戻す前の基準実行が緑であることを先に確かめる。** host lane を `MOCHA_GREP` で
+  絞ると、既存の失敗テストにも一致することがある（`unsupported PAC` が `Auto + unsupported PAC + reachable fallback`
+  に一致した）。grep は Issue 番号（`(#93)` など）で絞る（#93）。
+
+- **host lane が mocha の集計なしで終わったら、成功扱いにしない。** 拡張ホストが exit code 0 で途中終了することがある
+  （#85 の verifier と #93 で 2 回。#93 は `Extension startup OFF self-repair` の途中、#85 は位置を記録していない。原因は未特定）。
+  1 回だけ再実行し、止まった位置と再実行の件数を記録する。
+
 - **テスト後にプロセスが本当に終了したか確認する。** `Get-CimInstance Win32_Process` で
   `mocha|vscode-test` を grep。残っていたら CPU を焼き続ける。
 
@@ -80,11 +88,40 @@
   blocksConvergence ではない。別計算だと `runtimeState` と食い違う。`converged` は
   `runtimeState === 'applied'`（#78, `ee7f8a1`）。
 
+- **issue を足す・変えるときは、`expectsProxyDisabled`（Off、フォールバックの無い Auto: OFF）での impact を決める。**
+  proxy を外す期待のときに、拡張機能が上書きしない外部設定（PAC/WPAD）を blocksConvergence にしない。
+  状態に依存しない slow cache 由来の issue は、実行ごとのコピーで下げ、cache は書き換えない（#93）。
+
+- **外部ツールの読み取り失敗を「未設定」と同じ値にしない。** 観測に `readFailed` を持たせ、informational の
+  `<tool>.readUnavailable` を出し、mismatch と残留チェックは飛ばす（git #16、npm #93）。観測に項目を足したら、
+  観測全体を `deepStrictEqual` で比べるテスト（`ProxyRuntimeDiagnostics.test.ts`）も直す。host lane でしか走らない。
+
+- **「検出が変わったか」はモニタの emit とハンドラの両方で判定している。** 同じ規則で比べる
+  （`DetectedProxyValue` の `detectionSplitRoutingIdentity` / `splitRoutingIdentity`）。ハンドラだけ直すと、
+  split だけの変化ではイベント自体が来ない（#93）。
+
+- **「変化があったら適用する」条件を広げたら、Auto: OFF でも通るか確かめる。** モニタは split だけの変化で
+  接続テストをしないので、`proxyReachable` は undefined になり、`!== false` の判定で到達できない proxy を
+  有効にしてしまう。Auto: OFF では到達性について新しい情報が無い変化は保存だけにし、回復時の apply が
+  保存した値を読む（#93、verifier が発見）。Auto: OFF の各ターゲットの `*Configured` は proxy を外した結果の
+  false なので、`hasKnownEnableFailure` を enable 失敗として読まない。テストの state も disable 後の
+  実際の値（`*Configured: false`）で作る。`true` のままだと回帰経路を通らずに pass する（#93 の 2 回目の指摘）。
+
+- **ExecutionContext の capability は拡張ホストの実行環境で決める。** `uiKind === Web` は UI がブラウザという意味で、
+  拡張ホストは Node のリモートでもよい（`extensionKind: ["workspace"]`、`browser` エントリ無し）。判定は
+  純粋関数 `deriveExecutionContext` でテストする（#93、実機は未確認）。
+
 ## 排他制御
 
 - **cross-process な排他は `src/utils/FileLease` だけを使う。** 新しく mtime ベースの
   匿名ロックファイルを書かない。所有者 token + heartbeat がないと ABA で二重保持になる
   （`formal/SharedStateCas.tla` の `TLC-CAS-LEASE-ABA` が反例を出す）。
+
+- **`ApplyLockService` の読めない（空・途中までの）ロックは、3 つ揃ったときだけ回収する。**
+  mtime が TTL より古い（壁時計。注入した `now` はレコードの期限用で、ファイルの古さには使わない）、
+  再確認でも読めず mtime が同じ、rename で退避したファイルが読めない。読めたら別ウィンドウが先に回収して
+  作った生きたロックなので、`fs.link`（上書きしない）で戻して `held` を返す。期限切れレコードの回収経路の
+  ABA は未対応（#93 の範囲外）。
 
 - **`FileLease` のタイムアウトメッセージは契約。** `Timed out acquiring <name>`。
   `isGitConfigMutexTimeout` がこの文字列に依存している。`name` を変えない。

@@ -1,3 +1,4 @@
+import { clearDetectedSplitFields, splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
@@ -48,6 +49,7 @@ export async function handleProxyChanged(
     }
 
     const previousProxy = state.autoProxyUrl;
+    const previousSplitRouting = splitRoutingIdentity(state);
     const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
 
@@ -61,20 +63,37 @@ export async function handleProxyChanged(
     const fallbackEngaged = fallback === 'engaged';
 
     const recoveredFromAutoOff = wasAutoModeOff && state.autoModeOff === false;
+    const samePrimaryProxy = previousProxy === state.autoProxyUrl;
+    // Auto: OFF removed the proxy because this URL did not answer. The same URL
+    // without a new connection test says nothing new about that, so whatever
+    // else changed (per-scheme URLs, bypass) is only saved for the reachability
+    // recovery to apply (#93). The Configured flags are false here because of
+    // that removal, not because an enable failed.
+    const stillOffWithoutNewTest =
+        Boolean(result.proxyUrl) && samePrimaryProxy && state.autoModeOff === true && !result.testResult;
     // An engaged fallback always goes through apply, even when its URL equals
     // the lost system proxy: the fallback flags are only saved on that path.
-    if (
-        previousProxy === state.autoProxyUrl &&
+    // A per-scheme or bypass change with the same primary URL is a change too:
+    // the split fields are applied on that path (#93).
+    const unchanged =
+        samePrimaryProxy &&
+        previousSplitRouting === splitRoutingIdentity(state) &&
         !recoveredFromAutoOff &&
         !fallbackEngaged &&
-        !hasKnownEnableFailure(state)
-    ) {
+        !hasKnownEnableFailure(state);
+    if (stillOffWithoutNewTest || unchanged) {
         await commitAndPublish(context, started, 'detection', current => ({
             ...current,
             lastTestResult: state.lastTestResult,
             proxyReachable: state.proxyReachable,
             lastTestTimestamp: state.lastTestTimestamp,
-            autoModeOff: state.autoModeOff
+            autoModeOff: state.autoModeOff,
+            lastDetectionKind: state.lastDetectionKind,
+            lastDetectionCapability: state.lastDetectionCapability,
+            autoProxyKind: state.autoProxyKind,
+            autoHttpProxyUrl: state.autoHttpProxyUrl,
+            autoHttpsProxyUrl: state.autoHttpsProxyUrl,
+            detectedBypass: state.detectedBypass
         }));
         return;
     }
@@ -299,6 +318,12 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
     if (result.proxyUrl) {
         state.lastDetectionKind = result.kind ?? 'singleProxy';
         state.lastDetectionCapability = result.capability ?? 'supported';
+        // Same fields assignDetectedProxyToState writes on the startup path, so
+        // a stale per-scheme URL from the previous detection cannot survive (#93).
+        state.autoProxyKind = result.kind;
+        state.autoHttpProxyUrl = result.httpUrl;
+        state.autoHttpsProxyUrl = result.httpsUrl;
+        state.detectedBypass = result.bypass;
         if (result.proxyUrl !== state.fallbackProxyUrl) {
             state.usingFallbackProxy = false;
             state.fallbackProxyUrl = undefined;
@@ -310,6 +335,7 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
         state.lastDetectionSource = undefined;
         state.lastDetectionKind = 'direct';
         state.lastDetectionCapability = 'supported';
+        clearDetectedSplitFields(state);
     }
 
     if (result.testResult) {

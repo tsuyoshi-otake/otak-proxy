@@ -26,6 +26,7 @@ import {
     normalizeProxyMonitorConfig
 } from './ProxyMonitorConfig';
 import { detectProxyWithRetry } from './ProxyMonitorDetection';
+import { detectionSplitRoutingIdentity } from '../config/DetectedProxyValue';
 
 export type { ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
 
@@ -57,6 +58,9 @@ export class ProxyMonitor extends EventEmitter {
     private pollingInterval?: NodeJS.Timeout;
     private debounceTimer?: NodeJS.Timeout;
     private lastProxyUrl: string | null = null;
+    // Per-scheme endpoints / bypass of the last successful detection. A change
+    // there with the same primary URL still changes routing, so it is a change (#93).
+    private lastSplitRouting = detectionSplitRoutingIdentity({});
     private isCheckInProgress: boolean = false;
     /** Invalidates callbacks that started under an earlier start/stop lifecycle. */
     private lifecycleEpoch: number = 0;
@@ -291,7 +295,11 @@ export class ProxyMonitor extends EventEmitter {
     }
 
     private emitProxyChangeIfNeeded(result: ProxyDetectionResult, trigger: ProxyCheckTrigger): void {
-        if (!result.success || result.proxyUrl === this.lastProxyUrl) {
+        if (
+            !result.success ||
+            (result.proxyUrl === this.lastProxyUrl &&
+                detectionSplitRoutingIdentity(result) === this.lastSplitRouting)
+        ) {
             return;
         }
 
@@ -314,6 +322,7 @@ export class ProxyMonitor extends EventEmitter {
 
         this.state.recordCheckSuccess(result.proxyUrl, result.source);
         this.lastProxyUrl = result.proxyUrl;
+        this.lastSplitRouting = detectionSplitRoutingIdentity(result);
     }
 
     /**

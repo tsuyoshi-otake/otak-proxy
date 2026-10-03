@@ -279,7 +279,8 @@ Run `otak: Diagnose Proxy State` to inspect the current proxy state. Diagnostics
 Diagnostics also check whether the actual tool settings match the selected state:
 
 - In Auto with an active proxy, diagnostics report a mismatch when VS Code, Git `http.proxy`, or npm no longer holds the expected proxy URL. This check covers only the targets that otak-proxy has recorded as configured. A leftover Git `https.proxy` is reported for information only, because Git does not route traffic through it.
-- In Off, or in Auto while it shows `Auto: OFF`, diagnostics report a residual when VS Code, Git, or npm still has a proxy configured. A value that otak-proxy left in place when it cleared proxy settings, because otak-proxy did not write it, is reported as an advisory, not as a failure.
+- In Off, or in Auto while it shows `Auto: OFF`, diagnostics report a residual when VS Code, Git, or npm still has a proxy configured. A value that otak-proxy left in place when it cleared proxy settings, because otak-proxy did not write it, is reported as an advisory, not as a failure. An unsupported auto-config setting (PAC, WPAD, or GNOME `mode=auto`) is reported for information only in these states, because otak-proxy neither uses nor changes it.
+- When Git or npm cannot be read (for example, the command is not on `PATH` or times out), diagnostics report that for information and skip the mismatch and residual checks for that tool, instead of treating it as having no proxy.
 - In remote, WSL, container, or web extension hosts, local Windows checks that cannot run there are reported as capability limits instead of being forced.
 
 When otak-proxy starts in Off or `Auto: OFF`, it runs the same disable path as switching Off, so leftover VS Code, Git, or npm proxy entries that otak-proxy manages are detected and cleared.

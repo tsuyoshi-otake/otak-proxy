@@ -33,6 +33,9 @@ export async function detectProxyWithRetry(
                 proxyUrl: detection.proxyUrl,
                 source: detection.source as ProxyDetectionResult['source'],
                 kind: detection.kind,
+                httpUrl: detection.httpUrl,
+                httpsUrl: detection.httpsUrl,
+                bypass: detection.bypass,
                 capability: detection.capability,
                 timestamp: Date.now(),
                 success: true
@@ -58,7 +61,7 @@ export async function detectProxyWithRetry(
 
 async function detectProxy(
     detector: ISystemProxyDetector
-): Promise<Pick<ProxyDetectionResult, 'proxyUrl' | 'source' | 'kind' | 'capability'>> {
+): Promise<Pick<ProxyDetectionResult, 'proxyUrl' | 'source' | 'kind' | 'httpUrl' | 'httpsUrl' | 'bypass' | 'capability'>> {
     if (detector.detectSystemProxyWithSource) {
         return await detector.detectSystemProxyWithSource();
     }

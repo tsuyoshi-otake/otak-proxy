@@ -298,6 +298,7 @@
     "diagnose.reason.winhttpParseUnavailable": "Die WinHTTP-Proxy-Ausgabe konnte nicht analysiert werden",
     "diagnose.reason.wininetPac": "Eine Proxy-Autokonfigurations-URL (PAC) ist konfiguriert",
     "diagnose.reason.gitReadUnavailable": "die Git-Konfiguration konnte nicht gelesen werden",
+    "diagnose.reason.npmReadUnavailable": "die npm-Konfiguration konnte nicht gelesen werden",
     "migration.credentialsDropped": "otak-proxy konnte {count} doppelte Proxy-Anmeldedaten beim v3-Upgrade nicht in den sicheren Speicher migrieren. Geben Sie sie erneut ein, wenn sich ein Proxy nicht mehr authentifiziert.",
     "diagnose.target.systemBypass": "System-Proxy-Ausnahmen",
     "diagnose.target.pipUserProxy": "pip-Benutzerproxy",

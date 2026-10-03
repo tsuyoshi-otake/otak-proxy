@@ -88,19 +88,46 @@ export function clearDetectedSplitFields(state: ProxyState): void {
     state.detectedBypass = undefined;
 }
 
-export function splitApplyOptionsFromState(state: ProxyState): {
+/** The split fields, as a detection result or the committed state carries them. */
+export interface SplitRoutingFields {
     kind?: ProxyValueKind;
     httpUrl?: string;
     httpsUrl?: string;
     bypass?: string;
-} | undefined {
-    if (!isPerSchemeProxy(state.autoProxyKind, state.autoHttpProxyUrl, state.autoHttpsProxyUrl) && !state.detectedBypass) {
+}
+
+/** The split fields that change routing, or undefined when apply ignores them. */
+function routingSplit(fields: SplitRoutingFields): SplitRoutingFields | undefined {
+    if (!isPerSchemeProxy(fields.kind, fields.httpUrl, fields.httpsUrl) && !fields.bypass) {
         return undefined;
     }
     return {
+        kind: fields.kind,
+        httpUrl: fields.httpUrl,
+        httpsUrl: fields.httpsUrl,
+        bypass: fields.bypass
+    };
+}
+
+export function splitApplyOptionsFromState(state: ProxyState): SplitRoutingFields | undefined {
+    return routingSplit({
         kind: state.autoProxyKind,
         httpUrl: state.autoHttpProxyUrl,
         httpsUrl: state.autoHttpsProxyUrl,
         bypass: state.detectedBypass
-    };
+    });
+}
+
+/**
+ * What a detection's split fields change about routing, as a comparable
+ * string. Fields that apply ignores (a single proxy's own http/https copies)
+ * do not count, so an unchanged detection does not trigger a needless apply.
+ */
+export function detectionSplitRoutingIdentity(detection: SplitRoutingFields): string {
+    return JSON.stringify(routingSplit(detection) ?? null);
+}
+
+/** {@link detectionSplitRoutingIdentity} for the split fields committed in state. */
+export function splitRoutingIdentity(state: ProxyState): string {
+    return JSON.stringify(splitApplyOptionsFromState(state) ?? null);
 }

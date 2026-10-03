@@ -128,6 +128,16 @@ suite('DiagnoseProxyCommand Unit Tests', () => {
         assert.ok(message.includes('could not be inspected'));
     });
 
+    test('explains an npm config read failure instead of showing the raw issue id (#93)', () => {
+        const message = formatDiagnosticsNotification({
+            issueCount: 1,
+            issues: [issue('npm.readUnavailable', 'npm.user.proxy', 'capabilityUnavailable')]
+        });
+
+        assert.ok(message.includes('npm configuration could not be read'), message);
+        assert.ok(!message.includes('npm.readUnavailable'), message);
+    });
+
     test('diagnostics output carries the last remediation outcome, or an explicit null (#78)', () => {
         const report = {
             runtimeState: 'partial',

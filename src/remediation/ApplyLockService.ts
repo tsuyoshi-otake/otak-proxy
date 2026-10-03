@@ -117,12 +117,19 @@ export class ApplyLockService {
 
         const holder = await this.readLock(lockPath);
         if (!holder) {
-            // A peer may be renewing its lease with an in-place write at this
-            // exact instant. If a lock path still exists but is temporarily
-            // unreadable, fail closed: it is safer to report contention than
-            // to mistake a live lock for an I/O failure or reclaim it.
-            if (await this.lockPathExists(lockPath)) {
-                return { acquired: false, reason: 'held' };
+            const unreadableSince = await this.lockModifiedAt(lockPath);
+            if (unreadableSince !== undefined) {
+                // A peer may be renewing its lease with an in-place write at this
+                // exact instant, or be between creating the file and writing it.
+                // While the file was touched within one lease, fail closed: it is
+                // safer to report contention than to reclaim a live lock.
+                if (!(await this.isAbandonedUnreadableLock(lockPath, unreadableSince, ttlMs))) {
+                    return { acquired: false, reason: 'held' };
+                }
+                // Empty or truncated for longer than a whole lease: no live holder
+                // writes a lock that long (renew rewrites it every ttl/3), so the
+                // writer died mid-write. Reclaim it like an expired lock (#93).
+                return this.reclaimAndCreate(lockPath, target, record, 'unreadable');
             }
 
             // The holder may have released between our failed exclusive create
@@ -138,18 +145,44 @@ export class ApplyLockService {
             return { acquired: false, reason: 'held', holder: this.publicHolder(holder) };
         }
 
-        const stalePath = `${lockPath}.stale.${process.pid}.${token}`;
+        return this.reclaimAndCreate(lockPath, target, record, this.publicHolder(holder));
+    }
+
+    /**
+     * Moves a stale lock aside and creates ours. `stale` is the expired holder,
+     * or 'unreadable' for an abandoned empty / truncated lock.
+     */
+    private async reclaimAndCreate(
+        lockPath: string,
+        target: ApplyLockRequest,
+        record: ApplyLockRecord,
+        stale: Partial<ApplyLockRecord> | 'unreadable'
+    ): Promise<ApplyLockAcquireResult> {
+        const held: ApplyLockAcquireResult = stale === 'unreadable'
+            ? { acquired: false, reason: 'held' }
+            : { acquired: false, reason: 'held', holder: stale };
+        const stalePath = `${lockPath}.stale.${process.pid}.${record.token}`;
         try {
             await fs.rename(lockPath, stalePath);
-            await fs.unlink(stalePath).catch(() => undefined);
         } catch {
-            return { acquired: false, reason: 'held', holder: this.publicHolder(holder) };
+            return held;
         }
+
+        if (stale === 'unreadable' && await this.readLock(stalePath)) {
+            // Another window reclaimed the same abandoned file between our
+            // check and the rename, and created its own lock: we moved a live
+            // lock. Put it back without overwriting and report contention, so
+            // the reclaim cannot end with two holders (#93).
+            await fs.link(stalePath, lockPath).catch(() => undefined);
+            await fs.unlink(stalePath).catch(() => undefined);
+            return held;
+        }
+        await fs.unlink(stalePath).catch(() => undefined);
 
         const createdAfterStale = await this.tryCreateLock(lockPath, record);
         return createdAfterStale
-            ? { acquired: true, handle: { target, token, path: lockPath } }
-            : { acquired: false, reason: 'held', holder: this.publicHolder(holder) };
+            ? { acquired: true, handle: { target, token: record.token, path: lockPath } }
+            : held;
     }
 
     async release(handle: ApplyLockHandle): Promise<boolean> {
@@ -231,19 +264,28 @@ export class ApplyLockService {
     }
 
     private async tryCreateLock(lockPath: string, record: ApplyLockRecord): Promise<boolean> {
-        let file: fs.FileHandle | undefined;
+        let file: fs.FileHandle;
         try {
             file = await fs.open(lockPath, 'wx');
-            await file.writeFile(JSON.stringify(record), 'utf8');
-            return true;
         } catch (error) {
             if (isErrno(error, 'EEXIST')) {
                 return false;
             }
             throw error;
-        } finally {
-            await file?.close();
         }
+
+        try {
+            await file.writeFile(JSON.stringify(record), 'utf8');
+        } catch (error) {
+            // The file is ours but empty or truncated. Remove it so it does not
+            // block every window as an unreadable lock, then report the failure
+            // as before (#93).
+            await file.close().catch(() => undefined);
+            await fs.unlink(lockPath).catch(() => undefined);
+            throw error;
+        }
+        await file.close();
+        return true;
     }
 
     private async readLock(lockPath: string): Promise<ApplyLockRecord | undefined> {
@@ -255,13 +297,30 @@ export class ApplyLockService {
         }
     }
 
-    private async lockPathExists(lockPath: string): Promise<boolean> {
+    /** The lock file's mtime, or undefined when it no longer exists or cannot be read. */
+    private async lockModifiedAt(lockPath: string): Promise<number | undefined> {
         try {
-            await fs.access(lockPath);
-            return true;
+            return (await fs.stat(lockPath)).mtimeMs;
         } catch {
+            return undefined;
+        }
+    }
+
+    /**
+     * An unreadable lock carries no expiry, so its mtime is the only evidence of
+     * the last write. mtime is wall-clock time, so it is compared with
+     * Date.now(), not the injectable record clock. Before reclaiming, re-read to
+     * confirm the file is still unreadable and was not touched since the first
+     * look: a writer that finished in between makes it a live lock again.
+     */
+    private async isAbandonedUnreadableLock(lockPath: string, modifiedAt: number, ttlMs: number): Promise<boolean> {
+        if (Date.now() - modifiedAt <= ttlMs) {
             return false;
         }
+        if (await this.readLock(lockPath)) {
+            return false;
+        }
+        return (await this.lockModifiedAt(lockPath)) === modifiedAt;
     }
 
     private publicHolder(record: ApplyLockRecord): Partial<ApplyLockRecord> {

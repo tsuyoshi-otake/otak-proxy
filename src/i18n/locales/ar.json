@@ -298,6 +298,7 @@
     "diagnose.reason.winhttpParseUnavailable": "تعذّر تحليل مخرجات وكيل WinHTTP",
     "diagnose.reason.wininetPac": "تم تهيئة عنوان URL للتكوين التلقائي للوكيل (PAC)",
     "diagnose.reason.gitReadUnavailable": "تعذّرت قراءة تكوين git",
+    "diagnose.reason.npmReadUnavailable": "تعذّرت قراءة تكوين npm",
     "migration.credentialsDropped": "تعذّر على otak-proxy ترحيل {count} من بيانات اعتماد الوكيل المكررة إلى التخزين الآمن أثناء الترقية إلى v3. أعد إدخالها إذا توقف أحد الوكلاء عن المصادقة.",
     "diagnose.target.systemBypass": "تجاوز وكيل النظام",
     "diagnose.target.pipUserProxy": "وكيل مستخدم pip",

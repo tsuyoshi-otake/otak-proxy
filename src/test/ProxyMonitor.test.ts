@@ -727,4 +727,95 @@ suite('ProxyMonitor Connection Testing Integration', () => {
             assert.strictEqual(result, undefined, 'Should return undefined when no proxy URL');
         });
     });
+
+    /**
+     * #93 item 4: the monitor emitted proxyChanged only when the primary URL
+     * changed, and dropped the split fields, so a per-scheme or bypass change
+     * never reached the apply path.
+     */
+    suite('split routing changes (#93)', () => {
+        const primary = 'http://proxy.example.com:8080';
+        const secure = 'http://secure.example.com:8443';
+        type Detection = Pick<ProxyDetectionResult, 'proxyUrl' | 'kind' | 'httpUrl' | 'httpsUrl' | 'bypass'>;
+
+        function splitDetector(initial: Detection) {
+            let current = initial;
+            return {
+                set(next: Detection): void {
+                    current = next;
+                },
+                async detectSystemProxy(): Promise<string | null> {
+                    return current.proxyUrl;
+                },
+                async detectSystemProxyWithSource() {
+                    return { ...current, source: 'windows' };
+                }
+            };
+        }
+
+        async function check(): Promise<void> {
+            monitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        async function startWith(detector: ReturnType<typeof splitDetector>): Promise<ProxyDetectionResult[]> {
+            monitor = new ProxyMonitor(detector as any, logger, { pollingInterval: 60000, debounceDelay: 10 });
+            const emitted: ProxyDetectionResult[] = [];
+            monitor.on('proxyChanged', (result: ProxyDetectionResult) => emitted.push(result));
+            monitor.start();
+            await check();
+            return emitted;
+        }
+
+        const perScheme = (httpsUrl: string, bypass?: string): Detection => ({
+            proxyUrl: primary, kind: 'perSchemeProxy', httpUrl: primary, httpsUrl, bypass
+        });
+
+        test('the emitted result carries the split fields', async () => {
+            const emitted = await startWith(splitDetector(perScheme(secure, 'localhost')));
+
+            assert.strictEqual(emitted.length, 1);
+            assert.strictEqual(emitted[0].kind, 'perSchemeProxy');
+            assert.strictEqual(emitted[0].httpUrl, primary);
+            assert.strictEqual(emitted[0].httpsUrl, secure);
+            assert.strictEqual(emitted[0].bypass, 'localhost');
+        });
+
+        test('an https-only change with the same primary URL is emitted', async () => {
+            const detector = splitDetector(perScheme(secure));
+            const emitted = await startWith(detector);
+
+            detector.set(perScheme('http://secure2.example.com:8443'));
+            await check();
+
+            assert.strictEqual(emitted.length, 2);
+            assert.strictEqual(emitted[1].proxyUrl, primary);
+            assert.strictEqual(emitted[1].httpsUrl, 'http://secure2.example.com:8443');
+        });
+
+        test('per-scheme back to a single proxy, and a bypass-only change, are emitted', async () => {
+            const detector = splitDetector(perScheme(secure));
+            const emitted = await startWith(detector);
+
+            detector.set({ proxyUrl: primary, kind: 'singleProxy' });
+            await check();
+            detector.set({ proxyUrl: primary, kind: 'singleProxy', bypass: 'localhost' });
+            await check();
+
+            assert.strictEqual(emitted.length, 3);
+            assert.strictEqual(emitted[1].httpsUrl, undefined);
+            assert.strictEqual(emitted[2].bypass, 'localhost');
+        });
+
+        test('an identical detection, or a single proxy reporting its own copies, is not re-emitted', async () => {
+            const detector = splitDetector({ proxyUrl: primary, kind: 'singleProxy', httpUrl: primary, httpsUrl: primary });
+            const emitted = await startWith(detector);
+
+            await check();
+            detector.set({ proxyUrl: primary, kind: 'singleProxy' });
+            await check();
+
+            assert.strictEqual(emitted.length, 1);
+        });
+    });
 });
