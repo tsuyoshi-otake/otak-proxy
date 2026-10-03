@@ -3,10 +3,10 @@
 ## [Unreleased]
 
 ### Fixed
-- In `Auto: OFF`, Auto now turns back on when a connection test shows that the proxy answers, even with `407`, `403`, or `5xx`, or when the proxy accepts the connection and the test then times out. Before this, these results left `Auto: OFF` in place while the proxy was working (#97).
-- In `Auto: OFF`, a timeout or DNS failure before the proxy is reached no longer turns Auto back on. Such a result proves nothing about the proxy, so the current state is kept; Auto still turns off only when the proxy cannot be reached at all (#97).
-- A reachability change alone no longer turns the proxy back on in `Auto: OFF`. The connection test decides, and when it shows the proxy answering it applies the proxy in the same step, so recovery no longer depends on a later reachability change (#97).
-- A system proxy that changes while VS Code is running is now applied. The change was discarded whenever the same check also ran a connection test, so the new proxy was saved but not applied. In `Auto: OFF`, a new system proxy is judged on its own test and starts in Auto unless it cannot be reached (#97).
+- In `Auto: OFF`, Auto now turns back on when a connection test shows that the proxy answers, even with `407`, `403`, or `5xx`, or when the proxy accepts the connection and the test then times out (for an `https:` proxy, only once the TLS handshake has finished). Before this, these results left `Auto: OFF` in place while the proxy was working (#97).
+- In `Auto: OFF`, a timeout or DNS failure before the proxy is reached, or a TLS failure, no longer turns Auto back on. Such a result proves nothing about the proxy, so the current state is kept; Auto still turns off only when the proxy cannot be reached at all (#97).
+- A reachability change alone no longer turns the proxy back on in `Auto: OFF`. The connection test decides, and when it shows the proxy answering it applies the proxy in the same step, so recovery no longer depends on a later reachability change. Other VS Code windows see the recovery only after the proxy has been applied (#97).
+- A system proxy that changes while VS Code is running is now applied. The change was discarded whenever the same check also ran a connection test, so the new proxy was saved but not applied. In `Auto: OFF`, a new system proxy is judged on its own test and starts in Auto unless it cannot be reached; the same proxy written differently, for example with an upper-case host name, is not a new proxy (#97).
 - When a connection test shows that the proxy cannot be reached, the managed proxy settings are now removed right after the test, as intended. Before this, that removal never ran and the settings were removed only by the reachability change that followed (#97).
 - A connection test of a proxy that is no longer the current one no longer changes the current state (#97).
 

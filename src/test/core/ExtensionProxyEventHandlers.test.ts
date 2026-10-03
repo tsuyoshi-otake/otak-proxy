@@ -3,7 +3,7 @@ import * as sinon from 'sinon';
 import { handleProxyChanged, handleProxyStateChanged, handleProxyTestComplete } from '../../core/ExtensionProxyEventHandlers';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
 import { ProxyDetectionResult } from '../../monitoring/ProxyMonitor';
-import { captureLogicalGeneration } from '../../core/LogicalGeneration';
+import { captureLogicalGeneration, proxyUrlIdentity } from '../../core/LogicalGeneration';
 import { ProxyMode, ProxyState } from '../../core/types';
 import { isProxyEndpointReachable, TestResult } from '../../utils/ProxyUtils';
 import type { ManualFallbackOutcome } from '../../core/SystemProxyUpdateService';
@@ -648,6 +648,8 @@ suite('ExtensionProxyEventHandlers Tests', () => {
      */
     suite('Auto: OFF endpoint verdict (#97)', () => {
         const primary = 'http://proxy.example.com:8080';
+        // The same endpoint as primary: new URL() lowercases the host.
+        const primaryRespelled = 'http://PROXY.example.com:8080';
         const other = 'http://proxy2.example.com:8080';
         const secure2 = 'http://secure2.example.com:8443';
         const startup = () => ({ isPending: false });
@@ -720,6 +722,15 @@ suite('ExtensionProxyEventHandlers Tests', () => {
                     return { kind: 'committed' as const, revision: expectedRevision + 1, state: { ...state } };
                 };
         };
+        /** Another writer that lands right after the handler's first commit. */
+        const afterFirstCommit = (change: (committed: ProxyState) => ProxyState) => {
+            saveStateStub.callsFake(async (next: ProxyState) => {
+                state = saveStateStub.callCount === 1 ? change({ ...next }) : { ...next };
+            });
+        };
+        const autoModeOffPublishedBeforeApply = () => publishStateStub.getCalls().some(call =>
+            call.args[0].autoModeOff === false &&
+            (applyProxySettingsStub.notCalled || call.calledBefore(applyProxySettingsStub.firstCall)));
         const autoOnState = () => offState({
             autoModeOff: false,
             proxyReachable: true,
@@ -777,6 +788,25 @@ suite('ExtensionProxyEventHandlers Tests', () => {
                     assert.strictEqual(state.lastTestResult?.failureKind, variant.make(primary).failureKind);
                 });
             }
+
+            for (const variant of [undefined, ...byVerdict('unknown')]) {
+                test(`spelled differently, ${variant?.name ?? 'without a test'} keeps Auto: OFF`, async () => {
+                    // A raw string comparison took this for a new endpoint
+                    // and enabled it without proof.
+                    await handleProxyChanged(context, detection(primaryRespelled, variant?.make(primaryRespelled)));
+
+                    sinon.assert.notCalled(applyProxySettingsStub);
+                    assert.strictEqual(state.autoModeOff, true);
+                    assert.strictEqual(state.autoProxyUrl, primaryRespelled, 'the detected spelling is saved');
+                });
+            }
+
+            test('spelled differently, a success leaves Auto: OFF and applies', async () => {
+                await handleProxyChanged(context, detection(primaryRespelled, success.make(primaryRespelled)));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primaryRespelled, true, undefined);
+                assert.strictEqual(state.autoModeOff, false);
+            });
 
             test('endpointUnreachable keeps Auto: OFF and repeats the removal', async () => {
                 await handleProxyChanged(context, detection(primary, unreachable.make(primary), splitChange));
@@ -838,6 +868,12 @@ suite('ExtensionProxyEventHandlers Tests', () => {
                     sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
                     assert.strictEqual(atApply[0].autoModeOff, false);
                     assert.strictEqual(state.autoModeOff, false);
+                    // Same sequence as every other apply path: saved as
+                    // pending, applied, then cleared and published.
+                    assert.strictEqual(atApply[0].convergencePending, true, 'the apply runs on a state saved as pending');
+                    assert.strictEqual(state.convergencePending, false, 'cleared once the apply finished');
+                    assert.ok(!autoModeOffPublishedBeforeApply(), 'no window sees Auto back on before the apply');
+                    sinon.assert.calledWith(publishStateStub, sinon.match({ autoModeOff: false, convergencePending: false }));
                 });
             }
 
@@ -887,33 +923,70 @@ suite('ExtensionProxyEventHandlers Tests', () => {
             });
 
             test('a toggle committed before the recovery apply drops the apply', async () => {
-                publishStateStub.callsFake(async () => {
-                    state = { ...state, mode: ProxyMode.Off };
-                });
+                afterFirstCommit(committed => ({ ...committed, mode: ProxyMode.Off }));
 
                 await handleProxyTestComplete(context, startup(), success.make(primary));
 
                 sinon.assert.notCalled(applyProxySettingsStub);
+                assert.ok(!autoModeOffPublishedBeforeApply());
             });
 
             test('a detection that moved to another endpoint before the recovery apply drops the apply', async () => {
-                publishStateStub.callsFake(async () => {
-                    state = { ...state, autoProxyUrl: other };
-                });
+                afterFirstCommit(committed => ({ ...committed, autoProxyUrl: other }));
 
                 await handleProxyTestComplete(context, startup(), success.make(primary));
 
                 sinon.assert.notCalled(applyProxySettingsStub);
+                assert.ok(!autoModeOffPublishedBeforeApply());
             });
 
             test('Auto: OFF set again before the recovery apply drops the apply', async () => {
-                publishStateStub.callsFake(async () => {
-                    state = { ...state, autoModeOff: true };
-                });
+                afterFirstCommit(committed => ({ ...committed, autoModeOff: true }));
 
                 await handleProxyTestComplete(context, startup(), success.make(primary));
 
                 sinon.assert.notCalled(applyProxySettingsStub);
+                assert.ok(!autoModeOffPublishedBeforeApply());
+            });
+
+            test('a toggle committed during the recovery apply is neither cleared nor published', async () => {
+                applyProxySettingsStub.callsFake(async () => {
+                    atApply.push({ ...state });
+                    state = { ...state, mode: ProxyMode.Off, convergencePending: false };
+                    return true;
+                });
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                assert.strictEqual(state.mode, ProxyMode.Off);
+                // The toggle owns that state; this handler publishes nothing.
+                sinon.assert.notCalled(publishStateStub);
+            });
+
+            test('an alive test with no proxy to apply publishes at once, without a pending marker', async () => {
+                // Auto: OFF with no proxy at all; nothing will apply and clear a marker.
+                state = offState({ autoProxyUrl: undefined });
+                const { proxyUrl: _proxyUrl, ...withoutUrl } = success.make(primary);
+
+                await handleProxyTestComplete(context, startup(), withoutUrl as TestResult);
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoModeOff, false);
+                assert.notStrictEqual(state.convergencePending, true);
+                sinon.assert.calledWith(publishStateStub, sinon.match({ autoModeOff: false, convergencePending: false }));
+            });
+
+            test('a recovery apply that throws leaves the state pending and publishes nothing', async () => {
+                applyProxySettingsStub.callsFake(async () => {
+                    atApply.push({ ...state });
+                    throw new Error('apply failed');
+                });
+
+                await assert.rejects(handleProxyTestComplete(context, startup(), success.make(primary)), /apply failed/);
+
+                assert.strictEqual(state.autoModeOff, false);
+                assert.strictEqual(state.convergencePending, true, 'diagnostics and sync see that the apply never finished');
+                sinon.assert.neverCalledWith(publishStateStub, sinon.match({ autoModeOff: false }));
             });
 
             test('with compare-and-set commits, an unreachable test removes the proxy after its own commit', async () => {
@@ -937,6 +1010,10 @@ suite('ExtensionProxyEventHandlers Tests', () => {
 
                 sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
                 assert.strictEqual(atApply[0].autoModeOff, false);
+                assert.strictEqual(atApply[0].convergencePending, true);
+                assert.strictEqual(state.convergencePending, false);
+                assert.ok(!autoModeOffPublishedBeforeApply());
+                sinon.assert.calledOnceWithExactly(publishStateStub, sinon.match({ autoModeOff: false, convergencePending: false }));
             });
 
             test('with compare-and-set commits, a re-enable committed before the removal keeps the proxy', async () => {
@@ -1000,7 +1077,7 @@ suite('ExtensionProxyEventHandlers Tests', () => {
 
             for (const wasOff of [true, false]) {
                 for (const previous of [primary, undefined]) {
-                    for (const detected of [primary, other]) {
+                    for (const detected of [primary, primaryRespelled, other]) {
                         for (const variant of [undefined, ...variants]) {
                             for (const split of [false, true]) {
                                 const label = `[off=${wasOff} prev=${previous} det=${detected} test=${variant?.name ?? 'none'} split=${split}]`;
@@ -1017,7 +1094,8 @@ suite('ExtensionProxyEventHandlers Tests', () => {
                                 await handleProxyChanged(context, detection(detected, variant?.make(detected), split ? splitChange : {}));
 
                                 assertNothingEnabledUnderAutoOff(label);
-                                assert.strictEqual(state.autoModeOff, expectedOff(wasOff, previous === detected, variant?.verdict), label);
+                                const sameEndpoint = proxyUrlIdentity(previous) === proxyUrlIdentity(detected);
+                                assert.strictEqual(state.autoModeOff, expectedOff(wasOff, sameEndpoint, variant?.verdict), label);
                                 if (wasOff && state.autoModeOff === false) {
                                     assert.strictEqual(enableCalls().length, 1, `${label} leaving Auto: OFF must apply`);
                                 }

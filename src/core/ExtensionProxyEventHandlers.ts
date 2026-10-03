@@ -57,8 +57,10 @@ export async function handleProxyChanged(
     const previousSplitRouting = splitRoutingIdentity(state);
     const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
+    // One endpoint keeps its verdict however the URL is spelled (#97).
+    const sameEndpoint = proxyUrlIdentity(previousProxy) === proxyUrlIdentity(state.autoProxyUrl);
     if (result.proxyUrl) {
-        applyEndpointVerdict(state, previousProxy === state.autoProxyUrl, result.testResult);
+        applyEndpointVerdict(state, sameEndpoint, result.testResult);
     }
 
     // A system proxy lost mid-session resolves like one missing at startup:
@@ -72,15 +74,16 @@ export async function handleProxyChanged(
 
     const recoveredFromAutoOff = wasAutoModeOff && state.autoModeOff === false;
     const samePrimaryProxy = previousProxy === state.autoProxyUrl;
-    // Auto: OFF removed the proxy because this URL did not answer. The same URL
-    // without proof that it is alive again says nothing new about that, so
-    // whatever else changed (per-scheme URLs, bypass) is only saved for the
-    // recovery to apply (#93, #97). The Configured flags are false here because
-    // of that removal, not because an enable failed. A new unreachable result
-    // still goes through apply, which repeats the removal.
+    // Auto: OFF removed the proxy because this endpoint did not answer. The
+    // same endpoint without proof that it is alive again says nothing new
+    // about that, so whatever else changed (per-scheme URLs, bypass, the URL's
+    // spelling) is only saved for the recovery to apply (#93, #97). The
+    // Configured flags are false here because of that removal, not because an
+    // enable failed. A new unreachable result still goes through apply, which
+    // repeats the removal.
     const stillOffWithoutProof =
         Boolean(result.proxyUrl) &&
-        samePrimaryProxy &&
+        sameEndpoint &&
         state.autoModeOff === true &&
         !(result.testResult && isProxyEndpointUnreachable(result.testResult));
     // An engaged fallback always goes through apply, even when its URL equals
@@ -96,6 +99,7 @@ export async function handleProxyChanged(
     if (stillOffWithoutProof || unchanged) {
         await commitAndPublish(context, started, 'detection', current => ({
             ...current,
+            autoProxyUrl: state.autoProxyUrl,
             lastTestResult: state.lastTestResult,
             proxyReachable: state.proxyReachable,
             lastTestTimestamp: state.lastTestTimestamp,
@@ -210,8 +214,10 @@ export async function handleProxyTestComplete(
         next.proxyReachable = isProxyEndpointReachable(testResult);
         next.lastTestTimestamp = Date.now();
         applyEndpointVerdict(next, true, testResult);
-        recoveredFromAutoOff = wasAutoModeOff && next.autoModeOff === false;
-        next.convergencePending = isProxyEndpointUnreachable(testResult);
+        recoveredFromAutoOff = wasAutoModeOff && next.autoModeOff === false && Boolean(next.autoProxyUrl);
+        // A recovery is published only once its apply finished, as on every
+        // other apply path: until then the proxy is not active (#97).
+        next.convergencePending = isProxyEndpointUnreachable(testResult) || recoveredFromAutoOff;
         return next;
     });
 
@@ -221,10 +227,12 @@ export async function handleProxyTestComplete(
     }
 
     const committed = await context.proxyStateManager.getState();
-    await publishUnlessStale(context.publishProxyState, captureLogicalGeneration(committed), 'connectionTest', {
-        ...committed,
-        convergencePending: false
-    });
+    if (!recoveredFromAutoOff) {
+        await publishUnlessStale(context.publishProxyState, captureLogicalGeneration(committed), 'connectionTest', {
+            ...committed,
+            convergencePending: false
+        });
+    }
     context.updateStatusBar?.(committed);
     clearStartupPendingIfNeeded(startupTestState, testResult);
 
@@ -246,6 +254,7 @@ export async function handleProxyTestComplete(
         }
         await applyProxyThroughContext(context, latest.autoProxyUrl, true, { silent: true });
         Logger.info(`Proxy ${context.sanitizer.maskPassword(latest.autoProxyUrl)} proved reachable, Auto Mode back on`);
+        await clearPendingThenPublish(context, 'connectionTest', latest);
         context.updateStatusBar?.(await context.proxyStateManager.getState());
     }
 }
@@ -332,7 +341,20 @@ async function saveApplyThenPublish(
     }
 
     await apply();
+    await clearPendingThenPublish(context, owner, desired);
+}
 
+/**
+ * Ends an apply that started from a state saved with convergencePending:
+ * clears the flag and publishes the converged state. A state that moved to
+ * another logical identity meanwhile belongs to the writer that moved it.
+ * The revision is not compared: the apply itself writes the Configured flags.
+ */
+async function clearPendingThenPublish(
+    context: InitializerContext,
+    owner: 'detection' | 'connectionTest' | 'autoMonitoring' | 'stateChanged',
+    desired: ProxyState
+): Promise<void> {
     const afterApply = await context.proxyStateManager.getState();
     const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
     if (!sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(afterApply))) {

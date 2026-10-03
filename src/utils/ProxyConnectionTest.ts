@@ -1,5 +1,6 @@
 import * as http from 'http';
 import * as net from 'net';
+import * as tls from 'tls';
 import { Logger } from './Logger';
 import {
     classifyConnectError,
@@ -177,13 +178,15 @@ function createProxyConnectionAttempt(
 }
 
 /**
- * Reports when the request's socket opens a TCP connection to the proxy
- * itself. That proves the endpoint is up even when CONNECT then times out
- * (#97). A reused socket reports nothing, which only loses that proof.
+ * Reports when the request's socket opens a connection to the proxy itself.
+ * That proves the endpoint is up even when CONNECT then times out (#97). An
+ * https proxy proves it only with a finished TLS handshake: its socket reports
+ * 'connect' before the handshake, which can still fail. A reused socket
+ * reports nothing, which only loses that proof.
  */
 function trackProxyConnect(req: http.ClientRequest, onConnect: () => void): void {
     req.once('socket', (socket: net.Socket) => {
-        socket.once('connect', onConnect);
+        socket.once(socket instanceof tls.TLSSocket ? 'secureConnect' : 'connect', onConnect);
     });
 }
 
