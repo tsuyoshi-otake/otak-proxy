@@ -1,6 +1,16 @@
 # Change Log
 
+## [3.2.13] - 2026-10-03
+
+### Fixed
+- Recognize how npm 10.8.0 through 11.6.1 word the refusal to print a proxy URL with credentials ("can not be retrieved"). The npm fix from 3.2.12 now also works there, including with the npm 10 bundled with Node.js 22. Before this, a credentialed proxy written to npm still failed verification on those versions, and Off could not remove it (#88).
+
+### Changed
+- README: npm 10.8 and later, not only npm 11, refuse to print a proxy URL with a password (#88).
+
 ## [3.2.12] - 2026-10-03
+
+Not published: the release workflow stopped at the unit tests (#88). These changes first ship in 3.2.13.
 
 ### Fixed
 - In Auto, when the system proxy disappears while VS Code is running (for example after a VPN disconnect), test the configured fallback proxy and use it when it is reachable, as at startup. When it is not reachable, Auto turns off instead of staying on without a proxy (#85).
