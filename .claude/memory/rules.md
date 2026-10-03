@@ -200,6 +200,10 @@
 - **`vsce publish` / `ovsx publish` の成功ログは「アップロード成功」であって「公開反映」ではない。**
   実測で Open VSX 約 3〜4 分 / Marketplace 約 5〜7 分の遅延がある（v3.2.14 は約 7 分）。
   レジストリ API でバージョンが切り替わるまで「公開済み」と報告しない。
+  Marketplace の判定は `https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery`（POST、
+  `filterType: 7` に `<publisher>.<name>`）の `versions[0].version` で行う。版別アセット
+  （`<publisher>.gallery.vsassets.io/.../extension/<name>/<version>/assetbyname/...`）は upload から 1 分以内に
+  200 を返し、検索 API の切り替わりより約 5 分早い（v3.2.16）ので、公開の証拠にならない。
 
 - **過去のコミットの author / committer は書き換えない（2026-10-03 にユーザーが決定）。** 前のアカウント名と
   勤務先ドメインのメールアドレスのコミットが残っているが、書き換えには force push が要り、既存のタグと
