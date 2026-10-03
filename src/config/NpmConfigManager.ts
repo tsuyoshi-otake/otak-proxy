@@ -172,7 +172,7 @@ function classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | n
 /**
  * npm 10.8 and later refuse `config get` for any value they would redact (a
  * URL password, an npm token, a UUID), including values in the user's own
- * config (#85). npm 10.8.0 through 11.5.0 say "can not be retrieved"; 11.10.0
+ * config (#85). npm 10.8.0 through 11.6.1 say "can not be retrieved"; 11.6.2
  * and later say "cannot be retrieved" (#88).
  */
 function isProtectedGetRefusal(error: unknown): boolean {

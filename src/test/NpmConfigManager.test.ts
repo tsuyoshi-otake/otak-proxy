@@ -403,8 +403,8 @@ suite('NpmConfigManager Test Suite', () => {
             await assert.rejects(npm10.runner('npm', ['config', 'get', 'proxy']), /option is protected, and can not be retrieved/);
         });
 
-        // npm 10.8.0 through 11.5.0 say "can not be retrieved" (the npm 10
-        // bundled with Node.js 22 among them); 11.10.0 and later say
+        // npm 10.8.0 through 11.6.1 say "can not be retrieved" (the npm 10
+        // bundled with Node.js 22 among them); 11.6.2 and later say
         // "cannot be retrieved" (#88).
         for (const wording of ['cannot', 'can not'] as const) {
             test(`"${wording} be retrieved": a credentialed write verifies, reads back and Off removes it (#88)`, async () => {

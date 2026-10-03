@@ -117,8 +117,8 @@ function npmWouldRedact(value: string): boolean {
 }
 
 /**
- * How `config get` words the refusal: npm 10.8.0 through 11.5.0 say "can not",
- * 11.10.0 and later say "cannot" (#88).
+ * How `config get` words the refusal: npm 10.8.0 through 11.6.1 say "can not",
+ * 11.6.2 and later say "cannot" (#88).
  */
 export type FakeNpmRefusalWording = 'cannot' | 'can not';
 
