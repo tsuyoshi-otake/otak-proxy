@@ -2,6 +2,8 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { SystemProxyUpdateService } from '../../core/SystemProxyUpdateService';
+import { handleProxyChanged } from '../../core/ExtensionProxyEventHandlers';
+import { ProxyDetectionResult } from '../../monitoring/ProxyMonitor';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
 import { ProxyMode, ProxyState } from '../../core/types';
 import * as DetectUtils from '../../utils/SystemProxyDetectionUtils';
@@ -498,5 +500,96 @@ suite('SystemProxyUpdateService Tests', () => {
         await service.checkAndUpdateSystemProxy();
 
         sinon.assert.calledWith(getConfigStub, 'otakProxy');
+    });
+
+    suite('monitor-reported proxy loss uses the startup fallback rule (#85)', () => {
+        const lossResult = (): ProxyDetectionResult => ({
+            proxyUrl: null,
+            source: null,
+            timestamp: Date.now(),
+            success: true
+        });
+        const unreachable = {
+            success: false,
+            proxyUrl: 'http://manual.example:3128',
+            testUrls: ['https://example.com'],
+            errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+            failureKind: 'endpointUnreachable' as const,
+            proxyEndpointOk: false,
+            timestamp: 0
+        };
+
+        setup(() => {
+            state = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://detected.example:8080',
+                autoModeOff: false,
+                usingFallbackProxy: false,
+                lastDetectionSource: 'windows',
+                manualProxyUrl: 'http://manual.example:3128'
+            };
+            configValues.enableFallback = true;
+        });
+
+        test('reachable fallback: applies the manual URL and records the fallback', async () => {
+            await handleProxyChanged(context, lossResult(), draft => service.resolveManualFallback(draft));
+
+            sinon.assert.calledOnceWithExactly(connectionTester!.testProxyAuto, 'http://manual.example:3128');
+            sinon.assert.calledWith(applyProxyStub, 'http://manual.example:3128', true);
+            assert.strictEqual(state.autoProxyUrl, 'http://manual.example:3128');
+            assert.strictEqual(state.usingFallbackProxy, true);
+            assert.strictEqual(state.fallbackProxyUrl, 'http://manual.example:3128');
+            assert.strictEqual(state.lastDetectionSource, 'fallback');
+            assert.strictEqual(state.autoModeOff, false);
+            sinon.assert.calledWith(notifyStub, 'fallback.usingManualProxy', sinon.match.any);
+            sinon.assert.neverCalledWith(notifyStub, 'message.systemProxyRemoved');
+        });
+
+        test('unreachable fallback: Auto OFF and the lost proxy is removed', async () => {
+            connectionTester!.testProxyAuto.resolves(unreachable);
+
+            await handleProxyChanged(context, lossResult(), draft => service.resolveManualFallback(draft));
+
+            sinon.assert.calledWith(applyProxyStub, '', false);
+            assert.strictEqual(state.autoProxyUrl, undefined);
+            assert.strictEqual(state.autoModeOff, true);
+            assert.strictEqual(state.usingFallbackProxy, false);
+        });
+
+        test('connection tester unavailable: treated as unreachable, like startup', async () => {
+            connectionTester = null;
+
+            await handleProxyChanged(context, lossResult(), draft => service.resolveManualFallback(draft));
+
+            sinon.assert.calledWith(applyProxyStub, '', false);
+            assert.strictEqual(state.autoModeOff, true);
+            assert.strictEqual(state.autoProxyUrl, undefined);
+        });
+
+        test('fallback disabled: no test, and the lost proxy is cleared without Auto OFF', async () => {
+            configValues.enableFallback = false;
+
+            await handleProxyChanged(context, lossResult(), draft => service.resolveManualFallback(draft));
+
+            sinon.assert.notCalled(connectionTester!.testProxyAuto);
+            sinon.assert.calledWith(applyProxyStub, '', false);
+            assert.strictEqual(state.autoProxyUrl, undefined);
+            assert.strictEqual(state.autoModeOff, false);
+        });
+
+        test('resolveManualFallback leaves state untouched when no fallback is configured', async () => {
+            const draft: ProxyState = { mode: ProxyMode.Auto, autoProxyUrl: 'http://detected.example:8080' };
+            const before = { ...draft };
+
+            assert.strictEqual(await service.resolveManualFallback(draft), 'notConfigured');
+            assert.deepStrictEqual(draft, before);
+
+            configValues.enableFallback = false;
+            const withManual: ProxyState = { ...draft, manualProxyUrl: 'http://manual.example:3128' };
+            const beforeWithManual = { ...withManual };
+            assert.strictEqual(await service.resolveManualFallback(withManual), 'notConfigured');
+            assert.deepStrictEqual(withManual, beforeWithManual);
+            sinon.assert.notCalled(connectionTester!.testProxyAuto);
+        });
     });
 });

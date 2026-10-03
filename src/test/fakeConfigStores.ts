@@ -91,22 +91,72 @@ export interface FakeNpmConfig {
     runner: CommandRunner;
     get(key: FakeNpmProxyKey): string | null;
     set(key: FakeNpmProxyKey, value: string): void;
+    /**
+     * The user config file as npm would have written it. Pass it as
+     * `NpmConfigManagerOptions.readUserConfigFile`; any path other than the one
+     * `config get userconfig` reported rejects with ENOENT.
+     */
+    readUserConfigFile(path: string): Promise<string>;
+}
+
+/** Where the fake npm keeps user config when no `--userconfig` is passed. */
+export const FAKE_NPM_DEFAULT_USERCONFIG = '/fake-home/.npmrc';
+
+/**
+ * npm 11 `config get` refuses a value it would redact (#85). npm redacts a URL
+ * password only when the raw text matches the WHATWG-normalized password, so
+ * this rule refuses a superset of what npm refuses; it never prints a value
+ * npm would hide.
+ */
+function npmWouldRedact(value: string): boolean {
+    try {
+        return new URL(value).password !== '';
+    } catch {
+        return false;
+    }
+}
+
+function npmProtectedGetError(key: string): Error {
+    const stderr = `npm error The ${key} option is protected, and cannot be retrieved in this way\n`;
+    return Object.assign(new Error(`Command failed: npm config get ${key}\n${stderr}`), {
+        code: 1,
+        stdout: '',
+        stderr
+    });
+}
+
+/** `ini.safe` from npm's bundled ini 6: how `npm config set` writes a value. */
+export function npmIniSafe(value: string): string {
+    const quoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''));
+    if (/[=\r\n]/.test(value) || value.startsWith('[') || (value.length > 1 && quoted) || value !== value.trim()) {
+        return JSON.stringify(value);
+    }
+    return value.split(';').join('\\;').split('#').join('\\#');
 }
 
 /**
  * An `npm config` store limited to the two proxy keys.
  *
- * An unset key reads back as `null`, which is what npm itself prints.
+ * An unset key reads back as `null`, which is what npm itself prints. A
+ * credentialed value cannot be read back with `config get`, as with npm 11;
+ * it is only visible in the user config file.
  */
 export function createFakeNpmConfig(initial: Partial<Record<FakeNpmProxyKey, string>> = {}): FakeNpmConfig {
     const store = new Map<FakeNpmProxyKey, string>(
         Object.entries(initial).filter(([, value]) => typeof value === 'string') as Array<[FakeNpmProxyKey, string]>
     );
+    let reportedUserConfig: string | undefined;
 
     const proxyKeyOf = (args: string[]): FakeNpmProxyKey | undefined =>
         (['proxy', 'https-proxy'] as const).find(key => args.includes(key));
 
     const runner: CommandRunner = async (_command, args) => {
+        if (args.includes('get') && args.includes('userconfig')) {
+            const flag = args.indexOf('--userconfig');
+            reportedUserConfig = flag >= 0 ? args[flag + 1] : FAKE_NPM_DEFAULT_USERCONFIG;
+            return { stdout: `${reportedUserConfig}\n`, stderr: '' };
+        }
+
         const key = proxyKeyOf(args);
         if (!key) {
             return { stdout: '', stderr: '' };
@@ -123,7 +173,11 @@ export function createFakeNpmConfig(initial: Partial<Record<FakeNpmProxyKey, str
         }
 
         if (args.includes('get')) {
-            return { stdout: `${store.get(key) ?? 'null'}\n`, stderr: '' };
+            const value = store.get(key);
+            if (value !== undefined && npmWouldRedact(value)) {
+                throw npmProtectedGetError(key);
+            }
+            return { stdout: `${value ?? 'null'}\n`, stderr: '' };
         }
 
         return { stdout: '', stderr: '' };
@@ -134,6 +188,12 @@ export function createFakeNpmConfig(initial: Partial<Record<FakeNpmProxyKey, str
         get: key => store.get(key) ?? null,
         set: (key, value) => {
             store.set(key, value);
+        },
+        readUserConfigFile: async path => {
+            if (reportedUserConfig === undefined || path !== reportedUserConfig) {
+                throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
+            }
+            return [...store].map(([key, value]) => `${key}=${npmIniSafe(value)}\n`).join('');
         }
     };
 }

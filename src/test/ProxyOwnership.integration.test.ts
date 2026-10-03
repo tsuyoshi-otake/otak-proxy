@@ -6,11 +6,13 @@ import { ProxyCredentialStore } from '../security/ProxyCredentialStore';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import type { GitConfigManager, GitProxyKey } from '../config/GitConfigManager';
-import type { NpmConfigManager, NpmProxyKey } from '../config/NpmConfigManager';
+import { NpmConfigManager } from '../config/NpmConfigManager';
+import type { NpmProxyKey } from '../config/NpmConfigManager';
 import type { VscodeConfigManager } from '../config/VscodeConfigManager';
 import type { PipConfigManager } from '../config/PipConfigManager';
 import type { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import type { UserNotifier } from '../errors/UserNotifier';
+import { createFakeNpmConfig, FakeNpmConfig } from './fakeConfigStores';
 
 interface FakeTargetSet {
     git: FakeGitManager;
@@ -205,7 +207,62 @@ function createApplier(targets: FakeTargetSet, ownershipStore: TargetOwnershipSt
     );
 }
 
+/** The production npm manager over the fake npm CLI, which refuses credentialed `config get` like npm 11. */
+function createRealNpmTarget(npm: FakeNpmConfig, readUserConfigFile = npm.readUserConfigFile): FakeNpmManager {
+    return new NpmConfigManager(undefined, {
+        isWindows: false,
+        env: {},
+        commandAvailable: () => true,
+        commandRunner: npm.runner,
+        readUserConfigFile
+    }) as unknown as FakeNpmManager;
+}
+
 suite('Ownership-safe proxy disable integration', () => {
+    test('Auto then Off writes and removes a credentialed npm proxy (#85)', async () => {
+        const npm = createFakeNpmConfig();
+        const targets = { ...createTargets(), npm: createRealNpmTarget(npm) };
+        const applier = createApplier(targets, createOwnershipStore());
+        const proxyUrl = 'http://alice:s3cret@proxy.example.com:8080';
+
+        const applied = await applier.applyProxyDetailed(proxyUrl, true, { silent: true });
+        assert.strictEqual(applied.success, true, JSON.stringify(applied.errors));
+        assert.strictEqual(npm.get('proxy'), proxyUrl);
+        assert.strictEqual(npm.get('https-proxy'), proxyUrl);
+
+        const disabled = await applier.disableProxyDetailed({ silent: true });
+        assert.strictEqual(disabled.success, true, JSON.stringify(disabled.errors));
+        assert.strictEqual(disabled.results.npmOutcome, 'cleared');
+        assert.strictEqual(npm.get('proxy'), null);
+        assert.strictEqual(npm.get('https-proxy'), null);
+    });
+
+    test('Off keeps a credentialed npm proxy it cannot verify (#85)', async () => {
+        const npm = createFakeNpmConfig();
+        let userConfigReadable = true;
+        const targets = {
+            ...createTargets(),
+            npm: createRealNpmTarget(npm, async path => {
+                if (!userConfigReadable) {
+                    throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+                }
+                return npm.readUserConfigFile(path);
+            })
+        };
+        const applier = createApplier(targets, createOwnershipStore());
+        const proxyUrl = 'http://alice:s3cret@proxy.example.com:8080';
+        assert.strictEqual((await applier.applyProxyDetailed(proxyUrl, true, { silent: true })).success, true);
+
+        userConfigReadable = false;
+        const disabled = await applier.disableProxyDetailed({ silent: true });
+
+        assert.strictEqual(disabled.success, false);
+        assert.strictEqual(disabled.results.npmOutcome, 'failed');
+        assert.strictEqual(npm.get('proxy'), proxyUrl);
+        assert.strictEqual(npm.get('https-proxy'), proxyUrl);
+        assert.ok(!JSON.stringify(disabled).includes('s3cret'));
+    });
+
     test('Off removes an uncompensated first-key residual after a failed Git setProxy', async () => {
         const targets = createTargets();
         const ownedUrl = 'http://partial.example:8080';

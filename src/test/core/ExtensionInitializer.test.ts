@@ -235,6 +235,45 @@ suite('ExtensionInitializer Connection Testing Integration', function() {
             assert.strictEqual(persisted.proxyReachable, false);
             assert.strictEqual(persisted.autoModeOff, true);
         });
+
+        test('proxyChanged without a system proxy engages the reachable manual fallback (#85)', async () => {
+            const fallbackUrl = 'http://fallback.example.com:3128';
+            let persisted: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                lastDetectionSource: 'windows',
+                manualProxyUrl: fallbackUrl,
+                revision: 1
+            };
+            mockStateManager.getState.callsFake(async () => ({ ...persisted }));
+            mockStateManager.commitState.callsFake(async (expectedRevision, next) => {
+                if (expectedRevision !== persisted.revision) {
+                    return { kind: 'superseded', current: { ...persisted } };
+                }
+                persisted = { ...next, revision: expectedRevision + 1 };
+                return { kind: 'committed', revision: expectedRevision + 1, state: { ...persisted } };
+            });
+
+            initializer = createInitializer();
+            const monitor = initializer.initializeProxyMonitor();
+            const testProxyAuto = sandbox.stub(initializer.getConnectionTester()!, 'testProxyAuto').resolves({
+                success: true,
+                proxyUrl: fallbackUrl,
+                testUrls: [],
+                errors: [],
+                timestamp: 0
+            });
+
+            monitor.emit('proxyChanged', { proxyUrl: null, source: null, timestamp: Date.now(), success: true });
+            await initializer.stopSystemProxyMonitoring();
+
+            sinon.assert.calledOnceWithExactly(testProxyAuto, fallbackUrl);
+            sinon.assert.calledWith(mockApplier.applyProxy, fallbackUrl, true);
+            assert.strictEqual(persisted.autoProxyUrl, fallbackUrl);
+            assert.strictEqual(persisted.usingFallbackProxy, true);
+            assert.strictEqual(persisted.lastDetectionSource, 'fallback');
+            assert.strictEqual(persisted.convergencePending, false);
+        });
     });
 
     suite('Manual connection test', () => {

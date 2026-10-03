@@ -49,7 +49,7 @@ Working behind a corporate proxy usually means editing several configuration fil
 1. Run `otak: Configure Manual Proxy`.
 2. Enter a fallback proxy URL (for example, `http://proxy.example.com:8080`).
 
-Auto mode uses this URL when no system proxy is detected. When you switch to Auto from the status bar and no system proxy is found, otak-proxy first tests the fallback proxy and uses it only if it is reachable. A URL entered during first-run setup is applied without this test. If the URL includes credentials, read [Security & Privacy](#security--privacy) before allowing otak-proxy to write it to VS Code, Git, npm, or pip configuration files.
+Auto mode uses this URL when no system proxy is detected, including when the system proxy disappears while VS Code is running. When you switch to Auto from the status bar and no system proxy is found, or when Auto notices that the system proxy has disappeared, otak-proxy first tests the fallback proxy and uses it only if it is reachable. A URL entered during first-run setup is applied without this test. If the URL includes credentials, read [Security & Privacy](#security--privacy) before allowing otak-proxy to write it to VS Code, Git, npm, or pip configuration files.
 
 ## Capabilities
 
@@ -248,7 +248,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
 
 - VS Code: writes the global `http.proxy` setting through the VS Code configuration API.
 - Git: writes the global `http.proxy` with `git config --global`. Git uses this single key for both HTTP and HTTPS remotes (HTTPS goes through CONNECT). `https.proxy` does not route traffic, so otak-proxy does not write it; Off still removes a leftover `https.proxy` that otak-proxy owns.
-- npm: writes the user-level `proxy` and `https-proxy` with `npm config set`.
+- npm: writes the user-level `proxy` and `https-proxy` with `npm config set`. When `npm config get` refuses to print a proxy URL that contains a password (as npm 11 does), otak-proxy reads that value from the npm user config file (`.npmrc`) to confirm the write and to decide what Off may remove. If the value cannot be confirmed there (for example, when it is set only in a project or global `.npmrc`), Off keeps it and reports the npm target as failed.
 - pip: writes the user-level `global.proxy` with `python -m pip config --user` (trying `py`, `python`, then `python3` on Windows, and `python3`, then `python` elsewhere). pip stores one URL for both HTTP and HTTPS. This target is skipped when Python or pip is not installed.
 - Integrated terminals: sets `HTTP_PROXY` and `HTTPS_PROXY` for new terminals, plus the lowercase variants on non-Windows hosts.
 - Off removes only the values that otak-proxy wrote and that have not changed since. Values that you or other tools set or changed are kept.
@@ -270,7 +270,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
 - otak-proxy sends no telemetry and does not transmit usage data.
 - Connection tests check reachability by sending HTTP `CONNECT` requests through the configured proxy to the default test hosts `www.github.com`, `www.microsoft.com`, and `www.google.com`.
 - If the proxy URL contains credentials, the test sends a `Proxy-Authorization` header to the configured proxy. Test results, logs, and diagnostics redact credentials and authorization headers.
-- For diagnostics and Auto detection, the extension reads local environment variables, VS Code settings, the Git config, the npm config, and supported platform proxy settings.
+- For diagnostics and Auto detection, the extension reads local environment variables, VS Code settings, the Git config, the npm config (including the npm user config file when npm will not print a proxy URL with a password), and supported platform proxy settings.
 
 ## Diagnostics and Remediation Behavior
 
@@ -343,15 +343,14 @@ Replace `<version>` with the `version` in `package.json`, then reload VS Code.
   git config --global --get https.proxy
   git config --global --unset http.proxy
   git config --global --unset https.proxy
-  npm config get proxy
-  npm config get https-proxy
+  npm config list
   npm config delete proxy
   npm config delete https-proxy
   python -m pip config --user get global.proxy
   python -m pip config --user unset global.proxy
   ```
 
-  On Windows, use `py -m pip` if `python` is not on `PATH`. Also check `http.proxy` in your VS Code User Settings and clear it if it should no longer be set.
+  `npm config list` shows `proxy` and `https-proxy` with any password masked; npm refuses `npm config get` for a proxy URL that contains one. On Windows, use `py -m pip` if `python` is not on `PATH`. Also check `http.proxy` in your VS Code User Settings and clear it if it should no longer be set.
 
 - **Git is not detected**: make sure Git is installed and on `PATH` (`git --version`).
 - **Auto mode does not pick up changes**: check your system proxy settings and adjust `otakProxy.pollingInterval`.
