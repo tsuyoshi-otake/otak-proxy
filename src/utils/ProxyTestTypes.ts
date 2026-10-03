@@ -49,6 +49,22 @@ export interface TestResult {
      */
     proxyConnected?: boolean;
     canaryHost?: string;
+    /**
+     * Set by the monitor when the check that ran this test reports
+     * proxyChanged after it; that event carries this result (#102).
+     */
+    proxyChange?: ReportedProxyChange;
+}
+
+/**
+ * The proxyChanged event a monitor check reports after its connection test
+ * and reachability events, as those events see it (#102).
+ */
+export interface ReportedProxyChange {
+    /** The generation the check started from: the fence proxyChanged applies. */
+    startedGeneration: import('../core/LogicalGeneration').LogicalGeneration;
+    /** The detected per-scheme/bypass routing, as detectionSplitRoutingIdentity() spells it. */
+    routing: string;
 }
 
 /**

@@ -98,6 +98,10 @@
   コミットすると proxyChanged が捨てられ、途中で変わった system proxy が保存だけで適用されなかった（#97）。
   `state.autoProxyUrl` と違う endpoint のテスト完了は stale にする。イベント順に関わる修正は、本物の
   `ProxyMonitor` と直列キューを通す flow テスト（`AutoModeOffVerdict.flow.test.ts`）で確かめる。
+  主 URL が同じで split（HTTPS URL・bypass）だけ変わる場合も同じ（#102）。モニタは proxyChanged を出す
+  チェックのテスト結果と反転に `ReportedProxyChange`（開始時の世代と新しい routing）を付け、先の handler は
+  「印の世代がまだ新しく、routing が保存値と違う」ときだけ proxyChanged に任せる。世代の条件を外すと、
+  proxyChanged が stale で捨てられたときに判定が両方から消える。印は保存しない（`stripGeneration`）。
 
 ## 診断レポート
 
