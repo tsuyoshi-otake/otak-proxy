@@ -170,12 +170,14 @@ function classifyNpmConfig(details: NpmErrorDetails): NpmErrorClassification | n
 }
 
 /**
- * npm 11 refuses `config get` for any value it would redact (a URL password,
- * an npm token, a UUID), including values in the user's own config (#85).
+ * npm 10.8 and later refuse `config get` for any value they would redact (a
+ * URL password, an npm token, a UUID), including values in the user's own
+ * config (#85). npm 10.8.0 through 11.6.1 say "can not be retrieved"; 11.6.2
+ * and later say "cannot be retrieved" (#88).
  */
 function isProtectedGetRefusal(error: unknown): boolean {
     const details = getNpmErrorDetails(error);
-    return /option is protected, and cannot be retrieved/i.test(`${details.errorMessage}\n${details.stderr}`);
+    return /option is protected, and can ?not be retrieved/i.test(`${details.errorMessage}\n${details.stderr}`);
 }
 
 function hasUrlPassword(value: string): boolean {
@@ -391,7 +393,7 @@ export class NpmConfigManager {
     }
 
     /**
-     * Reads `proxy` and `https-proxy` as npm loads them. npm 11 will not print
+     * Reads `proxy` and `https-proxy` as npm loads them. npm 10.8 and later will not print
      * a credentialed value, so such a key is read from the user config file,
      * the layer `config set` and `config delete` act on (#85).
      */
