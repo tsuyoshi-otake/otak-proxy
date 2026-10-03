@@ -714,3 +714,59 @@ v3.2.11 から、リリース前チェック（CLAUDE.md の MUST）で、前の
 - Auto: OFF のガードの `Boolean(result.proxyUrl)`（proxy が無い検出では fallback の解決を飛ばさない）はテストで固定していない。モニタは「proxy なし → proxy なし」を emit しないため、到達する経路を確認できなかった防御。
 - 期限切れロックの回収経路の ABA は既存のまま（範囲外）。読めないロックの経路も、3 ウィンドウの競合や、確認中に相手が書き込み途中のときは二重保持が残り得る。`fs.link` が使えないファイルシステムでは生きたロックを失い得る。
 - 通知の変化: Off / Auto: OFF の PAC/WPAD ではロックスキップ通知が出なくなった（#30 の規則の帰結、#93 のコメントで開示）。https だけ・bypass だけの変化で「システム proxy が変わりました」が出るようになった（`SystemProxyUpdateService` と同じ）。`RemediationOutcome` も `blocksConvergence` で判定するので、Off / Auto: OFF の PAC/WPAD はそこでも収束扱いになった。
+
+## 2026-10-03 — v3.2.14 リリース（#93 の診断修正を公開）
+
+**Issue**: [#93](https://github.com/tsuyoshi-otake/otak-proxy/issues/93)（`Refs`、#94 の merge でクローズ済み）
+**PR**: [#95](https://github.com/tsuyoshi-otake/otak-proxy/pull/95)（3.2.14 のリリース）
+**Commits**: `d0328a7`（`chore(release): v3.2.14 (#93)`）
+**Merge commit**: `43dac17`（#95）
+**Tag**: `v3.2.14`（`43dac17`、annotated / `Release v3.2.14`）
+**CI run**: [37095729454](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/37095729454)（成功）
+
+### 内容
+
+#93 の 5 件（npm 読み取り失敗、Off / Auto: OFF の PAC/WPAD、読めないロック、古い split URL、web UI）と README の追記を公開した。リリースコミットは `CHANGELOG.md` / `package.json` / `package-lock.json` の 3 ファイルだけ。
+
+### リリース前チェックの結果（CLAUDE.md の MUST）
+
+| 観点 | 結果 | 対応 |
+| --- | --- | --- |
+| tracked files の個人情報らしき文字列 | v3.2.13..v3.2.14 の追加行（`package-lock.json` を除く）にメールアドレス・UUID・ローカルのユーザーパス・トークン・社内向け IP の一致なし | — |
+| コミット履歴の author / committer | v3.2.13..v3.2.14 は既存の ID と GitHub の merge コミットだけ。新しい ID なし | 書き換えない（2026-10-03 の決定） |
+| 公開設定・タグ・リリース | PUBLIC。タグは v3.2.13 まで。GitHub Release の最新は v3.2.9 | 先例に合わせ GitHub Release は作らない |
+| LICENSE | MIT あり | — |
+
+PR #94 のボット: CodeRabbit は要約だけで inline の指摘なし、Codex は利用上限でレビューなし。#95 もレビューなし（版上げと CHANGELOG だけ）。
+
+### Verification
+
+| ゲート | ローカル (Windows) | CI (Ubuntu, run 37095729454) |
+| --- | --- | --- |
+| `npm run lint` | pass (616 files scanned) | pass (600 files scanned。差の 16 は学び 1) |
+| unit | 976 + 74 passing / 0 failing | 976 + 73 passing / 1 pending（Windows 専用テスト） |
+| `npm run test:smoke` | 4 passing | 4 passing |
+| `npm run lint:unicode:dist` | pass (293 artifacts) | pass (293 artifacts) |
+| `vsce package` | — | `otak-proxy-3.2.14.vsix` (161 files, 640.34 KB) |
+| VS Marketplace | API で 3.2.14 を確認（04:22:14Z。`lastUpdated` 04:21:35Z、publish 04:14:47Z から約 7 分。04:21:14Z の時点ではまだ 3.2.13） | `Published odangoo.otak-proxy v3.2.14.`（04:14:47Z） |
+| Open VSX | API で 3.2.14 を確認（04:18:39Z。`timestamp` 04:14:49Z） | `Published odangoo.otak-proxy v3.2.14`（04:14:49Z） |
+| 公開された README | 両レジストリの 3.2.14 の README は同一（30,804 bytes）。vsce が `LICENSE` への相対リンク 2 か所を GitHub の URL に書き換えた以外は main の README と同じ。#93 の追記も入っている | — |
+
+extension-host lane は #94 で同じコードに対して実行済み（502 passing / 1 pending / 9 failing、9 件は既知の baseline）。版上げだけのこの PR では再実行していない。テスト後の runner プロセス残存 0 件（残っていた node は VS Code の tsserver だけ）。
+
+### Learning
+
+1. ローカルの `npm run lint:unicode` はリポジトリの CI より多いファイルを数える。tracked に加えて「新規で ignore されていない」ファイルも走査するため。今回の差 16 は未追跡の `.kiro/specs/domain-verification-assurance/evidence/runs/latest/pbt/*.json`（tracked 607 + 未追跡 16 − binary 7 = 616、CI は 607 − 7 = 600）。→ rules.md「リリース」
+2. Marketplace の反映は今回約 7 分（v3.2.13 は約 6 分）。Open VSX は 4 分以内。rules.md の Marketplace の値を「約 5〜7 分」にした。→ rules.md「リリース」
+3. 新しく学んだ失敗はなし。前回までの rules（3 ファイルのリリースコミット、annotated タグ、`curl -L`、レジストリ API での確認）でそのまま通った。
+
+### 残留リスク
+
+#93 のエントリの残留リスクがそのまま公開された:
+
+- 項目 5（web UI）は unit テストだけで、実際のブラウザ UI では試していない。
+- PAC/WPAD の扱いは実機の Windows 設定では確かめていない。
+- Auto: OFF での 407 / 403 / timeout canary の失敗テスト付き検出が proxy を有効にする既存の問題（verifier の指摘、未対応）。
+- 期限切れロックの ABA、読めないロックの 3 ウィンドウ競合と `fs.link` の制約。
+- 通知と挙動の変化（Off / Auto: OFF の PAC/WPAD でロックスキップ通知が出ない、https / bypass だけの変化で通知が出る、`RemediationOutcome` の収束扱い）。
+- `0379c62` のコミットメッセージの「13 mutations killed」は誤りで、正しくは 15（11 + 4）。force push を避けて修正していない。journal の #93 エントリは正しい件数。

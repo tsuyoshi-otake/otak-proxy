@@ -158,6 +158,10 @@
   `Windows npm path does not expand %OS% or split on &` が Linux で pending になるため（v3.2.11 と v3.2.13 のログで確認）。
   件数差がこれ以外なら調べる。
 
+- **ローカルの `npm run lint:unicode` はリポジトリの CI より走査ファイル数が多い。** tracked に加えて
+  新規で ignore されていないファイルも走査するため（v3.2.14 は未追跡の PBT evidence JSON 16 件で 616 / 600）。
+  差が `git ls-files --others --exclude-standard | wc -l` と合わなければ調べる。
+
 - **publish run が失敗しても、push したタグは付け替えない。** 公開前に止まったなら次の patch 版で出し、
   CHANGELOG の失敗した版に「Not published」と理由を書く（v3.2.12 → v3.2.13、#88）。
 
@@ -166,7 +170,7 @@
   タグは annotated で `Release vX.Y.Z`。PR を main に merge してから main HEAD に打つ。
 
 - **`vsce publish` / `ovsx publish` の成功ログは「アップロード成功」であって「公開反映」ではない。**
-  実測で Open VSX 約 3 分 / Marketplace 約 5〜6 分の遅延がある。
+  実測で Open VSX 約 3〜4 分 / Marketplace 約 5〜7 分の遅延がある（v3.2.14 は約 7 分）。
   レジストリ API でバージョンが切り替わるまで「公開済み」と報告しない。
 
 - **過去のコミットの author / committer は書き換えない（2026-10-03 にユーザーが決定）。** 前のアカウント名と
