@@ -99,6 +99,9 @@ This extension publishes to the Visual Studio Marketplace **and** the Open VSX R
 - VS Code shim: `scripts/vscode-shim.cjs` provides a minimal `vscode` module for unit tests that import code paths referencing it.
 - Parallel execution:
   - `npm run test:unit:parallel` enables Mocha `--parallel` with a bounded number of jobs.
+- Isolation (#103): both lanes run through `scripts/lib/unit-mocha.mjs`. Every Mocha process (the main one and each `--parallel` worker) gets its own temp directory, `GIT_CONFIG_GLOBAL`, and `NPM_CONFIG_USERCONFIG` from `scripts/unit-worker-isolation.cjs`. Workers therefore never share the Git config mutex (`os.tmpdir()/otak-proxy.gitconfig.mutex`) or a config file. The runner removes the run directory after Mocha exits; workers do not clean up, because `--bail` force-kills them.
+  - `npm run test:unit:isolation` checks this with two probe files (`scripts/fixtures/unit-isolation/`). It is part of `npm run test:mvp`. Do not run it next to another unit run: it compares the `otak-proxy-unit-*` directories in the system temp directory before and after.
+  - Direct `mocha` runs do not get this isolation: set `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` yourself. The VS Code host lane keeps the system temp directory, so its Git config mutex is still the shared one.
 
 ### Fast mode knobs (for iterative dev)
 - `OTAK_PROXY_TEST_FAST=1`: reduces property test runs and keeps timeouts tight.
