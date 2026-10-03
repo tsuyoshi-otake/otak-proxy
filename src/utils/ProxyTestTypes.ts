@@ -42,6 +42,12 @@ export interface TestResult {
     startedGeneration?: import('../core/LogicalGeneration').LogicalGeneration;
     failureKind?: ProxyTestFailureKind;
     proxyEndpointOk?: boolean;
+    /**
+     * At least one attempt opened a TCP connection to the proxy itself. A
+     * timeout after that point is the canary or the proxy's upstream, not a
+     * dead endpoint (#97).
+     */
+    proxyConnected?: boolean;
     canaryHost?: string;
 }
 

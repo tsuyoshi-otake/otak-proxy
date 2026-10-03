@@ -3,9 +3,14 @@ import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import { Logger } from '../utils/Logger';
-import { isProxyEndpointReachable, isProxyEndpointUnreachable, TestResult } from '../utils/ProxyUtils';
+import {
+    isProxyEndpointReachable,
+    isProxyEndpointUnreachable,
+    proxyEndpointVerdict,
+    TestResult
+} from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
-import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
+import { commitUnlessStale, commitUnlessStaleWithRevision, publishUnlessStale } from './GenerationFence';
 import {
     LogicalGeneration,
     captureLogicalGeneration,
@@ -15,7 +20,7 @@ import {
 } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import type { ManualFallbackOutcome } from './SystemProxyUpdateService';
-import { ProxyMode, ProxyState, ProxyTestResult } from './types';
+import { ProxyMode, ProxyState, ProxyTestResult, stateRevision } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 export interface StartupTestState {
@@ -52,6 +57,11 @@ export async function handleProxyChanged(
     const previousSplitRouting = splitRoutingIdentity(state);
     const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
+    // One endpoint keeps its verdict however the URL is spelled (#97).
+    const sameEndpoint = proxyUrlIdentity(previousProxy) === proxyUrlIdentity(state.autoProxyUrl);
+    if (result.proxyUrl) {
+        applyEndpointVerdict(state, sameEndpoint, result.testResult);
+    }
 
     // A system proxy lost mid-session resolves like one missing at startup:
     // the manual fallback, or Auto OFF when it does not answer (#85). The
@@ -64,13 +74,18 @@ export async function handleProxyChanged(
 
     const recoveredFromAutoOff = wasAutoModeOff && state.autoModeOff === false;
     const samePrimaryProxy = previousProxy === state.autoProxyUrl;
-    // Auto: OFF removed the proxy because this URL did not answer. The same URL
-    // without a new connection test says nothing new about that, so whatever
-    // else changed (per-scheme URLs, bypass) is only saved for the reachability
-    // recovery to apply (#93). The Configured flags are false here because of
-    // that removal, not because an enable failed.
-    const stillOffWithoutNewTest =
-        Boolean(result.proxyUrl) && samePrimaryProxy && state.autoModeOff === true && !result.testResult;
+    // Auto: OFF removed the proxy because this endpoint did not answer. The
+    // same endpoint without proof that it is alive again says nothing new
+    // about that, so whatever else changed (per-scheme URLs, bypass, the URL's
+    // spelling) is only saved for the recovery to apply (#93, #97). The
+    // Configured flags are false here because of that removal, not because an
+    // enable failed. A new unreachable result still goes through apply, which
+    // repeats the removal.
+    const stillOffWithoutProof =
+        Boolean(result.proxyUrl) &&
+        sameEndpoint &&
+        state.autoModeOff === true &&
+        !(result.testResult && isProxyEndpointUnreachable(result.testResult));
     // An engaged fallback always goes through apply, even when its URL equals
     // the lost system proxy: the fallback flags are only saved on that path.
     // A per-scheme or bypass change with the same primary URL is a change too:
@@ -81,9 +96,10 @@ export async function handleProxyChanged(
         !recoveredFromAutoOff &&
         !fallbackEngaged &&
         !hasKnownEnableFailure(state);
-    if (stillOffWithoutNewTest || unchanged) {
+    if (stillOffWithoutProof || unchanged) {
         await commitAndPublish(context, started, 'detection', current => ({
             ...current,
+            autoProxyUrl: state.autoProxyUrl,
             lastTestResult: state.lastTestResult,
             proxyReachable: state.proxyReachable,
             lastTestTimestamp: state.lastTestTimestamp,
@@ -99,9 +115,9 @@ export async function handleProxyChanged(
     }
 
     await saveApplyThenPublish(context, started, 'detection', state, async () => {
-        // result.proxyReachable describes the lost system proxy; the fallback
-        // was just tested reachable.
-        const shouldEnable = Boolean(state.autoProxyUrl && (fallbackEngaged || result.proxyReachable !== false));
+        // Nothing enables under Auto: OFF (#97). An engaged fallback was just
+        // tested reachable and cleared it; an unreachable result set it.
+        const shouldEnable = Boolean(state.autoProxyUrl) && state.autoModeOff !== true;
         const applied = await applyProxyThroughContext(context, state.autoProxyUrl || '', shouldEnable);
         context.updateStatusBar?.(await context.proxyStateManager.getState());
         if (applied) {
@@ -186,46 +202,85 @@ export async function handleProxyTestComplete(
         return;
     }
 
-    const outcome = await commitUnlessStale(context.proxyStateManager, started, 'connectionTest', state => {
+    let recoveredFromAutoOff = false;
+    const commit = await commitUnlessStaleWithRevision(context.proxyStateManager, started, 'connectionTest', state => {
         if (state.mode !== ProxyMode.Auto) {
             return undefined;
         }
 
         const next = { ...state };
+        const wasAutoModeOff = next.autoModeOff === true;
         next.lastTestResult = stripGeneration(testResult);
         next.proxyReachable = isProxyEndpointReachable(testResult);
         next.lastTestTimestamp = Date.now();
-        updateAutoModeFromTestResult(next, testResult);
-        next.convergencePending = isProxyEndpointUnreachable(testResult);
+        applyEndpointVerdict(next, true, testResult);
+        recoveredFromAutoOff = wasAutoModeOff && next.autoModeOff === false && Boolean(next.autoProxyUrl);
+        // A recovery is published only once its apply finished, as on every
+        // other apply path: until then the proxy is not active (#97).
+        next.convergencePending = isProxyEndpointUnreachable(testResult) || recoveredFromAutoOff;
         return next;
     });
 
-    if (outcome === 'stale') {
+    if (commit.outcome === 'stale') {
         clearStartupPendingIfNeeded(startupTestState, testResult);
         return;
     }
 
     const committed = await context.proxyStateManager.getState();
-    await publishUnlessStale(context.publishProxyState, captureLogicalGeneration(committed), 'connectionTest', {
-        ...committed,
-        convergencePending: false
-    });
+    if (!recoveredFromAutoOff) {
+        await publishUnlessStale(context.publishProxyState, captureLogicalGeneration(committed), 'connectionTest', {
+            ...committed,
+            convergencePending: false
+        });
+    }
     context.updateStatusBar?.(committed);
     clearStartupPendingIfNeeded(startupTestState, testResult);
 
     if (isProxyEndpointUnreachable(testResult)) {
-        const latest = await context.proxyStateManager.getState();
-        if (latest.mode !== ProxyMode.Auto) {
-            return;
-        }
-        if (testResult.startedGeneration && isStaleGeneration(testResult.startedGeneration, latest)) {
-            return;
-        }
-        if (testResult.proxyUrl && proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(latest.autoProxyUrl)) {
+        if (!await stateStillFromTest(context, testResult, commit.revision)) {
             return;
         }
         await applyProxyThroughContext(context, '', false, { silent: true });
+        return;
     }
+
+    // This test is what proved the endpoint alive, so it applies the proxy in
+    // the same step that leaves Auto: OFF (#97). The reachability flip may not
+    // follow: the monitor reports it once, possibly for an earlier test.
+    if (recoveredFromAutoOff) {
+        const latest = await stateStillFromTest(context, testResult, commit.revision);
+        if (!latest || latest.autoModeOff !== false || !latest.autoProxyUrl) {
+            return;
+        }
+        await applyProxyThroughContext(context, latest.autoProxyUrl, true, { silent: true });
+        Logger.info(`Proxy ${context.sanitizer.maskPassword(latest.autoProxyUrl)} proved reachable, Auto Mode back on`);
+        await clearPendingThenPublish(context, 'connectionTest', latest);
+        context.updateStatusBar?.(await context.proxyStateManager.getState());
+    }
+}
+
+/**
+ * The state this test's commit wrote, or undefined once a toggle, sync, or
+ * detection replaced it. Compared with the revision the commit wrote, not the
+ * test's start generation: the commit itself advanced past that. Without an
+ * attributable revision (no compare-and-set store), mode and URL decide.
+ */
+async function stateStillFromTest(
+    context: InitializerContext,
+    testResult: TestResult,
+    committedRevision: number | undefined
+): Promise<ProxyState | undefined> {
+    const latest = await context.proxyStateManager.getState();
+    if (latest.mode !== ProxyMode.Auto) {
+        return undefined;
+    }
+    if (committedRevision !== undefined && stateRevision(latest) !== committedRevision) {
+        return undefined;
+    }
+    if (testResult.proxyUrl && proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(latest.autoProxyUrl)) {
+        return undefined;
+    }
+    return latest;
 }
 
 export async function handleProxyStateChanged(
@@ -286,7 +341,20 @@ async function saveApplyThenPublish(
     }
 
     await apply();
+    await clearPendingThenPublish(context, owner, desired);
+}
 
+/**
+ * Ends an apply that started from a state saved with convergencePending:
+ * clears the flag and publishes the converged state. A state that moved to
+ * another logical identity meanwhile belongs to the writer that moved it.
+ * The revision is not compared: the apply itself writes the Configured flags.
+ */
+async function clearPendingThenPublish(
+    context: InitializerContext,
+    owner: 'detection' | 'connectionTest' | 'autoMonitoring' | 'stateChanged',
+    desired: ProxyState
+): Promise<void> {
     const afterApply = await context.proxyStateManager.getState();
     const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
     if (!sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(afterApply))) {
@@ -342,7 +410,6 @@ function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetect
         state.lastTestResult = stripGeneration(result.testResult);
         state.proxyReachable = result.proxyReachable;
         state.lastTestTimestamp = Date.now();
-        updateAutoModeFromTestResult(state, result.testResult);
     }
 
     setRequiresAuthFromLiveUrls(state);
@@ -376,8 +443,15 @@ function notifyProxyChange(
     }
 }
 
-function updateAutoModeFromTestResult(state: ProxyState, testResult: TestResult): void {
-    if (isProxyEndpointUnreachable(testResult)) {
+/**
+ * Auto: OFF is a verdict about one endpoint (#97), and only proof changes it:
+ * proven unreachable turns it on, proven alive turns it off. A test that
+ * proves neither, or no test, keeps it for the same endpoint; a new endpoint
+ * starts without it, because only proven unreachability turns Auto OFF (#67).
+ */
+function applyEndpointVerdict(state: ProxyState, sameEndpoint: boolean, testResult: TestResult | undefined): void {
+    const verdict = testResult ? proxyEndpointVerdict(testResult) : 'unknown';
+    if (verdict === 'unreachable') {
         state.autoModeOff = true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
@@ -385,7 +459,7 @@ function updateAutoModeFromTestResult(state: ProxyState, testResult: TestResult)
         return;
     }
 
-    if (testResult.success) {
+    if (verdict === 'alive' || (!sameEndpoint && state.autoModeOff === true)) {
         state.autoModeOff = false;
     }
 }
@@ -406,7 +480,17 @@ async function applyReachabilityChange(
     data: { proxyUrl: string; reachable: boolean; previousState: boolean }
 ): Promise<void> {
     if (data.reachable && !data.previousState) {
-        state.autoModeOff = false;
+        if (state.autoModeOff === true) {
+            // "Not proven unreachable" is not proof of life. The connection
+            // test that raised this flip owns the Auto: OFF verdict (#97).
+            await commitAndPublish(context, started, 'stateChanged', current => ({
+                ...current,
+                proxyReachable: true
+            }));
+            context.updateStatusBar?.(await context.proxyStateManager.getState());
+            return;
+        }
+
         await saveApplyThenPublish(context, started, 'autoMonitoring', state, async () => {
             await applyProxyThroughContext(context, data.proxyUrl, true, { silent: true });
             Logger.info(`Proxy ${data.proxyUrl} became reachable, enabling proxy`);
@@ -451,18 +535,24 @@ function isStaleTestCompletion(
     current: ProxyState
 ): boolean {
     if (testResult.startedGeneration) {
-        return isStaleGeneration(started, current);
+        return isStaleGeneration(started, current) || isTestOfAnotherEndpoint(testResult, current);
     }
 
     if (current.mode !== ProxyMode.Auto) {
         return true;
     }
 
-    if (testResult.proxyUrl && proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(current.autoProxyUrl)) {
-        return true;
-    }
+    return isTestOfAnotherEndpoint(testResult, current);
+}
 
-    return false;
+/**
+ * The verdict belongs to the endpoint the test reached. A test of a new
+ * endpoint precedes the proxyChanged event that owns it; committing it here
+ * would advance the revision and make that event stale (#97).
+ */
+function isTestOfAnotherEndpoint(testResult: TestResult, current: ProxyState): boolean {
+    return Boolean(testResult.proxyUrl) &&
+        proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(current.autoProxyUrl);
 }
 
 function stripGeneration(testResult: TestResult): ProxyTestResult {

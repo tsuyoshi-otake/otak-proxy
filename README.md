@@ -57,7 +57,7 @@ Auto mode uses this URL when no system proxy is detected, including when the sys
 - **Auto mode**: reads the system proxy and applies changes in the background.
 - **Optional fallback proxy**: uses a configured proxy URL when no system proxy is detected.
 - **Connection test**: `otak: Test Proxy` checks whether a proxy is reachable.
-- **Automatic connection testing**: in Auto mode, periodically checks that the active proxy is still reachable.
+- **Automatic connection testing**: in Auto mode, periodically checks that the active proxy is still reachable. Auto turns off (`Auto: OFF`) only when the proxy cannot be reached at all (the connection is refused or there is no route to it), and turns back on as soon as a test shows that the proxy answers again, even with an error such as `407` or `403`, or accepts the connection and then times out (an `https:` proxy must also finish the TLS handshake). A timeout or DNS failure before the proxy is reached, or a TLS failure, proves neither, so Auto keeps its current state. A newly detected system proxy is tested on its own and starts in Auto unless it cannot be reached.
 - **Diagnostics and safe remediation**: records sanitized diagnostics, retries an eligible failed apply once, and stops repeating repairs when another tool keeps rewriting the settings.
 - **Ownership-aware cleanup**: Off removes only the values otak-proxy wrote; values set or changed by you or other tools are kept.
 - **Credential-aware storage**: stores proxy credentials in VS Code SecretStorage where available and keeps synced and global state free of credentials.

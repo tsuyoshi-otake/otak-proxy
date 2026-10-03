@@ -799,3 +799,64 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 ### 残留リスク
 
 - 仕様（A: 到達可の失敗で Auto ON にする / B: success まで有効にしない）が未決。#97 で判断を求めている。
+
+## 2026-10-03 — #97 Auto: OFF は proxy が生きている証明があるときだけ外す（PR #99）
+
+**Issue**: [#97](https://github.com/tsuyoshi-otake/otak-proxy/issues/97)
+**PR**: [#99](https://github.com/tsuyoshi-otake/otak-proxy/pull/99)（未マージ）
+**コミット**: `a9ab986`（fix/97-auto-off-proven-recovery、基準 `543be4b`）
+
+### 症状
+
+- Auto: OFF のまま、407 / 403 / timeout canary の結果が付いた検出で proxy が有効になる（#97 の起票内容）。
+- 逆に、407 / 403 / 5xx や接続後の timeout では、proxy が動いているのに Auto: OFF から戻らない。接続前の timeout や DNS 失敗では、reachability の反転だけで Auto に戻ることがあった。
+
+### 原因
+
+- Auto: OFF に入る条件は endpoint unreachable（#67）だった。出る条件は、テスト完了では success だけ、反転と `handleProxyChanged` では `isProxyEndpointReachable`（unreachable 以外）で、分類が揃っていなかった。
+- end-to-end テストを書く途中で、既存のフェンス不具合が 2 件見つかった。
+  1. 同じチェックで先に来る proxyTestComplete のコミットが revision を進め、後の proxyChanged が stale として捨てられていた。途中で変わった system proxy は保存されるだけで、適用されなかった。
+  2. unreachable テスト後の解除ガードは、テスト開始時の世代と比べていた。自分のコミットで世代が進むので常に stale になり、解除は本番で一度も動いていなかった。
+
+### 修正
+
+- `proxyEndpointVerdict` を追加した。判定順は unreachable → alive（success / `proxyEndpointOk` / `proxyConnected`）→ unknown。
+- `TestResult.proxyConnected` を追加した。2 つの tester が proxy への TCP 接続を記録する。
+- `updateAutoModeFromTestResult` を `applyEndpointVerdict` に置き換えた。Auto: OFF の間は何も有効にしない。Auto: OFF から戻るテスト完了の handler が、同じ手順で apply する。
+- フェンス修正 D: 別 endpoint のテスト完了は stale にする。
+- フェンス修正 R: `stateStillFromTest` は、自分のコミットが書いた revision と比べる。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 実装前の新規・変更テスト | 34 failing（red） |
+| 対象ファイル | 92 passing |
+| `npm run lint` / `test:smoke` / `lint:unicode:dist` | pass / 4 passing / clean |
+| `npm run test:unit:parallel` | 1101 passing、0 failing |
+| `npm test`（拡張ホスト） | 502 passing、9 failing（既知の baseline と同じ 9 件） |
+| ミューテーション | 14 件中 14 件 killed |
+| 独立 verifier（rubric 10 項目） | 10/10 pass |
+
+### 事故: 実機の `~/.gitconfig` と `~/.npmrc` にテスト値が残った
+
+- 症状: `git push` が `Could not resolve proxy: proxy.example.com` で失敗した。
+- 原因: verifier が flaky テストを切り分けるため、`ConfigManagers.crossplatform.test.js` を隔離 env なしの mocha で 3 回実行した。このファイルの errorType テストは、実物の git / npm に `http://proxy.example.com:8080` を set して片付けない。16:34:43 に `~/.gitconfig` の `http.proxy`、16:34:47 に `~/.npmrc` の `proxy` / `https-proxy` が書かれた（mtime と verifier の transcript で確認）。私の rubric が「mocha (same flags)」と書き、隔離 env を渡していなかった。
+- 対処: 両ファイルを `~/tmp/otak97/config-backup-20261003/` に退避した。続けて `git config --global --unset http.proxy`、`npm config delete proxy` / `https-proxy`（`--location=user`）を実行した。`~/.npmrc` は空になり、npm が削除した。その後 push に成功した。
+- 書き込み前の値: 残っていない。テスト前は proxy 設定が無かったと判断した（未証明）。根拠は 3 点。`~/.npmrc` に他のキーが無かった。Windows の system proxy は無効（ProxyEnable 0、PAC なし）。当日それまでの push はプロキシなしで通っていた。
+
+### Learning
+
+1. 自分のコミットの後のガードは、そのコミットが書いた revision と比べる → rules.md「世代フェンス」。
+2. 同じチェックで先にコミットしたイベントは、後のイベントを stale にする → rules.md「世代フェンス」。
+3. 状態に入る条件と出る条件は同じ分類で決める（#97 調査時の Learning を昇格）→ rules.md「診断レポート」。
+4. verifier の rubric にも隔離 env を書く。`ConfigManagers.crossplatform` は書いた値を片付けない → rules.md「検証・回帰」の既存ルールに追記。
+
+### 残留リスク
+
+- TCP 接続を受けるが中継できない proxy は alive と判定する。
+- テストが何も証明しない新 endpoint は適用する（#67 の規則）。
+- 実ネットワーク・実 VPN 切替では未確認。
+- 拡張ホストの 1 回が集計なしで途中終了した。unit lane では `ConfigManagers.crossplatform` の errorType テストが 3 回中 1 回失敗した（この差分の外）。未検証の仮説: parallel の worker が 1 つの隔離 gitconfig を共有していて、lock が競合している。
+- 未修正: 同じ URL の split 変化と、同じチェックのテストが重なると、proxyChanged が stale になる（#93 の経路）。follow-up Issue を提案中。
+- `ConfigManagers.crossplatform` は隔離なしでは実物の設定を書き、片付けない。follow-up の候補。

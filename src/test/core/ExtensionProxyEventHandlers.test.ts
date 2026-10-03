@@ -3,8 +3,9 @@ import * as sinon from 'sinon';
 import { handleProxyChanged, handleProxyStateChanged, handleProxyTestComplete } from '../../core/ExtensionProxyEventHandlers';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
 import { ProxyDetectionResult } from '../../monitoring/ProxyMonitor';
+import { captureLogicalGeneration, proxyUrlIdentity } from '../../core/LogicalGeneration';
 import { ProxyMode, ProxyState } from '../../core/types';
-import { TestResult } from '../../utils/ProxyUtils';
+import { isProxyEndpointReachable, TestResult } from '../../utils/ProxyUtils';
 import type { ManualFallbackOutcome } from '../../core/SystemProxyUpdateService';
 import { InputSanitizer } from '../../validation/InputSanitizer';
 
@@ -634,6 +635,475 @@ suite('ExtensionProxyEventHandlers Tests', () => {
             assert.strictEqual(state.autoHttpProxyUrl, undefined);
             assert.strictEqual(state.autoHttpsProxyUrl, undefined);
             assert.strictEqual(state.detectedBypass, undefined);
+        });
+    });
+
+    /**
+     * #97: Auto: OFF is a verdict about one endpoint. It is entered on proof
+     * that the endpoint is unreachable and left on proof that it is alive: a
+     * success, a proxy response (407/403/5xx), or a TCP connection to the
+     * proxy. A test that proves neither keeps the verdict for the same
+     * endpoint; a new endpoint starts without one (#67: only proven
+     * unreachability turns it OFF). Nothing enables while Auto: OFF holds.
+     */
+    suite('Auto: OFF endpoint verdict (#97)', () => {
+        const primary = 'http://proxy.example.com:8080';
+        // The same endpoint as primary: new URL() lowercases the host.
+        const primaryRespelled = 'http://PROXY.example.com:8080';
+        const other = 'http://proxy2.example.com:8080';
+        const secure2 = 'http://secure2.example.com:8443';
+        const startup = () => ({ isPending: false });
+        let atApply: ProxyState[];
+
+        const failed = (proxyUrl: string, fields: Partial<TestResult>): TestResult => ({
+            success: false,
+            proxyUrl,
+            testUrls: ['https://www.github.com'],
+            errors: [{ url: 'https://www.github.com', message: 'canary failed' }],
+            proxyEndpointOk: false,
+            ...fields
+        });
+
+        type Variant = { name: string; verdict: 'alive' | 'unknown' | 'unreachable'; make: (url: string) => TestResult };
+        const variants: Variant[] = [
+            { name: 'success', verdict: 'alive', make: url => ({ success: true, proxyUrl: url, testUrls: ['https://www.github.com'], errors: [], proxyEndpointOk: true }) },
+            { name: '407 authRequired', verdict: 'alive', make: url => failed(url, { failureKind: 'authRequired', proxyEndpointOk: true }) },
+            { name: '403 destinationForbidden', verdict: 'alive', make: url => failed(url, { failureKind: 'destinationForbidden', proxyEndpointOk: true }) },
+            { name: '502 connectRejected', verdict: 'alive', make: url => failed(url, { failureKind: 'connectRejected', proxyEndpointOk: true }) },
+            { name: 'timeout after the TCP connection', verdict: 'alive', make: url => failed(url, { failureKind: 'timeout', proxyConnected: true }) },
+            { name: 'timeout before any TCP connection', verdict: 'unknown', make: url => failed(url, { failureKind: 'timeout' }) },
+            { name: 'proxy host DNS failure', verdict: 'unknown', make: url => failed(url, { failureKind: 'dns' }) },
+            { name: 'TLS failure', verdict: 'unknown', make: url => failed(url, { failureKind: 'protocol' }) },
+            { name: 'endpointUnreachable', verdict: 'unreachable', make: url => failed(url, { failureKind: 'endpointUnreachable' }) }
+        ];
+        const byVerdict = (verdict: Variant['verdict']) => variants.filter(variant => variant.verdict === verdict);
+        const success = byVerdict('alive')[0];
+        const authRequired = byVerdict('alive')[1];
+        const timeoutBeforeConnect = byVerdict('unknown')[0];
+        const dnsFailure = byVerdict('unknown')[1];
+        const unreachable = byVerdict('unreachable')[0];
+
+        const detection = (
+            proxyUrl: string,
+            testResult?: TestResult,
+            fields: Partial<ProxyDetectionResult> = {}
+        ): ProxyDetectionResult => ({
+            proxyUrl,
+            source: 'windows',
+            timestamp: Date.now(),
+            success: true,
+            ...(testResult ? { testResult, proxyReachable: isProxyEndpointReachable(testResult) } : {}),
+            ...fields
+        });
+        const splitChange: Partial<ProxyDetectionResult> = { kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure2 };
+
+        const enableCalls = () => applyProxySettingsStub.getCalls().filter(call => call.args[1] === true);
+        const assertNothingEnabledUnderAutoOff = (label: string) => {
+            applyProxySettingsStub.getCalls().forEach((call, index) => {
+                if (call.args[1] === true) {
+                    assert.strictEqual(atApply[index].autoModeOff, false, `${label} enable #${index} ran under Auto: OFF`);
+                }
+            });
+            if (state.autoModeOff === true) {
+                assert.strictEqual(enableCalls().length, 0, `${label} Auto: OFF must not end with the proxy enabled`);
+            }
+        };
+
+        const removalCalls = () => applyProxySettingsStub.getCalls().filter(call => call.args[1] === false);
+        /** Compare-and-set commits, as ProxyStateManager does in production. */
+        const useRevisionedStore = () => {
+            state = { ...state, revision: 5 };
+            (context.proxyStateManager as unknown as { commitState: unknown }).commitState =
+                async (expectedRevision: number, next: ProxyState) => {
+                    if ((state.revision ?? 0) !== expectedRevision) {
+                        return { kind: 'superseded' as const, current: { ...state } };
+                    }
+                    state = { ...next, revision: expectedRevision + 1 };
+                    return { kind: 'committed' as const, revision: expectedRevision + 1, state: { ...state } };
+                };
+        };
+        /** Another writer that lands right after the handler's first commit. */
+        const afterFirstCommit = (change: (committed: ProxyState) => ProxyState) => {
+            saveStateStub.callsFake(async (next: ProxyState) => {
+                state = saveStateStub.callCount === 1 ? change({ ...next }) : { ...next };
+            });
+        };
+        const autoModeOffPublishedBeforeApply = () => publishStateStub.getCalls().some(call =>
+            call.args[0].autoModeOff === false &&
+            (applyProxySettingsStub.notCalled || call.calledBefore(applyProxySettingsStub.firstCall)));
+        const autoOnState = () => offState({
+            autoModeOff: false,
+            proxyReachable: true,
+            gitConfigured: true,
+            npmConfigured: true,
+            vscodeConfigured: true
+        });
+
+        const offState = (overrides: Partial<ProxyState> = {}): ProxyState => ({
+            // Auto: OFF after it removed the proxy: every Configured flag is false.
+            mode: ProxyMode.Auto,
+            autoProxyUrl: primary,
+            autoModeOff: true,
+            proxyReachable: false,
+            usingFallbackProxy: false,
+            lastDetectionSource: 'windows',
+            autoProxyKind: 'singleProxy',
+            gitConfigured: false,
+            npmConfigured: false,
+            vscodeConfigured: false,
+            ...overrides
+        });
+
+        setup(() => {
+            state = offState();
+            atApply = [];
+            applyProxySettingsStub.callsFake(async () => {
+                atApply.push({ ...state });
+                return true;
+            });
+        });
+
+        suite('a detection of the same endpoint', () => {
+            for (const variant of byVerdict('alive')) {
+                test(`${variant.name} leaves Auto: OFF and applies`, async () => {
+                    await handleProxyChanged(context, detection(primary, variant.make(primary), splitChange));
+
+                    sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, undefined);
+                    assert.strictEqual(atApply[0].autoModeOff, false);
+                    assert.strictEqual(atApply[0].autoHttpsProxyUrl, secure2);
+                    assert.strictEqual(state.autoModeOff, false);
+                });
+            }
+
+            for (const variant of byVerdict('unknown')) {
+                test(`${variant.name} keeps Auto: OFF and only saves the detection`, async () => {
+                    const showSuccess = context.userNotifier.showSuccess as sinon.SinonStub;
+
+                    await handleProxyChanged(context, detection(primary, variant.make(primary), splitChange));
+
+                    sinon.assert.notCalled(applyProxySettingsStub);
+                    sinon.assert.notCalled(showSuccess);
+                    assert.strictEqual(state.autoModeOff, true);
+                    assert.strictEqual(state.autoHttpsProxyUrl, secure2, 'saved for the recovery to apply');
+                    assert.strictEqual(state.lastTestResult?.failureKind, variant.make(primary).failureKind);
+                });
+            }
+
+            for (const variant of [undefined, ...byVerdict('unknown')]) {
+                test(`spelled differently, ${variant?.name ?? 'without a test'} keeps Auto: OFF`, async () => {
+                    // A raw string comparison took this for a new endpoint
+                    // and enabled it without proof.
+                    await handleProxyChanged(context, detection(primaryRespelled, variant?.make(primaryRespelled)));
+
+                    sinon.assert.notCalled(applyProxySettingsStub);
+                    assert.strictEqual(state.autoModeOff, true);
+                    assert.strictEqual(state.autoProxyUrl, primaryRespelled, 'the detected spelling is saved');
+                });
+            }
+
+            test('spelled differently, a success leaves Auto: OFF and applies', async () => {
+                await handleProxyChanged(context, detection(primaryRespelled, success.make(primaryRespelled)));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primaryRespelled, true, undefined);
+                assert.strictEqual(state.autoModeOff, false);
+            });
+
+            test('endpointUnreachable keeps Auto: OFF and repeats the removal', async () => {
+                await handleProxyChanged(context, detection(primary, unreachable.make(primary), splitChange));
+
+                assert.strictEqual(enableCalls().length, 0);
+                assert.strictEqual(removalCalls().length, 1, 'same as before #97: a new unreachable result goes through apply');
+                assert.strictEqual(state.autoModeOff, true);
+            });
+        });
+
+        suite('a detection of a new endpoint', () => {
+            for (const variant of [...byVerdict('alive'), ...byVerdict('unknown')]) {
+                test(`${variant.name} starts the new endpoint in Auto and applies it`, async () => {
+                    // Auto: OFF with no proxy at all (fallback missing or unreachable).
+                    state = offState({ autoProxyUrl: undefined, autoProxyKind: undefined, lastDetectionSource: undefined });
+                    const showSuccess = context.userNotifier.showSuccess as sinon.SinonStub;
+
+                    await handleProxyChanged(context, detection(other, variant.make(other)));
+
+                    sinon.assert.calledOnceWithExactly(applyProxySettingsStub, other, true, undefined);
+                    assert.strictEqual(atApply[0].autoModeOff, false);
+                    assert.strictEqual(state.autoModeOff, false);
+                    // Unchanged notification rule: an applied detection says so.
+                    sinon.assert.calledWith(showSuccess, 'message.systemProxyChanged', { url: other });
+                });
+            }
+
+            test('a new endpoint without a connection test starts in Auto and applies it', async () => {
+                await handleProxyChanged(context, detection(other));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, other, true, undefined);
+                assert.strictEqual(atApply[0].autoModeOff, false);
+                assert.strictEqual(state.autoModeOff, false);
+            });
+
+            test('a new endpoint replacing the unreachable one is judged on its own test', async () => {
+                await handleProxyChanged(context, detection(other, dnsFailure.make(other)));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, other, true, undefined);
+                assert.strictEqual(state.autoProxyUrl, other);
+                assert.strictEqual(state.autoModeOff, false);
+            });
+
+            test('an unreachable new endpoint stays Auto: OFF and is not enabled', async () => {
+                state = offState({ autoProxyUrl: undefined });
+
+                await handleProxyChanged(context, detection(other, unreachable.make(other)));
+
+                assert.strictEqual(enableCalls().length, 0);
+                assert.strictEqual(state.autoModeOff, true);
+            });
+        });
+
+        suite('a connection test of the current endpoint', () => {
+            for (const variant of byVerdict('alive')) {
+                test(`${variant.name} leaves Auto: OFF and applies in the same step`, async () => {
+                    await handleProxyTestComplete(context, startup(), variant.make(primary));
+
+                    sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+                    assert.strictEqual(atApply[0].autoModeOff, false);
+                    assert.strictEqual(state.autoModeOff, false);
+                    // Same sequence as every other apply path: saved as
+                    // pending, applied, then cleared and published.
+                    assert.strictEqual(atApply[0].convergencePending, true, 'the apply runs on a state saved as pending');
+                    assert.strictEqual(state.convergencePending, false, 'cleared once the apply finished');
+                    assert.ok(!autoModeOffPublishedBeforeApply(), 'no window sees Auto back on before the apply');
+                    sinon.assert.calledWith(publishStateStub, sinon.match({ autoModeOff: false, convergencePending: false }));
+                });
+            }
+
+            for (const variant of byVerdict('unknown')) {
+                test(`${variant.name} keeps Auto: OFF`, async () => {
+                    await handleProxyTestComplete(context, startup(), variant.make(primary));
+
+                    sinon.assert.notCalled(applyProxySettingsStub);
+                    assert.strictEqual(state.autoModeOff, true);
+                });
+            }
+
+            test('endpointUnreachable keeps Auto: OFF and only re-runs the removal', async () => {
+                await handleProxyTestComplete(context, startup(), unreachable.make(primary));
+
+                assert.strictEqual(enableCalls().length, 0);
+                assert.strictEqual(state.autoModeOff, true);
+            });
+
+            test('a test of another endpoint changes nothing, even with a generation stamp', async () => {
+                // The verdict belongs to the endpoint the test reached. The
+                // proxyChanged event that follows owns a new endpoint; a commit
+                // here would make that event stale and drop it.
+                const startedGeneration = captureLogicalGeneration(state);
+                const before = { ...state };
+
+                await handleProxyTestComplete(context, startup(), { ...success.make(other), startedGeneration });
+
+                sinon.assert.notCalled(saveStateStub);
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.deepStrictEqual(state, before);
+            });
+
+            test('a 407 while Auto is on changes nothing', async () => {
+                state = offState({
+                    autoModeOff: false,
+                    proxyReachable: true,
+                    gitConfigured: true,
+                    npmConfigured: true,
+                    vscodeConfigured: true
+                });
+
+                await handleProxyTestComplete(context, startup(), authRequired.make(primary));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoModeOff, false);
+            });
+
+            test('a toggle committed before the recovery apply drops the apply', async () => {
+                afterFirstCommit(committed => ({ ...committed, mode: ProxyMode.Off }));
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.ok(!autoModeOffPublishedBeforeApply());
+            });
+
+            test('a detection that moved to another endpoint before the recovery apply drops the apply', async () => {
+                afterFirstCommit(committed => ({ ...committed, autoProxyUrl: other }));
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.ok(!autoModeOffPublishedBeforeApply());
+            });
+
+            test('Auto: OFF set again before the recovery apply drops the apply', async () => {
+                afterFirstCommit(committed => ({ ...committed, autoModeOff: true }));
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.ok(!autoModeOffPublishedBeforeApply());
+            });
+
+            test('a toggle committed during the recovery apply is neither cleared nor published', async () => {
+                applyProxySettingsStub.callsFake(async () => {
+                    atApply.push({ ...state });
+                    state = { ...state, mode: ProxyMode.Off, convergencePending: false };
+                    return true;
+                });
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                assert.strictEqual(state.mode, ProxyMode.Off);
+                // The toggle owns that state; this handler publishes nothing.
+                sinon.assert.notCalled(publishStateStub);
+            });
+
+            test('an alive test with no proxy to apply publishes at once, without a pending marker', async () => {
+                // Auto: OFF with no proxy at all; nothing will apply and clear a marker.
+                state = offState({ autoProxyUrl: undefined });
+                const { proxyUrl: _proxyUrl, ...withoutUrl } = success.make(primary);
+
+                await handleProxyTestComplete(context, startup(), withoutUrl as TestResult);
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoModeOff, false);
+                assert.notStrictEqual(state.convergencePending, true);
+                sinon.assert.calledWith(publishStateStub, sinon.match({ autoModeOff: false, convergencePending: false }));
+            });
+
+            test('a recovery apply that throws leaves the state pending and publishes nothing', async () => {
+                applyProxySettingsStub.callsFake(async () => {
+                    atApply.push({ ...state });
+                    throw new Error('apply failed');
+                });
+
+                await assert.rejects(handleProxyTestComplete(context, startup(), success.make(primary)), /apply failed/);
+
+                assert.strictEqual(state.autoModeOff, false);
+                assert.strictEqual(state.convergencePending, true, 'diagnostics and sync see that the apply never finished');
+                sinon.assert.neverCalledWith(publishStateStub, sinon.match({ autoModeOff: false }));
+            });
+
+            test('with compare-and-set commits, an unreachable test removes the proxy after its own commit', async () => {
+                // Before #97 the removal compared the state with the test's
+                // start generation, which its own commit had just advanced, so
+                // it never ran.
+                state = autoOnState();
+                useRevisionedStore();
+
+                await handleProxyTestComplete(context, startup(), unreachable.make(primary));
+
+                assert.strictEqual(enableCalls().length, 0);
+                assert.strictEqual(removalCalls().length, 1);
+                assert.strictEqual(state.autoModeOff, true);
+            });
+
+            test('with compare-and-set commits, an alive test recovers after its own commit', async () => {
+                useRevisionedStore();
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+                assert.strictEqual(atApply[0].autoModeOff, false);
+                assert.strictEqual(atApply[0].convergencePending, true);
+                assert.strictEqual(state.convergencePending, false);
+                assert.ok(!autoModeOffPublishedBeforeApply());
+                sinon.assert.calledOnceWithExactly(publishStateStub, sinon.match({ autoModeOff: false, convergencePending: false }));
+            });
+
+            test('with compare-and-set commits, a re-enable committed before the removal keeps the proxy', async () => {
+                // Mode, URL and endpoint still match; only the revision shows
+                // that the state is no longer the one this test wrote.
+                state = autoOnState();
+                useRevisionedStore();
+                publishStateStub.callsFake(async () => {
+                    state = { ...state, autoModeOff: false, revision: (state.revision ?? 0) + 1 };
+                });
+
+                await handleProxyTestComplete(context, startup(), unreachable.make(primary));
+
+                assert.strictEqual(removalCalls().length, 0);
+                assert.strictEqual(state.autoModeOff, false);
+            });
+        });
+
+        suite('a reachability flip', () => {
+            test('a flip to reachable does not enable while Auto: OFF holds', async () => {
+                await handleProxyStateChanged(context, { proxyUrl: primary, reachable: true, previousState: false });
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoModeOff, true);
+                assert.strictEqual(state.proxyReachable, true);
+            });
+
+            test('a flip to reachable while Auto is on re-applies as before', async () => {
+                state = offState({ autoModeOff: false, gitConfigured: true, npmConfigured: true, vscodeConfigured: true });
+
+                await handleProxyStateChanged(context, { proxyUrl: primary, reachable: true, previousState: false });
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+                assert.strictEqual(state.autoModeOff, false);
+            });
+
+            test('an alive test after the flip was spent on an unknown one still recovers', async () => {
+                // Monitor order: test complete, then the flip. The flip fires
+                // once, on the unknown test; the later alive test brings none.
+                await handleProxyTestComplete(context, startup(), timeoutBeforeConnect.make(primary));
+                await handleProxyStateChanged(context, { proxyUrl: primary, reachable: true, previousState: false });
+                sinon.assert.notCalled(applyProxySettingsStub);
+
+                await handleProxyTestComplete(context, startup(), success.make(primary));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+                assert.strictEqual(state.autoModeOff, false);
+            });
+        });
+
+        test('no detection enables under Auto: OFF, and Auto: OFF follows the verdict table', async () => {
+            const expectedOff = (wasOff: boolean, sameEndpoint: boolean, verdict?: Variant['verdict']): boolean => {
+                if (verdict === 'unreachable') {
+                    return true;
+                }
+                if (verdict === 'alive') {
+                    return false;
+                }
+                return sameEndpoint && wasOff;
+            };
+
+            for (const wasOff of [true, false]) {
+                for (const previous of [primary, undefined]) {
+                    for (const detected of [primary, primaryRespelled, other]) {
+                        for (const variant of [undefined, ...variants]) {
+                            for (const split of [false, true]) {
+                                const label = `[off=${wasOff} prev=${previous} det=${detected} test=${variant?.name ?? 'none'} split=${split}]`;
+                                state = offState({
+                                    autoProxyUrl: previous,
+                                    autoModeOff: wasOff,
+                                    gitConfigured: !wasOff,
+                                    npmConfigured: !wasOff,
+                                    vscodeConfigured: !wasOff
+                                });
+                                atApply = [];
+                                applyProxySettingsStub.resetHistory();
+
+                                await handleProxyChanged(context, detection(detected, variant?.make(detected), split ? splitChange : {}));
+
+                                assertNothingEnabledUnderAutoOff(label);
+                                const sameEndpoint = proxyUrlIdentity(previous) === proxyUrlIdentity(detected);
+                                assert.strictEqual(state.autoModeOff, expectedOff(wasOff, sameEndpoint, variant?.verdict), label);
+                                if (wasOff && state.autoModeOff === false) {
+                                    assert.strictEqual(enableCalls().length, 1, `${label} leaving Auto: OFF must apply`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         });
     });
 });

@@ -5,6 +5,7 @@ import {
     testProxyConnection,
     testProxyConnectionParallel
 } from '../../utils/ProxyConnectionTest';
+import { proxyEndpointVerdict } from '../../utils/ProxyTestFailure';
 import { TestResult } from '../../utils/ProxyTestTypes';
 
 suite('Proxy connection failure classification', () => {
@@ -71,6 +72,7 @@ suite('Proxy connection failure classification', () => {
             });
             await assertClassifiedFailure(result, 'authRequired', '407');
             assert.strictEqual(result.proxyEndpointOk, true);
+            assert.strictEqual(result.proxyConnected, true);
             assert.strictEqual(result.canaryHost, 'www.github.com');
         } finally {
             await close(server);
@@ -122,6 +124,11 @@ suite('Proxy connection failure classification', () => {
         });
         await assertClassifiedFailure(result, 'endpointUnreachable');
         assert.strictEqual(result.proxyEndpointOk, false);
+        assert.notStrictEqual(result.proxyConnected, true);
+
+        const parallel = await testProxyConnectionParallel(`http://127.0.0.1:${port}`, ['https://www.github.com'], 1000);
+        await assertClassifiedFailure(parallel, 'endpointUnreachable');
+        assert.notStrictEqual(parallel.proxyConnected, true);
     });
 
     test('CONNECT hang is timeout, not endpointUnreachable', async function() {
@@ -139,10 +146,44 @@ suite('Proxy connection failure classification', () => {
             await assertClassifiedFailure(result, 'timeout', 'timeout');
             assert.notStrictEqual(result.failureKind, 'endpointUnreachable');
             assert.strictEqual(result.proxyEndpointOk, false);
+            // The proxy took the connection; the wait is behind it (#97).
+            assert.strictEqual(result.proxyConnected, true);
+
+            const parallel = await testProxyConnectionParallel(`http://127.0.0.1:${port}`, ['https://www.github.com'], 200);
+            await assertClassifiedFailure(parallel, 'timeout', 'timeout');
+            assert.strictEqual(parallel.proxyConnected, true);
         } finally {
             for (const socket of sockets) {
                 socket.destroy();
             }
+            await close(server);
+        }
+    });
+
+    test('an https proxy whose TLS handshake fails is not proof of life', async function() {
+        this.timeout(5000);
+        // The TCP connection opens, then the reply is not TLS. A TLS socket
+        // reports 'connect' before the handshake, so only a finished
+        // handshake proves that an https proxy answers (#97).
+        const server = net.createServer(socket => {
+            socket.once('data', () => socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'));
+            socket.on('error', () => undefined);
+        });
+        const port = await listen(server);
+        try {
+            const result = await testProxyConnection(`https://127.0.0.1:${port}`, {
+                timeout: 1000,
+                testUrls: ['https://www.github.com']
+            });
+            await assertClassifiedFailure(result, 'protocol');
+            assert.notStrictEqual(result.proxyConnected, true);
+            assert.strictEqual(proxyEndpointVerdict(result), 'unknown');
+
+            const parallel = await testProxyConnectionParallel(`https://127.0.0.1:${port}`, ['https://www.github.com'], 1000);
+            await assertClassifiedFailure(parallel, 'protocol');
+            assert.notStrictEqual(parallel.proxyConnected, true);
+            assert.strictEqual(proxyEndpointVerdict(parallel), 'unknown');
+        } finally {
             await close(server);
         }
     });
@@ -155,5 +196,6 @@ suite('Proxy connection failure classification', () => {
         });
         await assertClassifiedFailure(result, 'dns');
         assert.notStrictEqual(result.failureKind, 'endpointUnreachable');
+        assert.notStrictEqual(result.proxyConnected, true);
     });
 });
