@@ -53,6 +53,7 @@ const DIAGNOSE_KEYS = [
     'diagnose.reason.winhttpParseUnavailable',
     'diagnose.reason.wininetPac',
     'diagnose.reason.gitReadUnavailable',
+    'diagnose.reason.npmReadUnavailable',
     'diagnose.target.systemBypass',
     'diagnose.target.pipUserProxy',
     'diagnose.reason.gitSplitLossy',

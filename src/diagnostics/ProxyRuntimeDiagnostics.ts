@@ -20,7 +20,7 @@ import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanit
 import { normalizeProxyForComparison } from '../utils/ProxyUrlIdentity';
 import { isPerSchemeProxy } from '../config/DetectedProxyValue';
 import { splitCapabilityIssues } from '../core/ProxyTargetCapability';
-import { createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
+import { asProxyDisabledUnsupportedAutoConfig, createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
 import { buildConnectionTestObservation } from '../utils/ProxyTestFailure';
 
 export interface ProxyRuntimeDiagnosticsRunOptions {
@@ -204,17 +204,23 @@ export class ProxyRuntimeDiagnostics {
         }));
         issues.push(...this.collectSplitProxyIssues(state));
         issues.push(...this.collectUnsupportedAutoConfigFromState(state, issues));
+        // The Windows PAC/WPAD issues come from the state-independent slow
+        // cache, so the Off / Auto: OFF downgrade happens here, per run, on
+        // copies that leave the cached issues untouched (#93).
+        const reportedIssues = this.expectsProxyDisabled(state)
+            ? issues.map(asProxyDisabledUnsupportedAutoConfig)
+            : issues;
 
         const connectionTest = buildConnectionTestObservation(state.lastTestResult);
         if (connectionTest) {
             observations.connectionTest = connectionTest;
         }
 
-        const sanitizedIssues = this.redactor.redactValue(issues, knownSecrets);
+        const sanitizedIssues = this.redactor.redactValue(reportedIssues, knownSecrets);
         const sanitizedObservations = this.redactor.redactValue(observations, knownSecrets);
         const highest = getHighestPriorityIssue(sanitizedIssues);
 
-        const runtimeState = deriveRuntimeApplyStateFromProxyState(state, issues);
+        const runtimeState = deriveRuntimeApplyStateFromProxyState(state, reportedIssues);
 
         return {
             generatedAt: new Date().toISOString(),
@@ -468,12 +474,14 @@ export class ProxyRuntimeDiagnostics {
     }
 
     private async collectNpmDiagnostics(): Promise<{ observation: Record<string, unknown>; issues: ProxyIssue[] }> {
-        const values = await this.readNpmConfigValues();
+        const { values, readFailed } = await this.readNpmConfigValues();
         const proxy = normalizeNpmValue(values.proxy);
         const httpsProxy = normalizeNpmValue(values['https-proxy']);
         const noproxy = normalizeNpmValue(values.noproxy);
         const registry = normalizeNpmValue(values.registry);
-        const observation = { proxy, httpsProxy, noproxy, registry };
+        // A failed read (timeout, missing npm, unparsable output) must not look
+        // like "proxy unset" to the convergence checks (#93, same rule as #16).
+        const observation = { proxy, httpsProxy, noproxy, registry, readFailed };
         const issues: ProxyIssue[] = [];
 
         if (noproxy) {
@@ -549,6 +557,22 @@ export class ProxyRuntimeDiagnostics {
             }));
         }
 
+        // Same rule for npm: an unreadable npm config cannot prove a mismatch or
+        // a residual, so it is informational and the npm checks below are
+        // skipped instead of reporting "unset" (#93).
+        const npmReadFailed = this.observedFlag(observations.npm, 'readFailed');
+        if (state.npmConfigured && npmReadFailed) {
+            issues.push(this.issue('npm.readUnavailable', 'capabilityUnavailable', 'informational', 'npm.user.proxy', 'workspaceHost', {
+                source: 'npm config',
+                capability: 'unsupported',
+                evidence: {
+                    mode: state.mode,
+                    autoModeOff: state.autoModeOff,
+                    npmConfigured: state.npmConfigured
+                }
+            }));
+        }
+
         if (this.expectsProxyDisabled(state)) {
             issues.push(...this.collectManagedResidualIssues(state, observations));
             return issues;
@@ -585,7 +609,7 @@ export class ProxyRuntimeDiagnostics {
         const npmHttpsProxy = this.observedString(observations.npm, 'httpsProxy');
         const expectedNpmHttp = state.autoHttpProxyUrl || expectedProxy;
         const expectedNpmHttps = state.autoHttpsProxyUrl || expectedProxy;
-        if (state.npmConfigured &&
+        if (state.npmConfigured && !npmReadFailed &&
             (!this.proxyMatchesExpected(npmProxy, expectedNpmHttp) ||
                 !this.proxyMatchesExpected(npmHttpsProxy, expectedNpmHttps))) {
             issues.push(this.issue('npm.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'npm.user.proxy', 'workspaceHost', {
@@ -812,16 +836,20 @@ export class ProxyRuntimeDiagnostics {
         }
     }
 
-    private async readNpmConfigValues(): Promise<NpmDiagnosticValues> {
+    private async readNpmConfigValues(): Promise<{ values: NpmDiagnosticValues; readFailed: boolean }> {
         try {
             const invocation = resolveNpmInvocation(['config', 'list', '--json'], {
                 isWindows: process.platform === 'win32',
                 env: process.env
             });
             const { stdout } = await this.commandRunner(invocation.command, invocation.args);
-            return JSON.parse(stdout) as NpmDiagnosticValues;
+            const parsed: unknown = JSON.parse(stdout);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                return { values: {}, readFailed: true };
+            }
+            return { values: parsed as NpmDiagnosticValues, readFailed: false };
         } catch {
-            return {};
+            return { values: {}, readFailed: true };
         }
     }
 

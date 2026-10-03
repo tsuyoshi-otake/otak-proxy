@@ -438,4 +438,202 @@ suite('ExtensionProxyEventHandlers Tests', () => {
             assert.strictEqual(state.lastDetectionSource, 'fallback');
         });
     });
+
+    /**
+     * #93 item 4: the monitor path dropped the per-scheme endpoints and the
+     * bypass of a new detection, so the previous detection's values stayed in
+     * state, and diagnostics compared npm against them (false, retryable
+     * npm.managedProxyMismatch). ProxyApplier reads these committed fields.
+     */
+    suite('monitor-detected split routing (#93)', () => {
+        const primary = 'http://proxy.example.com:8080';
+        const secure = 'http://secure.example.com:8443';
+        let atApply: ProxyState | undefined;
+
+        const detection = (fields: Partial<ProxyDetectionResult>): ProxyDetectionResult => ({
+            proxyUrl: primary,
+            source: 'windows',
+            timestamp: Date.now(),
+            success: true,
+            proxyReachable: true,
+            ...fields
+        });
+
+        setup(() => {
+            state = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: primary,
+                autoModeOff: false,
+                usingFallbackProxy: false,
+                lastDetectionSource: 'windows',
+                autoProxyKind: 'perSchemeProxy',
+                autoHttpProxyUrl: primary,
+                autoHttpsProxyUrl: secure,
+                gitConfigured: true,
+                npmConfigured: true,
+                vscodeConfigured: true
+            };
+            atApply = undefined;
+            applyProxySettingsStub.callsFake(async () => {
+                atApply = { ...state };
+                return true;
+            });
+        });
+
+        test('a new primary URL does not keep the previous per-scheme https endpoint', async () => {
+            await handleProxyChanged(context, detection({ proxyUrl: 'http://proxy2.example.com:8080', kind: 'singleProxy' }));
+
+            sinon.assert.calledOnceWithExactly(applyProxySettingsStub, 'http://proxy2.example.com:8080', true, undefined);
+            assert.ok(atApply);
+            assert.strictEqual(atApply.autoProxyKind, 'singleProxy');
+            assert.strictEqual(atApply.autoHttpsProxyUrl, undefined, 'apply must not see the stale https endpoint');
+            assert.strictEqual(state.autoHttpProxyUrl, undefined);
+            assert.strictEqual(state.autoHttpsProxyUrl, undefined);
+        });
+
+        test('an https-only change with the same primary URL is applied with the new endpoint', async () => {
+            const showSuccess = context.userNotifier.showSuccess as sinon.SinonStub;
+            const secure2 = 'http://secure2.example.com:8443';
+
+            await handleProxyChanged(context, detection({ kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure2 }));
+
+            sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, undefined);
+            assert.ok(atApply);
+            assert.strictEqual(atApply.autoHttpsProxyUrl, secure2);
+            assert.strictEqual(state.autoHttpsProxyUrl, secure2);
+            // Same notification SystemProxyUpdateService already shows for an https-only change.
+            sinon.assert.calledWith(showSuccess, 'message.systemProxyChanged', { url: primary });
+        });
+
+        test('per-scheme back to a single proxy with the same primary URL is applied and clears https', async () => {
+            await handleProxyChanged(context, detection({ kind: 'singleProxy' }));
+
+            sinon.assert.calledOnce(applyProxySettingsStub);
+            assert.ok(atApply);
+            assert.strictEqual(atApply.autoProxyKind, 'singleProxy');
+            assert.strictEqual(atApply.autoHttpsProxyUrl, undefined);
+        });
+
+        test('a bypass-only change is applied with the new bypass', async () => {
+            const bypass = 'localhost;*.internal.example.com';
+
+            await handleProxyChanged(context, detection({ kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure, bypass }));
+
+            sinon.assert.calledOnce(applyProxySettingsStub);
+            assert.ok(atApply);
+            assert.strictEqual(atApply.detectedBypass, bypass);
+            assert.strictEqual(atApply.autoHttpsProxyUrl, secure);
+        });
+
+        test('an identical detection stays on the unchanged path', async () => {
+            await handleProxyChanged(context, detection({ kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure }));
+
+            sinon.assert.notCalled(applyProxySettingsStub);
+            sinon.assert.calledOnce(saveStateStub);
+            assert.strictEqual(state.autoHttpsProxyUrl, secure);
+        });
+
+        test('a single proxy reporting its own http/https copies does not count as a split change', async () => {
+            state.autoProxyKind = 'singleProxy';
+            state.autoHttpProxyUrl = undefined;
+            state.autoHttpsProxyUrl = undefined;
+
+            await handleProxyChanged(context, detection({ kind: 'singleProxy', httpUrl: primary, httpsUrl: primary }));
+
+            sinon.assert.notCalled(applyProxySettingsStub);
+        });
+
+        suite('under Auto: OFF', () => {
+            // What Auto: OFF looks like after it removed the proxy: the removal
+            // leaves every managed target's Configured flag false.
+            setup(() => {
+                state.autoModeOff = true;
+                state.proxyReachable = false;
+                state.gitConfigured = false;
+                state.npmConfigured = false;
+                state.vscodeConfigured = false;
+            });
+
+            test('a split-only change is saved for the recovery, not applied to the unreachable proxy', async () => {
+                // The monitor runs no connection test when only the split changes,
+                // so reachability is unknown; Auto: OFF already says this URL does not answer.
+                const secure2 = 'http://secure2.example.com:8443';
+
+                await handleProxyChanged(context, detection({
+                    kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure2, proxyReachable: undefined
+                }));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                sinon.assert.calledOnce(saveStateStub);
+                assert.strictEqual(state.autoModeOff, true);
+                assert.strictEqual(state.autoHttpsProxyUrl, secure2, 'the reachability recovery applies the saved endpoint');
+            });
+
+            test('a kind and bypass change saves the detection fields together', async () => {
+                const bypass = 'localhost';
+                state.lastDetectionKind = 'perSchemeProxy';
+
+                await handleProxyChanged(context, detection({ kind: 'singleProxy', bypass, proxyReachable: undefined }));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoProxyKind, 'singleProxy');
+                assert.strictEqual(state.lastDetectionKind, 'singleProxy');
+                assert.strictEqual(state.autoHttpsProxyUrl, undefined);
+                assert.strictEqual(state.detectedBypass, bypass);
+            });
+
+            test('the same detection without a new test does not retry the removed targets as enable failures', async () => {
+                await handleProxyChanged(context, detection({
+                    kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure, proxyReachable: undefined
+                }));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoModeOff, true);
+            });
+
+            test('a new failed test still goes through the removal path as before', async () => {
+                const testResult: TestResult = {
+                    success: false,
+                    proxyUrl: primary,
+                    testUrls: ['https://example.com'],
+                    errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+                    failureKind: 'endpointUnreachable',
+                    proxyEndpointOk: false
+                };
+
+                await handleProxyChanged(context, detection({
+                    kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure, testResult, proxyReachable: false
+                }));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, false, undefined);
+                assert.strictEqual(state.autoModeOff, true);
+            });
+
+            test('a successful test with a split change recovers and applies the new endpoint', async () => {
+                const secure2 = 'http://secure2.example.com:8443';
+                const testResult: TestResult = { success: true, proxyUrl: primary, testUrls: ['https://example.com'], errors: [] };
+
+                await handleProxyChanged(context, detection({
+                    kind: 'perSchemeProxy', httpUrl: primary, httpsUrl: secure2, testResult, proxyReachable: true
+                }));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, undefined);
+                assert.ok(atApply);
+                assert.strictEqual(atApply.autoModeOff, false);
+                assert.strictEqual(atApply.autoHttpsProxyUrl, secure2);
+            });
+        });
+
+        test('no detected proxy clears the split fields', async () => {
+            state.detectedBypass = 'localhost';
+
+            await handleProxyChanged(context, detection({ proxyUrl: null, source: null }));
+
+            sinon.assert.calledOnceWithExactly(applyProxySettingsStub, '', false, undefined);
+            assert.strictEqual(state.autoProxyKind, undefined);
+            assert.strictEqual(state.autoHttpProxyUrl, undefined);
+            assert.strictEqual(state.autoHttpsProxyUrl, undefined);
+            assert.strictEqual(state.detectedBypass, undefined);
+        });
+    });
 });

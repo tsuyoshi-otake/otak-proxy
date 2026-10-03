@@ -298,6 +298,7 @@
     "diagnose.reason.winhttpParseUnavailable": "không thể phân tích đầu ra proxy WinHTTP",
     "diagnose.reason.wininetPac": "một URL tự động cấu hình proxy (PAC) đã được cấu hình",
     "diagnose.reason.gitReadUnavailable": "không thể đọc cấu hình git",
+    "diagnose.reason.npmReadUnavailable": "không thể đọc cấu hình npm",
     "migration.credentialsDropped": "otak-proxy không thể di chuyển {count} thông tin đăng nhập proxy trùng lặp sang bộ lưu trữ an toàn trong quá trình nâng cấp lên v3. Hãy nhập lại nếu một proxy ngừng xác thực.",
     "diagnose.target.systemBypass": "Bỏ qua proxy hệ thống",
     "diagnose.target.pipUserProxy": "Proxy người dùng pip",

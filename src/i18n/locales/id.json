@@ -298,6 +298,7 @@
     "diagnose.reason.winhttpParseUnavailable": "keluaran proxy WinHTTP tidak dapat diurai",
     "diagnose.reason.wininetPac": "URL konfigurasi otomatis proxy (PAC) telah dikonfigurasi",
     "diagnose.reason.gitReadUnavailable": "konfigurasi git tidak dapat dibaca",
+    "diagnose.reason.npmReadUnavailable": "konfigurasi npm tidak dapat dibaca",
     "migration.credentialsDropped": "otak-proxy tidak dapat memigrasikan {count} kredensial proxy duplikat ke penyimpanan aman selama peningkatan v3. Masukkan kembali jika sebuah proxy berhenti mengautentikasi.",
     "diagnose.target.systemBypass": "Bypass proxy sistem",
     "diagnose.target.pipUserProxy": "Proxy pengguna pip",

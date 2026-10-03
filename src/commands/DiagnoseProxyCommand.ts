@@ -68,6 +68,8 @@ function issueReasonKey(issue: ProxyIssue): string | undefined {
             return 'diagnose.reason.macosPac';
         case 'git.readUnavailable':
             return 'diagnose.reason.gitReadUnavailable';
+        case 'npm.readUnavailable':
+            return 'diagnose.reason.npmReadUnavailable';
         case 'vscode.proxySupport.off':
             return 'diagnose.reason.proxySupportOff';
         case 'vscode.launch.proxyFlags':

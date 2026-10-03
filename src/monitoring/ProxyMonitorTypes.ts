@@ -24,6 +24,11 @@ export interface ProxyDetectionResult {
     proxyUrl: string | null;
     source: 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | null;
     kind?: ProxyValueKind;
+    /** Per-scheme endpoints and bypass from the detection, so the monitor path
+     *  updates them like the startup path does instead of keeping stale ones (#93). */
+    httpUrl?: string;
+    httpsUrl?: string;
+    bypass?: string;
     capability?: ProxyCapability;
     timestamp: number;
     success: boolean;

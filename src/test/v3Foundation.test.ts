@@ -721,6 +721,271 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
+    // #93 item 1: `npm config list --json` failing (5 s timeout, npm missing,
+    // unparsable output) used to read as "no proxy", which raised a false,
+    // retryable npm.managedProxyMismatch in Auto and hid residuals in Off.
+    function npmReadScenario(npmAnswer: () => Promise<{ stdout: string; stderr: string }>) {
+        return async (command: string, args: string[]) => {
+            if (isNpmConfigListCall(command, args)) {
+                return npmAnswer();
+            }
+            if (command === 'git') {
+                const error = new Error('') as Error & { code: number };
+                error.code = 1;
+                throw error;
+            }
+            return { stdout: '', stderr: '' };
+        };
+    }
+
+    function npmTimeout(): Promise<{ stdout: string; stderr: string }> {
+        const error = new Error('Command failed: npm config list --json') as Error & { killed: boolean; signal: string };
+        error.killed = true;
+        error.signal = 'SIGTERM';
+        return Promise.reject(error);
+    }
+
+    const npmReadFailures: Array<[string, () => Promise<{ stdout: string; stderr: string }>]> = [
+        ['a timeout', npmTimeout],
+        ['unparsable output', async () => ({ stdout: 'npm WARN config something odd\n', stderr: '' })],
+        ['a JSON value that is not an object', async () => ({ stdout: 'null\n', stderr: '' })]
+    ];
+
+    for (const [label, answer] of npmReadFailures) {
+        test(`ProxyRuntimeDiagnostics treats an npm read failure (${label}) as npm.readUnavailable, not a retryable mismatch (#93)`, async () => {
+            const store: Store = new Map();
+            const context = createContext(store, new Map());
+            const restoreConfig = stubConfiguration('', undefined, 'on');
+            try {
+                const diagnostics = new ProxyRuntimeDiagnostics(
+                    context,
+                    async () => ({
+                        mode: ProxyMode.Auto,
+                        autoProxyUrl: 'http://expected.example.com:8080',
+                        autoModeOff: false,
+                        gitConfigured: false,
+                        npmConfigured: true,
+                        vscodeConfigured: false
+                    }),
+                    { commandRunner: npmReadScenario(answer) }
+                );
+
+                const report = await diagnostics.run();
+                const issueIds = new Set(report.issues.map(issue => issue.id));
+                assert.ok(!issueIds.has('npm.managedProxyMismatch'), 'an unreadable npm config cannot prove a mismatch');
+                const readIssue = report.issues.find(issue => issue.id === 'npm.readUnavailable');
+                assert.ok(readIssue, 'the read failure must be visible');
+                assert.strictEqual(readIssue?.impact, 'informational');
+                assert.strictEqual(readIssue?.autoAction, 'none');
+                assert.strictEqual((report.observations.npm as { readFailed?: unknown }).readFailed, true);
+            } finally {
+                restoreConfig();
+            }
+        });
+    }
+
+    test('ProxyRuntimeDiagnostics does not report an npm read failure as a converged residual check in Off (#93)', async () => {
+        const store: Store = new Map();
+        const context = createContext(store, new Map());
+        const restoreConfig = stubConfiguration('', undefined, 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Off,
+                    autoModeOff: false,
+                    gitConfigured: false,
+                    npmConfigured: true,
+                    vscodeConfigured: false
+                }),
+                { commandRunner: npmReadScenario(npmTimeout) }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            assert.ok(!issueIds.has('npm.managedProxyResidual'));
+            assert.ok(issueIds.has('npm.readUnavailable'), 'Off must say npm could not be checked instead of silently passing it');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics does not raise npm.readUnavailable when npm is not a managed target (#93)', async () => {
+        const store: Store = new Map();
+        const context = createContext(store, new Map());
+        const restoreConfig = stubConfiguration('', undefined, 'on');
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://expected.example.com:8080',
+                    autoModeOff: false,
+                    gitConfigured: false,
+                    npmConfigured: false,
+                    vscodeConfigured: false
+                }),
+                { commandRunner: npmReadScenario(npmTimeout) }
+            );
+
+            const report = await diagnostics.run();
+            const issueIds = new Set(report.issues.map(issue => issue.id));
+            assert.ok(!issueIds.has('npm.readUnavailable'));
+            assert.ok(!issueIds.has('npm.managedProxyMismatch'));
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('ProxyRuntimeDiagnostics still reports real npm mismatch and residual after a successful read (#93)', async () => {
+        const store: Store = new Map();
+        const context = createContext(store, new Map());
+        const restoreConfig = stubConfiguration('', undefined, 'on');
+        try {
+            // Successful read with no proxy: in Auto that is a real, retryable gap.
+            const autoReport = await new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://expected.example.com:8080',
+                    autoModeOff: false,
+                    gitConfigured: false,
+                    npmConfigured: true,
+                    vscodeConfigured: false
+                }),
+                { commandRunner: npmReadScenario(async () => npmConfigListStdout({ registry: 'https://registry.npmjs.org/' })) }
+            ).run();
+            const autoIds = new Set(autoReport.issues.map(issue => issue.id));
+            assert.ok(autoIds.has('npm.managedProxyMismatch'), 'a readable, unset npm proxy is still a mismatch');
+            assert.ok(!autoIds.has('npm.readUnavailable'));
+            assert.strictEqual((autoReport.observations.npm as { readFailed?: unknown }).readFailed, false);
+
+            // Successful read with a proxy left behind: in Off that is a residual.
+            const offReport = await new ProxyRuntimeDiagnostics(
+                context,
+                async () => ({
+                    mode: ProxyMode.Off,
+                    autoModeOff: false,
+                    gitConfigured: false,
+                    npmConfigured: true,
+                    vscodeConfigured: false
+                }),
+                { commandRunner: npmReadScenario(async () => npmConfigListStdout({ proxy: 'http://stale.example.com:8080' })) }
+            ).run();
+            const offIds = new Set(offReport.issues.map(issue => issue.id));
+            assert.ok(offIds.has('npm.managedProxyResidual'));
+            assert.ok(!offIds.has('npm.readUnavailable'));
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    // #93 item 2: PAC/WPAD cannot be applied, but it only blocks convergence when
+    // a proxy is expected. With the proxy expected off it stays visible as
+    // informational and must not turn the runtime state into `partial`.
+    function unsupportedPacState(mode: ProxyMode, autoModeOff: boolean, usingFallbackProxy = false): ProxyState {
+        return {
+            mode,
+            autoModeOff,
+            usingFallbackProxy,
+            autoProxyUrl: mode === ProxyMode.Auto && !autoModeOff ? 'http://expected.example.com:8080' : undefined,
+            fallbackProxyUrl: usingFallbackProxy ? 'http://fallback.example.com:8080' : undefined,
+            gitConfigured: false,
+            npmConfigured: false,
+            vscodeConfigured: false,
+            lastDetectionSource: 'windows',
+            lastDetectionKind: 'pac',
+            lastDetectionCapability: 'unsupported'
+        };
+    }
+
+    const proxyDisabledPacCases: Array<[string, ProxyState]> = [
+        ['Off', unsupportedPacState(ProxyMode.Off, false)],
+        ['Auto: OFF without fallback', unsupportedPacState(ProxyMode.Auto, true)]
+    ];
+
+    for (const [label, state] of proxyDisabledPacCases) {
+        test(`ProxyRuntimeDiagnostics reports an unsupported PAC as informational in ${label} (#93)`, async () => {
+            const store: Store = new Map();
+            const context = createContext(store, new Map());
+            const restoreConfig = stubConfiguration('', undefined, 'on');
+            try {
+                const report = await new ProxyRuntimeDiagnostics(context, async () => state, {
+                    commandRunner: npmReadScenario(async () => npmConfigListStdout({}))
+                }).run();
+                const pac = report.issues.find(issue => issue.id === 'windows.wininet.pac');
+                assert.ok(pac, 'the PAC observation must stay visible');
+                assert.strictEqual(pac?.impact, 'informational');
+                assert.ok(!report.issues.some(issue => issue.impact === 'blocksConvergence'), JSON.stringify(report.issues.map(issue => issue.id)));
+                assert.notStrictEqual(report.runtimeState, 'partial');
+            } finally {
+                restoreConfig();
+            }
+        });
+    }
+
+    const proxyEnabledPacCases: Array<[string, ProxyState]> = [
+        ['Auto with a detected proxy', unsupportedPacState(ProxyMode.Auto, false)],
+        ['Auto: OFF using the fallback proxy', unsupportedPacState(ProxyMode.Auto, true, true)]
+    ];
+
+    for (const [label, state] of proxyEnabledPacCases) {
+        test(`ProxyRuntimeDiagnostics keeps an unsupported PAC as blocksConvergence in ${label} (#93)`, async () => {
+            const store: Store = new Map();
+            const context = createContext(store, new Map());
+            const restoreConfig = stubConfiguration('', undefined, 'on');
+            try {
+                const report = await new ProxyRuntimeDiagnostics(context, async () => state, {
+                    commandRunner: npmReadScenario(async () => npmConfigListStdout({}))
+                }).run();
+                const pac = report.issues.find(issue => issue.id === 'windows.wininet.pac');
+                assert.strictEqual(pac?.impact, 'blocksConvergence');
+            } finally {
+                restoreConfig();
+            }
+        });
+    }
+
+    test('ProxyRuntimeDiagnostics downgrades a cached Windows PAC issue per run without mutating the cache (#93)', async function () {
+        if (process.platform !== 'win32') {
+            // The registry slow path only runs on a local Windows host.
+            this.skip();
+        }
+        const store: Store = new Map();
+        const context = createContext(store, new Map());
+        const restoreConfig = stubConfiguration('', undefined, 'on');
+        let state: ProxyState = { mode: ProxyMode.Off, autoModeOff: false, gitConfigured: false, npmConfigured: false, vscodeConfigured: false };
+        let regCalls = 0;
+        try {
+            const diagnostics = new ProxyRuntimeDiagnostics(context, async () => state, {
+                commandRunner: async (command, args) => {
+                    if (command === 'reg') {
+                        regCalls += 1;
+                        if (args.includes('AutoConfigURL')) {
+                            return { stdout: '    AutoConfigURL    REG_SZ    http://pac.example.com/proxy.pac\r\n', stderr: '' };
+                        }
+                        throw new Error('value not found');
+                    }
+                    return npmReadScenario(async () => npmConfigListStdout({}))(command, args);
+                }
+            });
+
+            const offReport = await diagnostics.run();
+            const offPac = offReport.issues.find(issue => issue.id === 'windows.wininet.pac');
+            assert.strictEqual(offPac?.impact, 'informational');
+            assert.notStrictEqual(offReport.runtimeState, 'partial');
+
+            const regCallsAfterFirstRun = regCalls;
+            state = { mode: ProxyMode.Auto, autoProxyUrl: 'http://expected.example.com:8080', autoModeOff: false, gitConfigured: false, npmConfigured: false, vscodeConfigured: false };
+            const autoReport = await diagnostics.run();
+            assert.strictEqual(regCalls, regCallsAfterFirstRun, 'the second run must reuse the slow cache');
+            const autoPac = autoReport.issues.find(issue => issue.id === 'windows.wininet.pac');
+            assert.strictEqual(autoPac?.impact, 'blocksConvergence', 'the Off downgrade must not leak into the cached issue');
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('ProxyRuntimeDiagnostics does not treat leftover https.proxy as Git routing success or mismatch', async () => {
         const store: Store = new Map();
         const secrets = new Map<string, string>();

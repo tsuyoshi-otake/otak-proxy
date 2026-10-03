@@ -53,6 +53,26 @@ export function createUnsupportedAutoConfigIssue(params: UnsupportedAutoConfigIs
     };
 }
 
+const UNSUPPORTED_AUTO_CONFIG_ISSUE_IDS: ReadonlySet<string> = new Set([
+    'windows.wininet.pac',
+    'windows.wininet.wpad',
+    'linux.gnome.auto',
+    'macos.autoproxy.pac'
+]);
+
+/**
+ * PAC/WPAD only blocks convergence while otak-proxy is expected to apply a
+ * proxy. When the proxy is expected to be off there is nothing to converge, so
+ * the observation stays visible but must not make the runtime state partial
+ * (#93).
+ */
+export function asProxyDisabledUnsupportedAutoConfig(issue: ProxyIssue): ProxyIssue {
+    if (!UNSUPPORTED_AUTO_CONFIG_ISSUE_IDS.has(issue.id) || issue.impact !== 'blocksConvergence') {
+        return issue;
+    }
+    return { ...issue, impact: 'informational' satisfies ProxyIssueImpact };
+}
+
 export function unsupportedAutoConfigKindLabel(kind: ProxyValueKind | undefined): string {
     return kind === 'wpad' ? 'WPAD' : 'PAC';
 }

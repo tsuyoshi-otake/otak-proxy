@@ -75,7 +75,9 @@ suite('ProxyRuntimeDiagnostics Test Suite', () => {
                 proxy: 'http://proxy.example.com:8080',
                 httpsProxy: 'http://proxy.example.com:8080',
                 noproxy: 'localhost,127.0.0.1',
-                registry: 'https://registry.npmjs.org/'
+                registry: 'https://registry.npmjs.org/',
+                // A successful read says so, as the git observation does (#93).
+                readFailed: false
             });
             assert.deepStrictEqual(reports[1].observations.npm, reports[0].observations.npm);
         } finally {

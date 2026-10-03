@@ -309,6 +309,7 @@
     "diagnose.target.linuxGnome": "GNOME プロキシ",
     "diagnose.target.macosNetwork": "macOS ネットワークプロキシ",
     "diagnose.reason.gitReadUnavailable": "git 設定を読み取れませんでした",
+    "diagnose.reason.npmReadUnavailable": "npm 設定を読み取れませんでした",
     "migration.credentialsDropped": "otak-proxy は v3 へのアップグレード中に {count} 件の重複したプロキシ資格情報をセキュアストレージへ移行できませんでした。プロキシの認証が通らなくなった場合は再入力してください。",
     "diagnose.target.systemBypass": "システムプロキシのバイパス",
     "diagnose.target.pipUserProxy": "pip ユーザープロキシ",

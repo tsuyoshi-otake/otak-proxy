@@ -309,6 +309,7 @@
     "diagnose.target.linuxGnome": "GNOME proxy",
     "diagnose.target.macosNetwork": "macOS network proxy",
     "diagnose.reason.gitReadUnavailable": "git configuration could not be read",
+    "diagnose.reason.npmReadUnavailable": "npm configuration could not be read",
     "migration.credentialsDropped": "otak-proxy could not migrate {count} duplicate proxy credential(s) to secure storage during the v3 upgrade. Re-enter them if a proxy stops authenticating.",
     "diagnose.target.systemBypass": "System proxy bypass",
     "diagnose.target.pipUserProxy": "pip user proxy",
