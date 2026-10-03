@@ -557,3 +557,80 @@ CORE-6/7/8（タイミング依存）、SYNC-5/6/8/10/11/12、MON-5（一部確�
 - Off のときに確かめられない値は、errorType UNKNOWN（`npm proxy re-read failed; refusing to unset`）で報告され、CONFIG_ERROR にはならない。値は残る。
 - モニタ経路では、PAC/WPAD のときにフォールバックを使わない。`ToggleProxyCommand` にある判定の重複は範囲外とした（#85 に明記）。
 - フォールバックが無いとき、モニタ経路では `autoModeOff=false` のままだが、起動時は true になる。仕様の不整合として報告だけにした。
+
+## 2026-10-03 — v3.2.12 の公開失敗（#88）と v3.2.13 リリース（#85 + #88 を公開）
+
+**Issue**: [#88](https://github.com/tsuyoshi-otake/otak-proxy/issues/88)（#89 の merge でクローズ）、[#85](https://github.com/tsuyoshi-otake/otak-proxy/issues/85)（`Refs`）
+**PR**: [#87](https://github.com/tsuyoshi-otake/otak-proxy/pull/87)（3.2.12 のリリース）、[#89](https://github.com/tsuyoshi-otake/otak-proxy/pull/89)（修正）、[#90](https://github.com/tsuyoshi-otake/otak-proxy/pull/90)（3.2.13 のリリース）
+**Commits**: `21d9384`（`chore(release): v3.2.12`）、`b1ffef7`（修正）、`89da4ac`（版範囲のコメント修正）、`0ca554d`（`chore(release): v3.2.13`）
+**Merge commits**: `5d683f8`（#87）、`9aa402c`（#89）、`cd6de03`（#90）
+**Tags**: `v3.2.12`（`5d683f8`、**未公開**）、`v3.2.13`（`cd6de03`、annotated / `Release v3.2.13`）
+**CI runs**: [37089775512](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/37089775512)（v3.2.12、Unit tests で失敗）、[37091020182](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/37091020182)（v3.2.13、成功）
+
+### 症状
+
+`v3.2.12` タグの publish run が Unit tests で止まった。失敗したテストは `real npm: a credentialed URL is set, verified, read and removed (#85)`、メッセージは `Failed to read/write npm configuration; residual remains: proxy, https-proxy`。VSIX の作成より前なので、どちらのレジストリにも何も出ていない。ローカル（Windows、npm 11.16.0）のゲートは 4 つとも通っていた。
+
+### 原因
+
+- CI は Node 22.23.3 に同梱の **npm 10.9.9** で動く。npm 10.9.9 は認証情報付きの値の `config get` を `... option is protected, and can not be retrieved in this way` で拒否する。
+- #85 の `isProtectedGetRefusal` は npm 11.16.0 の文言 `cannot be retrieved` しか見ていなかった。拒否として認識されず、user config ファイルも読まれず、npm 10 では CFG-1 が直っていなかった。テストだけの問題ではなく、Node.js 22 の npm を使う利用者に効く本番の不具合。
+- npm/cli の `lib/commands/config.js` をタグごとに確認した結果: 10.7.0 以前は値を表示する（redact による拒否なし）。10.8.0〜11.6.1 は `can not be retrieved`。11.6.2 以降は `cannot be retrieved`。
+- ローカルの検証は npm 11 だけで、CI の npm の版でテストしていなかった。
+
+### 対応
+
+1. Issue #88 を作り、`isProtectedGetRefusal` を `/can ?not be retrieved/` にした（`b1ffef7`）。fake npm に `refusalWording` を足し、書き込み→検証→読み戻し→Off の往復と、userconfig のパス拒否の fail-closed を両方の文言で回す。README とコメントは「npm 10.8 and later」。npm 10.9.9 の ini 5.0.0 と npm 11.16.0 の ini 6.0.0 は `lib/ini.js` が同一なので、user config の読み取りもそのまま使える。
+2. 独立 verifier の指摘で、版の境目（11.6.1 / 11.6.2）をコメントに正確に書いた（`89da4ac`）。
+3. `v3.2.12` タグは付け替えず（`git tag` の man page が公開済みタグの付け替えを勧めない）、3.2.13 として出した。CHANGELOG では 3.2.12 を「Not published」とした（`0ca554d`）。
+
+### リリース前チェックの結果（CLAUDE.md の MUST）
+
+| 観点 | 結果 | 対応 |
+| --- | --- | --- |
+| tracked files の個人情報らしき文字列 | v3.2.11 以降の追加行は `*.example.com` と `127.0.0.1` の fixture だけ | — |
+| コミット履歴の author / committer | v3.2.11 以降は既存と同じ ID と GitHub の merge コミットだけ。前のアカウント名と勤務先ドメインのメールアドレスのコミットは既存のまま | **未対応**（ユーザー判断待ちのまま。v3.2.11 のエントリと同じ） |
+| 公開設定・タグ・リリース | PUBLIC。タグは v3.2.12（未公開）まで。GitHub Release の最新は v3.2.9 | 先例に合わせ GitHub Release は作らない |
+| LICENSE | MIT あり | — |
+
+### Verification
+
+修正の確認:
+
+| 項目 | 結果 |
+| --- | --- |
+| 修正前の再現 | 実物の npm 10.9.9（`~/tmp/otak85/npm10` に隔離して用意）で、2 件の real npm テストが CI と同じメッセージで失敗。fake の `can not` テストも修正前は失敗 |
+| 修正後 | `NpmConfigManager` + `NpmUserConfigValue` のテストが、実物の npm 10.9.9 と 11.16.0 の両方で 43 passing |
+| 独立 verifier（sonnet、fresh context、6 項目） | 全項目 pass。`out/` のコピーで旧 regex に戻すと CI と同じエラーになることも確認 |
+| PR #89 のレビュー | Codex 完了（`b1ffef7`、指摘なし）。#90 は Codex の利用上限と CodeRabbit の rate limit でレビューなし（版上げと CHANGELOG だけ） |
+
+v3.2.13 のリリース:
+
+| ゲート | ローカル (Windows) | CI (Ubuntu, run 37091020182) |
+| --- | --- | --- |
+| `npm run lint` | pass (614 files scanned) | pass (598 files scanned) |
+| unit | 946 + 74 passing / 0 failing | 946 + 73 passing / 1 pending（Windows 専用テスト。学び 3） |
+| `npm run test:smoke` | 4 passing | 4 passing |
+| `npm run lint:unicode:dist` | pass (291 artifacts) | pass (291 artifacts) |
+| `vsce package` | — | `otak-proxy-3.2.13.vsix` (161 files, 637.06 KB) |
+| VS Marketplace | API で 3.2.13 を確認（02:56:42Z。`lastUpdated` 02:56:30Z、publish 02:50:50Z から約 6 分） | `Published odangoo.otak-proxy v3.2.13.`（02:50:50Z） |
+| Open VSX | API で 3.2.13 を確認（02:53:52Z。02:51:43Z の時点ではまだ 3.2.11。publish 02:50:52Z から 3 分以内） | `Published odangoo.otak-proxy v3.2.13`（02:50:52Z） |
+| 公開された README | 両レジストリの 3.2.13 の README は同一（30,406 bytes）。vsce が `LICENSE` への相対リンク 2 か所を GitHub の URL に書き換えた以外は main の README と同じ。#85 と #88 の文言 3 つも入っている | — |
+
+テスト後の runner プロセス残存 0 件（残っていた node は VS Code の tsserver だけ）。
+
+### Learning
+
+1. ローカルと CI で外部ツールの版が違う（ローカル npm 11.16.0 / CI npm 10.9.9）。実物の外部ツールを叩くテストは、タグを打つ前に CI と同じ版でもローカルで回す。→ rules.md「リリース」
+2. npm の拒否メッセージは版で文言が違う（`can not` / `cannot`）。エラー文言で分岐するときは、対象の版範囲の文言をソースで確認する。→ rules.md「npm」
+3. CI とローカルの unit 件数の 1 件差（v3.2.10 から「理由は未確認」）は、Windows 専用テスト `Windows npm path does not expand %OS% or split on &` が Linux で pending になるため。v3.2.13 と v3.2.11（run 37003590405）の CI ログで、このテストが `1 pending` になっていることを確認した。→ rules.md「リリース」
+4. publish run が失敗してもタグは残る。公開前に止まったならタグは付け替えず、次の patch で出して CHANGELOG に未公開と書く。→ rules.md「リリース」
+5. `rm -rf` を含む Bash コマンドは権限で拒否された。テストの隔離ディレクトリは消さずに、実行ごとに新しく作る。→ rules.md「ツール操作」
+6. Open VSX の `files.readme` は `openvsx.eclipsecontent.org` への 302。curl に `-L` が無いと README が 0 bytes になり、確認が成り立たない。→ rules.md「リリース」
+7. Git Bash の `sed -i` は CRLF のファイルを LF にして書き戻した（rules.md の全行）。CRLF のファイルは node で直す。→ rules.md「ツール操作」
+8. 公開遅延は今回も同じ（Open VSX 3 分以内、Marketplace 約 6 分）。rules.md の値は変えない。
+
+### 残留リスク
+
+- エラー文言で拒否を判定しているので、npm が将来また文言を変えると同じ失敗になる。その場合は CONFIG_ERROR で fail-closed（値は消さない・漏らさない）。
+- #85 の残留リスク（project `.npmrc` の上書き、Off で確かめられない値の errorType、PAC/WPAD、実機での VPN 切断の未確認）はそのまま。
