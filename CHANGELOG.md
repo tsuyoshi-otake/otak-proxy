@@ -1,5 +1,17 @@
 # Change Log
 
+## [3.2.14] - 2026-10-03
+
+### Fixed
+- Diagnostics no longer treat npm as having no proxy when `npm config list` fails (for example, npm is not on `PATH` or times out). The failure is reported for information, and the npm mismatch and residual checks are skipped, as for Git (#93).
+- In Off, and in `Auto: OFF` without the fallback proxy, a PAC, WPAD, or GNOME auto-config setting no longer makes diagnostics report `partial`. It is still shown for information (#93).
+- An empty or truncated apply lock left by a window that stopped mid-write no longer blocks every window forever. It is reclaimed once it is older than the lock lease, and a window that fails to write its new lock removes it (#93).
+- When the system proxy's per-scheme HTTPS URL or bypass list changes while the main URL stays the same, the new values are applied and the previous HTTPS URL is no longer kept. In `Auto: OFF` they are saved and applied when a connection test succeeds again; a detection without a test no longer applies the proxy while `Auto: OFF` is shown (#93).
+- With a browser-based VS Code UI connected to a remote extension host, diagnostics no longer report every command-based check (Git, npm, and similar) as unavailable. What can run now follows where the extension host runs, not the UI. This is covered by unit tests and has not yet been tried with a real browser UI (#93).
+
+### Changed
+- README: describe how diagnostics report unsupported auto-config in Off and a Git or npm config that cannot be read (#93).
+
 ## [3.2.13] - 2026-10-03
 
 ### Fixed
