@@ -398,3 +398,162 @@ ASCII 図 2 つ（トグル図、Status Indicators 図）は HEAD とバイト�
    → rules.md「リリース」に追加。
 2. **リリース前チェックで `.github/` の中も検索する。** 前の所有者アカウントの URL が Issue テンプレートに残っていた。ソースや README だけを見ていると見落とす。`git grep` の対象はリポジトリ全体にする。
 3. **公開遅延の実測は今回も同じだった**（Open VSX 約 2 分、Marketplace 約 6 分）。rules.md の値は変えない。
+
+## 2026-10-03 — 診断・修復まわりの不具合調査（コード変更なし）
+
+**Issue**: なし（調査のみ。起票はユーザー判断待ち）
+**基準コミット**: `d80515f`（v3.2.11 リリース後の main）
+
+### やったこと
+
+「他に診断不具合は無い?」への回答として、3 つのサブエージェント（収集・分類・修復）に読み取り専用で監査させた。挙がった指摘 25 件は、すべて自分で該当コードを読んで確かめた。ローカルで再現できるものは、読み取り専用のプローブで確認した。
+
+### 確定した主な不具合（重い順）
+
+| # | 内容 | 根拠 |
+| --- | --- | --- |
+| 1 | npm の設定読み取りに失敗すると（5 秒タイムアウト等）、未設定として扱われる。Auto では retryable な `npm.managedProxyMismatch` が偽で出て、無駄なリトライが走る。Off では偽の converged になる | `readNpmConfigValues` の catch が `{}` を返す |
+| 2 | Windows に PAC/WPAD があると、Off でも `blocksConvergence` が出て `partial` 扱いになる。split と認証情報の検査には `expectsProxyDisabled` のガードがあるが、PAC/WPAD の検査には無い | `createUnsupportedAutoConfigIssue` の impact が固定で、`WindowsProxyDiagnostics.toIssues` も無条件 |
+| 3 | 0 バイトのロックファイルが残ると、全ウィンドウの apply が `lockSkipped` のまま戻らない | `ApplyLockService.tryAcquire`: 読めないロックは常に `held`。stale 判定はパースできたときだけ |
+| 4 | Auto でモニタ経由で検出 URL が変わったとき、per-scheme の古い `autoHttpProxyUrl` が残り、npm の mismatch が偽で出る（retryable） | `applyProxyDetectionResultToState` が split フィールドを更新しない。`ProxyApplier` は不一致時に split を無視するが、診断は無視しない |
+| 5 | Web UI + リモートの Node 拡張ホストを、child_process が使えない環境と判定する（実環境では未確認） | `ExecutionContextDetector`: `canUseChildProcess: !isWeb` |
+
+ほかに確定したもの（低〜中）:
+
+- `blockPlaintextTargets` のときに Auto: OFF（到達不能）の無効化が止まり、平文認証情報の proxy が残る。toggle の Off は URL に `''` を渡すので影響しない。
+- ロックの stale 回収が ABA で二重保持になる（rules.md「`FileLease` だけを使う」に反する実装）。
+- ロックの I/O エラーで例外がそのまま上がる（`ioError` を返すコードが無い）。
+- リトライが最大 2 回で、「at most one bounded retry」という文書と合わない。
+- リトライ後の診断が失敗すると、flap バケットがリセットされる。
+- apply 失敗の通知が、無関係な最上位 issue の fingerprint で間引かれる。
+- pip がロックの対象に入っていない。
+- 進行中の遅い診断に合流すると、`bypassSlowCache` が無視される。
+- 既知シークレットの文字列置換で issue の id やキーが壊れる。
+- Windows の reg / netsh の失敗で何も出ない。
+- 通知に生の id が出る。
+- bare `user:p@ss@host` のパスワード末尾と、PAC URL の `?token=` が漏れる。
+
+### 否定・一部否定
+
+| 指摘 | 結論 | 根拠 |
+| --- | --- | --- |
+| VS Code の `http.proxy` がワークスペース単位で設定されると、偽の mismatch が出る | 否定 | 手元の VS Code 本体（`workbench.desktop.main.js`）で、`http.proxy` の scope は APPLICATION か MACHINE だった。ワークスペースの値は適用されない |
+| en/ja 以外のロケールで WinHTTP のパースが失敗する | 一部否定 | Windows 11 の CP932 環境で、日本語の出力は正しくパースされた。en/ja 以外のロケールは未確認 |
+
+### 未確認のまま残したもの
+
+- `channel.info` がログレベルで出なくなる件。
+- netsh のエラーが stdout に出て理由が隠れる件。
+- superseded のリクエストが後処理をする件（実際の影響）。
+- renew で解放済みのロックが復活する件。
+- FlapTracker の書き込み競合。
+- `success` と `converged` の食い違い。
+
+### Learning
+
+1. **診断の各検査は、`expectsProxyDisabled` のガードを検査ごとに確かめる。** split と認証情報にはガードがあったが、PAC/WPAD には無かった。新しく検査を足すときは、Off / Auto: OFF での impact を決めてテストする。
+2. **「読めなかった」と「未設定」を同じ値で表さない。** git は `readFailed` で区別しているが、npm と Windows のレジストリは区別していない。どちらも偽の収束、または偽のブロッカーの原因になっている。
+3. **VS Code の設定 scope は、推測せず本体のバンドルで確かめられる。** `workbench.desktop.main.js` の `"<key>":{` の直前にある `scope:` を読む（1=APPLICATION, 2=MACHINE）。
+
+## 2026-10-03 — コードベース全体の不具合・改善点の調査（コード変更なし）
+
+**Issue**: なし（調査のみ。起票はユーザー判断待ち）
+**基準コミット**: `d80515f`
+
+### やったこと
+
+「不具合箇所や改善が必要な箇所がないか分析して」への回答として、6 つのサブエージェント（Core / Config writers / Monitoring / Sync・Security / Commands・UI・i18n / Build・CI・Test）に読み取り専用で監査させた。指摘は 69 件。主要なものは自分で該当コードを読み、ローカルで安全に再現できるものはプローブで確かめた。
+
+プローブ（いずれも repo に書き込みなし）:
+
+- npm 11.16.0 を一時 `NPM_CONFIG_USERCONFIG` で実行: 認証情報付き URL を `config set proxy` した後の `config get proxy` は `The proxy option is protected, and cannot be retrieved in this way` で exit 1。認証情報なしなら値が返る。
+- Node `execFile` のエラー文: `Command failed: git config ... http://alice:<pw>@proxy.example.com:8080`。argv がそのまま入る。
+- `InputSanitizer.maskPassword('http://a:pw1@h1:1,http://b:pw2@h2:2')` → 2 つ目の `pw2` が残る。
+- `ProxyUrlValidator.validate`: タブ入り・末尾 NUL・先頭空白は valid、末尾 `/` は「Hostname contains invalid characters」で invalid。
+
+### 確定した主な不具合（重い順）
+
+| # | 内容 | 根拠 |
+| --- | --- | --- |
+| CORE-1 | Auto でシステム proxy が途中で消えると（VPN 切断など）、proxy を外すだけでフォールバックに切り替わらない。`autoModeOff` も立たず「Auto: no proxy」表示のまま | `ExtensionProxyEventHandlers.handleProxyChanged` → `applyProxyDetectionResultToState` は `autoProxyUrl=undefined` にするだけ。フォールバック判定は `SystemProxyUpdateService.applyFallbackProxyState` と `ToggleProxyCommand` にしかない |
+| CFG-1 | 認証情報付き proxy で npm の書き込み検証が必ず失敗し（ロールバック）、Off でも削除できない（`re-read failed; refusing to unset`） | npm の `config get` が private 値を拒否。`NpmConfigManager.inspectProxy` が `status:'error'` を返す。fake npm はこの拒否を模倣していない |
+| CFG-2 | git が UNKNOWN / LOCKED で失敗すると、エラー通知にパスワードが平文で出る | `GitConfigErrorClassifier` が `errorMessage` をそのまま返し、`showAggregatedErrors` → `UserNotifier.showError` にマスクがない |
+| UI-1 | Auto 中に「Configure Manual Proxy」で URL を入れても何も適用されず、表示も変わらない | `ConfigureUrlCommand.applyManualModeChange` が `mode !== Manual` で return。Manual は `getState()` で必ず Auto に移行される |
+| BUILD-1/3/4 | PR CI がない。`workflow_dispatch` で任意ブランチから publish でき、タグと `package.json` の版の一致も確認しない。先頭 8000 バイトに NUL があるファイルは invisible Unicode 検査をすり抜ける | `publish-vscode.yml` のトリガ、`check-invisible-unicode.mjs` の `isBinary` |
+
+ほかに確定したもの（グループ別）:
+
+- **状態の整合性・競合**: `commitState` の check と write の間に await がありロストアップデート（CORE-2）。apply 結果が revision のずれだけで捨てられる（CORE-3）。migration 失敗時の古いスナップショット書き戻し（CORE-5）。共有ファイル CAS の基準が「最後に観測した版」ではなく「今読んだ版」（SYNC-1）。publish lease タイムアウトで publish を黙って捨てる（SYNC-2）。未来タイムスタンプ判定が version 比較より先（SYNC-9）。古い接続テスト結果が新しい世代で刻印される（MON-3）。
+- **データ消失**: SecretStorage への保存失敗でも migration が公開 state を書き、旧シークレットを削除する。通知は衝突時だけ（CORE-4）。
+- **監視の負荷・堅牢性**: `isCheckInProgress` が立ちっぱなしになり得る（MON-4）。フォーカスのたびに接続テスト（MON-8）。テスト間隔が 60 秒ではなく 90 秒（MON-9）。リトライにジッタ・上限・停止がない（MON-10）。初期値 false で偽の「到達可能になった」イベント（MON-11）。リモート変更のたびに差分を見ずに apply（SYNC-4）。
+- **秘密情報**: Logger のマスクが 1 つ目の認証情報だけ（MON-12）。
+- **入力検証**: URL 入力の trim・inline 検証がない、末尾 `/` のエラー文言が誤解を招く、タブ・NUL が通る（UI-2 / SYNC-3）。
+- **表示・i18n**: 「Off モードに切り替えます」と言うが実際は Auto OFF（UI-3）。フォールバック URL を「System Proxy」と表示（UI-4）。ほか UI-5, 9〜12。
+- **ビルド・テスト基盤**: VS Code host テストと contracts / failure-injection が CI で走らない（BUILD-2）。7 日ルールと audit が未強制（BUILD-5）。publish job の secrets 分離なし（BUILD-6）。検査後に `vscode:prepublish` が `out/` を再生成（BUILD-7）。evidence の pbt JSON が毎回作業ツリーを汚す（BUILD-10）。lint の警告が gate にならない（BUILD-11）。到達不能らしい 3.1 GB の loose blob（BUILD-12、サイズのみ確認）。
+- **死んだコード**: `escapeGitValueRegex` と `exactGitConfigValuePattern` の重複でテストが未使用側を守っている（CFG-9）。`SharedStateFile.recover()` に本番の呼び出しなし（SYNC-7）。`isStartupTestStillPending` に本番の呼び出しなし（CORE-12）。
+
+### 否定・仕様判断が要るもの
+
+| 指摘 | 結論 | 根拠 |
+| --- | --- | --- |
+| CFG-3: VS Code の Off がワークスペースの `http.proxy` を読んで Global 値を消し損ねる | 否定（主シナリオ） | 前回確認したとおり `http.proxy` の scope は APPLICATION / MACHINE で、ワークスペース値は適用されない。残るのは Off で `""` を書き残す件だけ（軽微） |
+| MON-1: 接続テスト 1 回の失敗で Auto: OFF にする | 挙動は確定、仕様判断が必要 | 何回の失敗で無効化すべきかが仕様に書かれていない |
+| CORE-9: 同じ proxy アドレスで認証情報を外しても、保存済みの認証情報が再び付く | 挙動は確定、仕様判断が必要 | `persistManualProxySecret` は public URL が変わったときだけ削除する。意図した再利用かどうかが不明 |
+
+### 未確認のまま残したもの
+
+CORE-6/7/8（タイミング依存）、SYNC-5/6/8/10/11/12、MON-5（一部確認）/6/7、CFG-4/5/6/7、UI-7、BUILD-9 の原因特定。いずれもエージェントの追跡のみで、自分ではコードを読み切っていないか、実機（macOS / マルチユーザー Linux / Volta）が必要。
+
+### Learning
+
+1. **実ツールが拒否・秘匿する値は、fake でも同じように拒否させる。** npm は認証情報付きの `proxy` を `config get` で返さない。`createFakeNpmConfig` はこれを模倣しておらず、テストのコメント「npm 11.x masks credentials」は認証情報なしの URL でテストすることで回避していた。そのため CFG-1 がテストで見えなかった。→ rules.md「外部ツールのスタブ」に追加。
+2. **`execFile` のエラー文には argv がそのまま入る。** 認証情報付きのコマンドが失敗したときの文字列は、表示の境界（通知）でマスクする。呼び出し元ごとのマスクは漏れる（CFG-2）。
+3. **「システム proxy なし」の解決は入口ごとに実装されている。** 起動・toggle にはフォールバック判定があるが、モニタのイベント経路にはない（CORE-1）。新しい入口を足すときは同じ resolver を通す。
+4. **compaction 後、バックグラウンドエージェントの output ファイルは 0 バイトのことがある。** 結果はセッションの transcript（jsonl）の tool result から取り出せる。
+
+## 2026-10-03 — #85 モニタ経路のフォールバックと、認証情報付き npm proxy の検証・削除
+
+**Issue**: #85
+**コミット**: `9884649`（修正・テスト・README）。PR #86（merge commit で main に入れる）
+
+### 症状
+
+- CORE-1: Auto 中にシステム proxy が消えると（VPN 切断など）、proxy を外すだけで手動 URL（Auto のフォールバック）を使わない。フォールバックに到達できなくても Auto OFF にならない。
+- CFG-1: 認証情報付き proxy で、npm への書き込み後の検証が必ず失敗してロールバックされる。Off でも npm の proxy を削除できない（`npm proxy re-read failed; refusing to unset`）。
+
+### 原因
+
+- CORE-1: フォールバック判定は起動時（`SystemProxyUpdateService.applyFallbackProxyState`）と toggle にしかなく、モニタのイベント経路（`handleProxyChanged`）には無かった。
+- CFG-1: npm 11 の `config get` は、redact される値（URL のパスワード、npm token、UUID）を含む値をすべて拒否する（exit 1）。`NpmConfigManager.inspectProxy` はこれを読み取り失敗として扱っていた。fake npm がこの拒否を模倣していなかったので、テストで見えなかった。
+
+### 修正
+
+- `resolveManualFallback(state)` を公開し、`ExtensionInitializer` がモニタ経路の `handleProxyChanged` に注入する。結果が engaged なら fast path を通らずに適用し、パスワードを伏せて `fallback.usingManualProxy` を通知する。resolver の例外は notConfigured として扱う。revision 付きコミットなので、フォールバックのテスト中に入った toggle が勝つ。
+- npm が拒否したキーだけ、user config ファイル（`npm config get userconfig` が返すパス）から読む。ファイルの読み込みは 1 回の inspection につき 1 回。`NpmUserConfigValue.readTopLevelNpmrcString` が ini 6 の decode を再現する。
+- ファイルの値がパスワード付き URL でなければ、他の layer の値とみなして fail-closed（CONFIG_ERROR）にする。ファイルが無い・読めないとき、userconfig のパス自体を npm が拒否したとき（UUID を含むパス）も同じく fail-closed にし、ファイルの場所は推測しない。
+- fake npm に拒否を模倣させ、user config ファイルを ini の書き出し形式で返すようにした。
+- README: 途中で消えたときのフォールバック、npm の user config 読み取りと fail-closed を説明し、Troubleshooting を `npm config list` に変えた。
+
+### 検証
+
+- `npm run lint`（ESLint + lint:unicode、614 files）が clean。
+- unit lane は 946 + 71 passing。実 npm 11.16.0 を隔離した userconfig で使うテスト 2 件を含む。
+- VS Code host lane は 491 passing / 1 pending / 9 failing。失敗 9 件は変更前の baseline と同じ集合で、#85 のテストは含まない。
+- smoke は 4 passing。テストランナーの残存プロセスは無し。
+- 独立した verifier（fresh context、10 項目の rubric、sonnet）の初回判定は、C1 だけ fail（rules.md に BOM の実体が混入）。直したあとに C1 を再判定し、全項目 pass。
+- 未確認: OS の proxy 設定や VPN を実際に変えて、システム proxy を消す実機確認はしていない。
+
+### 学び
+
+1. README 更新中に Troubleshooting のコマンドを実際に実行して、`npm config get userconfig` も UUID を含むパスでは拒否されることが分かった。修正の漏れだったので、fail-closed を明示してテストを追加した。→ rules.md「ドキュメント」「npm」
+2. Edit ツールも、バックスラッシュ u FEFF の形のエスケープを BOM の実体にして書く。この学びを rules.md に書いた行そのものに BOM が混入し、verifier の lint で検出された。→ rules.md「ツール操作」
+3. npm は、最後のキーを `config delete` すると user config ファイル自体を消す。→ rules.md「npm」
+4. Git Bash の `grep -c` で CR を数える方法は使えない。LF だけのファイルでも全行が一致した。→ rules.md「ツール操作」
+5. verifier の host lane の初回実行が途中で切れた（mocha の summary なし）。原因は特定していない。完走した再実行は baseline と一致した。
+
+### 残留リスク
+
+- project レベルの `.npmrc` が別の認証情報付き URL で上書きしていても、user ファイルの値を有効値とみなす。どの project config が効くかは、プロセスの cwd で決まる。
+- Off のときに確かめられない値は、errorType UNKNOWN（`npm proxy re-read failed; refusing to unset`）で報告され、CONFIG_ERROR にはならない。値は残る。
+- モニタ経路では、PAC/WPAD のときにフォールバックを使わない。`ToggleProxyCommand` にある判定の重複は範囲外とした（#85 に明記）。
+- フォールバックが無いとき、モニタ経路では `autoModeOff=false` のままだが、起動時は true になる。仕様の不整合として報告だけにした。
