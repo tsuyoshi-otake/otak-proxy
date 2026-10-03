@@ -1,5 +1,14 @@
 # Change Log
 
+## [3.2.12] - 2026-10-03
+
+### Fixed
+- In Auto, when the system proxy disappears while VS Code is running (for example after a VPN disconnect), test the configured fallback proxy and use it when it is reachable, as at startup. When it is not reachable, Auto turns off instead of staying on without a proxy (#85).
+- Verify and clean up npm proxy URLs that contain credentials. npm 11 refuses to print such values, which made every npm write fail verification and kept Off from removing them. otak-proxy now reads them from the npm user config file, and keeps any value it cannot confirm there (#85).
+
+### Changed
+- README: describe the fallback when the system proxy disappears and how npm proxy URLs with credentials are read, and use `npm config list` in Troubleshooting, which masks passwords (#85).
+
 ## [3.2.11] - 2026-10-02
 
 ### Changed
