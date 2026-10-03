@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [3.2.15] - 2026-10-03
 
 ### Fixed
 - In `Auto: OFF`, Auto now turns back on when a connection test shows that the proxy answers, even with `407`, `403`, or `5xx`, or when the proxy accepts the connection and the test then times out (for an `https:` proxy, only once the TLS handshake has finished). Before this, these results left `Auto: OFF` in place while the proxy was working (#97).
