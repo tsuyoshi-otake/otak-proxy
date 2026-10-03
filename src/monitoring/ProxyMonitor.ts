@@ -4,6 +4,7 @@ import { ProxyChangeLogger, ProxyCheckEvent, ProxyChangeEvent } from './ProxyCha
 import { Logger } from '../utils/Logger';
 import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { TestResult } from '../utils/ProxyUtils';
+import { ReportedProxyChange } from '../utils/ProxyTestTypes';
 import {
     createProxyMonitorConnectionState,
     handleConnectionConfigChange,
@@ -237,7 +238,8 @@ export class ProxyMonitor extends EventEmitter {
                 trigger,
                 this.config,
                 this.lastProxyUrl,
-                this.state.getStatus().isActive
+                this.state.getStatus().isActive,
+                this.reportedProxyChange(result)
             );
             this.logCheckResult(result, trigger);
             this.emitProxyChangeIfNeeded(result, trigger);
@@ -294,12 +296,28 @@ export class ProxyMonitor extends EventEmitter {
         this.logger.logCheck(checkEvent);
     }
 
+    private reportsProxyChange(result: ProxyDetectionResult): boolean {
+        return result.success && (
+            result.proxyUrl !== this.lastProxyUrl ||
+            detectionSplitRoutingIdentity(result) !== this.lastSplitRouting
+        );
+    }
+
+    /**
+     * The proxyChanged event this check will report, for the connection test
+     * and reachability events it emits first: their handlers leave a routing
+     * change to that event instead of making it stale (#102). Undefined when
+     * the check reports no change or runs without a generation fence.
+     */
+    private reportedProxyChange(result: ProxyDetectionResult): ReportedProxyChange | undefined {
+        if (!result.startedGeneration || !this.reportsProxyChange(result)) {
+            return undefined;
+        }
+        return { startedGeneration: result.startedGeneration, routing: detectionSplitRoutingIdentity(result) };
+    }
+
     private emitProxyChangeIfNeeded(result: ProxyDetectionResult, trigger: ProxyCheckTrigger): void {
-        if (
-            !result.success ||
-            (result.proxyUrl === this.lastProxyUrl &&
-                detectionSplitRoutingIdentity(result) === this.lastSplitRouting)
-        ) {
+        if (!this.reportsProxyChange(result)) {
             return;
         }
 

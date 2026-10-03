@@ -8,6 +8,8 @@ import { ProxyMode, ProxyState } from '../../core/types';
 import { isProxyEndpointReachable, TestResult } from '../../utils/ProxyUtils';
 import type { ManualFallbackOutcome } from '../../core/SystemProxyUpdateService';
 import { InputSanitizer } from '../../validation/InputSanitizer';
+import { detectionSplitRoutingIdentity, splitRoutingIdentity } from '../../config/DetectedProxyValue';
+import type { ReportedProxyChange } from '../../utils/ProxyTestTypes';
 
 suite('ExtensionProxyEventHandlers Tests', () => {
     let sandbox: sinon.SinonSandbox;
@@ -1061,6 +1063,185 @@ suite('ExtensionProxyEventHandlers Tests', () => {
 
                 sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
                 assert.strictEqual(state.autoModeOff, false);
+            });
+        });
+
+        /**
+         * #102: a monitor check runs its connection test, and any reachability
+         * flip, before its own proxyChanged. When that proxyChanged changes the
+         * endpoint's per-scheme URLs or bypass, a commit by the earlier events
+         * advanced the revision, the event was dropped as stale, and the new
+         * routing was never saved or applied. Those events now leave it to
+         * proxyChanged, which carries the test result.
+         */
+        suite('a routing change left to proxyChanged (#102)', () => {
+            const newRouting = detectionSplitRoutingIdentity(splitChange);
+            /** The marker the monitor puts on the events of a check that reports proxyChanged. */
+            const reported = (routing = newRouting): ReportedProxyChange => ({
+                startedGeneration: captureLogicalGeneration(state),
+                routing
+            });
+            /** The same marker from a check that started before another commit. */
+            const reportedBeforeAnotherCommit = (): ReportedProxyChange => ({
+                startedGeneration: { ...captureLogicalGeneration(state), revision: (state.revision ?? 0) - 1 },
+                routing: newRouting
+            });
+            const inCheck = (testResult: TestResult, proxyChange: ReportedProxyChange): TestResult => ({
+                ...testResult,
+                startedGeneration: proxyChange.startedGeneration,
+                proxyChange
+            });
+            /** The check's own proxyChanged event. */
+            const reportedDetection = (testResult: TestResult, proxyChange: ReportedProxyChange) =>
+                detection(primary, testResult, { ...splitChange, startedGeneration: proxyChange.startedGeneration });
+            const flipToReachable = (proxyChange?: ReportedProxyChange) => ({
+                proxyUrl: primary,
+                reachable: true,
+                previousState: false,
+                ...(proxyChange ? { proxyChange } : {})
+            });
+            const autoOnUnreachable = () => offState({
+                autoModeOff: false,
+                gitConfigured: true,
+                npmConfigured: true,
+                vscodeConfigured: true
+            });
+            const assertNoMarkerPersisted = () => {
+                assert.ok(state.lastTestResult, 'the test result is saved');
+                assert.ok(!('proxyChange' in state.lastTestResult), 'the marker is not persisted');
+                assert.ok(!('startedGeneration' in state.lastTestResult), 'the generation is not persisted');
+            };
+
+            test('an alive test leaves the recovery to proxyChanged, which applies the new routing', async () => {
+                useRevisionedStore();
+                const change = reported();
+                const tested = inCheck(success.make(primary), change);
+                const pending = { isPending: true };
+                const before = { ...state };
+
+                await handleProxyTestComplete(context, pending, tested);
+
+                assert.deepStrictEqual(state, before, 'a commit here would make proxyChanged stale');
+                sinon.assert.notCalled(applyProxySettingsStub);
+                sinon.assert.notCalled(publishStateStub);
+                assert.strictEqual(pending.isPending, false, 'the startup test still counts as completed');
+
+                await handleProxyChanged(context, reportedDetection(tested, change));
+
+                assert.strictEqual(enableCalls().length, 1);
+                assert.strictEqual(atApply[0].autoModeOff, false);
+                assert.strictEqual(atApply[0].autoHttpsProxyUrl, secure2);
+                assert.strictEqual(state.autoModeOff, false);
+                assert.strictEqual(state.autoHttpsProxyUrl, secure2);
+                assertNoMarkerPersisted();
+            });
+
+            test('an unreachable test leaves the removal to proxyChanged, which saves the new routing', async () => {
+                state = autoOnState();
+                useRevisionedStore();
+                const change = reported();
+                const tested = inCheck(unreachable.make(primary), change);
+                const before = { ...state };
+
+                await handleProxyTestComplete(context, startup(), tested);
+
+                assert.deepStrictEqual(state, before);
+                sinon.assert.notCalled(applyProxySettingsStub);
+
+                await handleProxyChanged(context, reportedDetection(tested, change));
+
+                assert.strictEqual(enableCalls().length, 0);
+                assert.strictEqual(removalCalls().length, 1, 'one removal, by proxyChanged');
+                assert.strictEqual(state.autoModeOff, true);
+                assert.strictEqual(state.autoHttpsProxyUrl, secure2, 'saved for the recovery to apply');
+            });
+
+            test('an unknown test under Auto: OFF leaves the save to proxyChanged, which refreshes the status bar', async () => {
+                useRevisionedStore();
+                const change = reported();
+                const tested = inCheck(dnsFailure.make(primary), change);
+
+                await handleProxyTestComplete(context, startup(), tested);
+                await handleProxyChanged(context, reportedDetection(tested, change));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.autoModeOff, true);
+                assert.strictEqual(state.autoHttpsProxyUrl, secure2);
+                assert.strictEqual(state.lastTestResult?.failureKind, 'dns');
+                assertNoMarkerPersisted();
+                sinon.assert.calledWith(updateStatusBarStub, sinon.match({ autoModeOff: true, autoHttpsProxyUrl: secure2 }));
+            });
+
+            test('a test from a check that started before another commit is applied as before', async () => {
+                // That check's proxyChanged is stale and will be dropped, so
+                // nothing else would carry the verdict.
+                useRevisionedStore();
+
+                await handleProxyTestComplete(context, startup(), {
+                    ...success.make(primary),
+                    startedGeneration: captureLogicalGeneration(state),
+                    proxyChange: reportedBeforeAnotherCommit()
+                });
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+                assert.strictEqual(state.autoModeOff, false);
+                assertNoMarkerPersisted();
+            });
+
+            test('a test from a check that keeps the saved routing is applied as before', async () => {
+                // For example a check that reports only a respelled URL.
+                state = offState({ autoProxyKind: 'perSchemeProxy', autoHttpProxyUrl: primary, autoHttpsProxyUrl: secure2 });
+                useRevisionedStore();
+                assert.strictEqual(splitRoutingIdentity(state), newRouting, 'precondition: the routing is already saved');
+
+                await handleProxyTestComplete(context, startup(), inCheck(success.make(primary), reported()));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+                assert.strictEqual(state.autoModeOff, false);
+            });
+
+            test('a reachability flip leaves the re-apply to proxyChanged', async () => {
+                state = autoOnUnreachable();
+                useRevisionedStore();
+                const before = { ...state };
+
+                await handleProxyStateChanged(context, flipToReachable(reported()));
+
+                assert.deepStrictEqual(state, before);
+                sinon.assert.notCalled(applyProxySettingsStub);
+            });
+
+            test('a reachability flip from a check that started before another commit re-applies as before', async () => {
+                state = autoOnUnreachable();
+                useRevisionedStore();
+
+                await handleProxyStateChanged(context, flipToReachable(reportedBeforeAnotherCommit()));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+            });
+
+            test('a reachability flip from a check that keeps the saved routing re-applies as before', async () => {
+                state = autoOnUnreachable();
+                useRevisionedStore();
+
+                await handleProxyStateChanged(context, flipToReachable(reported(splitRoutingIdentity(state))));
+
+                sinon.assert.calledOnceWithExactly(applyProxySettingsStub, primary, true, sinon.match({ silent: true }));
+            });
+
+            test('a toggle committed between the test and proxyChanged owns the state; nothing enables', async () => {
+                // Residual risk: the verdict is lost with the dropped event,
+                // and the toggle decides what is applied.
+                useRevisionedStore();
+                const change = reported();
+                const tested = inCheck(success.make(primary), change);
+
+                await handleProxyTestComplete(context, startup(), tested);
+                state = { ...state, mode: ProxyMode.Off, revision: (state.revision ?? 0) + 1 };
+                await handleProxyChanged(context, reportedDetection(tested, change));
+
+                sinon.assert.notCalled(applyProxySettingsStub);
+                assert.strictEqual(state.mode, ProxyMode.Off);
             });
         });
 

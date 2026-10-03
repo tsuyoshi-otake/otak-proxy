@@ -2,6 +2,7 @@ import { clearDetectedSplitFields, splitRoutingIdentity } from '../config/Detect
 import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
+import type { ReachabilityChange } from '../monitoring/ProxyMonitorConnection';
 import { Logger } from '../utils/Logger';
 import {
     isProxyEndpointReachable,
@@ -9,6 +10,7 @@ import {
     proxyEndpointVerdict,
     TestResult
 } from '../utils/ProxyUtils';
+import type { ReportedProxyChange } from '../utils/ProxyTestTypes';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, commitUnlessStaleWithRevision, publishUnlessStale } from './GenerationFence';
 import {
@@ -111,6 +113,8 @@ export async function handleProxyChanged(
             autoHttpsProxyUrl: state.autoHttpsProxyUrl,
             detectedBypass: state.detectedBypass
         }));
+        // The check's connection test may have left its result to this event (#102).
+        context.updateStatusBar?.(await context.proxyStateManager.getState());
         return;
     }
 
@@ -202,6 +206,11 @@ export async function handleProxyTestComplete(
         return;
     }
 
+    if (isLeftToProxyChange(testResult.proxyChange, current)) {
+        clearStartupPendingIfNeeded(startupTestState, testResult);
+        return;
+    }
+
     let recoveredFromAutoOff = false;
     const commit = await commitUnlessStaleWithRevision(context.proxyStateManager, started, 'connectionTest', state => {
         if (state.mode !== ProxyMode.Auto) {
@@ -285,7 +294,7 @@ async function stateStillFromTest(
 
 export async function handleProxyStateChanged(
     context: InitializerContext,
-    data: { proxyUrl: string; reachable: boolean; previousState: boolean }
+    data: ReachabilityChange
 ): Promise<void> {
     const started = captureLogicalGeneration(await context.proxyStateManager.getState());
     const state = await context.proxyStateManager.getState();
@@ -296,6 +305,10 @@ export async function handleProxyStateChanged(
 
     if (proxyUrlIdentity(data.proxyUrl) !== proxyUrlIdentity(state.autoProxyUrl) && data.proxyUrl) {
         // Reachability event for a different endpoint must not mutate the current generation.
+        return;
+    }
+
+    if (isLeftToProxyChange(data.proxyChange, state)) {
         return;
     }
 
@@ -477,7 +490,7 @@ async function applyReachabilityChange(
     context: InitializerContext,
     started: LogicalGeneration,
     state: ProxyState,
-    data: { proxyUrl: string; reachable: boolean; previousState: boolean }
+    data: ReachabilityChange
 ): Promise<void> {
     if (data.reachable && !data.previousState) {
         if (state.autoModeOff === true) {
@@ -555,7 +568,22 @@ function isTestOfAnotherEndpoint(testResult: TestResult, current: ProxyState): b
         proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(current.autoProxyUrl);
 }
 
+/**
+ * The check that ran this test, or flipped this reachability, reports
+ * proxyChanged next, and that event will both pass the generation fence and
+ * change this endpoint's per-scheme URLs or bypass. It carries the test result
+ * and applies the verdict together with the routing (#102). A commit here
+ * would advance the revision first and make it stale, and the monitor does
+ * not report the change twice. A new endpoint is left to it by
+ * isTestOfAnotherEndpoint (#97).
+ */
+function isLeftToProxyChange(change: ReportedProxyChange | undefined, current: ProxyState): boolean {
+    return change !== undefined &&
+        !isStaleGeneration(change.startedGeneration, current) &&
+        change.routing !== splitRoutingIdentity(current);
+}
+
 function stripGeneration(testResult: TestResult): ProxyTestResult {
-    const { startedGeneration: _started, ...rest } = testResult;
+    const { startedGeneration: _started, proxyChange: _change, ...rest } = testResult;
     return rest as ProxyTestResult;
 }

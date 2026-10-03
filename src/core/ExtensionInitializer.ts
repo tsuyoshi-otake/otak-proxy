@@ -16,6 +16,7 @@ import * as vscode from 'vscode';
 import { captureLogicalGeneration } from './LogicalGeneration';
 import { ProxyMode, ProxyState } from './types';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
+import type { ReachabilityChange } from '../monitoring/ProxyMonitorConnection';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
 import { TestResult } from '../utils/ProxyUtils';
@@ -113,7 +114,7 @@ export class ExtensionInitializer {
         });
 
         // Feature: auto-mode-proxy-testing - Handle state changes based on reachability
-        this.proxyMonitor.on('proxyStateChanged', (data: { proxyUrl: string; reachable: boolean; previousState: boolean }) => {
+        this.proxyMonitor.on('proxyStateChanged', (data: ReachabilityChange) => {
             this.enqueueProxyMonitorEvent(() => handleProxyStateChanged(this.context, data));
         });
 

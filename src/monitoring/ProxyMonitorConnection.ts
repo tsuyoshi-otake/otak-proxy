@@ -1,13 +1,23 @@
 import { Logger } from '../utils/Logger';
 import { LogicalGeneration } from '../core/LogicalGeneration';
 import { isProxyEndpointReachable, isProxyEndpointUnreachable, TestResult } from '../utils/ProxyUtils';
+import { ReportedProxyChange } from '../utils/ProxyTestTypes';
 import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { ProxyTestScheduler } from './ProxyTestScheduler';
 import { ProxyCheckTrigger, ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
 
+/** The `proxyStateChanged` payload: the endpoint's reachability flipped. */
+export interface ReachabilityChange {
+    proxyUrl: string;
+    reachable: boolean;
+    previousState: boolean;
+    /** Set when the check that flipped it reports proxyChanged after it (#102). */
+    proxyChange?: ReportedProxyChange;
+}
+
 export interface ProxyMonitorConnectionEvents {
     onTestComplete(result: TestResult): void;
-    onReachabilityChanged(data: { proxyUrl: string; reachable: boolean; previousState: boolean }): void;
+    onReachabilityChanged(data: ReachabilityChange): void;
 }
 
 export interface ProxyMonitorConnectionState {
@@ -99,7 +109,8 @@ export async function handleConnectionDetectionResult(
     trigger: ProxyCheckTrigger,
     config: ProxyMonitorConfig,
     lastProxyUrl: string | null,
-    monitorActive: boolean
+    monitorActive: boolean,
+    proxyChange?: ReportedProxyChange
 ): Promise<void> {
     const useScheduler = shouldUseConnectionScheduler(state, config);
     const proxyChanged = result.success && result.proxyUrl !== lastProxyUrl;
@@ -110,7 +121,7 @@ export async function handleConnectionDetectionResult(
 
     if (canTestDetectedProxy(state, result, config)) {
         alignSchedulerForDetectedProxy(state, result.proxyUrl!, useScheduler, monitorActive);
-        await runConnectionTestIfNeeded(state, result, trigger, proxyChanged, useScheduler, config);
+        await runConnectionTestIfNeeded(state, result, trigger, proxyChanged, useScheduler, config, proxyChange);
         return;
     }
 
@@ -280,7 +291,8 @@ async function runConnectionTestIfNeeded(
     trigger: ProxyCheckTrigger,
     proxyChanged: boolean,
     useScheduler: boolean,
-    config: ProxyMonitorConfig
+    config: ProxyMonitorConfig,
+    proxyChange: ReportedProxyChange | undefined
 ): Promise<void> {
     if (!shouldRunConnectionTest(state, trigger, proxyChanged, useScheduler, config)) {
         return;
@@ -291,7 +303,7 @@ async function runConnectionTestIfNeeded(
     }
 
     const testResult = await stampTestGeneration(state, await state.tester!.testProxyAuto(result.proxyUrl!));
-    recordConnectionTestResult(state, result, testResult);
+    recordConnectionTestResult(state, result, proxyChange ? { ...testResult, proxyChange } : testResult);
 }
 
 function shouldRunConnectionTest(
@@ -334,13 +346,14 @@ function recordConnectionTestResult(
         Logger.warn(`Proxy ${result.proxyUrl} canary failed (${testResult.failureKind ?? 'unknown'})`);
     }
 
-    updateReachabilityState(state, result.proxyUrl!, isProxyEndpointReachable(testResult));
+    updateReachabilityState(state, result.proxyUrl!, isProxyEndpointReachable(testResult), testResult.proxyChange);
 }
 
 function updateReachabilityState(
     state: ProxyMonitorConnectionState,
     proxyUrl: string,
-    reachable: boolean
+    reachable: boolean,
+    proxyChange?: ReportedProxyChange
 ): void {
     const wasReachable = state.lastProxyReachable;
     state.lastProxyReachable = reachable;
@@ -349,7 +362,8 @@ function updateReachabilityState(
         state.events.onReachabilityChanged({
             proxyUrl,
             reachable,
-            previousState: wasReachable
+            previousState: wasReachable,
+            ...(proxyChange ? { proxyChange } : {})
         });
     }
 }
