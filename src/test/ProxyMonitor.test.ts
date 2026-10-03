@@ -13,6 +13,10 @@ import { InputSanitizer } from '../validation/InputSanitizer';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { UserNotifier } from '../errors/UserNotifier';
 import { TestResult } from '../utils/ProxyUtils';
+import type { ReachabilityChange } from '../monitoring/ProxyMonitorConnection';
+import { captureLogicalGeneration } from '../core/LogicalGeneration';
+import { ProxyMode, ProxyState } from '../core/types';
+import { detectionSplitRoutingIdentity } from '../config/DetectedProxyValue';
 
 // Mock SystemProxyDetector for testing
 class MockSystemProxyDetector {
@@ -816,6 +820,105 @@ suite('ProxyMonitor Connection Testing Integration', () => {
             await check();
 
             assert.strictEqual(emitted.length, 1);
+        });
+    });
+
+    /**
+     * #102: a check runs its connection test, and emits any reachability flip,
+     * before its own proxyChanged. Those events carry the proxyChanged they
+     * precede, so that their handlers can leave a routing change to it instead
+     * of committing first and making it stale.
+     */
+    suite('events that precede proxyChanged (#102)', () => {
+        const primary = 'http://proxy.example.com:8080';
+        const secure = 'http://secure.example.com:8443';
+        const secure2 = 'http://secure2.example.com:8443';
+        const generation = captureLogicalGeneration({ mode: ProxyMode.Auto, autoProxyUrl: primary, revision: 7 } as ProxyState);
+        type Detection = Pick<ProxyDetectionResult, 'proxyUrl' | 'kind' | 'httpUrl' | 'httpsUrl' | 'bypass'>;
+        const perScheme = (httpsUrl: string, bypass?: string): Detection => ({
+            proxyUrl: primary, kind: 'perSchemeProxy', httpUrl: primary, httpsUrl, bypass
+        });
+        const alive: TestResult = { success: true, testUrls: ['https://example.com'], errors: [], proxyUrl: primary };
+        const unreachable: TestResult = {
+            success: false,
+            testUrls: ['https://example.com'],
+            errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+            failureKind: 'endpointUnreachable',
+            proxyEndpointOk: false,
+            proxyUrl: primary
+        };
+        let detected: Detection;
+        let recorded: { tests: TestResult[]; flips: ReachabilityChange[]; changes: ProxyDetectionResult[] };
+
+        async function check(): Promise<void> {
+            monitor.triggerCheck('focus');
+            await new Promise(resolve => setTimeout(resolve, 150));
+        }
+
+        /** Starts with a reachable per-scheme proxy; the next test finds it unreachable, so the next check flips. */
+        async function startReachable(withGenerationCapture: boolean): Promise<void> {
+            detected = perScheme(secure);
+            const detector = {
+                detectSystemProxy: async () => detected.proxyUrl,
+                detectSystemProxyWithSource: async () => ({ ...detected, source: 'windows' })
+            };
+            const testStub = sandbox.stub(connectionTester, 'testProxyAuto');
+            testStub.onFirstCall().resolves({ ...alive });
+            testStub.onSecondCall().resolves({ ...unreachable });
+            monitor = new ProxyMonitor(detector as any, logger, {
+                pollingInterval: 60000,
+                debounceDelay: 10,
+                enableConnectionTest: true
+            }, connectionTester);
+            if (withGenerationCapture) {
+                monitor.setGenerationCapture(async () => generation);
+            }
+            monitor.start();
+            await check();
+            recorded = { tests: [], flips: [], changes: [] };
+            monitor.on('proxyTestComplete', (result: TestResult) => recorded.tests.push(result));
+            monitor.on('proxyStateChanged', (data: ReachabilityChange) => recorded.flips.push(data));
+            monitor.on('proxyChanged', (result: ProxyDetectionResult) => recorded.changes.push(result));
+        }
+
+        test('a same-URL routing change marks the test, the flip, and the result proxyChanged carries', async () => {
+            await startReachable(true);
+            detected = perScheme(secure2, 'localhost');
+
+            await check();
+
+            const expected = { startedGeneration: generation, routing: detectionSplitRoutingIdentity(detected) };
+            assert.strictEqual(recorded.tests.length, 1);
+            assert.strictEqual(recorded.flips.length, 1);
+            assert.strictEqual(recorded.changes.length, 1);
+            assert.deepStrictEqual(recorded.tests[0].proxyChange, expected);
+            assert.deepStrictEqual(recorded.flips[0].proxyChange, expected);
+            assert.deepStrictEqual(recorded.changes[0].testResult?.proxyChange, expected);
+            assert.deepStrictEqual(recorded.changes[0].startedGeneration, generation, 'the fence proxyChanged applies');
+        });
+
+        test('a check that reports no change marks nothing', async () => {
+            await startReachable(true);
+
+            await check();
+
+            assert.strictEqual(recorded.tests.length, 1);
+            assert.strictEqual(recorded.flips.length, 1);
+            assert.strictEqual(recorded.changes.length, 0);
+            assert.ok(!('proxyChange' in recorded.tests[0]));
+            assert.ok(!('proxyChange' in recorded.flips[0]));
+        });
+
+        test('a check without a generation fence marks nothing', async () => {
+            // Its proxyChanged cannot be stale, so nothing needs to wait for it.
+            await startReachable(false);
+            detected = perScheme(secure2, 'localhost');
+
+            await check();
+
+            assert.strictEqual(recorded.changes.length, 1);
+            assert.ok(!('proxyChange' in recorded.tests[0]));
+            assert.ok(!('proxyChange' in recorded.flips[0]));
         });
     });
 });
