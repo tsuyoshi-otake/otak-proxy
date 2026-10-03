@@ -54,10 +54,14 @@
 
 ## npm
 
-- **npm 11 の `config get` は、redact される値をすべて拒否する。** 判定は `isProtected(key) || redact(value) !== value`。
+- **npm 10.8 以降の `config get` は、redact される値をすべて拒否する。** 判定は `isProtected(key) || redact(value) !== value`。
   redact 対象は URL のパスワード、npm token、UUID。`userconfig` のパスも UUID を含むと拒否される
   （scratchpad のパスで実測）。拒否された値は user config ファイルから読み、ファイルの場所が分からない・
   読めない・認証情報付き URL として確かめられないときは推測せず fail-closed にする（#85）。
+- **npm の拒否メッセージは版で文言が違う。** 10.8.0〜11.6.1 は `can not be retrieved`、11.6.2 以降は
+  `cannot be retrieved`、10.7 以前は拒否せず値を表示する（npm/cli の `lib/commands/config.js` をタグごとに確認）。
+  文言で分岐するときは両方に一致させ、対象の版範囲の文言をソースで確かめる。CI（Node 22）は npm 10.9.9 で、
+  ローカルの npm 11 とは文言が違った（v3.2.12 の publish が止まった、#88）。
 - **npm は `config delete` で最後のキーを消すと、user config ファイル自体を消す。**
   実 npm テストで削除後にファイルを読むなら、先に存在を確かめる（#85）。
 
@@ -107,6 +111,19 @@
   ローカルで通す: `npm run lint` / `npm run test:unit:parallel` / `npm run test:smoke` /
   `npm run lint:unicode:dist`。VS Code host の全件 (`npm test`) は gate ではない。
 
+- **実物の外部ツールを叩くテストは、タグを打つ前に CI と同じ版でもローカルで回す。** CI は ubuntu-latest +
+  Node 22（npm 10.9.9）で、ローカルの npm 11 だけでは版差の不具合を見逃す（#88）。npm は `~/tmp` の一時 dir に
+  `<dir>/node_modules/npm`（目的の版）と `<dir>/npm.cmd`（Node 同梱の shim のコピー）を揃え、その dir を PATH の
+  先頭に置く（`resolveWindowsNpmCli` がこの 2 つを要求する）。`NpmConfigManager` / `NpmUserConfigValue` の
+  テストを `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を隔離して mocha で直接回す。
+
+- **CI の unit はローカルより 1 件少なく、1 pending になる。** Windows 専用テスト
+  `Windows npm path does not expand %OS% or split on &` が Linux で pending になるため（v3.2.11 と v3.2.13 のログで確認）。
+  件数差がこれ以外なら調べる。
+
+- **publish run が失敗しても、push したタグは付け替えない。** 公開前に止まったなら次の patch 版で出し、
+  CHANGELOG の失敗した版に「Not published」と理由を書く（v3.2.12 → v3.2.13、#88）。
+
 - **リリースコミットは `CHANGELOG.md` + `package.json` + `package-lock.json` の 3 ファイルだけ。**
   版上げは `npm version <x.y.z> --no-git-tag-version`（lifecycle script なし）。
   タグは annotated で `Release vX.Y.Z`。PR を main に merge してから main HEAD に打つ。
@@ -119,6 +136,9 @@
   Open VSX は `https://open-vsx.org/api/<publisher>/<name>/<version>` の `files.readme`。
   Marketplace は `https://<publisher>.gallery.vsassets.io/_apis/public/gallery/publisher/<publisher>/extension/<name>/<version>/assetbyname/Microsoft.VisualStudio.Services.Content.Details`
   （`marketplace.visualstudio.com/_apis/public/gallery/publishers/.../assetbyname/...` は 404。v3.2.11 で確認）。
+  Open VSX の `files.readme` は `openvsx.eclipsecontent.org` への 302 なので、curl は `-L` を付ける
+  （付けないと 0 bytes になる、v3.2.13）。配信される README は、vsce が相対リンク（`LICENSE`）を
+  GitHub の URL に書き換えた以外はリポジトリの README と同じになる。
 
 ## ドキュメント
 
@@ -146,8 +166,14 @@
 - **Write / Edit ツールは `\u` + `FEFF` の形のエスケープを、実体の BOM にして書く。** 不可視文字はテストでも
   `String.fromCodePoint(0xFEFF)` で組み立てる（`otak/no-invisible-unicode` と `lint:unicode` が検出した。rules.md 自体にも一度混入した、#85）。
 
+- **Git Bash の `sed -i` は CRLF のファイルを LF にして書き戻す。** rules.md を `sed -i` で 1 行直したら
+  全 173 行が LF になった（#88）。CRLF のファイルは node で書き換え、CRLF 数と LF 数が一致することを確かめる。
+
 - **Git Bash の `grep -c $'\r$'` は CR を数えられない。** LF だけのファイルでも全行が一致した。
   改行コードは node で `\r\n` と `\n` の数を数えて確かめる（#85）。
+
+- **`rm -rf` を含む Bash コマンドは権限で拒否される。** テストの隔離ディレクトリは消さず、
+  実行ごとに新しい名前（`iso-<版>-<時刻>` など）で作る（#88）。
 
 - `package.nls*.json` は `npm run gen:nls` の生成物。手で編集しない。
   作業ツリーで modified に見えていても中身は改行コード差だけのことがある（`git diff` で確認）。
