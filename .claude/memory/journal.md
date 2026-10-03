@@ -913,3 +913,51 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 - 実ネットワーク・実 VPN 切替では未確認。
 - 拡張ホスト lane の集計なしの途中終了（原因不明）。unit lane の `GitConfigLocking.aba` と `ConfigManagers.crossplatform` の flake。
 - 未修正: 同じ URL の split 変化と、同じチェックのテストが重なると proxyChanged が stale になる（#93 の経路）。
+
+## 2026-10-03 — #102 同じ URL の split 変化が、同じチェックのテストで捨てられる不具合の修正（PR #104）
+
+**Issue**: [#102](https://github.com/tsuyoshi-otake/otak-proxy/issues/102)
+**PR**: [#104](https://github.com/tsuyoshi-otake/otak-proxy/pull/104)（未マージ）
+**コミット**: `6757708`（fix/102-split-change-same-check、基準 `2867a78`）
+
+### 症状
+
+- 主 URL が同じまま、scheme 別の HTTPS URL か bypass リストだけが変わったチェックで、同じチェックが接続テストか reachability の反転も出すと、変化が保存も適用もされない。前の HTTPS URL / bypass が残り、同じチェックで Auto: OFF から戻ると古い routing が適用される。
+
+### 原因
+
+- モニタは proxyTestComplete → proxyStateChanged → proxyChanged の順に出す。先の handler のコミットが revision を進め、proxyChanged が世代フェンスで stale として捨てられた。
+- モニタはチェックの時点で新しい routing を記録済みなので、次のチェックでも変化として報告しない。変化は失われたままになる。
+- #97 で入れた「別 endpoint のテスト完了は stale」は主 URL の比較なので、同じ URL の split 変化には効かない。
+
+### 修正
+
+- モニタは、proxyChanged を出すチェックのテスト結果と反転イベントに `ReportedProxyChange { startedGeneration, routing }` を付ける。付けるのは世代フェンスがあり、変化を報告するチェックだけ。
+- `isLeftToProxyChange`: 印があり、その世代がまだ新しく（proxyChanged がフェンスを通る）、routing が保存値と違うときだけ、先の handler は proxyChanged に任せる。それ以外は従来どおり。
+- proxyChanged はテスト結果を持っているので、判定と routing を一緒に適用する。印は `stripGeneration` で外してから保存する。保存だけの分岐は status bar を更新するようにした。
+- 通知の変化（PR と CHANGELOG に明記）: この経路は system proxy の変化として適用され、"Proxy configured" と "System proxy changed"、unreachable なら "Proxy disabled" が出る。Auto: OFF からの回復は無音で古い値を適用していた。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 修正前の新規 flow テスト | 4 failing、11 passing（red、4 件とも #102 suite） |
+| `AutoModeOffVerdict.flow`（修正後） | 15 passing |
+| `ExtensionProxyEventHandlers` + `ProxyMonitor` | 121 passing（新規 9 + 3） |
+| ミューテーション（compiled JS） | 13 件中 13 件 killed |
+| `npm run lint` / `test:smoke` / `lint:unicode:dist` | pass / 4 passing / clean |
+| `npm run test:unit:parallel` | 1055 + 74 passing、0 failing |
+| `npm test`（拡張ホスト） | 502 passing、1 pending、9 failing（基準と同じ 9 件） |
+| 独立 verifier（rubric 9 項目） | 9/9 pass |
+| テストランナーの残存プロセス | なし |
+
+### Learning
+
+1. 先のイベントが後のイベントを stale にする問題は、主 URL だけでなく split（HTTPS URL・bypass）でも起きる。先のイベントに「後のイベントが運ぶ変化」の印を付け、後のイベントがフェンスを通るときだけ任せる → rules.md「世代フェンス」の既存ルールに追記。
+2. 任せる条件には「印の世代がまだ新しい」を必ず入れる。入れないと、後のイベントが stale で捨てられたとき、先のイベントも何もしないので判定が両方から消える（ミューテーション M1 で確認）。
+
+### 残留リスク
+
+- scheduler のテストがチェック開始から proxyChanged までの間にコミットすると、proxyChanged はまだ stale になる（scheduler の結果には印がない。`pollingInterval > connectionTestInterval` のときだけ）。
+- 先の handler と proxyChanged の間に toggle / sync がコミットすると、判定は stale のイベントと一緒に消える。状態はその writer のもの。Off で何も有効にならないことはテストで固定した。
+- 実ネットワーク・実 VPN 切替では未確認。
