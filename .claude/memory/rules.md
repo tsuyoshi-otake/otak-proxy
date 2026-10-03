@@ -32,6 +32,12 @@
   GIT_CONFIG_GLOBAL=<temp>/gitconfig NPM_CONFIG_USERCONFIG=<temp>/npmrc npx mocha ...
   ```
 
+  2026-10-03 に再発（#97 の verifier）。`ConfigManagers.crossplatform.test.ts` の errorType テストは
+  `http://proxy.example.com:8080` を set して**片付けない**。`~/.gitconfig` の `http.proxy` と
+  `~/.npmrc` の `proxy` / `https-proxy` が残り、`git push` が名前解決できない proxy で失敗した。
+  上の「テストは片付ける」は全テストには当てはまらない。**verifier や subagent に渡す rubric の mocha コマンドにも
+  この env を書き**、rubric に無いテストファイルを直接回さないことも明記する。
+
 - **ミューテーション確認は、戻す前の基準実行が緑であることを先に確かめる。** host lane を `MOCHA_GREP` で
   絞ると、既存の失敗テストにも一致することがある（`unsupported PAC` が `Auto + unsupported PAC + reachable fallback`
   に一致した）。grep は Issue 番号（`(#93)` など）で絞る（#93）。
@@ -80,6 +86,15 @@
   revision を進めるので、他 writer のコミットと区別できない（#78）。
 - **修復リトライのテストは本物の `createFencedApply` を通す。** fake applier だけでは
   「自分のコミットでリトライが superseded になる」欠陥が見えない（#78 で既存テストは全 pass だった）。
+- **自分のコミットの後に置くガードは、そのコミットが書いた revision と比べる。** テスト開始時の世代と比べると、
+  自分のコミットで世代が進むので常に stale になる。unreachable テスト後の解除は、このため本番で一度も
+  動いていなかった（#97、end-to-end テストで発見）。`commitUnlessStaleWithRevision` が返す revision を使い、
+  revision を返さない store では mode と URL の identity で比べる。
+- **同じチェックの中で先にコミットしたイベントは、後のイベントを stale にする。** モニタは
+  proxyTestComplete → proxyStateChanged → proxyChanged の順に出す。新しい endpoint のテスト完了を先に
+  コミットすると proxyChanged が捨てられ、途中で変わった system proxy が保存だけで適用されなかった（#97）。
+  `state.autoProxyUrl` と違う endpoint のテスト完了は stale にする。イベント順に関わる修正は、本物の
+  `ProxyMonitor` と直列キューを通す flow テスト（`AutoModeOffVerdict.flow.test.ts`）で確かめる。
 
 ## 診断レポート
 
@@ -110,6 +125,12 @@
 - **ExecutionContext の capability は拡張ホストの実行環境で決める。** `uiKind === Web` は UI がブラウザという意味で、
   拡張ホストは Node のリモートでもよい（`extensionKind: ["workspace"]`、`browser` エントリ無し）。判定は
   純粋関数 `deriveExecutionContext` でテストする（#93、実機は未確認）。
+
+- **状態に入る条件と出る条件は、同じ分類で決める。** #67 で Auto: OFF に入る条件を endpoint unreachable に
+  変えたが、出る条件は success のまま残り、3 つの handler の結論が食い違った（#97）。Auto: OFF は endpoint ごとの
+  判定にする。unreachable で入り、alive（success、proxy の応答、proxy への TCP 接続）で出る。どちらも証明しない
+  結果（接続前の timeout、DNS 失敗、テストなし）では、同じ endpoint の状態を保つ。新しい endpoint は、unreachable で
+  ない限り Auto で始める。
 
 ## 排他制御
 
