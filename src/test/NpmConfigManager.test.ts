@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { createFakeNpmConfig, FakeNpmConfig } from './fakeConfigStores';
+import { createFakeNpmConfig, FakeNpmConfig, npmProtectedGetError } from './fakeConfigStores';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -395,11 +395,37 @@ suite('NpmConfigManager Test Suite', () => {
             return { manager, calls };
         }
 
-        test('the fake refuses config get for a credentialed value, like npm 11', async () => {
+        test('the fake refuses config get for a credentialed value, like npm 10.8 and later', async () => {
             const npm = createFakeNpmConfig({ proxy: CREDENTIALED });
+            const npm10 = createFakeNpmConfig({ proxy: CREDENTIALED }, { refusalWording: 'can not' });
 
-            await assert.rejects(npm.runner('npm', ['config', 'get', 'proxy']), /The proxy option is protected/);
+            await assert.rejects(npm.runner('npm', ['config', 'get', 'proxy']), /option is protected, and cannot be retrieved/);
+            await assert.rejects(npm10.runner('npm', ['config', 'get', 'proxy']), /option is protected, and can not be retrieved/);
         });
+
+        // npm 10.8.0 through 11.5.0 say "can not be retrieved" (the npm 10
+        // bundled with Node.js 22 among them); 11.10.0 and later say
+        // "cannot be retrieved" (#88).
+        for (const wording of ['cannot', 'can not'] as const) {
+            test(`"${wording} be retrieved": a credentialed write verifies, reads back and Off removes it (#88)`, async () => {
+                const npm = createFakeNpmConfig({}, { refusalWording: wording });
+                const { manager } = fakeBacked(npm);
+
+                assert.deepStrictEqual(await manager.setProxyKeys({ proxy: CREDENTIALED, 'https-proxy': SEMICOLON_PASSWORD }), { success: true });
+                assert.deepStrictEqual(await manager.inspectProxy(), {
+                    status: 'available',
+                    values: { proxy: CREDENTIALED, 'https-proxy': SEMICOLON_PASSWORD }
+                });
+
+                const unset = await manager.unsetProxyKeys(
+                    ['proxy', 'https-proxy'],
+                    { proxy: CREDENTIALED, 'https-proxy': SEMICOLON_PASSWORD }
+                );
+                assert.deepStrictEqual(unset, { success: true });
+                assert.strictEqual(npm.get('proxy'), null);
+                assert.strictEqual(npm.get('https-proxy'), null);
+            });
+        }
 
         test('setProxy verifies a credentialed write and getProxy reads it back', async () => {
             const npm = createFakeNpmConfig();
@@ -508,34 +534,35 @@ suite('NpmConfigManager Test Suite', () => {
             }
         });
 
-        test('a user config path npm refuses to print fails closed', async () => {
-            // npm redacts UUIDs too, so it refuses `config get userconfig` when the
-            // path contains one (for example a temp profile directory).
-            const stderr = 'npm error The userconfig option is protected, and cannot be retrieved in this way\n';
-            const npm = createFakeNpmConfig({ proxy: CREDENTIALED });
-            let fileReads = 0;
-            const { manager } = fakeBacked(npm, {
-                commandRunner: async (command, args, options) => {
-                    if (args.includes('userconfig')) {
-                        throw Object.assign(new Error(`Command failed: npm config get userconfig\n${stderr}`), { code: 1, stdout: '', stderr });
+        for (const wording of ['cannot', 'can not'] as const) {
+            test(`a user config path npm refuses to print fails closed ("${wording} be retrieved")`, async () => {
+                // npm redacts UUIDs too, so it refuses `config get userconfig` when the
+                // path contains one (for example a temp profile directory).
+                const npm = createFakeNpmConfig({ proxy: CREDENTIALED }, { refusalWording: wording });
+                let fileReads = 0;
+                const { manager } = fakeBacked(npm, {
+                    commandRunner: async (command, args, options) => {
+                        if (args.includes('userconfig')) {
+                            throw npmProtectedGetError('userconfig', wording);
+                        }
+                        return npm.runner(command, args, options);
+                    },
+                    readUserConfigFile: async () => {
+                        fileReads++;
+                        return `proxy=${CREDENTIALED}\n`;
                     }
-                    return npm.runner(command, args, options);
-                },
-                readUserConfigFile: async () => {
-                    fileReads++;
-                    return `proxy=${CREDENTIALED}\n`;
-                }
+                });
+
+                const inspection = await manager.inspectProxy();
+                assert.strictEqual(inspection.status, 'error');
+                assert.strictEqual(inspection.errorType, 'CONFIG_ERROR');
+                assert.strictEqual(fileReads, 0, 'no file is guessed when npm does not name it');
+
+                const unset = await manager.unsetProxyKeys(['proxy'], { proxy: CREDENTIALED });
+                assert.strictEqual(unset.success, false);
+                assert.strictEqual(npm.get('proxy'), CREDENTIALED);
             });
-
-            const inspection = await manager.inspectProxy();
-            assert.strictEqual(inspection.status, 'error');
-            assert.strictEqual(inspection.errorType, 'CONFIG_ERROR');
-            assert.strictEqual(fileReads, 0, 'no file is guessed when npm does not name it');
-
-            const unset = await manager.unsetProxyKeys(['proxy'], { proxy: CREDENTIALED });
-            assert.strictEqual(unset.success, false);
-            assert.strictEqual(npm.get('proxy'), CREDENTIALED);
-        });
+        }
 
         test('other config get failures do not fall back to the user config file', async () => {
             let fileReads = 0;

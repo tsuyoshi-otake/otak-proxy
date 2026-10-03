@@ -1,8 +1,9 @@
 /**
  * Reads one top-level value from an npm user config file (`.npmrc`) the way
- * npm 11 loads it, for the values `npm config get` refuses to print (#85).
+ * npm loads it, for the values `npm config get` refuses to print (#85).
  *
- * npm stores user config with its bundled `ini` 6 package. Decoding follows
+ * npm stores user config with its bundled `ini` package (5.0.0 in npm 10.9.9,
+ * 6.0.0 in npm 11.16.0; their `lib/ini.js` is identical). Decoding follows
  * `ini.decode` / `unsafe`:
  * - lines are split on CR/LF; blank lines and `;`/`#` comment lines are skipped
  * - `[section]` starts a section; only keys before the first section are top-level

@@ -103,7 +103,7 @@ export interface FakeNpmConfig {
 export const FAKE_NPM_DEFAULT_USERCONFIG = '/fake-home/.npmrc';
 
 /**
- * npm 11 `config get` refuses a value it would redact (#85). npm redacts a URL
+ * npm 10.8 and later `config get` refuse a value they would redact (#85). npm redacts a URL
  * password only when the raw text matches the WHATWG-normalized password, so
  * this rule refuses a superset of what npm refuses; it never prints a value
  * npm would hide.
@@ -116,8 +116,18 @@ function npmWouldRedact(value: string): boolean {
     }
 }
 
-function npmProtectedGetError(key: string): Error {
-    const stderr = `npm error The ${key} option is protected, and cannot be retrieved in this way\n`;
+/**
+ * How `config get` words the refusal: npm 10.8.0 through 11.5.0 say "can not",
+ * 11.10.0 and later say "cannot" (#88).
+ */
+export type FakeNpmRefusalWording = 'cannot' | 'can not';
+
+export interface FakeNpmConfigOptions {
+    refusalWording?: FakeNpmRefusalWording;
+}
+
+export function npmProtectedGetError(key: string, wording: FakeNpmRefusalWording = 'cannot'): Error {
+    const stderr = `npm error The ${key} option is protected, and ${wording} be retrieved in this way\n`;
     return Object.assign(new Error(`Command failed: npm config get ${key}\n${stderr}`), {
         code: 1,
         stdout: '',
@@ -138,10 +148,13 @@ export function npmIniSafe(value: string): string {
  * An `npm config` store limited to the two proxy keys.
  *
  * An unset key reads back as `null`, which is what npm itself prints. A
- * credentialed value cannot be read back with `config get`, as with npm 11;
- * it is only visible in the user config file.
+ * credentialed value cannot be read back with `config get`, as with npm 10.8
+ * and later; it is only visible in the user config file.
  */
-export function createFakeNpmConfig(initial: Partial<Record<FakeNpmProxyKey, string>> = {}): FakeNpmConfig {
+export function createFakeNpmConfig(
+    initial: Partial<Record<FakeNpmProxyKey, string>> = {},
+    options: FakeNpmConfigOptions = {}
+): FakeNpmConfig {
     const store = new Map<FakeNpmProxyKey, string>(
         Object.entries(initial).filter(([, value]) => typeof value === 'string') as Array<[FakeNpmProxyKey, string]>
     );
@@ -175,7 +188,7 @@ export function createFakeNpmConfig(initial: Partial<Record<FakeNpmProxyKey, str
         if (args.includes('get')) {
             const value = store.get(key);
             if (value !== undefined && npmWouldRedact(value)) {
-                throw npmProtectedGetError(key);
+                throw npmProtectedGetError(key, options.refusalWording);
             }
             return { stdout: `${value ?? 'null'}\n`, stderr: '' };
         }
