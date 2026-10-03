@@ -242,5 +242,10 @@
 - **`rm -rf` を含む Bash コマンドは権限で拒否される。** テストの隔離ディレクトリは消さず、
   実行ごとに新しい名前（`iso-<版>-<時刻>` など）で作る（#88）。
 
+- **Codex の再レビュー結果は「Reviewed commit」の sha で判定する。** 結果は新しい issue comment
+  （`Codex Review: Didn't find any major issues` か指摘付きのレビュー）の「Reviewed commit: <sha10>」の行で届く。
+  要約表のコメント（`codex-pull-request-review-summary`）は最初のレビューで作られ、その後は上書きされる。
+  「最後の codex comment に `Completed` と sha の両方」で待った待機スクリプトは結果を見落とした（#97、v3.2.15）。
+
 - `package.nls*.json` は `npm run gen:nls` の生成物。手で編集しない。
   作業ツリーで modified に見えていても中身は改行コード差だけのことがある（`git diff` で確認）。

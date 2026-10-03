@@ -860,3 +860,56 @@ extension-host lane は #94 で同じコードに対して実行済み（502 pas
 - 拡張ホストの 1 回が集計なしで途中終了した。unit lane では `ConfigManagers.crossplatform` の errorType テストが 3 回中 1 回失敗した（この差分の外）。未検証の仮説: parallel の worker が 1 つの隔離 gitconfig を共有していて、lock が競合している。
 - 未修正: 同じ URL の split 変化と、同じチェックのテストが重なると、proxyChanged が stale になる（#93 の経路）。follow-up Issue を提案中。
 - `ConfigManagers.crossplatform` は隔離なしでは実物の設定を書き、片付けない。follow-up の候補。
+
+## 2026-10-03 — #97 Codex 指摘 3 件の修正（795c1bd）と v3.2.15 リリース
+
+**Issue**: [#97](https://github.com/tsuyoshi-otake/otak-proxy/issues/97)
+**PR**: [#99](https://github.com/tsuyoshi-otake/otak-proxy/pull/99)（修正、merge `a1f2e08`）、[#100](https://github.com/tsuyoshi-otake/otak-proxy/pull/100)（3.2.15 のリリース、merge `cd4f8cd`）
+**Commits**: `795c1bd`（Codex 指摘の修正）、`4dd2d53`（`chore(release): v3.2.15 (#97)`）
+**Tag**: `v3.2.15`（`cd4f8cd`、annotated / `Release v3.2.15`）
+**CI run**: [37110778012](https://github.com/tsuyoshi-otake/otak-proxy/actions/runs/37110778012)（成功。CI の unit は 1036 + 73 passing / 1 pending（Windows 専用テスト）、smoke 4 passing、`otak-proxy-3.2.15.vsix`（161 files, 643.11 KB））
+
+### Codex 指摘 3 件（PR #99、a9ab986 へのレビュー）
+
+| 指摘 | 症状 | 根本原因 | 修正 |
+| --- | --- | --- | --- |
+| P1 TLS | `https:` proxy で証明書・プロトコルが失敗しても Auto: OFF が外れる | TLSSocket は TCP 接続の時点（ハンドシェイク前）に `connect` を出す。`proxyConnected` が立ち、判定が alive になった | `trackProxyConnect` は TLSSocket では `secureConnect` を待つ |
+| P2 URL の書き方 | 大文字のホスト名や既定ポート付きで同じ proxy が届くと、テストなしで Auto: OFF が外れる | 前回と今回の URL を文字列で比べ、新しい endpoint と見なした | `proxyUrlIdentity()` で比べる。保存だけの経路で検出した書き方も保存する |
+| P2 回復の公開順 | 回復の apply が終わる前に、他のウィンドウへ `autoModeOff: false` が公開される | 回復だけが「保存して公開 → apply」の順だった | 他の apply 経路と同じく `convergencePending: true` で保存 → apply → 解除して公開。共通部分を `clearPendingThenPublish` に抽出 |
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 実装前の新規・変更テスト | 16 failing（red） |
+| 対象 3 ファイル | 94 passing |
+| ミューテーション（新しいガード） | 9 件中 9 件 killed（1 件目の生存は toggle テストの assert を `notCalled` に強めて kill） |
+| Codex 再レビュー（795c1bd） | 「Didn't find any major issues」（08:17Z） |
+| CodeRabbit | 590a469 まで指摘なし。795c1bd は 1 時間 1 回の枠切れでレビューなし |
+| リリースゲート（`chore/97-release-3.2.15`、2 回目） | lint pass / unit 1036 + 74 passing、0 failing / smoke 4 passing / unicode:dist clean（294 files） |
+| 拡張ホスト（795c1bd） | 502 passing / 1 pending / 9 failing（既知の baseline）。同じコードで 2 回、集計なしの途中終了 |
+| リリース前チェック（CLAUDE.md の MUST） | v3.2.14..v3.2.15 の追加行に個人情報らしき文字列なし（ホストは example.com / 127.0.0.1 / .invalid / 公開サイトだけ）。新しい author / committer ID なし。PUBLIC。LICENSE（MIT）あり |
+| VS Marketplace | API で 3.2.15 を確認（08:54:32Z。`lastUpdated` 08:54:14Z、upload 08:48:35Z から約 6 分。08:53:40Z の時点ではまだ 3.2.14） |
+| Open VSX | API で 3.2.15 を確認（08:52:33Z。`timestamp` 08:48:38Z、約 4 分。08:51:22Z の時点ではまだ 3.2.14） |
+| 公開された README | 両レジストリの 3.2.15 の README は同一（31,370 bytes）。vsce が `LICENSE` への相対リンク 2 か所を GitHub の URL に書き換えた以外は v3.2.15 の README と同じ。TLS の追記（`must also finish the TLS handshake`）も入っている |
+
+### 1 回目の unit ゲートの失敗（#97 の外）
+
+- 症状: `GitConfigLocking.aba` の「a slow holder does not release a lock it no longer owns」が `FileLeaseTimeoutError: Timed out acquiring Git config mutex` で失敗し、`--bail` で 965 passing のまま止まった。失敗したのは `await first`（compiled の 100 行目）。最初の保持者が 35 秒（`CONFIG_COMMAND_TIMEOUT_MS * 2 + 5_000`）以内にロックを取れなかった。
+- 原因（仮説、未証明）: Git config のミューテックスは `os.tmpdir()/otak-proxy.gitconfig.mutex` の 1 ファイルで、parallel の全 worker が実物の git 書き込みで共有している（`ConfigManagers.crossplatform` / `ConfigWriteVerification` / `ErrorCases` / `security` など 14 ファイル）。他の worker が 35 秒保持したか、取り合いで負け続けた。この suite の teardown は他の worker のロックも無条件に unlink する。
+- 根拠: 単体では 5 回中 5 回成功（各 0.2 秒弱）。全体の再実行は成功。`FileLease` / `GitConfigLocking` は `c885f9d` 以降変更なし。
+- 対応: リリースは続行した。PR #100 の本文とリリースコミットに記録した。follow-up の候補（ミューテックスのパスをテストごとに隔離する。task_952fbe6c の `ConfigManagers.crossplatform` の hermetic 化と同じ系統）。
+
+### Learning
+
+1. Codex の再レビュー結果は、新しい issue comment「Codex Review: Didn't find any major issues」と「**Reviewed commit:** `<sha10>`」で届く。要約表のコメント（`codex-pull-request-review-summary`）は最初のレビュー時に作られて上書きされるので、`created_at` で探しても新しい結果は見つからない。待機スクリプトは「最後の codex comment に `Completed` と sha」の両方を要求したため、結果を見落として TIMEOUT になった。判定は「Reviewed commit」の sha で行う。→ rules.md「レビューボット」
+2. 共有の一時ファイルに依存するテストは、parallel lane で他のファイルと競合しうる。ゲートの失敗が差分の外なら、単体での再現と全体の再実行の両方を記録してから進む（再実行の成功だけを根拠にしない）。→ 既存の rules.md「検証・回帰」の範囲。新しいルールは追加しない。
+
+### 残留リスク
+
+- TCP 接続を受けるが中継できない proxy は alive と判定する。
+- テストが何も証明しない新 endpoint は適用する（#67 の規則）。
+- `https:` proxy の成功側（TLS ハンドシェイクが通る場合）はテストしていない（証明書と鍵をリポジトリに置く必要がある）。
+- 実ネットワーク・実 VPN 切替では未確認。
+- 拡張ホスト lane の集計なしの途中終了（原因不明）。unit lane の `GitConfigLocking.aba` と `ConfigManagers.crossplatform` の flake。
+- 未修正: 同じ URL の split 変化と、同じチェックのテストが重なると proxyChanged が stale になる（#93 の経路）。
