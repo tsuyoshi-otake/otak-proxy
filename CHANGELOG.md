@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [3.2.16] - 2026-10-03
 
 ### Fixed
 - When the system proxy's per-scheme HTTPS URL or bypass list changes while the main URL stays the same, the change is now saved and applied even when the same check also runs a connection test or sees the proxy's reachability change. Before this, the change was discarded in that case, and the previous HTTPS URL or bypass list stayed in effect. In `Auto: OFF` the new values are saved, and applied when the test shows that the proxy answers (#102).
