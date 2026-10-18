@@ -52,6 +52,10 @@
 - **テスト後にプロセスが本当に終了したか確認する。** `Get-CimInstance Win32_Process` で
   `mocha|vscode-test` を grep。残っていたら CPU を焼き続ける。
 
+- **入力を正規化してから検証するときは、正規化が拒否すべき文字を消さないか確かめる。**
+  `String.prototype.trim()` は末尾の `\n` も消すので、拒否していた `http://proxy.com/\n` が
+  `http://proxy.com/` になり、受理された（property test の反例、#108）。proxy URL の正規化で除くのは ASCII の空白だけ。
+
 ## 外部ツールのスタブ
 
 - **`{stdout:'', stderr:''}` を返すだけのコマンドスタブは書かない。**
@@ -229,6 +233,15 @@
   （付けないと 0 bytes になる、v3.2.13）。配信される README は、vsce が相対リンク（`LICENSE`）を
   GitHub の URL に書き換えた以外はリポジトリの README と同じになる。
 
+## 資格情報と URL
+
+- **SecretStorage の資格情報キーは、公開 URL の WHATWG href の sha256。保存する URL の綴りはキーに影響しない。**
+  保存側（`splitProxyUrl().publicUrl`）も参照側（`getProxyPublicUrl()` → `toPublicProxyHref`）も、
+  `new URL()` で userinfo を空にして直列化し直す（末尾 `/` 付き、scheme と host は小文字）。
+  `http://proxy:8080`、`http://proxy:8080/`、`HTTP://PROXY:8080` は同じキーになる。生の文字列を
+  `getCredentialKeyForPublicUrl` に渡したときだけ、別のキーになる。キーを引く経路を足すときは `getProxyPublicUrl` を通す
+  （node で out/ を読み込んで確認、#108、2026-10-18）。
+
 ## ドキュメント
 
 - **README の設定・挙動の説明は、description 文字列ではなく値を読むコードから書く。**
@@ -239,6 +252,10 @@
 - **README に載せるコマンドは、隔離した設定で実際に実行して出力を確かめる。**
   Troubleshooting の `npm config get proxy` が認証情報付きの値で失敗すること、`npm config get userconfig` が
   UUID を含むパスで失敗すること（#85 の修正漏れ）は、README 更新中に実行して初めて分かった。
+
+- **CHANGELOG や PR の「以前は〜だった」は、main のコードで確かめてから書く。**
+  #108 の URL 正規化の下書きは、`HTTP://` を「拒否されていた」と書いた。main の scheme 判定は大文字小文字を
+  区別していたので、`HTTP://` は authority の検査を素通りして受理されていた。
 
 ## VS Code ホストの前提
 
@@ -283,6 +300,11 @@
   （`Codex Review: Didn't find any major issues` か指摘付きのレビュー）の「Reviewed commit: <sha10>」の行で届く。
   要約表のコメント（`codex-pull-request-review-summary`）は最初のレビューで作られ、その後は上書きされる。
   「最後の codex comment に `Completed` と sha の両方」で待った待機スクリプトは結果を見落とした（#97、v3.2.15）。
+
+- **PR を作ったら、Codex の自動レビュー（`chatgpt-codex-connector[bot]`）が届くまでマージしない。**
+  #109 は作成（01:24:00Z）の 1 分 39 秒後にマージし、P2 の指摘 5 件はマージ後の 01:30:02Z に届いた。
+  直しは別の PR になった。作成から 10 分ほど待ち、届いた指摘は同じ PR で直す（#78、#108、2026-10-18）。
+  確認: `gh api repos/tsuyoshi-otake/otak-proxy/pulls/<N>/reviews --jq '.[] | [.user.login, .submitted_at] | @tsv'`。
 
 - **公開 Issue で項目番号を `#1` の形で書くと、同じ番号の別の Issue / PR に自動リンクする。**
   コメントでは code span で書くか、「項目 1」と書く（#108 の本文で起きた、2026-10-18）。
