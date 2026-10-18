@@ -86,6 +86,12 @@
   `src/test/vscodeRuntime.ts`）は振り分けをすり抜けて unit lane に残り、2 つ目の流儀になる。直接 import に直すと、
   10 件が host lane に移った（#108）。
 
+- **別のテストと「同じ」結果を示すテストは、同じアサーションを持つ。** レビューでは、テスト名と前提ではなく
+  アサーションを 1 つずつ突き合わせる。#108 の書き込み失敗のテストは、片方だけ復元するテストと前提はそろって
+  いたが、ゲートの戻り値しか確かめず、同期の受信側（apply しない、`lastError`、何も書かない）を見ていなかった
+  （独立 verifier が指摘、レビューでは見落とした）。受信側のアサーションを足すと、受信側のゲートを外す
+  ミューテーションで red になった（#108）。
+
 ## 外部ツールのスタブ
 
 - **`{stdout:'', stderr:''}` を返すだけのコマンドスタブは書かない。**
@@ -309,10 +315,19 @@
   場合を必ず入れる。
 
 - **applied-proxy の provider が返す URL と、拡張が `http.proxy` に書いた値は一致しないことがある。** provider は
-  hydrate 済みの `autoProxyUrl`（同じアドレスの資格情報が SecretStorage にあれば資格情報付き）を返す。検出経路
-  （`SystemProxyUpdateService.saveAndApplyAutoProxyState`、監視の経路）は検出した URL をそのまま書くので、Windows /
-  macOS の proxy なら資格情報が無い。エコー判定を資格情報まで一致させると自分の書き込みを検出し直し、OS の proxy の
-  変更を拾えなくなる（#29 の再発、out/ の probe で再現、#108）。資格情報の無い候補は、同じアドレスならエコーとして扱う。
+  hydrate 済みの `autoProxyUrl` を返す。同じアドレスの資格情報が SecretStorage にあれば資格情報付きになり、綴りは
+  WHATWG で正規化される（ホストは小文字、既定ポートなし）。検出経路（`SystemProxyUpdateService.saveAndApplyAutoProxyState`、
+  監視の経路）は検出した URL をそのまま書くので、Windows / macOS の proxy なら資格情報が無く、綴りも検出したまま。
+  エコー判定を資格情報まで一致させると自分の書き込みを検出し直し、OS の proxy の変更を拾えなくなる（#29 の再発、
+  out/ の probe で再現、#108）。資格情報の無い候補は、同じアドレスならエコーとして扱う。資格情報付きの候補は
+  `sameProxyUrlWithCredentials`（秘密のキーと同じ `splitProxyUrl` で分解）で比べ、文字列の完全一致では比べない
+  （再読み込みを通したテストで確認。完全一致に戻すと red になる、#108）。
+
+- **資格情報が要るかどうかは、proxy のアドレスごとに記録する。** `requiresAuth` は真偽値なので、split の 2 つの
+  アドレスのうち片方だけが復元された場合（SecretStorage への書き込みの失敗、片方の秘密しか持たないマシン）を区別できない。
+  `authRequiredProxyUrls` に資格情報付きだった公開 URL を残し、`shouldSkipUnauthenticatedApply` は、資格情報の無い
+  計画 URL がその一覧にあればスキップする。集合に `some` を当てて不変条件を判定するときは、その性質が要素ごとに
+  要るのかを確かめる（片方だけ復元するテストと書き込み失敗のテストで確認。`some` だけに戻すと red になる、#108）。
 
 ## ドキュメント
 

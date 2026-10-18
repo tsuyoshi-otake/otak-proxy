@@ -1481,3 +1481,63 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - VS Code の `http.proxy` から手で資格情報を外した値は、今もエコーとして無視される。拡張自身の検出経路の書き込みと区別できないため。区別するには、実際に書いた値（所有権の記録の fingerprint など）と比べる必要がある。
 - テスト専用の fallback（`applyProxySettings` が無いときの `context.proxyApplier.applyProxy`）は計画も同意も通らない。本番は常に `applyProxySettings` を設定する。
 - 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際に認証する proxy では試していない。
+
+## 2026-10-18 — #108 項目 1 PR #112 への Codex の指摘 2 件を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 1）
+**PR**: [#112](https://github.com/tsuyoshi-otake/otak-proxy/pull/112)（指摘は `1e6572d` へのレビュー）
+**コミット**: `0e776cc`（fix/108-credential-consent-all-urls）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状（`1e6572d` への Codex の指摘、どちらも P2）
+
+- エコー抑止の比較が綴りに左右される。永続化は `new URL(...).toString()` で資格情報を外し、hydrate は `new URL` で URL を組み立て直す。そのため、再読み込み後の `http://user:pass@PROXY.EXAMPLE.COM:80` は `http://user:pass@proxy.example.com` として戻る。VS Code の `http.proxy` には元の綴りが残りうる（再読み込み前の書き込みや、hydrate を経ていない別ウィンドウの書き込み）。比較 (a) は `canonicalizeProxyUrl` の完全一致で、ホストの大文字小文字も既定ポートも揃えない。比較 (b) は、候補が資格情報付きなので通らない。結果として、自分が書いた値を `vscode` ソースの proxy として検出する（#29 の再発）。main は公開 URL（WHATWG で正規化）で比べていたので、この PR で入れた回帰。
+- `requiresAuth` は 1 つの真偽値で、どの URL に資格情報が要るかを持たない。2 つのアドレスに資格情報がある split で、片方だけが復元される場合がある。SecretStorage への書き込みが失敗すると `storeJson` は false を返し、`persistProxySecrets` はそのまま続行する。片方の秘密だけを持つ別マシンも同じ。このとき `some` の判定が通り、もう片方のアドレスを資格情報なしで書いてしまう。
+
+### 原因
+
+- 永続化と hydrate を通る URL は WHATWG で正規化される。エコー判定の比較に使った正規形（`canonicalizeProxyUrl`：scheme の小文字化と末尾 `/` だけ）は、それと違った。
+- 「資格情報が要るのに復元できない URL は書かない」という不変条件を、URL ごとの情報を持たない 1 つの真偽値で近似した。`some` は「計画のどれかが資格情報付き」しか見ず、資格情報が要るのはどの URL かを見ない。
+
+### 修正
+
+- `sameProxyUrlWithCredentials`（`src/utils/ProxyUrlIdentity.ts`）を追加した。資格情報ストアが秘密のキーに使う `splitProxyUrl` で両方を分解し、公開 URL とデコード後の資格情報が一致すれば同じ値とみなす。エコー判定の (a) をこの関数に替えた。(b) は変えていない。
+- `ProxyState.authRequiredProxyUrls` を追加した。資格情報を持っていた URL フィールドの公開 URL の一覧で、userinfo は含まない。`requiresAuth` と同じく永続化と同期の対象。
+  - `setRequiresAuthFromLiveUrls` はライブのフィールドから作り直す。
+  - 保存と hydrate では、ライブの資格情報付き URL と既存の一覧の和を取り、どのフィールドにも残っていない URL を除く。一覧は並べ替え、空なら持たない。変更前に保存された state は 1 バイトも変わらない。
+  - `shouldSkipUnauthenticatedApply` は、従来の規則（変更前に保存された state 用）に加えて、資格情報を持たない計画 URL がこの一覧に入っていればスキップする。
+- 6 つの URL フィールドの一覧を `STATE_URL_FIELDS` の 1 か所にまとめた。`proxyUrlsHaveCredentials`、一覧の導出、ゲートの 3 か所がこれを読む。
+
+### レビューで直させた点
+
+1. 同一性の関数が `splitProxyUrl` と同じこと（公開 URL の正規化、資格情報のデコード）を自前で実装し、URL を 2 回パースしていた。秘密のキーと比較の定義がずれないよう、`splitProxyUrl` の上に作らせた。
+2. README の `ignoreSelfWrittenVSCodeProxy` の説明に「再読み込みが値を書き換えても認識される」とあった。再読み込みは `http.proxy` を書き換えないうえ、3.2.16 も綴りを無視して比べていた。この文を削らせた。同じ理由で、CHANGELOG の綴りの正規化についての括弧書きも削らせた。
+3. README の新しい箇条書きに「同期で別マシンから state が来た場合」とあった。同期は同じマシンのグローバルストレージを通してウィンドウ間で行うので、確実な原因（SecretStorage への保存の失敗）に替えさせた。
+4. ARCHITECTURE.md が `requiresAuth` を「アドレスの一覧」と書いていた。真偽値と一覧を分けて書かせた。
+5. 独立 verifier（この修正への 1 回目、通算 3 回目）の指摘: 書き込み失敗のテストはゲートの戻り値しか確かめておらず、同期の受信側を通していなかった。片方だけ復元するテストと同じく `applyRemoteSyncState` まで通し、apply されないこと、`lastError`、何も書かれないことを確かめさせた。本番の挙動は、verifier が `out/` に当てた probe で正しいと確認済み。
+
+### Verification
+
+- `npm run lint`: exit 0（`lint:unicode` は 634 ファイルを走査、検出なし）
+- `npm run test:unit:parallel`: 1098 + 74 passing、0 failing
+- `npm test`: 574 passing / 1 pending / 9 failing。9 件は既知の失敗だけ。#108 のスイートはすべて pass
+- `npm run test:smoke`: 4 passing
+- ミューテーション（`out/` に当てて戻した）:
+  - エコー判定 (a) を `===` に戻す → 再読み込みの 2 テストが red（実装者と verifier が再現）
+  - ゲートを `some` だけに戻す → 片方だけ復元の 2 テストがゲートのアサーションで red（実装者とレビュアーが再現）
+  - 受信側のゲートを外す → 同じ 2 テストが受信側のアサーションで red（実装者とレビュアーが再現）
+  - 一覧を永続化から外す → 2 アドレスのテストが red（実装者の報告）
+- 独立 verifier（11 項目）: この修正への 1 回目（通算 3 回目）は C4 (ii) で fail（テストが受信側を通していない）。テストを直した後の 2 回目（通算 4 回目）で全項目 pass
+
+### Learning
+
+1. 永続化や hydrate を通る URL を、完全一致の文字列で比べない。保存側は WHATWG で正規化する（ホストの小文字化、既定ポートの除去）。比べるときも、秘密のキーと同じ分解（`splitProxyUrl`）を通す。→ rules.md「資格情報と URL」に追記した。
+2. 集合への `some` で不変条件を判定するときは、その性質が集合の要素ごとに要るのかを確かめる。要素ごとに要るなら、要素ごとの情報を持つ。→ rules.md「資格情報と URL」に追記した。
+3. 自分の作業ミス: 03d でエコー規則を直したとき、比較に使う正規形が永続化の正規形と同じかを確かめなかった。ルーブリックにも綴りの違いの観点がなかった。URL を比べる変更のブリーフとルーブリックには、再読み込み（永続化と hydrate）を通した値を必ず入れる。もう 1 つ、ルーブリックの「(ii) も (i) と同じ」を、レビューではテスト名と前提だけで確かめ、観測（受信側、`lastError`、書き込みなし）まで同じかを読まなかった。「同じ」と書いた条件は、アサーションを 1 つずつ突き合わせる。→ rules.md「検証・回帰」に追記した。
+
+### 残留リスク
+
+- 3.2.16 以前に保存された state には `authRequiredProxyUrls` が無く、従来の `some` の規則しか効かない。3.2.16 は split の資格情報を保存していなかった。そのため更新後も、split の URL が資格情報付きで検出し直されて保存されるまでは、3.2.16 と同じく資格情報なしの split URL を書きうる。
+- ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す。`requiresAuth` と同じ扱いで、そのマシンの検出結果を正とする。
+- 診断（`ProxyRuntimeDiagnostics.collectCredentialIssues`）は主 URL しか見ないので、片方だけ復元された場合を報告しない。apply はスキップされ、`lastError` は記録される。
+- 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の SecretStorage の書き込み失敗は試していない。
