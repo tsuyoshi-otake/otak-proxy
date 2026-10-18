@@ -1257,3 +1257,90 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - 認証付き split URL の資格情報は、再読み込み後に SecretStorage から戻らない（T03）。
 - split 値の片側だけが不正なとき（例 `HTTP_PROXY=http://proxy:99999`）は、その側を警告付きで捨て、HTTPS 側を両方に使う。この方針は変えていない。
 - 確認したのはユニットテストと VS Code ホストのテストまで。実際の proxy では試していない。
+
+## 2026-10-18 — #78 PR #109 への Codex の指摘 5 件を直す（PR #111）
+
+**Issue**: [#78](https://github.com/tsuyoshi-otake/otak-proxy/issues/78)（#108 の項目 7）
+**PR**: [#111](https://github.com/tsuyoshi-otake/otak-proxy/pull/111)（指摘元は [#109](https://github.com/tsuyoshi-otake/otak-proxy/pull/109) のレビュー）
+**コミット**: `c85cc8c`（fix/78-toggle-followups、基準 `b961457`）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状（#109 のマージ後に届いた Codex の指摘、すべて P2）
+
+- F4: CAS が 3 回とも負けると、トグルは警告をログに出すだけで success を返した。保存も apply もしないのに、ユーザーにはエラーが出ない。
+- F3: Auto は `convergencePending` を外す前にモニタを起動した。`startSystemProxyMonitoring` の即時チェックが、pending のままの state をコミットして他のウィンドウへ publish できた。
+- F5: トグルは、検出のときに読んだ検出フィールドをコミットにコピーした。トグルの検出の後、コミットの前に入った新しい検出（proxy B）や新しいチェック時刻を、古いコピー（proxy A）で上書きした。
+- F2: 初回セットアップは、質問の前に読んだオブジェクトを丸ごと保存した。質問の間に他の writer がコミットした `lastError`、`convergencePending`、`lastTestResult`、`*Configured` が巻き戻った。
+- F1: 起動時の署名に `requiresAuth` が入っていなかった。`applyStartupProxyState` は未認証の apply を飛ばす判定で `requiresAuth` を読むので、`requiresAuth` だけが変わったときに再実行しなかった。
+
+### 原因
+
+- 「決めた差分を最新の state に重ねてコミットする」処理の持ち主がいなかった。トグルは独自の CAS ループを持ち、初回セットアップは丸ごと保存した。
+- CAS を使い切った分岐（exhausted）に、失敗という終端状態が無かった。success として返っていた。
+- トグルは検出の前に読んだ state を基に決め、検出の結果は別にコピーしていた。
+- 起動時の署名の項目が、`applyStartupProxyState` が読む入力と揃っていなかった。
+
+### 修正
+
+- `commitDecidedPatch`（`src/core/ApplyConvergence.ts`）を、決めた差分のコミットの唯一の持ち主にした。
+  - 1 回の試行ごとに読み直す。最大 3 回。
+  - 呼び出し側のガードが最新の state を拒否したら、何も書かずに `moved` を返す。
+  - それ以外は revision 付きでコミットする。競合に負けたら、新しい state に重ね直す。
+  - patch で `undefined` のキーはフィールドを消す。タイマーは使わない（重ね直しはネットワークの再試行ではない）。
+- `diffProxyState` は、キーの和集合で差分を作る。決定で消したフィールドは消える。
+- トグル:
+  - 最初の読み取りで `fromMode` と `nextMode` を固定する。
+  - 各ラウンド（最大 3）は、必要なら検出を走らせてから読み直し、そのコピーで決める。
+  - コミットするのは `diffProxyState(basis, decided)` と `convergencePending: true`。ガードは「basis と同じ mode、同じ論理 identity」。
+  - committed: Off はモニタを止めてから設定を消す。Auto は apply し、flag を外して publish してから、モニタを起動する（F3）。
+  - moved で mode が違う: superseded（従来どおり）。moved で mode が同じ: 新しい state で決め直す（F5）。
+  - exhausted、またはラウンドを使い切った: 「トグル失敗」のエラーを出し、`success: false`。何も apply しない（F4）。
+- 決定が出したい通知（「manual proxy を使用」のトースト、システム proxy の設定プロンプト、manual proxy のプロンプト）は集めておき、コミットが通ったラウンドの apply の後だけ実行する。
+- 初回セットアップは、決めたフィールドの差分だけを `commitDecidedPatch` でコミットする。ガードは今までの `setupStateSignature`（F2）。`commitState` の無い manager 向けの丸ごと保存は持たない。configureUrl の分岐は、保存の直前に読み直した state を保存したまま。
+- `startupEnforcementTarget` に `requiresAuth` を加えた（F1）。
+- 消した関数: `copyDetectedProxyState`、`changedToggleFields`、`commitToggleDesiredState`、`prepareNextMode`、`applyPreparedState`。
+- CHANGELOG は、最初の #78 の項目に 1 文を足した（保存できないトグルは、黙って何もしないのではなくエラーを出す）。
+- ドキュメント（ユーザーの指示「README.md やドキュメント更新も忘れずにね」）:
+  - ARCHITECTURE.md のトグルの 2 つの手順は「apply → 保存」のままだった（#109 でも直していなかった）。今の順序（コミット → apply → flag を外して publish → モニタ起動、superseded / 決め直し / 失敗）に書き直した。
+  - README の Troubleshooting に「Failed to toggle proxy mode」の項目を足した。
+
+### レビューで直させた点
+
+1. 各ラウンドで `fromMode` と `nextMode` を計算し直していた。ラウンド 1 が同じ mode の `moved` で終わった後、別のウィンドウが Auto を保存すると、ラウンド 2 は `nextMode = Off` を計算して Off をコミットし、相手の選択を打ち消した（generation suite のテスト「a mode change before a re-decide round supersedes instead of undoing it」、修正前は `false !== true`）。
+2. 決定の中で通知していた。決め直すたびにトーストが出て（2 回）、失敗したトグルでも「トグル失敗」と並んで出た（テスト「the fallback toast fires once, only for the committed round」と「a failing toggle shows no fallback toast alongside the error」）。
+3. 初回セットアップに「`commitState` が無ければ `saveState`」の分岐があった。本番の `ProxyStateManager` は常に `commitState` を持つので、この分岐を通るのはテストの fake だけだった。`calledOnce(saveStateStub)` を見る 3 件のテストは本番が通らない経路を検査していて、分岐は F2 を黙って戻せた。
+4. 「トグル前のスナップショットとの差分」のミューテーションが、単独では green だった。identity のガードが `moved` にして吸収した。ガードが守らない範囲（同じ proxy の新しい bookkeeping）でテスト「same-identity bookkeeping committed inside the CAS window is kept」を足し、単独で red になることを確かめた。
+5. ARCHITECTURE.md の最初の書き直しは、apply の通知（ProxyApplier の「proxy configured」「proxy disabled」）を落とし、入口を内部関数の名前にし、superseded を「失敗」に分類していた。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 修正前（main のロジック） | 新しいテストのうち 11 件が落ちる。例: `a published state carried convergencePending`、CAS を使い切った後の `success` が `true !== false`、B ではなく A が保存される、起動の再実行が `1 !== 2` |
+| 修正前（この変更の最初の版） | 意図のテストが `false !== true`（トグルが Off に向きを変えた）。トーストのテストは、2 回出る、エラーと並んで出る |
+| ミューテーション | 9 件とも、単独で少なくとも 1 件のテストが red になる: モニタ起動を flag の解除より前、使い切りで success、検出前のスナップショットとの差分、署名から `requiresAuth` を外す、セットアップが質問前のオブジェクトを保存、決定側のキーだけで差分、ラウンドごとに `fromMode`/`nextMode` を計算し直す、決定の中でトースト、セットアップの丸ごと保存を戻す |
+| `npm run lint` | pass（ESLint と `lint:unicode`、630 ファイル） |
+| `npm run test:unit:parallel` | 1095 + 74 passing、0 failing |
+| `npm test`（拡張ホスト） | 526 passing、1 pending、9 failing（基準と同じ 9 件） |
+| `npm run test:smoke` | 4 passing |
+| 独立 verifier | C1〜C13（コードとテスト）13/13 pass。C14（ドキュメント）pass。C14 の改行コードの条件は rubric 側の誤りを直して再判定した |
+| verifier の後 | テスト名の接頭辞 4 件と不要な `!` を消した。コンパイル後の `InitialSetupFlow.js` はバイト単位で同じ。コンパイル後のテストは、その 4 件のタイトルだけが違う。compile と lint は pass |
+| テストランナーの残存プロセス | なし |
+
+### Learning
+
+1. 再試行のラウンドで、ユーザーの意図を読み直した state から計算し直さない。トグルの次の mode は今の mode から決まるので、計算し直すと向きが逆になる。→ rules.md「世代フェンス」に追記した。
+2. やり直しうる決定の中で、ユーザーに見える副作用を実行しない。集めておき、コミットが通った後に実行する。→ rules.md「世代フェンス」に追記した。
+3. 本番が通らない fallback 分岐は、本番の経路を検査しないテストを生む。fake に本番と同じ契約を持たせ、分岐は消す。→ rules.md「検証・回帰」に追記した。
+4. ミューテーションが単独で green なら、別の層が吸収していないか調べ、その層が守らない範囲でテストを書く。→ rules.md「検証・回帰」に追記した。
+5. tsc の再エクスポート（`export { x } from './y'`）は getter になる。`sinon.stub(ProxyUtils, 'testProxyConnectionParallel')` は例外を出さずに成功するが、`ProxyUtils.testProxyConnectionParallel` は本物の関数を返し続ける。定義元の `utils/ProxyConnectionTest` を stub すると、ProxyUtils 経由でも効く。Devin が報告し、sinon 21.1.2 と `out/utils/ProxyUtils.js` で確かめた。→ rules.md「外部ツールのスタブ」に追記した。
+6. 「決めた差分だけを重ねる」の既存ルールを、今の持ち主（`commitDecidedPatch`）と CAS の 3 つの結果に合わせて書き直した。→ rules.md「世代フェンス」。
+7. 自分の作業ミス: Devin への指示書と docs の rubric に「README と ARCHITECTURE.md は LF」と書いた。Git Bash の `grep -c $'\r$'` が 0 を返したのを信じたが、rules.md にこの grep は当てにならないとすでに書いてある。node で数えると、作業ツリーは CRLF（index は LF）。Devin の編集は CRLF を保っていた。rubric を直して verifier に訂正を送った。新しいルールは足さない（既存のルールを守る）。
+
+### 残留リスク
+
+- 検出とフォールバックの到達性テストは、ラウンドごとに走り直すことがある（最大 3 ラウンド）。
+- configureUrl の分岐は、直前に読み直した state を丸ごと保存する。読み直しから保存までの短い窓は残る。
+- `sameLogicalIdentity` は per-scheme の URL（`autoHttpProxyUrl` / `autoHttpsProxyUrl`）を比べない。コミットの窓でそれだけが変わった場合、トグルの patch は触れないので値は残るが、決め直しは起きない。
+- `applyStartupProxyState` の skip 時の保存は、丸ごと保存のまま。
+- 確認したのはユニットテストと VS Code ホストのテストまで。実際の複数ウィンドウでは試していない。
