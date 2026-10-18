@@ -2,6 +2,8 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { ProxyDiagnosticReport, ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../i18n/I18nManager';
+import { proxyApplyPlanCredentialUrls } from '../core/ProxyApplyPlan';
+import { LogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
 import { publicFingerprint } from '../core/TargetOwnershipStore';
 import { ProxyState } from '../core/types';
@@ -28,7 +30,8 @@ export interface SafeProxyApplyOptions extends ProxyApplyOptions {
 export type ProxyApplyDetailedDelegate = (
     proxyUrl: string,
     enabled: boolean,
-    options?: ProxyApplyOptions
+    options?: ProxyApplyOptions,
+    basis?: LogicalGeneration
 ) => Promise<ProxyApplyDetailedResult>;
 
 export interface ProxyRemediationServiceOptions {
@@ -131,7 +134,7 @@ export class ProxyRemediationService {
     ): Promise<SafeProxyApplyResult> {
         const attempt = ++this.attemptSequence;
         const settings = readV3Settings();
-        if (!(await this.ensureCredentialTargetConsent(proxyUrl, options, settings))) {
+        if (!(await this.ensureCredentialTargetConsent(proxyApplyPlanCredentialUrls(proxyUrl, options), options, settings))) {
             const diagnosticReport = await this.runDiagnosticsIfEnabled(settings);
             return this.recordOutcome(attempt, enabled, options, settings, {
                 success: false,
@@ -221,10 +224,17 @@ export class ProxyRemediationService {
         applyDetailed: ProxyApplyDetailedDelegate,
         settings: V3Settings
     ): Promise<UnrecordedApplyResult> {
-        let applyResult = await applyDetailed(proxyUrl, enabled, {
+        // The resolved write plan rides in `options`; retries reuse exactly
+        // that plan so a retry never writes a URL consent did not judge (#108).
+        const applyOptions: ProxyApplyOptions = {
             silent: options.silent,
-            showProgress: options.showProgress
-        });
+            showProgress: options.showProgress,
+            kind: options.kind,
+            httpUrl: options.httpUrl,
+            httpsUrl: options.httpsUrl,
+            bypass: options.bypass
+        };
+        let applyResult = await applyDetailed(proxyUrl, enabled, applyOptions);
         let retryAttempted = false;
         let retrySuppressed = false;
         const fingerprint = this.applyFailureFingerprint(proxyUrl, enabled, applyResult);
@@ -234,7 +244,7 @@ export class ProxyRemediationService {
             if (decision.allowed) {
                 retryAttempted = true;
                 await this.sleep(settings.delayedRetryMs);
-                applyResult = await applyDetailed(proxyUrl, enabled, { silent: true });
+                applyResult = await applyDetailed(proxyUrl, enabled, { ...applyOptions, silent: true });
             } else {
                 retrySuppressed = true;
             }
@@ -250,6 +260,7 @@ export class ProxyRemediationService {
             proxyUrl,
             enabled,
             options,
+            applyOptions,
             applyDetailed,
             settings,
             applyResult,
@@ -320,6 +331,7 @@ export class ProxyRemediationService {
         proxyUrl: string,
         enabled: boolean,
         options: SafeProxyApplyOptions,
+        applyOptions: ProxyApplyOptions,
         applyDetailed: ProxyApplyDetailedDelegate,
         settings: V3Settings,
         applyResult: ProxyApplyDetailedResult,
@@ -342,7 +354,7 @@ export class ProxyRemediationService {
         }
 
         await this.sleep(settings.delayedRetryMs);
-        const retriedApplyResult = await applyDetailed(proxyUrl, enabled, { silent: true });
+        const retriedApplyResult = await applyDetailed(proxyUrl, enabled, { ...applyOptions, silent: true });
         if (retriedApplyResult.superseded) {
             // Nothing was written for this generation, so there is no new
             // observation to make and no non-convergence to charge.
@@ -526,12 +538,19 @@ export class ProxyRemediationService {
         }
     }
 
+    /**
+     * Consent and the plaintext-target policy judge every credential-bearing
+     * URL in the write plan, not just the primary: a per-scheme split writes
+     * each URL to npm and the terminal environment (#108). One prompt covers
+     * all of them; approving records consent for each public URL, keyed the
+     * same way single-URL consent always was.
+     */
     private async ensureCredentialTargetConsent(
-        proxyUrl: string,
+        credentialUrls: readonly string[],
         options: SafeProxyApplyOptions,
         settings: V3Settings
     ): Promise<boolean> {
-        if (!proxyUrl || !hasProxyCredentials(proxyUrl)) {
+        if (credentialUrls.length === 0) {
             return true;
         }
 
@@ -544,10 +563,9 @@ export class ProxyRemediationService {
             return false;
         }
 
-        const publicUrl = removeProxyCredentials(proxyUrl) || proxyUrl;
-        const consentKey = publicFingerprint(publicUrl);
         const consent = this.context.globalState.get<Record<string, boolean>>(CREDENTIAL_TARGET_CONSENT_KEY, {});
-        if (consent[consentKey]) {
+        const unconsented = credentialUrls.filter(url => !consent[this.consentKeyFor(url)]);
+        if (unconsented.length === 0) {
             return true;
         }
 
@@ -566,10 +584,11 @@ export class ProxyRemediationService {
         );
 
         if (action === allow) {
-            await this.context.globalState.update(CREDENTIAL_TARGET_CONSENT_KEY, {
-                ...consent,
-                [consentKey]: true
-            });
+            const granted = { ...consent };
+            for (const url of credentialUrls) {
+                granted[this.consentKeyFor(url)] = true;
+            }
+            await this.context.globalState.update(CREDENTIAL_TARGET_CONSENT_KEY, granted);
             return true;
         }
 
@@ -577,6 +596,11 @@ export class ProxyRemediationService {
             await vscode.commands.executeCommand('otak-proxy.diagnoseProxy');
         }
         return false;
+    }
+
+    private consentKeyFor(url: string): string {
+        const publicUrl = removeProxyCredentials(url) || url;
+        return publicFingerprint(publicUrl);
     }
 
     private applyFailureFingerprint(

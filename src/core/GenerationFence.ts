@@ -122,7 +122,8 @@ export async function publishUnlessStale(
 export type DetailedApply = (
     proxyUrl: string,
     enabled: boolean,
-    options?: ProxyApplyOptions
+    options?: ProxyApplyOptions,
+    basis?: LogicalGeneration
 ) => Promise<ProxyApplyDetailedResult>;
 
 /**
@@ -159,7 +160,7 @@ export function createFencedApply(
             return supersededApplyResult(proxyUrl, enabled);
         }
 
-        const result = await apply(proxyUrl, enabled, options);
+        const result = await apply(proxyUrl, enabled, options, fence);
         if (result.committedRevision === fence.revision + 1) {
             fence = { ...fence, revision: result.committedRevision };
         }

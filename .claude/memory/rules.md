@@ -65,6 +65,39 @@
   identity のガードが `moved` にして吸収した。ガードが守らない範囲（同じ proxy の新しい bookkeeping）でテストを
   書くと、単独で red になった（#78、テスト「same-identity bookkeeping committed inside the CAS window is kept」）。
 
+- **テストは本番の合成そのものを呼ぶ。手順の写しを持たない。** #108 の初稿のテストは `applyProxySafely` の手順
+  （state を読む → 計画 → フェンス → `applyWithSafety`）を写していて、本番が未解決の options を渡すように壊しても
+  緑だった。合成を `runProxyApplyAttempt`（`src/remediation/ProxyApplyAttempt.ts`）に移して本番とテストが同じ関数を
+  呼ぶと、同じミューテーションで 6 件が red になった（#108）。
+
+- **テストの state は本番の書き込み経路（`ProxyStateManager.saveState`）で作る。** 資格情報付きの state を globalState に
+  直接書くと、本番には存在しない state になる（永続化は資格情報を外して SecretStorage に分ける）。#108 の初稿はその
+  state を通すために `V3MigrationService` の候補を変え、primary と衝突時の優先順位まで変えていた。存在しない state の
+  ためにプロダクションコードを変えない。
+
+- **`saveState` の後は、globalState を直接書き換えても `getState()` には見えない。** `saveState` は in-memory の state
+  を設定し、`getState()` はそれを返す。テストの途中で state を動かすときは、`getState()` から見える形で動かし、守る
+  不変条件を壊すミューテーションで red になることを確かめる。#108 のテスト「state moves under the open prompt」は seed を
+  `saveState` に変えた後も globalState を直接書いていて、「applier が同意の後で state を読み直す」ミューテーションでも
+  緑だった（独立 verifier が out/ のコピーで確認）。
+
+- **`vscode` の API をスタブするテストは `vscode` を直接 import する。** `scripts/run-unit-tests.mjs` はテストファイル中の
+  `import/require('vscode')` で host lane に振り分ける。再エクスポートするヘルパー（#108 の初稿の
+  `src/test/vscodeRuntime.ts`）は振り分けをすり抜けて unit lane に残り、2 つ目の流儀になる。直接 import に直すと、
+  10 件が host lane に移った（#108）。
+
+- **別のテストと「同じ」結果を示すテストは、同じアサーションを持つ。** レビューでは、テスト名と前提ではなく
+  アサーションを 1 つずつ突き合わせる。#108 の書き込み失敗のテストは、片方だけ復元するテストと前提はそろって
+  いたが、ゲートの戻り値しか確かめず、同期の受信側（apply しない、`lastError`、何も書かない）を見ていなかった
+  （独立 verifier が指摘、レビューでは見落とした）。受信側のアサーションを足すと、受信側のゲートを外す
+  ミューテーションで red になった（#108）。
+
+- **ガードや判断の入力を足すブリーフは、守る操作へのすべての経路を表にしてから書く。** #108 項目 1 のブリーフは、
+  資格情報のゲートを既存の置き場所（起動と同期）のまま広げ、監視とトグルの経路、起動の reconcile の署名、
+  結果コミットの世代を見落とした。3 つとも Codex が見つけた。書き込み関数の呼び出し元を `git grep` で列挙し、
+  各行で「ガードを通るか」「判断の入力が再実行の署名に入っているか」「コミットの世代は計画と同じ読み取りか」を
+  確かめてからブリーフに書く（#108）。
+
 ## 外部ツールのスタブ
 
 - **`{stdout:'', stderr:''}` を返すだけのコマンドスタブは書かない。**
@@ -154,6 +187,17 @@
   通ったラウンドの apply の後だけ実行する。決定の中で出すと、決め直すたびに出て（2 回）、失敗した
   トグルでも「トグル失敗」と並んで出た（テスト「the fallback toast fires once, only for the committed round」と
   「a failing toggle shows no fallback toast alongside the error」、#78）。
+- **結果コミットの世代は、計画を作った読み取りの世代を渡して使う。applier の中で読み直さない。**
+  `createFencedApply` は今の fence を `basis` として applier に渡し、`applyProxyDetailed` / `disableProxyDetailed` は
+  それで `saveProxyConfigResults` / `recordApplyBlocked` をコミットする。basis が無い直接の呼び出しだけが読み直す。
+  読み直すと、fence の確認と書き込みの間に別のウィンドウがコミットした新しい状態に、古い計画の結果が載る。その
+  コミットで revision が進み、新しい状態自身の fenced apply が superseded になる（PR #112 への Codex の指摘。
+  basis を無視する、fence を渡さない、無効化への委譲で basis を落とす、の各ミューテーションで red、#108）。
+  引数を有効化と無効化の両方の分岐に通す変更は、分岐ごとにミューテーションを当てる。無効化で basis を無視する
+  ミューテーションは、最初は新しいテストがすべて green のまま残った。
+- **再実行を決める署名には、守る判断が読む入力をすべて入れる。** 起動の reconcile の署名（`startupEnforcementTarget`）に、
+  起動のゲートと書き込み計画が読む `authRequiredProxyUrls` と split の URL（`splitRoutingIdentity`）が無かった。
+  それだけが apply 中に変わると、古い判断のまま止まった（PR #112 への Codex の指摘。どちらかを外すと red、#108）。
 
 ## 診断レポート
 
@@ -278,6 +322,38 @@
   `http://proxy:8080`、`http://proxy:8080/`、`HTTP://PROXY:8080` は同じキーになる。生の文字列を
   `getCredentialKeyForPublicUrl` に渡したときだけ、別のキーになる。キーを引く経路を足すときは `getProxyPublicUrl` を通す
   （node で out/ を読み込んで確認、#108、2026-10-18）。
+
+- **資格情報は proxy のアドレス（公開 URL）単位で保存・復元される。同じアドレスの URL は、どのフィールドでも
+  同じ資格情報で復元される。** `hydrateStateForRuntime` は `autoProxyUrl` / `autoHttpProxyUrl` / `autoHttpsProxyUrl` を
+  同じキーで引く。`HTTP_PROXY=http://proxy:3128` と `HTTPS_PROXY=http://user:secret@proxy:3128` を保存して再読み込みすると、
+  3 つとも資格情報付きで復元され、書き込み計画は 1 つの URL に畳まれる（out/ の probe とテスト「same-host split: after a
+  reload every written URL is one consent judged」で確認、#108）。本番で `deleteCredentialsForPublicUrl` を呼ぶ経路は無いので、
+  URL から外した資格情報も復元時に付き直る。scheme ごとの資格情報を扱う変更のテストには、両 scheme が同じアドレスの
+  場合を必ず入れる。
+
+- **applied-proxy の provider が返す URL と、拡張が `http.proxy` に書いた値は一致しないことがある。** provider は
+  hydrate 済みの `autoProxyUrl` を返す。同じアドレスの資格情報が SecretStorage にあれば資格情報付きになり、綴りは
+  WHATWG で正規化される（ホストは小文字、既定ポートなし）。検出経路（`SystemProxyUpdateService.saveAndApplyAutoProxyState`、
+  監視の経路）は検出した URL をそのまま書くので、Windows / macOS の proxy なら資格情報が無く、綴りも検出したまま。
+  エコー判定を資格情報まで一致させると自分の書き込みを検出し直し、OS の proxy の変更を拾えなくなる（#29 の再発、
+  out/ の probe で再現、#108）。資格情報の無い候補は、同じアドレスならエコーとして扱う。資格情報付きの候補は
+  `sameProxyUrlWithCredentials`（秘密のキーと同じ `splitProxyUrl` で分解）で比べ、文字列の完全一致では比べない
+  （再読み込みを通したテストで確認。完全一致に戻すと red になる、#108）。
+
+- **資格情報が要るかどうかは、proxy のアドレスごとに記録する。** `requiresAuth` は真偽値なので、split の 2 つの
+  アドレスのうち片方だけが復元された場合（SecretStorage への書き込みの失敗、片方の秘密しか持たないマシン）を区別できない。
+  `authRequiredProxyUrls` に資格情報付きだった公開 URL を残し、`planUrlsMissingRequiredCredentials` が、資格情報の無い
+  計画 URL のうち一覧にあり、同じ公開 URL の資格情報付き計画 URL も無いものを返す。集合に `some` を当てて不変条件を
+  判定するときは、その性質が要素ごとに要るのかを確かめる（片方だけ復元するテストと書き込み失敗のテストで確認。
+  `some` だけに戻すと red になる、#108）。
+- **書き込みの不変条件は、すべての書き込みが通る 1 か所で守る。** 資格情報が要るアドレスを資格情報なしで書かない
+  判定は `runProxyApplyAttempt` の中（計画を解決した後、同意と書き込みの前）にある。起動と同期の呼び出し元だけに
+  置いていたときは、監視の到達性の経路が片方の資格情報なしで書いた（PR #112 への Codex の指摘。判定を外すと
+  監視の経路のテストが red、#108）。
+- **6 つの URL フィールドから導く集約フラグ（`requiresAuth`）で、計画の一部についての判定をしない。** 手動の
+  fallback の資格情報だけで、資格情報の無い system proxy の apply まで拒む（3.2.16 も起動と同期で拒んでいた）。
+  一覧がある state ではアドレスごとの規則だけを使い、集約規則は一覧の導入前に保存された state にだけ残す
+  （集約規則を先に戻すミューテーションで「list present: no skip」が red、#108）。
 
 ## ドキュメント
 

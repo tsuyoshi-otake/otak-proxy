@@ -9,6 +9,7 @@ import type * as vscode from 'vscode';
 import { canonicalizeProxyUrl, ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { ProxyApplier } from '../core/ProxyApplier';
+import { resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { InputSanitizer } from '../validation/InputSanitizer';
 import { I18nManager } from '../i18n/I18nManager';
@@ -220,7 +221,9 @@ suite('Proxy URL canonical form (#108)', () => {
                 assert.strictEqual(reloaded.autoHttpsProxyUrl, 'http://proxy-b.example.com:8443/');
 
                 const { applier, npmKeyCalls } = createApplier(freshManager);
-                const result = await applier.applyProxyDetailed(reloaded.autoProxyUrl!, true, { silent: true });
+                // The plan is resolved once upstream; the applier writes it verbatim (#108).
+                const planOptions = resolveProxyApplyOptions(reloaded.autoProxyUrl!, { silent: true }, reloaded);
+                const result = await applier.applyProxyDetailed(reloaded.autoProxyUrl!, true, planOptions);
 
                 assert.strictEqual(result.success, true, JSON.stringify(result.errors));
                 assert.deepStrictEqual(npmKeyCalls, [{

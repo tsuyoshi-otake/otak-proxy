@@ -8,8 +8,8 @@
  */
 
 import * as vscode from 'vscode';
-import { captureLogicalGeneration } from './core/LogicalGeneration';
-import { createFencedApply } from './core/GenerationFence';
+import { proxyApplyPlanUrls, resolveProxyApplyOptions } from './core/ProxyApplyPlan';
+import { runProxyApplyAttempt } from './remediation/ProxyApplyAttempt';
 import { ProxyMode, ProxyState } from './core/types';
 import { ProxyStateManager } from './core/ProxyStateManager';
 import { ProxyApplier } from './core/ProxyApplier';
@@ -22,6 +22,7 @@ import { NpmConfigManager } from './config/NpmConfigManager';
 import { PipConfigManager } from './config/PipConfigManager';
 import { TerminalEnvConfigManager } from './config/TerminalEnvConfigManager';
 import { SystemProxyDetector } from './config/SystemProxyDetector';
+import { appliedProxyInfoFromState } from './core/AppliedProxyProvenance';
 import { getSystemProxyDetector } from './utils/ProxyUtilityInstances';
 import { UserNotifier } from './errors/UserNotifier';
 import { Logger } from './utils/Logger';
@@ -172,20 +173,9 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
 
     // Let detection recognize the value this extension itself wrote into
     // VS Code's http.proxy so it is not re-detected as a system proxy (#29).
-    services.systemProxyDetector.setAppliedProxyProvider(async () => {
-        const state = await proxyStateManager.getState();
-        if (state.mode !== ProxyMode.Auto || !state.autoProxyUrl) {
-            return undefined;
-        }
-        let source: string | undefined = state.lastDetectionSource;
-        // States saved before 3.2.2 lack provenance; an engaged fallback is
-        // still unambiguous, so derive it. Everything else stays undefined
-        // (= never suppressed) to protect hand-set http.proxy values.
-        if (!source && state.usingFallbackProxy && state.fallbackProxyUrl === state.autoProxyUrl) {
-            source = 'fallback';
-        }
-        return { url: state.autoProxyUrl, source };
-    });
+    services.systemProxyDetector.setAppliedProxyProvider(
+        async () => appliedProxyInfoFromState(await proxyStateManager.getState())
+    );
 
     initializer = new ExtensionInitializer({
         extensionContext: context,
@@ -208,25 +198,15 @@ async function applyProxySafely(
     trigger: ProxyApplyTrigger,
     options?: ProxyApplyOptions
 ): Promise<boolean> {
-    const applyIfCurrent = createFencedApply(
+    const result = await runProxyApplyAttempt(
         proxyStateManager,
-        captureLogicalGeneration(await proxyStateManager.getState()),
-        trigger,
-        (proxyUrl, shouldEnable, applyOptions) => proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions)
-    );
-
-    if (!proxyRemediationService) {
-        return (await applyIfCurrent(url, enabled, options)).success;
-    }
-
-    const result = await proxyRemediationService.applyWithSafety(
+        (proxyUrl, shouldEnable, applyOptions, basis) =>
+            proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions, basis),
+        proxyRemediationService,
         url,
         enabled,
-        {
-            ...options,
-            trigger
-        },
-        applyIfCurrent
+        trigger,
+        options
     );
     return result.success;
 }
@@ -378,7 +358,8 @@ async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: Te
         return;
     }
 
-    if (shouldSkipUnauthenticatedApply(state, activeUrl)) {
+    const planOptions = activeUrl ? resolveProxyApplyOptions(activeUrl, undefined, state) : undefined;
+    if (shouldSkipUnauthenticatedApply(state, proxyApplyPlanUrls(activeUrl, planOptions))) {
         await proxyStateManager.saveState({
             ...state,
             lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR,

@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { createFencedApply } from '../../core/GenerationFence';
-import { captureLogicalGeneration } from '../../core/LogicalGeneration';
+import { captureLogicalGeneration, LogicalGeneration } from '../../core/LogicalGeneration';
 import { ProxyApplyDetailedResult } from '../../core/ProxyApplierTypes';
 import { saveProxyConfigResults } from '../../core/ProxyConfigStateTracker';
 import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../../core/types';
@@ -116,6 +116,33 @@ suite('Fenced apply across remediation retries (#78)', () => {
         assert.strictEqual(harness.realApplies, 1, 'only a commit the apply reports may move the fence');
         assert.strictEqual(retry.superseded, true);
         assert.strictEqual(harness.state.autoModeOff, true);
+    });
+
+    test('the wrapped apply receives the fence as its basis, advanced after a self-commit (#108)', async () => {
+        const harness = createHarness({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a.example:8080' });
+        const bases: (LogicalGeneration | undefined)[] = [];
+        const fence0 = captureLogicalGeneration(harness.state);
+        const apply = createFencedApply(
+            harness.manager,
+            fence0,
+            'manual',
+            async (proxyUrl, enabled, _options, basis) => {
+                bases.push(basis);
+                return harness.realApply(proxyUrl, enabled);
+            }
+        );
+
+        const first = await apply('http://a.example:8080', true);
+        const second = await apply('http://a.example:8080', true, { silent: true });
+
+        assert.deepStrictEqual(bases[0], fence0, 'the first call gets the captured fence');
+        assert.strictEqual(first.committedRevision, fence0.revision + 1);
+        assert.strictEqual(
+            bases[1]?.revision,
+            fence0.revision + 1,
+            'after a self-commit the next call gets the advanced fence'
+        );
+        assert.strictEqual(second.committedRevision, fence0.revision + 2);
     });
 
     test('a request already superseded before the first attempt writes nothing', async () => {

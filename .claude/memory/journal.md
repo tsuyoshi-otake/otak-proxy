@@ -1408,3 +1408,200 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - `sameLogicalIdentity` は per-scheme の URL を比べない。
 - 新しいメッセージの 15 個の翻訳は、ネイティブの確認を受けていない。
 - 確認したのはユニットテストと VS Code ホストのテストまで。実際の複数ウィンドウでは試していない。
+
+## 2026-10-18 — #108 項目 1 資格情報の同意とポリシーが、書き込むすべての URL を判定する（PR #112）
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 1）
+**PR**: [#112](https://github.com/tsuyoshi-otake/otak-proxy/pull/112)
+**コミット**: `de43ff6`（fix/108-credential-consent-all-urls、基準 `3e4542c`）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状
+
+- scheme ごとの proxy（`HTTP_PROXY=http://proxy:3128`、`HTTPS_PROXY=http://user:secret@proxy:3128`）で、同意のプロンプト、`otakProxy.credentialTargetPolicy`、未認証スキップが判定したのは primary（資格情報の無い HTTP 側）だけだった。apply は state を読み直し、HTTPS 側の資格情報付き URL を `.npmrc` の `https-proxy` とターミナルの `HTTPS_PROXY` に書いた。プロンプトは出ず、`blockPlaintextTargets` でも止まらなかった。
+- split の URL の資格情報は SecretStorage に入らず、永続化で取り除かれた。ウィンドウを再読み込みすると HTTPS 側は資格情報を失い、起動時の apply は資格情報の無い URL を書いた。
+- VS Code の `http.proxy` のエコー抑止は資格情報を外した形で比べたので、資格情報だけが違う値や、資格情報を足した値を、自分の書き込みとして無視した。
+
+### 原因
+
+- 判定と書き込みが別々に state を読んでいた。`ProxyRemediationService` は呼び出し側の URL だけを判定し、`ProxyApplier.resolveApplyOptions` が判定の後で state を読み直して split の URL と bypass を決めた。判定した集合と書いた集合が同じだという保証が無かった。
+- in-lock の再試行と収束の再試行は `{ silent: true }` だけを渡し、kind、split の URL、bypass を落としていた。applier はそれを、その時点の state から補っていた。
+- split のフィールド（b3bce25、2026-09-05）は永続化のサニタイズにだけ足され、`persistProxySecrets`、`hydrateStateForRuntime`、`proxyUrlsHaveCredentials` は扱っていなかった。
+- `isSelfWrittenVSCodeValue` は資格情報を外した形で比べていた。
+
+### 修正
+
+- `src/core/ProxyApplyPlan.ts`（新規）: 旧 `ProxyApplier.resolveApplyOptions` の規則から I/O を除いた `resolveProxyApplyOptions`、計画が書く URL の集合 `proxyApplyPlanUrls`、そのうち資格情報付きの `proxyApplyPlanCredentialUrls`。
+- `src/remediation/ProxyApplyAttempt.ts`（新規）: `runProxyApplyAttempt` は state を 1 回だけ読み、その値から世代フェンス（`captureLogicalGeneration` → `createFencedApply`）と書き込み計画を作って `applyWithSafety` に渡す。`applyProxySafely`（`src/extension.ts`）はこれを呼ぶだけ。依存は remediation → core の向きだけ（`src/core` から `src/remediation` への import は無い）。
+- `ProxyApplier`: `resolveApplyOptions` を削除。渡された計画をそのまま書く。
+- `ProxyRemediationService`: 計画のうち資格情報付きの URL をすべて判定する。`blockPlaintextTargets` は 1 つでもあれば止め、silent の apply はスキップし、プロンプトは 1 回、承認すると URL ごとに同意を記録する。キーは従来どおり資格情報を外した URL の `publicFingerprint` なので、既存の同意はそのまま一致する。2 つの再試行は計画全体に `silent: true` を足して渡す。
+- `ProxyStateManager` は split の URL の資格情報を SecretStorage に保存・復元する。`proxyUrlsHaveCredentials` は split のフィールドも見るので、`requiresAuth` も追従する。`shouldSkipUnauthenticatedApply` は計画の URL の集合を受け取り（文字列 1 つなら従来どおり）、起動時の apply と同期の受信側がそれを使う。
+- `SystemProxyDetector.isSelfWrittenVSCodeValue`: 候補が適用中の URL と資格情報まで含めた正規形で一致するか、資格情報を持たずに同じ proxy のアドレスを指すときだけ、拡張自身の書き込みとして無視する。資格情報が違う値と、資格情報を足した値は検出する。
+- `src/core/AppliedProxyProvenance.ts`（新規）: `appliedProxyInfoFromState` は、`extension.ts` が provider として直書きしていた対応づけ（Auto の URL と検出元、3.2.2 より前の state の fallback の規則）。本番とテストが同じ関数を呼び、検出器は `ProxyState` を知らないまま。
+- ドキュメント: README（`ignoreSelfWrittenVSCodeProxy`、`credentialTargetPolicy` の `ask`）、ARCHITECTURE.md（フォルダ構成、ProxyApplier の説明、ProxyApplyAttempt の節、監視と同期のフロー）、CHANGELOG。
+
+### レビューで直させた点
+
+1. テストのレーン回避。`src/test/vscodeRuntime.ts` が `vscode` を再エクスポートし、`scripts/run-unit-tests.mjs` の振り分け（テストファイル中の `import/require('vscode')`）をすり抜けて unit lane に残っていた。ファイルを消させ、テストは `vscode` を直接 import する（host lane の 10 件）。
+2. テストが本番の合成の写しを検査していた。テスト内の `applySafely` は `applyProxySafely` の手順を写したもので、`extension.ts` が未解決の options を `applyWithSafety` に渡しても、どのテストも落ちなかった。合成を `runProxyApplyAttempt` に移させ、本番とテストが同じ関数を呼ぶ。同じミューテーションで 6 件が red になる。
+3. `V3MigrationService.findCredentialCandidates` の変更を戻させた。split のフィールドは v3 移行（29cd8c9、2026-07-04）より後に足され、永続化は当初から split の資格情報を取り除くので、保存済みの state に split の資格情報は無い。変更は、テストが資格情報付きの state を globalState に直接書いたことの埋め合わせで、primary と衝突時の優先順位まで変えていた。テストは `saveState` で state を作る。
+4. Issue の再現手順そのもの（1 つの proxy、HTTPS だけ資格情報付き）がテストされていなかった。テストは 2 つのホストを使っていた。同じホストのテストを 3 件足させた（初回ウィンドウの拒否、`blockPlaintextTargets`、再読み込み後の 3 つの場面）。Devin の初稿は hydrate 済みの state から options を作り、プロンプトを通らないまま green になった（hydrate すると HTTP 側も資格情報付きになり、split にならない）。本番の検出と同じく、生のフィールドから作らせた。
+5. ARCHITECTURE.md が古いままだった（フォルダ構成に新しいモジュールが無い、監視と同期のフローが `ProxyApplier.applyProxy()`）。直させた。小さな片付け（`as never`、未使用の引数、`consentKeyFor` のコメント）。README の `ask` の説明は「URL ごとに 1 回」と読めたので、「proxy のアドレスごとに 1 回、1 回のプロンプトで apply のすべての資格情報付き URL」に直させた（同意のキーはアドレス単位）。
+6. エコー抑止の回帰（レビューで発見）。T03 は `isSelfWrittenVSCodeValue` を「資格情報まで含めて一致したときだけ抑止」に変えた。比較相手は provider が返す hydrate 済みの `autoProxyUrl` で、SecretStorage に同じアドレスの資格情報（手動 URL のものなど）があると資格情報付きになる。一方、検出経路は検出した URL をそのまま `http.proxy` に書く（Windows / macOS の proxy なら資格情報なし）。自分の書いた値をエコーと認識できず、`vscode` ソースの値として検出し、後で OS の proxy が変わっても拾えなくなる（#29 の再発）。out/ の probe で再現した（main は公開 URL で比べるので抑止される）。資格情報を持たない候補は、同じアドレスならエコーとして扱う規則に直させた。原因は自分の T03 ブリーフで、Issue が求めたのは「同じ proxy の別の資格情報を検出する」だけなのに、「外した資格情報も検出する」まで書いていた。
+7. テスト 5（プロンプト中に state が動く）が不変条件を守っていなかった（独立 verifier が発見）。03b で seed を `saveState` に変えた結果、`getState()` は in-memory の state を返し、プロンプト中の生の `globalState.set` は見えなくなった。「applier が同意の後で state を読み直して計画を作る」ミューテーションでも green のままだった。revision を変えずに `getState()` から見える形（`getState` のスタブ）で動かさせ、同じミューテーションで red になることを記録させた。
+8. provider の対応づけの置き場所。Devin は `appliedProxyInfoFromState` を `src/config/SystemProxyDetector.ts` に置き、`src/core/types` から値（`ProxyMode`）を import した。main では `src/config` から `src/core` への import はすべて型だけで、検出器は `AppliedProxyProvider` の契約を通してしか適用中の proxy を見ていなかった。state の意味（どの mode、どのフィールド、fallback の規則）は state の持ち主の知識なので、`src/core` のモジュールに移させた。
+
+### Verification
+
+- `npm run lint`: 0 で終了（`lint:unicode` 634 ファイル、検出なし）。
+- `npm run test:unit:parallel`: 1098 + 74 passing、0 failing。
+- `npm test`: 547 passing / 1 pending / 9 failing。9 件はすべて既知（ExtensionInitializer 3、SystemProxyUpdateService 1、ProxyOwnership.integration 3、FailureInjection.integration 1、ProxyRuntimeDiagnostics 1）。#108 のスイートは 7 + 3 件、エコー抑止のスイートは 13 件、すべて pass。
+- `npm run test:smoke`: 4 passing。実行後、テストのプロセスは残っていない。
+- fail-before（Devin のレポート）: テスト 1〜3、6、8 は修正前に red。エコーの回帰テストは T03 の規則で red（`+ 'http://corp.example.com:8080' - null`）。
+- ミューテーション（独立 verifier が out/ のコピーで再実行）: applier が `getState()` から計画を作り直す → テスト 5 だけ red。未解決の options を渡す → 6 件 red。同意が primary だけを判定 → 5 件 red。split の資格情報を保存しない → 2 件 red。エコーの (b) を外す → 回帰テストが red。
+- 独立 verifier（sonnet、ルーブリック 11 項目）: 1 回目は C6 が fail（テスト 5）。03d・03e の後の 2 回目は 11 項目すべて pass。
+- 改行: 変更・新規の 16 ファイルはすべて CRLF で一様、`git ls-files --eol` は `i/lf`（`core.autocrlf=true`）。
+
+### Learning
+
+1. テストは本番の合成そのものを呼ぶ。写しを検査すると、本番の合成が壊れても緑のまま。→ rules.md「検証・回帰」に追記した。
+2. テストの state は本番の書き込み経路（`saveState`）で作る。本番に存在しない state を通すためにプロダクションコードを変えない。→ rules.md「検証・回帰」に追記した。
+3. `vscode` の API をスタブするテストは `vscode` を直接 import する。→ rules.md「検証・回帰」に追記した。
+4. 資格情報は proxy のアドレス単位で保存・復元される。同じアドレスの URL はどのフィールドでも同じ資格情報で復元され、外した資格情報も付き直る。scheme ごとの資格情報のテストには、同じアドレスの場合を入れる。→ rules.md「資格情報と URL」に追記した。
+5. 自分の作業ミス: T03 のブリーフは split の資格情報をアドレス単位の既存の保存に載せるよう指示したが、同じアドレスの場合を書かなかった。Devin のテストも 2 つのホストを使って、その場合を避けていた。再現手順に書いた値をそのままテストに使うよう、ブリーフで指定する。
+6. エコー抑止の比較相手（provider が返す hydrate 済みの URL）と、実際に `http.proxy` に書いた値は一致しないことがある。検出経路は検出した URL をそのまま書く。→ rules.md「資格情報と URL」に追記した。
+7. 自分の作業ミス: ブリーフに Issue の要求より強い保証（外した資格情報も検出）を書き、それが自分の書き込みを壊した。仕様は Issue の要求文から書き、強い保証を足すときは、拡張自身の書き込みがその条件に当たらないかを先に確かめる。
+8. seed を `saveState` に変えると、in-memory の state がテスト中の `globalState` の書き換えを隠す。state を動かすテストは、`getState()` から見える形で動かし、ミューテーションで red になることを確かめる。→ rules.md「検証・回帰」に追記した。
+
+### 残留リスク
+
+- 1 つの proxy で HTTPS にだけ資格情報がある場合、再読み込み後は 3 つのフィールドがすべて資格情報付きで復元され、起動時の apply は資格情報付きの URL を全ターゲットに書く（同意の判定は通る）。次の検出が生の split との差を見つけて split を apply し直すので、起動ごとに apply が 2 回になる。scheme ごとに資格情報を分けるには、scheme ごとの資格情報の記録が要る。仕様の判断としてユーザーに確認する。
+- 外した資格情報は、SecretStorage の値が消えるまで付き直る（primary は以前から、split もこの変更から）。本番で `deleteCredentialsForPublicUrl` を呼ぶ経路は無い。
+- 同じアドレスで資格情報が違う 2 つの URL は区別できない。秘密の値も同意の記録も 1 つを共有する。
+- VS Code の `http.proxy` から手で資格情報を外した値は、今もエコーとして無視される。拡張自身の検出経路の書き込みと区別できないため。区別するには、実際に書いた値（所有権の記録の fingerprint など）と比べる必要がある。
+- テスト専用の fallback（`applyProxySettings` が無いときの `context.proxyApplier.applyProxy`）は計画も同意も通らない。本番は常に `applyProxySettings` を設定する。
+- 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際に認証する proxy では試していない。
+
+## 2026-10-18 — #108 項目 1 PR #112 への Codex の指摘 2 件を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 1）
+**PR**: [#112](https://github.com/tsuyoshi-otake/otak-proxy/pull/112)（指摘は `1e6572d` へのレビュー）
+**コミット**: `0e776cc`（fix/108-credential-consent-all-urls）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状（`1e6572d` への Codex の指摘、どちらも P2）
+
+- エコー抑止の比較が綴りに左右される。永続化は `new URL(...).toString()` で資格情報を外し、hydrate は `new URL` で URL を組み立て直す。そのため、再読み込み後の `http://user:pass@PROXY.EXAMPLE.COM:80` は `http://user:pass@proxy.example.com` として戻る。VS Code の `http.proxy` には元の綴りが残りうる（再読み込み前の書き込みや、hydrate を経ていない別ウィンドウの書き込み）。比較 (a) は `canonicalizeProxyUrl` の完全一致で、ホストの大文字小文字も既定ポートも揃えない。比較 (b) は、候補が資格情報付きなので通らない。結果として、自分が書いた値を `vscode` ソースの proxy として検出する（#29 の再発）。main は公開 URL（WHATWG で正規化）で比べていたので、この PR で入れた回帰。
+- `requiresAuth` は 1 つの真偽値で、どの URL に資格情報が要るかを持たない。2 つのアドレスに資格情報がある split で、片方だけが復元される場合がある。SecretStorage への書き込みが失敗すると `storeJson` は false を返し、`persistProxySecrets` はそのまま続行する。片方の秘密だけを持つ別マシンも同じ。このとき `some` の判定が通り、もう片方のアドレスを資格情報なしで書いてしまう。
+
+### 原因
+
+- 永続化と hydrate を通る URL は WHATWG で正規化される。エコー判定の比較に使った正規形（`canonicalizeProxyUrl`：scheme の小文字化と末尾 `/` だけ）は、それと違った。
+- 「資格情報が要るのに復元できない URL は書かない」という不変条件を、URL ごとの情報を持たない 1 つの真偽値で近似した。`some` は「計画のどれかが資格情報付き」しか見ず、資格情報が要るのはどの URL かを見ない。
+
+### 修正
+
+- `sameProxyUrlWithCredentials`（`src/utils/ProxyUrlIdentity.ts`）を追加した。資格情報ストアが秘密のキーに使う `splitProxyUrl` で両方を分解し、公開 URL とデコード後の資格情報が一致すれば同じ値とみなす。エコー判定の (a) をこの関数に替えた。(b) は変えていない。
+- `ProxyState.authRequiredProxyUrls` を追加した。資格情報を持っていた URL フィールドの公開 URL の一覧で、userinfo は含まない。`requiresAuth` と同じく永続化と同期の対象。
+  - `setRequiresAuthFromLiveUrls` はライブのフィールドから作り直す。
+  - 保存と hydrate では、ライブの資格情報付き URL と既存の一覧の和を取り、どのフィールドにも残っていない URL を除く。一覧は並べ替え、空なら持たない。変更前に保存された state は 1 バイトも変わらない。
+  - `shouldSkipUnauthenticatedApply` は、従来の規則（変更前に保存された state 用）に加えて、資格情報を持たない計画 URL がこの一覧に入っていればスキップする。
+- 6 つの URL フィールドの一覧を `STATE_URL_FIELDS` の 1 か所にまとめた。`proxyUrlsHaveCredentials`、一覧の導出、ゲートの 3 か所がこれを読む。
+
+### レビューで直させた点
+
+1. 同一性の関数が `splitProxyUrl` と同じこと（公開 URL の正規化、資格情報のデコード）を自前で実装し、URL を 2 回パースしていた。秘密のキーと比較の定義がずれないよう、`splitProxyUrl` の上に作らせた。
+2. README の `ignoreSelfWrittenVSCodeProxy` の説明に「再読み込みが値を書き換えても認識される」とあった。再読み込みは `http.proxy` を書き換えないうえ、3.2.16 も綴りを無視して比べていた。この文を削らせた。同じ理由で、CHANGELOG の綴りの正規化についての括弧書きも削らせた。
+3. README の新しい箇条書きに「同期で別マシンから state が来た場合」とあった。同期は同じマシンのグローバルストレージを通してウィンドウ間で行うので、確実な原因（SecretStorage への保存の失敗）に替えさせた。
+4. ARCHITECTURE.md が `requiresAuth` を「アドレスの一覧」と書いていた。真偽値と一覧を分けて書かせた。
+5. 独立 verifier（この修正への 1 回目、通算 3 回目）の指摘: 書き込み失敗のテストはゲートの戻り値しか確かめておらず、同期の受信側を通していなかった。片方だけ復元するテストと同じく `applyRemoteSyncState` まで通し、apply されないこと、`lastError`、何も書かれないことを確かめさせた。本番の挙動は、verifier が `out/` に当てた probe で正しいと確認済み。
+
+### Verification
+
+- `npm run lint`: exit 0（`lint:unicode` は 634 ファイルを走査、検出なし）
+- `npm run test:unit:parallel`: 1098 + 74 passing、0 failing
+- `npm test`: 574 passing / 1 pending / 9 failing。9 件は既知の失敗だけ。#108 のスイートはすべて pass
+- `npm run test:smoke`: 4 passing
+- ミューテーション（`out/` に当てて戻した）:
+  - エコー判定 (a) を `===` に戻す → 再読み込みの 2 テストが red（実装者と verifier が再現）
+  - ゲートを `some` だけに戻す → 片方だけ復元の 2 テストがゲートのアサーションで red（実装者とレビュアーが再現）
+  - 受信側のゲートを外す → 同じ 2 テストが受信側のアサーションで red（実装者とレビュアーが再現）
+  - 一覧を永続化から外す → 2 アドレスのテストが red（実装者の報告）
+- 独立 verifier（11 項目）: この修正への 1 回目（通算 3 回目）は C4 (ii) で fail（テストが受信側を通していない）。テストを直した後の 2 回目（通算 4 回目）で全項目 pass
+
+### Learning
+
+1. 永続化や hydrate を通る URL を、完全一致の文字列で比べない。保存側は WHATWG で正規化する（ホストの小文字化、既定ポートの除去）。比べるときも、秘密のキーと同じ分解（`splitProxyUrl`）を通す。→ rules.md「資格情報と URL」に追記した。
+2. 集合への `some` で不変条件を判定するときは、その性質が集合の要素ごとに要るのかを確かめる。要素ごとに要るなら、要素ごとの情報を持つ。→ rules.md「資格情報と URL」に追記した。
+3. 自分の作業ミス: 03d でエコー規則を直したとき、比較に使う正規形が永続化の正規形と同じかを確かめなかった。ルーブリックにも綴りの違いの観点がなかった。URL を比べる変更のブリーフとルーブリックには、再読み込み（永続化と hydrate）を通した値を必ず入れる。もう 1 つ、ルーブリックの「(ii) も (i) と同じ」を、レビューではテスト名と前提だけで確かめ、観測（受信側、`lastError`、書き込みなし）まで同じかを読まなかった。「同じ」と書いた条件は、アサーションを 1 つずつ突き合わせる。→ rules.md「検証・回帰」に追記した。
+
+### 残留リスク
+
+- 3.2.16 以前に保存された state には `authRequiredProxyUrls` が無く、従来の `some` の規則しか効かない。3.2.16 は split の資格情報を保存していなかった。そのため更新後も、split の URL が資格情報付きで検出し直されて保存されるまでは、3.2.16 と同じく資格情報なしの split URL を書きうる。
+- ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す。`requiresAuth` と同じ扱いで、そのマシンの検出結果を正とする。
+- 診断（`ProxyRuntimeDiagnostics.collectCredentialIssues`）は主 URL しか見ないので、片方だけ復元された場合を報告しない。apply はスキップされ、`lastError` は記録される。
+- 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の SecretStorage の書き込み失敗は試していない。
+
+
+## 2026-10-18 — #108 項目 1 PR #112 への Codex の再レビューの指摘 3 件を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 1）
+**PR**: [#112](https://github.com/tsuyoshi-otake/otak-proxy/pull/112)（指摘は `1330af5` へのレビュー）
+**コミット**: `f6e28d1`（fix/108-credential-consent-all-urls）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状（`1330af5` への Codex の指摘、3 件とも P2）
+
+- A: アドレスごとのスキップ判定（`shouldSkipUnauthenticatedApply`）は、起動と同期の受信側でしか呼ばれていなかった。監視の到達性の経路（false → true）とトグルは `runProxyApplyAttempt` を直接通るので、split の片方の資格情報だけが復元され、その片方に同意がある場合、もう片方のアドレスを資格情報なしで書いた。
+- B: 起動の reconcile の署名（`startupEnforcementTarget`）は主 URL と `requiresAuth` しか比べていなかった。起動のゲートと書き込み計画が読む `authRequiredProxyUrls` と split の URL だけが最初の apply 中に変わると、最新の state でゲートを通し直さずに終わった。
+- C: `ProxyApplier.applyProxyDetailed` / `disableProxyDetailed` は、結果をコミットする世代を apply の始めに `getState()` から読み直していた。fence の確認とこの読み取りの間に別のウィンドウが新しい状態をコミットすると、古い計画の結果が新しい状態に対してコミットされ、その revision の前進で新しい状態自身の fenced apply が superseded になった。
+
+### 原因
+
+- A: 「資格情報が要るアドレスを資格情報なしで書かない」という書き込みの不変条件を、すべての書き込みが通る関数ではなく、呼び出し元の一部（起動、同期）に置いた。
+- B: ゲートに入力（一覧、split の URL）を足したとき、そのゲートを再実行するかを決める署名を更新しなかった。
+- C: 計画（とその世代）を 1 回の読み取りから作る設計にしたが、結果コミットの世代だけが applier の中の 2 回目の読み取りに残っていた。
+
+### 修正
+
+- A1: `planUrlsMissingRequiredCredentials(state, planUrls)`（`src/utils/ProxyStateSanitizer.ts`）を追加した。資格情報の無い計画 URL のうち、公開 URL が `authRequiredProxyUrls` にあり、同じ公開 URL の資格情報付き計画 URL も無いものを、並べ替えて返す。後半の条件は、同じホストの split（資格情報が HTTPS 側にだけある、再読み込み前の state）を拒まないため。`shouldSkipUnauthenticatedApply` は、一覧がある state ではこの規則だけを使い、`requiresAuth` の集約規則は一覧の無い state（一覧の導入前に保存されたもの）にだけ残した。集約規則は 6 つの URL フィールドから導くので、手動の fallback の資格情報だけで、資格情報の無い system proxy まで拒んでいた（3.2.16 も起動と同期で拒んでいた）。
+- A2: `runProxyApplyAttempt` は、計画を解決した後、同意と書き込みの前に `planUrlsMissingRequiredCredentials` を呼ぶ。足りないアドレスがあれば、警告を 1 行出し、`UNRESOLVED_LOCAL_CREDENTIAL_ERROR` を `commitUnlessStale`（読み取りの世代）で `lastError` に記録し、`proxyReachable` は変えずに `success: false` を返す。無効化は判定しない。state の引数は `StateWriter` に広げた。
+- B: `startupEnforcementTarget` に `authRequiredProxyUrls` と `splitRoutingIdentity(state)` を足した。
+- C: `createFencedApply` は今の fence を 4 つ目の引数 `basis` として applier に渡す。`applyProxyDetailed` / `disableProxyDetailed` は basis があればそれで `saveProxyConfigResults` / `recordApplyBlocked` をコミットし、無い直接の呼び出しだけ読み直す。有効化から無効化への委譲も basis を渡す。`DetailedApply` と `ProxyApplyDetailedDelegate` が引数を宣言し、`applyProxySafely` のラムダが渡す。`ProxyApplyOptions` に世代のフィールドは足していない（計画のまま）。
+- Docs: README（スキップは監視、トグル、同期、起動のすべての apply に効く）、ARCHITECTURE.md（ProxyStateManager の記述、ProxyApplyAttempt の Gate / Basis / 起動の署名）、CHANGELOG（同意の項目を修正、結果コミットの項目を追加）。
+
+### レビューで直させた点
+
+1. 自分のミューテーション 7 種のうち、無効化で basis を無視するものだけが、新しいテスト 11 件と unit lane をすべて green のまま通った。有効化から無効化への委譲で basis を落とすミューテーションは、その部分集合（委譲の経路だけ読み直しになる）なので、同じく通るはずだった。`applyProxyDetailed('', false, …, basis)` で、古い basis ならコミットしない、今の basis なら `basis.revision + 1` でコミットする（陽性対照）テストを足させた。足した後は、無効化で basis を無視するミューテーションと委譲で落とすミューテーションの両方で、このテストが red になった。
+2. `planMissesRequiredCredentials`（一覧の関数を真偽値にするだけの包み）を消させた。本番の呼び出しは同じモジュールの 1 か所だけで、ARCHITECTURE.md は包みの名前を書いていたが、attempt が呼ぶのは一覧の関数だった。テストは返る一覧そのものを確かめる形にした。
+3. 03i の検証中、Devin の unit lane が task 04 の古いビルド出力（`out/test/security/CredentialDisplayMasking.test.js`）を拾った。このブランチにソースが無い出力なので、その 2 ファイルだけを消させた。
+
+### Verification
+
+- `npm run lint`: exit 0（`lint:unicode` は 634 ファイルを走査、検出なし）
+- `npm run test:unit:parallel`: 1101 + 74 passing、0 failing
+- `npm test`: 586 passing / 1 pending / 9 failing。9 件は既知の失敗だけ。#108 のスイートはすべて pass
+- `npm run test:smoke`: 4 passing。実行後、テストのプロセスは残っていない
+- ミューテーション（`npm run compile` の後、`out/` に当てて戻した。すべて red になった）:
+  - attempt のゲートを外す → 3 件 red（`autoDetection`、`manual`、監視の到達性の経路）
+  - 集約規則を一覧より先に置く → ゲート表の一覧ありの行が red
+  - 署名から一覧を外す、split を外す → それぞれのテストが red
+  - 有効化で basis を無視する → 3 件 red。無効化で無視する → 1 件 red。委譲で basis を落とす → 1 件 red。fence を渡さない → ホスト 1 件と unit 1 件が red
+- 独立 verifier（sonnet、ルーブリック 14 項目 = これまでの 11 項目 + attempt のゲート、起動の署名、結果の basis）: この修正への 1 回目（通算 5 回目）で全項目 pass。新しい 3 項目のミューテーションは verifier も自分で当て、レビュアーと同じ結果だった
+- 改行: main からの変更 24 ファイルはすべて CRLF で一様、index は `i/lf`
+
+### Learning
+
+1. 書き込みの不変条件は、すべての書き込みが通る 1 か所で守る。呼び出し元ごとのゲートは経路を漏らす。→ rules.md「資格情報と URL」に追記した。
+2. 集約フラグで計画の一部についての判定をしない。→ rules.md「資格情報と URL」に追記した。
+3. 結果コミットの世代は計画を作った読み取りの世代を渡して使い、applier の中で読み直さない。引数を有効化と無効化の両方の分岐に通す変更は、分岐ごとにミューテーションを当てる。→ rules.md「世代フェンス」に追記した。
+4. 再実行を決める署名には、守る判断が読む入力をすべて入れる。→ rules.md「世代フェンス」に追記した。
+5. 自分の作業ミス: T03 のブリーフは、ゲートを既存の置き場所（起動と同期）のまま広げ、監視とトグルの経路、起動の署名、結果コミットの世代を見落とした。3 つとも Codex が見つけた。ガードや判断の入力を足すブリーフは、守る操作への経路を `git grep` で表にしてから書く。→ rules.md「検証・回帰」に追記した。
+
+### 残留リスク
+
+- attempt でのスキップは `lastError` だけを記録し、`proxyReachable` は接続テストの結果のまま残す。起動と同期のスキップは従来どおり `proxyReachable: false` も記録する。
+- 一覧の無い state（3.2.16 までに保存されたもの）では、集約規則は起動と同期でだけ効き、監視とトグルの apply は 3.2.16 と同じく判定しない。
+- ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す（前回の記録と同じ）。同じアドレスの資格情報の無い観測を「資格情報を外した」と読むかは仕様の判断で、最終報告でユーザーに聞く。
+- 結果コミットが捨てられても、古い計画の書き込みは対象に残る。別のウィンドウの apply が後から書けば上書きされるが、書き込みの順序が逆になると、対象は古い計画の値のまま残りうる。fence の確認と書き込みは原子的でない（従来から）。
+- 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の認証 proxy と SecretStorage の書き込み失敗は試していない。

@@ -116,6 +116,13 @@ export interface ProxyState {
      * Never contains userinfo.
      */
     requiresAuth?: boolean;
+    /**
+     * Non-secret metadata: the public URLs (`getProxyPublicUrl` form, never
+     * userinfo) of the state's URL fields that carried credentials. Persisted
+     * and synced like `requiresAuth` so a receiver can refuse to write a
+     * specific address whose credentials cannot be restored on this machine.
+     */
+    authRequiredProxyUrls?: string[];
     autoProxyKind?: ProxyValueKind;
     autoHttpProxyUrl?: string;
     autoHttpsProxyUrl?: string;
