@@ -330,8 +330,8 @@
     "test:failure-injection": "npm run compile && node scripts/assurance/run-mocha.mjs failure-injection",
     "test:real-proxy": "dotenvx run -f .env.local -- cross-env MOCHA_GREP=\"Real Proxy\" vscode-test",
     "package:vsix": "vsce package",
-    "deploy": "vsce publish --skip-duplicate",
-    "deploy:ovsx": "ovsx publish --skip-duplicate"
+    "deploy": "vsce publish",
+    "deploy:ovsx": "ovsx publish"
   },
   "devDependencies": {
     "@dotenvx/dotenvx": "^1.51.1",

@@ -80,8 +80,15 @@ export const INVISIBLE_CATEGORIES = Object.freeze([
         id: 'invisible-operator',
         label: 'invisible operator / word joiner',
         start: 0x2060,
-        end: 0x2064,
+        end: 0x2065,
         reason: 'Invisible formatting characters with no legitimate use in sources.'
+    },
+    {
+        id: 'deprecated-format',
+        label: 'deprecated format control',
+        start: 0x206a,
+        end: 0x206f,
+        reason: 'Deprecated and reserved invisible format controls (Default_Ignorable, Unicode 16.0; unchanged in 17.0).'
     },
     {
         id: 'line-separator',
@@ -101,7 +108,7 @@ export const INVISIBLE_CATEGORIES = Object.freeze([
         id: 'mongolian-format',
         label: 'Mongolian format control',
         start: 0x180b,
-        end: 0x180e,
+        end: 0x180f,
         reason: 'Invisible format controls with no legitimate use in sources.'
     },
     {
@@ -138,6 +145,88 @@ export const INVISIBLE_CATEGORIES = Object.freeze([
         start: 0x007f,
         end: 0x007f,
         reason: 'Non-printable control character.'
+    },
+    // The remaining categories complete the Unicode 16.0 (unchanged in 17.0)
+    // Default_Ignorable_Code_Point table. They are hard-coded because the
+    // property tables differ between Node versions; a unit test asserts that
+    // every code point the running Node marks \p{Default_Ignorable_Code_Point}
+    // is covered here, so a newer Node reports what to add.
+    {
+        id: 'combining-grapheme-joiner',
+        label: 'combining grapheme joiner',
+        start: 0x034f,
+        end: 0x034f,
+        reason: 'Invisible combining mark (Default_Ignorable, Unicode 16.0; unchanged in 17.0) with no legitimate use in sources.'
+    },
+    {
+        id: 'hangul-jamo-filler',
+        label: 'Hangul jamo filler',
+        start: 0x115f,
+        end: 0x1160,
+        reason: 'Renders as blank space (Default_Ignorable, Unicode 16.0; unchanged in 17.0); can hide or pad tokens.'
+    },
+    {
+        id: 'khmer-inherent-vowel',
+        label: 'Khmer inherent vowel mark',
+        start: 0x17b4,
+        end: 0x17b5,
+        reason: 'Invisible format marks (Default_Ignorable, Unicode 16.0; unchanged in 17.0) with no legitimate use in sources.'
+    },
+    {
+        id: 'hangul-filler',
+        label: 'Hangul filler',
+        start: 0x3164,
+        end: 0x3164,
+        reason: 'Renders as blank space (Default_Ignorable, Unicode 16.0; unchanged in 17.0); can hide or pad tokens.'
+    },
+    {
+        id: 'halfwidth-hangul-filler',
+        label: 'halfwidth Hangul filler',
+        start: 0xffa0,
+        end: 0xffa0,
+        reason: 'Renders as blank space (Default_Ignorable, Unicode 16.0; unchanged in 17.0); can hide or pad tokens.'
+    },
+    {
+        id: 'unassigned-default-ignorable',
+        label: 'unassigned default-ignorable code point',
+        start: 0xfff0,
+        end: 0xfff8,
+        reason: 'Reserved default-ignorable code points (Unicode 16.0; unchanged in 17.0); reserved for future smuggling-friendly characters.'
+    },
+    {
+        id: 'shorthand-format',
+        label: 'shorthand format control',
+        start: 0x1bca0,
+        end: 0x1bca3,
+        reason: 'Invisible format controls (Default_Ignorable, Unicode 16.0; unchanged in 17.0) with no legitimate use in sources.'
+    },
+    {
+        id: 'musical-format',
+        label: 'musical format control',
+        start: 0x1d173,
+        end: 0x1d17a,
+        reason: 'Invisible beam/slur controls (Default_Ignorable, Unicode 16.0; unchanged in 17.0) with no legitimate use in sources.'
+    },
+    {
+        // Covers the rest of the E0000-E0FFF default-ignorable block: the
+        // unassigned code points either side of the tag characters and the
+        // variation-selector supplement, which are matched by earlier
+        // categories. Reserved today, default-ignorable by design (Unicode 16.0; unchanged in 17.0).
+        id: 'default-ignorable-reserved',
+        label: 'reserved default-ignorable code point',
+        start: 0xe0080,
+        end: 0xe0fff,
+        reason: 'Reserved default-ignorable code points (Unicode 16.0; unchanged in 17.0) in the block GlassWorm used.'
+    },
+    {
+        // U+2800 BRAILLE PATTERN BLANK is not Default_Ignorable, but it renders
+        // as an empty cell in every font, so it can pad or split tokens the same
+        // way the fillers above can.
+        id: 'braille-blank',
+        label: 'Braille pattern blank',
+        start: 0x2800,
+        end: 0x2800,
+        reason: 'Renders as a blank glyph; can hide or pad tokens.'
     }
 ]);
 

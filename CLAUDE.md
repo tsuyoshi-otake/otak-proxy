@@ -60,14 +60,22 @@ This repo has two test modes: VS Code extension-host tests and plain Node unit t
 ## Supply-Chain Lint (Invisible Unicode / GlassWorm)
 This extension publishes to the Visual Studio Marketplace **and** the Open VSX Registry, which is the channel the GlassWorm worm used to ship payloads hidden in invisible Unicode code points. Hidden code cannot be caught by reading a diff, so it is checked mechanically.
 
-- Detector (single source of truth): `scripts/lib/invisible-unicode.mjs` — plain ESM, no build step, because both consumers run before `tsc`.
+- Detector (single source of truth): `scripts/lib/invisible-unicode.mjs` — plain ESM, no build step, because both consumers run before `tsc`. The category table hard-codes the full Unicode 16.0 (unchanged in 17.0) `Default_Ignorable_Code_Point` set plus U+2800 (Braille blank); a unit test asserts the running Node's `\p{Default_Ignorable_Code_Point}` is fully covered, so a newer Unicode table reports what to add.
 - Consumers:
   - ESLint rule `otak/no-invisible-unicode` (`eslint-rules/no-invisible-unicode.mjs`) — inline editor feedback for `src/**`.
   - `npm run lint:unicode` — every tracked *and* new non-ignored file (JSON, Markdown, workflows, scripts). Part of `npm run lint`, so it gates CI.
   - `npm run lint:unicode:dist` — the compiled artifacts that actually ship. Runs in the publish workflow before `vsce package`, so a payload injected into `out/**` is caught even when the sources are clean.
+  - `node scripts/check-invisible-unicode.mjs --dir <path>` — every file under an arbitrary directory. CI and the publish workflow unzip the VSIX into `$RUNNER_TEMP` and scan it this way, so the packaged artifact itself is checked, not only the sources and `out/`.
+- Scanning rules: a file whose extension is not in the binary list is decoded as UTF-8 and scanned whole — a NUL byte is a `c0-control` finding, never a reason to skip; a run that scans zero files fails in every mode; `--dir` cannot be combined with `--dist` or explicit paths.
 - Exemptions are deliberate and narrow: a BOM at offset 0, and a single emoji presentation selector (U+FE0E/U+FE0F) directly after an emoji or keycap base. Runs of two or more selectors are always rejected — byte smuggling produces runs.
 - Never write a literal invisible character into a test fixture; build it with `String.fromCodePoint` so the file itself stays clean and a reviewer can tell a fixture from a real payload.
 - Adding an exemption requires a comment in `scripts/lib/invisible-unicode.mjs` explaining why the character is legitimate.
+
+## Release Pipeline
+- `.github/workflows/publish-vscode.yml` runs on pushed `v*` tags only (no `workflow_dispatch`): the build job verifies `GITHUB_REF` is `refs/tags/v` + `package.json` version and that the tagged commit sits on `origin/main` (`scripts/release/check-release-ref.mjs`), then packages and scans the VSIX; a `check-tokens` job verifies both registry secrets up front so a missing token fails before any partial publish; one job per registry (`needs: [build, check-tokens]`) downloads that artifact and publishes without `--skip-duplicate`, so an already-published version fails instead of passing silently.
+- `.github/workflows/ci.yml` runs the same lint / unit / smoke / package / VSIX-scan steps on pull requests and pushes to `main`, plus `npm audit --audit-level=critical`; concurrency cancels superseded pull-request runs only, so every `main` push is tested to completion.
+- Every workflow job has `timeout-minutes`, every `uses:` is pinned to a full commit SHA with a `# vX.Y.Z` comment, every `actions/checkout` sets `persist-credentials: false`, and `permissions:` is `contents: read`; `src/test/releaseWorkflowPolicy.test.ts` enforces this.
+- `.github/dependabot.yml` proposes weekly npm and GitHub Actions updates with a 3-day `cooldown`; the cooldown applies to version updates only, not security-update PRs, so the minimum release age is checked by hand on those.
 
 ## Localization Source Of Truth
 - UI/runtime messages: `src/i18n/locales/*.json`
@@ -84,7 +92,7 @@ This extension publishes to the Visual Studio Marketplace **and** the Open VSX R
 - Default behavior: run only VS Code-dependent tests (auto-detected by scanning built `out/test/**/*.test.js` for `import/require('vscode')`).
 - Override: set `OTAK_PROXY_VSCODE_TEST_ALL=1` to run all tests under the VS Code host.
 - Isolation / no side effects on developer machine:
-  - Each run uses a unique temp profile via `--user-data-dir` and `--extensions-dir`.
+  - Each run uses a unique temp profile via `--user-data-dir` and `--extensions-dir`; a synchronous `process.on('exit')` hook in `.vscode-test.mjs` removes it after `vscode-test` exits (the config module runs only in the CLI process, never inside the extension host).
   - Git global config is redirected using `GIT_CONFIG_GLOBAL` (so `git config --global` doesn't touch `~/.gitconfig`).
   - npm user config is redirected using `NPM_CONFIG_USERCONFIG` (so `npm config` doesn't touch `~/.npmrc`).
 - Commands:

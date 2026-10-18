@@ -15,6 +15,8 @@
   - ハーメティック化: 各実行ごとに一意の `--user-data-dir` /
     `--extensions-dir` を作成し、`GIT_CONFIG_GLOBAL` と
     `NPM_CONFIG_USERCONFIG` でグローバル設定を sandbox に隔離する。
+    作成したプロファイルは、`vscode-test` の終了時に `.vscode-test.mjs` の
+    同期の `exit` フックが削除する。
 - **純粋 Node ユニットテスト** (`scripts/run-unit-tests.mjs`)
   - 上記いずれにも該当しないテストを Mocha 直叩きで実行。
   - 必要なら `scripts/vscode-shim.cjs` が最小限の `vscode` モジュールを

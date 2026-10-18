@@ -1,6 +1,6 @@
 import { defineConfig } from '@vscode/test-cli';
 import { randomUUID } from 'crypto';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -25,6 +25,20 @@ if (process.env.MOCHA_GREP) {
 // which can collide if VS Code is still shutting down from a previous run.
 const profileDir = join(tmpdir(), `otak-proxy-vscode-test-${process.pid}-${randomUUID()}`);
 mkdirSync(profileDir, { recursive: true });
+
+// This module is evaluated only once, in the vscode-test CLI process - the
+// runner inside the extension host receives its options through
+// VSCODE_TEST_OPTIONS and never imports this file - so a synchronous 'exit'
+// hook removes the profile only after VS Code has exited and released it.
+// It must stay synchronous (rmSync): the CLI calls process.exit(), which runs
+// 'exit' listeners synchronously and drops async work.
+process.on('exit', () => {
+	try {
+		rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
+	} catch (error) {
+		console.warn(`otak-proxy: could not remove test profile ${profileDir}: ${error}`);
+	}
+});
 
 // Keep VS Code tests hermetic so they don't mutate the developer machine's global settings.
 // Git: `git config --global` respects GIT_CONFIG_GLOBAL
