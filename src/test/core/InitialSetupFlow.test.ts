@@ -3,7 +3,7 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { InitialSetupFlow } from '../../core/InitialSetupFlow';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../../core/types';
 import { I18nManager } from '../../i18n/I18nManager';
 import * as DetectUtils from '../../utils/SystemProxyDetectionUtils';
 import { ProxyStateManager } from '../../core/ProxyStateManager';
@@ -26,6 +26,7 @@ suite('InitialSetupFlow Tests', () => {
 
     let state: ProxyState;
     let saveStateStub: sinon.SinonStub;
+    let commitStateStub: sinon.SinonStub;
     let getStateStub: sinon.SinonStub;
     let applyProxyStub: sinon.SinonStub;
     let updateStatusBarStub: sinon.SinonStub;
@@ -62,6 +63,19 @@ suite('InitialSetupFlow Tests', () => {
         saveStateStub = sandbox.stub().callsFake(async (next: ProxyState) => {
             state = { ...next };
         });
+        // Same revision-checked write ProxyStateManager.commitState performs:
+        // the setup's decided patch commits only through this path, never a
+        // blind saveState.
+        commitStateStub = sandbox.stub().callsFake(
+            async (expected: number, next: ProxyState): Promise<StateCommitResult> => {
+                if (stateRevision(state) !== expected) {
+                    return { kind: 'superseded', current: { ...state } };
+                }
+                const revision = expected + 1;
+                state = { ...next, revision };
+                return { kind: 'committed', revision, state: { ...state } };
+            }
+        );
         getStateStub = sandbox.stub().callsFake(async () => ({ ...state }));
         applyProxyStub = sandbox.stub().callsFake(async (url: string, enabled: boolean) => {
             recordedApplyCalls.push({ url, enabled });
@@ -107,7 +121,8 @@ suite('InitialSetupFlow Tests', () => {
             extensionContext: {} as vscode.ExtensionContext,
             proxyStateManager: {
                 getState: getStateStub,
-                saveState: saveStateStub
+                saveState: saveStateStub,
+                commitState: commitStateStub
             } as unknown as InitializerContext['proxyStateManager'],
             proxyApplier: {
                 applyProxy: applyProxyStub
@@ -141,6 +156,7 @@ suite('InitialSetupFlow Tests', () => {
         sinon.assert.notCalled(detectStub);
         sinon.assert.notCalled(showInputBoxStub);
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(startSystemProxyMonitoringStub);
         sinon.assert.notCalled(configUpdateStub);
@@ -163,6 +179,7 @@ suite('InitialSetupFlow Tests', () => {
 
         sinon.assert.notCalled(showInputBoxStub);
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(startSystemProxyMonitoringStub);
         assert.strictEqual(state.mode, ProxyMode.Auto);
@@ -179,6 +196,7 @@ suite('InitialSetupFlow Tests', () => {
 
         sinon.assert.notCalled(detectStub);
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.calledOnce(startSystemProxyMonitoringStub);
         // Persisted state untouched
@@ -192,8 +210,8 @@ suite('InitialSetupFlow Tests', () => {
 
         await flow.askForInitialSetup();
 
-        sinon.assert.calledOnce(saveStateStub);
-        const saved = saveStateStub.firstCall.args[0] as ProxyState;
+        sinon.assert.calledOnce(commitStateStub);
+        const saved = commitStateStub.firstCall.args[1] as ProxyState;
         assert.strictEqual(saved.mode, ProxyMode.Auto);
         assert.strictEqual(saved.autoProxyUrl, 'http://detected.example:8080');
 
@@ -256,6 +274,7 @@ suite('InitialSetupFlow Tests', () => {
         sinon.assert.calledTwice(showInformationMessageStub);
         sinon.assert.notCalled(executeCommandStub);
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(startSystemProxyMonitoringStub);
         assert.strictEqual(recordedNotifications.length, 0);
@@ -273,6 +292,7 @@ suite('InitialSetupFlow Tests', () => {
 
         // Should bypass the success path entirely
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         // Second prompt is the fallback prompt
         sinon.assert.calledTwice(showInformationMessageStub);
@@ -318,6 +338,7 @@ suite('InitialSetupFlow Tests', () => {
 
         sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(startSystemProxyMonitoringStub);
     });
@@ -330,6 +351,7 @@ suite('InitialSetupFlow Tests', () => {
 
         sinon.assert.calledOnce(showInputBoxStub);
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(configUpdateStub);
         assert.strictEqual(recordedNotifications.length, 0);
@@ -343,6 +365,7 @@ suite('InitialSetupFlow Tests', () => {
         await flow.askForInitialSetup();
 
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(configUpdateStub);
         assert.strictEqual(recordedNotifications.length, 0);
@@ -355,6 +378,7 @@ suite('InitialSetupFlow Tests', () => {
         await flow.askForInitialSetup();
 
         sinon.assert.notCalled(saveStateStub);
+        sinon.assert.notCalled(commitStateStub);
         sinon.assert.notCalled(applyProxyStub);
         sinon.assert.notCalled(configUpdateStub);
         const errorNotif = recordedNotifications.find(n => n.type === 'error');
@@ -373,8 +397,8 @@ suite('InitialSetupFlow Tests', () => {
 
         await flow.askForInitialSetup();
 
-        sinon.assert.calledOnce(saveStateStub);
-        const saved = saveStateStub.firstCall.args[0] as ProxyState;
+        sinon.assert.calledOnce(commitStateStub);
+        const saved = commitStateStub.firstCall.args[1] as ProxyState;
         assert.strictEqual(saved.mode, ProxyMode.Auto);
         assert.strictEqual(saved.manualProxyUrl, 'http://manual.example:3128');
         assert.strictEqual(saved.autoProxyUrl, 'http://manual.example:3128');

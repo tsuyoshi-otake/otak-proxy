@@ -4,6 +4,7 @@ import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { canonicalizeValidProxyUrl, detectSystemProxySettingsWithSource, validateProxyUrl } from '../utils/ProxyUtils';
 import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
+import { commitDecidedPatch, diffProxyState } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState } from './types';
@@ -76,6 +77,34 @@ export class InitialSetupFlow {
         return false;
     }
 
+    /**
+     * Commits only the fields the setup decided, folded onto the latest state,
+     * while the signature still matches the pre-prompt one. Saving the whole
+     * pre-prompt object would roll back bookkeeping other writers committed
+     * meanwhile (apply results, detection, test fields). On `moved` or
+     * `exhausted` nothing is written and the branch stops.
+     */
+    private async commitSetupDecision(
+        prePromptState: ProxyState,
+        decidedState: ProxyState,
+        initialStateSignature: string
+    ): Promise<boolean> {
+        const manager = this.context.proxyStateManager;
+        const outcome = await commitDecidedPatch(
+            {
+                getState: () => manager.getState(),
+                commitState: (expected, next) => manager.commitState(expected, next)
+            },
+            diffProxyState(prePromptState, decidedState),
+            latest => this.setupStateSignature(latest) === initialStateSignature
+        );
+        if (outcome.kind === 'committed') {
+            return true;
+        }
+        Logger.log('Initial setup action skipped because proxy state changed while setup was waiting.');
+        return false;
+    }
+
     private async handleAutoSetup(
         state: ProxyState,
         i18n: I18nManager,
@@ -88,11 +117,14 @@ export class InitialSetupFlow {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
                 return;
             }
-            state.systemProxyDetected = true;
-            state.lastDetectionKind = detected.kind;
-            state.lastDetectionCapability = detected.capability;
-            state.lastDetectionSource = detected.source ?? undefined;
-            await this.context.proxyStateManager.saveState(state);
+            const decided: ProxyState = { ...state };
+            decided.systemProxyDetected = true;
+            decided.lastDetectionKind = detected.kind;
+            decided.lastDetectionCapability = detected.capability;
+            decided.lastDetectionSource = detected.source ?? undefined;
+            if (!await this.commitSetupDecision(state, decided, initialStateSignature)) {
+                return;
+            }
             const configure = await vscode.window.showWarningMessage(
                 i18n.t('warning.unsupportedAutoConfig', {
                     kind: unsupportedAutoConfigKindLabel(detected.kind)
@@ -110,8 +142,11 @@ export class InitialSetupFlow {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
                 return;
             }
-            this.useAutoProxy(state, detectedProxy, false, detected.source ?? undefined);
-            await this.context.proxyStateManager.saveState(state);
+            const decided: ProxyState = { ...state };
+            this.useAutoProxy(decided, detectedProxy, false, detected.source ?? undefined);
+            if (!await this.commitSetupDecision(state, decided, initialStateSignature)) {
+                return;
+            }
             const applied = await applyProxyThroughContext(this.context, detectedProxy, true);
             this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
             if (applied) {
@@ -175,9 +210,12 @@ export class InitialSetupFlow {
             return;
         }
 
-        state.manualProxyUrl = canonicalUrl;
-        this.useAutoProxy(state, canonicalUrl, true);
-        await this.context.proxyStateManager.saveState(state);
+        const decided: ProxyState = { ...state };
+        decided.manualProxyUrl = canonicalUrl;
+        this.useAutoProxy(decided, canonicalUrl, true);
+        if (!await this.commitSetupDecision(state, decided, initialStateSignature)) {
+            return;
+        }
 
         await vscode.workspace.getConfiguration('otakProxy').update(
             'proxyUrl',

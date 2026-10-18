@@ -1,9 +1,11 @@
 import { ProxyState } from './types';
 
 /**
- * A stable signature of everything applyStartupProxyState acts on. Used to detect
- * whether the persisted state changed while the (slow) startup enforcement ran,
- * so we can reconcile on the latest instead of a stale activation snapshot (#12).
+ * A stable signature of every input applyStartupProxyState reads — no
+ * bookkeeping. Used to detect whether the persisted state changed while the
+ * (slow) startup enforcement ran, so we can reconcile on the latest instead
+ * of a stale activation snapshot (#12). requiresAuth is an input (the
+ * unauthenticated-apply skip reads it), so a change in it alone re-runs.
  */
 function startupEnforcementTarget(
     state: ProxyState,
@@ -13,6 +15,7 @@ function startupEnforcementTarget(
         mode: state.mode,
         activeUrl: getActiveProxyUrl(state),
         autoModeOff: state.autoModeOff === true,
+        requiresAuth: state.requiresAuth === true,
         noProxy: state.noProxy ?? ''
     });
 }

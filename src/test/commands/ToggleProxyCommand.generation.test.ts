@@ -19,6 +19,7 @@ import { ProxyStateManager } from '../../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../../core/types';
 import { ErrorAggregator } from '../../errors/ErrorAggregator';
 import { I18nManager } from '../../i18n/I18nManager';
+import * as ProxyConnectionTest from '../../utils/ProxyConnectionTest';
 
 suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
     let sandbox: sinon.SinonSandbox;
@@ -51,6 +52,10 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
         /** An interleaved writer to run inside the next commitState call(s). */
         queuedCommitWrites: Array<() => Promise<void>>;
         duringApply: (writer: () => Promise<void>) => void;
+        /** Keys passed to userNotifier.showError. */
+        errors: string[];
+        /** Keys/params passed to userNotifier.showSuccess. */
+        successes: Array<{ key: string; params?: Record<string, string> }>;
     }
 
     /** Fake ExtensionContext wired like ProxyStateManager.test.ts: map-backed
@@ -93,7 +98,13 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
 
     function harness(
         initial: ProxyState,
-        options?: { detectedUrl?: string; detectedFields?: Partial<ProxyState> }
+        options?: {
+            detectedUrl?: string;
+            detectedFields?: Partial<ProxyState>;
+            /** Runs inside startSystemProxyMonitoring, like the immediate
+             *  check the real startSystemProxyMonitoring awaits. */
+            monitorStart?: () => Promise<void>;
+        }
     ): Harness {
         const { context, globalState } = fakeExtensionContext();
         globalState.set('proxyState', { revision: 1, ...initial });
@@ -104,6 +115,8 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
         const modeAtApply: ProxyMode[] = [];
         const published: ProxyState[] = [];
         const queuedCommitWrites: Array<() => Promise<void>> = [];
+        const errors: string[] = [];
+        const successes: Array<{ key: string; params?: Record<string, string> }> = [];
         let duringApplyWriter: (() => Promise<void>) | undefined;
 
         // Mirrors ProxyApplier.applyProxyDetailed -> saveProxyConfigResults:
@@ -178,12 +191,17 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
                         ...options.detectedFields
                     });
                 },
-                startSystemProxyMonitoring: async () => { events.push('monitorStart'); },
+                startSystemProxyMonitoring: async () => {
+                    events.push('monitorStart');
+                    await options?.monitorStart?.();
+                },
                 stopSystemProxyMonitoring: async () => { events.push('monitorStop'); },
                 userNotifier: {
-                    showSuccess: () => {},
+                    showSuccess: (key: string, params?: Record<string, string>) => {
+                        successes.push({ key, params });
+                    },
                     showWarning: () => {},
-                    showError: () => {},
+                    showError: (key: string) => { errors.push(key); },
                     showErrorWithDetails: async () => {},
                     showProgressNotification: async (_title, task) =>
                         task({ report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>)
@@ -196,7 +214,9 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
             modeAtApply,
             published,
             queuedCommitWrites,
-            duringApply: writer => { duringApplyWriter = writer; }
+            duringApply: writer => { duringApplyWriter = writer; },
+            errors,
+            successes
         };
         return h;
     }
@@ -214,11 +234,13 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
         assert.strictEqual(h.events.filter(e => e === 'monitorStart').length, 1);
         assert.strictEqual(h.published.length, 1);
         assert.strictEqual(h.published[0].mode, ProxyMode.Auto);
-        // commit < apply < monitorStart < publish: the mode is stored before
-        // the apply, and the monitor starts only afterwards.
-        const order = ['commit', 'apply', 'monitorStart', 'publish'].map(e => h.events.indexOf(e));
+        // commit < apply < publish < monitorStart: the mode is stored before
+        // the apply, and the monitor starts only once the pending flag is
+        // cleared and published, so its immediate check cannot publish a
+        // still-pending state to other windows.
+        const order = ['commit', 'apply', 'publish', 'monitorStart'].map(e => h.events.indexOf(e));
         assert.ok(order.every((index, i) => index >= 0 && (i === 0 || order[i - 1] < index)),
-            `expected commit < apply < monitorStart < publish, got ${h.events.join(',')}`);
+            `expected commit < apply < publish < monitorStart, got ${h.events.join(',')}`);
     });
 
     test('diagnostics inside the apply read the committed (new) mode, so Off -> Auto reports no residual', async () => {
@@ -390,5 +412,236 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
         assert.deepStrictEqual(state.lastTestResult, newerTestResult);
         assert.strictEqual(state.lastTestTimestamp, newerTimestamp);
         assert.strictEqual(state.proxyReachable, false);
+    });
+
+    test('the immediate check inside monitor start cannot publish a pending state', async () => {
+        // startSystemProxyMonitoring awaits checkAndUpdateSystemProxy, whose
+        // unchanged-detection path commits onto the current state and
+        // publishes it. Started before the pending flag is cleared, that
+        // publish would ship convergencePending: true to other windows.
+        const h = harness({ mode: ProxyMode.Off }, {
+            detectedUrl: 'http://proxy.example.com:8080',
+            monitorStart: async () => {
+                await h.ctx.saveProxyState({
+                    ...(await h.state()),
+                    lastSystemProxyCheck: Date.now(),
+                    systemProxyDetected: true
+                });
+                await h.ctx.publishProxyState(await h.state());
+            }
+        });
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.ok(h.published.length >= 1, 'the toggle and the check both publish');
+        for (const p of h.published) {
+            assert.notStrictEqual(p.convergencePending, true,
+                `a published state carried convergencePending: ${JSON.stringify(p)}`);
+        }
+        assert.strictEqual(state.convergencePending, false);
+    });
+
+    test('a CAS race on every attempt fails the toggle and applies nothing', async () => {
+        const h = harness({ mode: ProxyMode.Off }, { detectedUrl: 'http://proxy.example.com:8080' });
+        // Every commit attempt is preceded by a same-mode revision bump, so
+        // the compare-and-set can never land.
+        const baseCommit = h.ctx.commitProxyState;
+        h.ctx.commitProxyState = async (expected, next) => {
+            await h.ctx.saveProxyState({ ...(await h.state()), lastTestTimestamp: Date.now() });
+            return baseCommit(expected, next);
+        };
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, false);
+        assert.deepStrictEqual(h.errors, ['error.toggleFailed'], 'the failure is reported once');
+        assert.strictEqual(h.applies.length, 0, 'nothing was committed, so nothing may be applied');
+        assert.strictEqual(state.mode, ProxyMode.Off, 'the stored mode is unchanged');
+    });
+
+    test('a newer detection committed inside the CAS window wins over the toggle\'s copy', async () => {
+        // Off -> Auto runs detection (commits proxy A). Before the toggle's
+        // first commit lands, another detection commits proxy B under the
+        // same mode. The toggle must store and apply B, not refold A over it.
+        const h = harness({ mode: ProxyMode.Off }, { detectedUrl: 'http://a.example:8080' });
+        h.queuedCommitWrites.push(async () => {
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                autoProxyUrl: 'http://b.example:9090',
+                lastSystemProxyCheck: 9999
+            });
+        });
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://b.example:9090', 'the newer detection wins');
+        assert.strictEqual(state.lastSystemProxyCheck, 9999);
+        assert.deepStrictEqual(h.applies, [{ url: 'http://b.example:9090', enabled: true }]);
+    });
+
+    test('a decision that deletes requiresAuth leaves no requiresAuth stored', async () => {
+        // Stale requiresAuth on the saved state. Off -> Auto with nothing
+        // detected lands on Auto OFF, whose decision clears requiresAuth; the
+        // field must be deleted from the stored state, not left behind.
+        const h = harness({ mode: ProxyMode.Off, requiresAuth: true });
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual('requiresAuth' in state, false, 'requiresAuth must be removed, not stored');
+        assert.strictEqual(state.requiresAuth, undefined);
+    });
+
+    test('a same-mode identity change under every round fails bounded, without apply', async () => {
+        const h = harness({ mode: ProxyMode.Off }, { detectedUrl: 'http://a.example:8080' });
+        let identityMoves = 0;
+        // Every commit attempt is preceded by a same-mode identity change
+        // (a newer detection URL), so each round's basis is stale by commit
+        // time and the decision must be re-made, boundedly.
+        const baseCommit = h.ctx.commitProxyState;
+        h.ctx.commitProxyState = async (expected, next) => {
+            identityMoves++;
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                autoProxyUrl: `http://mover-${identityMoves}.example:8080`
+            });
+            return baseCommit(expected, next);
+        };
+
+        const result = await executeToggleProxy(h.ctx);
+
+        assert.strictEqual(result.success, false);
+        assert.deepStrictEqual(h.errors, ['error.toggleFailed'], 'the failure is reported once');
+        assert.strictEqual(h.applies.length, 0, 'nothing was committed, so nothing may be applied');
+        assert.ok(identityMoves <= 9, `bounded: at most 3 rounds x 3 attempts, saw ${identityMoves}`);
+    });
+
+    test('same-identity bookkeeping committed inside the CAS window is kept', async () => {
+        // Off -> Auto: the toggle's own detection commits proxy A with check
+        // metadata t1/result1. Inside the first commit attempt another writer
+        // commits the same proxy A with fresher t2/result2. Same identity, so
+        // the patch refolds onto it — a diff against a pre-detection snapshot
+        // would roll t2 back to t1.
+        const result1 = { success: true, testUrls: [], errors: [] } as never;
+        const result2 = { success: false, testUrls: [], errors: [{ url: '', message: 'timeout' }] } as never;
+        const h = harness({ mode: ProxyMode.Off }, {
+            detectedUrl: 'http://a.example:8080',
+            detectedFields: {
+                lastSystemProxyCheck: 1111,
+                lastTestResult: result1
+            }
+        });
+        h.queuedCommitWrites.push(async () => {
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                lastSystemProxyCheck: 2222,
+                lastTestResult: result2
+            });
+        });
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://a.example:8080');
+        assert.strictEqual(state.lastSystemProxyCheck, 2222, 'the newer check timestamp wins');
+        assert.deepStrictEqual(state.lastTestResult, result2);
+        assert.deepStrictEqual(h.applies, [{ url: 'http://a.example:8080', enabled: true }]);
+    });
+
+    test('a mode change before a re-decide round supersedes instead of undoing it', async () => {
+        // Round 1 ends moved with the same mode (identity churn inside the CAS
+        // window). Before round 2 reads, another window stores Auto. The toggle
+        // asked for Auto and must not now store Off over the other writer.
+        const h = harness({ mode: ProxyMode.Off, autoProxyUrl: 'http://a.example:8080' });
+        let moved = false;
+        let readsAfterMove = 0;
+        const baseCommit = h.ctx.commitProxyState;
+        h.ctx.commitProxyState = async (expected, next) => {
+            // Same-mode identity change: a newer detection URL.
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                autoProxyUrl: 'http://identity-mover.example:1'
+            });
+            moved = true;
+            return baseCommit(expected, next);
+        };
+        const baseGet = h.ctx.getProxyState;
+        h.ctx.getProxyState = async () => {
+            if (moved && ++readsAfterMove === 2) {
+                // Another window's toggle lands before round 2's first read.
+                await h.ctx.saveProxyState({
+                    ...(await baseGet()),
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://other.example:8080',
+                    autoModeOff: false
+                });
+            }
+            return baseGet();
+        };
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto, "the other writer's Auto must stand");
+        assert.strictEqual(state.autoProxyUrl, 'http://other.example:8080');
+        assert.strictEqual(h.applies.length, 0, 'a superseded toggle applies nothing');
+        assert.deepStrictEqual(h.errors, []);
+    });
+
+    test('the fallback toast fires once, only for the committed round', async () => {
+        // Off -> Auto, nothing detected, reachable manual fallback. Round 1's
+        // decision already falls back; the round ends moved with the same mode
+        // and round 2 decides and commits. The user-visible follow-up may only
+        // run for the round that committed.
+        sandbox.stub(ProxyConnectionTest, 'testProxyConnectionParallel').resolves({
+            success: true, testUrls: [], errors: []
+        } as never);
+        const h = harness({ mode: ProxyMode.Off, manualProxyUrl: 'http://manual.example:3128' });
+        h.queuedCommitWrites.push(async () => {
+            // Same-mode identity change inside the first CAS window.
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                manualProxyUrl: 'http://manual-v2.example:3128'
+            });
+        });
+
+        const result = await executeToggleProxy(h.ctx);
+
+        assert.strictEqual(result.success, true);
+        const fallbacks = h.successes.filter(s => s.key === 'fallback.usingManualProxy');
+        assert.strictEqual(fallbacks.length, 1,
+            `expected exactly one fallback toast, got ${JSON.stringify(h.successes)}`);
+        assert.strictEqual(fallbacks[0].params?.url, 'http://manual-v2.example:3128');
+    });
+
+    test('a failing toggle shows no fallback toast alongside the error', async () => {
+        sandbox.stub(ProxyConnectionTest, 'testProxyConnectionParallel').resolves({
+            success: true, testUrls: [], errors: []
+        } as never);
+        const h = harness({ mode: ProxyMode.Off, manualProxyUrl: 'http://manual.example:3128' });
+        // Every commit attempt is preceded by a revision bump: exhausted.
+        const baseCommit = h.ctx.commitProxyState;
+        h.ctx.commitProxyState = async (expected, next) => {
+            await h.ctx.saveProxyState({ ...(await h.state()), lastTestTimestamp: Date.now() });
+            return baseCommit(expected, next);
+        };
+
+        const result = await executeToggleProxy(h.ctx);
+
+        assert.strictEqual(result.success, false);
+        assert.deepStrictEqual(h.errors, ['error.toggleFailed']);
+        assert.strictEqual(h.successes.filter(s => s.key === 'fallback.usingManualProxy').length, 0,
+            'a round that never committed must not show the fallback toast');
     });
 });

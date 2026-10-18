@@ -307,29 +307,45 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 1. User clicks the status bar
    ↓
 2. ToggleProxyCommand.executeToggleProxy()
+   ├─→ Queues toggles so they run one at a time
+   └─→ Each queued toggle starts with a first read that fixes the
+       current mode and the next mode (Off ↔ Auto) for the whole
+       toggle
    ↓
-3. ProxyStateManager.getState()
-   └─→ Retrieve current state
+3. runToggleRound()
+   ├─→ Re-read state; a moved mode supersedes the toggle
+   │   (status bar refresh only)
+   └─→ Off → Auto with no detected proxy: run detection first,
+       then read the state again
    ↓
-4. Determine next mode (Off ↔ Auto; getNextMode never returns Manual)
+4. Decide the next state on a copy
+   └─→ Notifications and prompts the decision wants are only collected
    ↓
-5. ProxyApplier.applyProxy() or disableProxy()
-   ├─→ GitConfigManager
-   ├─→ VscodeConfigManager
-   ├─→ NpmConfigManager
-   └─→ TerminalEnvConfigManager
+5. commitDecidedPatch() (ApplyConvergence, at most 3 attempts)
+   └─→ Commit the changed fields plus convergencePending: true onto
+       the latest stored state with a revision check; guarded by
+       "same mode and same proxy identity as the decision's basis"
    ↓
-6. ProxyStateManager.saveState()
-   └─→ Save new state
+6. Commit landed → applyCommittedToggle()
+   ├─→ Off: stop monitoring, then remove the proxy settings
+   │       (GitConfigManager, VscodeConfigManager, NpmConfigManager,
+   │        TerminalEnvConfigManager); ProxyApplier shows "proxy
+   │       disabled" (the toggle's call is not silent)
+   ├─→ Auto: apply the proxy settings (same managers); ProxyApplier
+   │       shows "proxy configured" with the masked URL
+   │   (when a target failed, the aggregated error is shown instead)
+   ├─→ clearPendingThenPublish(): clear the pending flag and publish
+   │   the state (SyncManager.notifyChange reaches other windows
+   │   when sync is on)
+   ├─→ Auto: start monitoring only after publishing
+   ├─→ StatusBarManager.update() from the stored state
+   └─→ Run the collected notifications
    ↓
-7. SyncManager (when enabled)
-   └─→ Propagate state to other instances
-   ↓
-8. StatusBarManager.update()
-   └─→ Update UI
-   ↓
-9. UserNotifier.showSuccess()
-   └─→ Success notification
+7. Commit did not land
+   ├─→ Mode changed: superseded, refresh status bar only
+   ├─→ Same mode, new proxy identity: decide again (at most 3 rounds)
+   └─→ Every attempt lost the race or the rounds ran out:
+       "Failed to toggle proxy mode" is shown, nothing is applied
 ```
 
 ### Auto Mode Monitoring Flow
@@ -426,11 +442,12 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ToggleProxyCommand
 - **Responsibility**: Mode switching (Off ↔ Auto)
 - **Flow**:
-  1. Get current mode
-  2. Determine next mode (`getNextMode`: Off → Auto → Off)
-  3. Apply or disable proxy
-  4. Save state
-  5. Update UI
+  1. First read fixes the current mode and the next mode (Off ↔ Auto) for the whole toggle
+  2. Each round re-reads the state; Off → Auto with no detected proxy runs detection first, then reads again
+  3. The next state is decided on a copy; notifications and prompts the decision wants are only collected here
+  4. `commitDecidedPatch` commits the changed fields plus `convergencePending: true` onto the latest stored state with a revision check, guarded by same mode and same proxy identity (at most 3 attempts)
+  5. On commit: Off stops monitoring and removes the proxy settings, Auto applies them; `ProxyApplier` shows "proxy configured" with the masked URL after an apply and "proxy disabled" after a removal (the toggle's call is not silent), or the aggregated error when a target failed; `clearPendingThenPublish` clears the pending flag and publishes the state (reaching other windows via `SyncManager.notifyChange` when sync is on); Auto then starts monitoring; the status bar refreshes from the stored state and the collected notifications run
+  6. When the commit does not land: a mode change supersedes the toggle (status bar refresh only); a same-mode identity change re-decides (at most 3 rounds); every attempt lost or rounds exhausted shows "Failed to toggle proxy mode" and nothing is applied
 
 #### ConfigureUrlCommand
 - **Responsibility**: Configure the Auto fallback proxy URL (`otak: Configure Manual Proxy`)

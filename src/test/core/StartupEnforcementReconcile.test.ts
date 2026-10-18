@@ -74,6 +74,66 @@ suite('Startup proxy enforcement reconcile loop (#78)', () => {
         assert.strictEqual(target?.mode, ProxyMode.Off);
     });
 
+    test('a requiresAuth flip to true during the apply re-runs with the latest state', async () => {
+        const initial: ProxyState = { revision: 1, mode: ProxyMode.Auto, autoProxyUrl: 'http://a.example:8080' };
+        const h = harness(initial);
+        let pass = 0;
+
+        const target = await reconcileStartupProxyApply(
+            initial,
+            activeUrl,
+            async t => {
+                await h.apply(t);
+                if (pass === 0) {
+                    // Credential metadata arrived mid-apply (e.g. a synced
+                    // state): the skip path reads requiresAuth, so this is a
+                    // real input change, not bookkeeping.
+                    h.write(current => ({ ...current, requiresAuth: true }));
+                }
+                pass++;
+            },
+            h.getState,
+            () => true
+        );
+
+        assert.strictEqual(h.appliedTargets.length, 2, 'a requiresAuth change reconciles once more');
+        assert.strictEqual(h.appliedTargets[1].requiresAuth, true, 'the second apply sees the latest state');
+        assert.strictEqual(target?.requiresAuth, true);
+    });
+
+    test('a requiresAuth flip to false during the apply re-runs with the latest state', async () => {
+        const initial: ProxyState = {
+            revision: 1,
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://a.example:8080',
+            requiresAuth: true
+        };
+        const h = harness(initial);
+        let pass = 0;
+
+        const target = await reconcileStartupProxyApply(
+            initial,
+            activeUrl,
+            async t => {
+                await h.apply(t);
+                if (pass === 0) {
+                    h.write(current => {
+                        const next = { ...current };
+                        delete next.requiresAuth;
+                        return next;
+                    });
+                }
+                pass++;
+            },
+            h.getState,
+            () => true
+        );
+
+        assert.strictEqual(h.appliedTargets.length, 2, 'a requiresAuth change reconciles once more');
+        assert.strictEqual(h.appliedTargets[1].requiresAuth, undefined);
+        assert.strictEqual(target?.requiresAuth, undefined);
+    });
+
     test('the loop stays bounded when the identity keeps changing', async () => {
         const initial: ProxyState = { revision: 1, mode: ProxyMode.Auto, autoProxyUrl: 'http://a.example:8080' };
         const h = harness(initial);

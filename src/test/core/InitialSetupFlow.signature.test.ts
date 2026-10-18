@@ -9,9 +9,10 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { InitialSetupFlow } from '../../core/InitialSetupFlow';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
-import { ProxyMode, ProxyState, stateRevision } from '../../core/types';
+import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../../core/types';
 import { I18nManager } from '../../i18n/I18nManager';
 import { InputSanitizer } from '../../validation/InputSanitizer';
+import * as DetectUtils from '../../utils/SystemProxyDetectionUtils';
 
 suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
     let sandbox: sinon.SinonSandbox;
@@ -22,6 +23,9 @@ suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
         i18n = I18nManager.getInstance();
         i18n.initialize('en');
         sandbox.stub(vscode.commands, 'executeCommand').resolves();
+        if (!('showInputBox' in vscode.window)) {
+            (vscode.window as { showInputBox?: unknown }).showInputBox = async () => undefined;
+        }
         sandbox.stub(vscode.workspace, 'getConfiguration').returns({
             get: (_key: string, defaultValue?: unknown) => defaultValue,
             update: () => Promise.resolve(),
@@ -38,6 +42,8 @@ suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
         let stored: ProxyState = { revision: 1, mode: ProxyMode.Off };
         const applies: Array<{ url: string; enabled: boolean }> = [];
         const notifications: string[] = [];
+        /** Writers to run inside the next commitState call(s). */
+        const queuedCommitWrites: Array<() => Promise<void>> = [];
 
         const context = {
             extensionContext: {} as vscode.ExtensionContext,
@@ -45,6 +51,15 @@ suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
                 getState: async () => ({ ...stored }),
                 saveState: async (next: ProxyState) => {
                     stored = { ...next, revision: stateRevision(stored) + 1 };
+                },
+                commitState: async (expected: number, next: ProxyState): Promise<StateCommitResult> => {
+                    await queuedCommitWrites.shift()?.();
+                    if (stateRevision(stored) !== expected) {
+                        return { kind: 'superseded', current: { ...stored } };
+                    }
+                    const revision = expected + 1;
+                    stored = { ...next, revision };
+                    return { kind: 'committed', revision, state: { ...stored } };
                 }
             },
             proxyApplier: {} as never,
@@ -67,6 +82,7 @@ suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
             context,
             applies,
             notifications,
+            queuedCommitWrites,
             state: () => stored,
             /** The startup apply committing while the prompt is open. */
             write: (change: (current: ProxyState) => ProxyState) =>
@@ -114,5 +130,110 @@ suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
         assert.strictEqual(h.state().manualProxyUrl, undefined, 'the answer must not overwrite the newer state');
         assert.strictEqual(h.state().mode, ProxyMode.Auto);
         assert.strictEqual(h.applies.length, 0);
+    });
+
+    /** Bookkeeping another writer can commit while the prompt is open:
+     *  same signature, other fields. */
+    const bookkeeping = (current: ProxyState): ProxyState => ({
+        ...current,
+        lastError: 'startup apply failed earlier',
+        convergencePending: false,
+        lastTestResult: { success: true, testUrls: [], errors: [] } as never,
+        lastTestTimestamp: 1234,
+        gitConfigured: true
+    });
+
+    const assertBookkeepingKept = (state: ProxyState) => {
+        assert.strictEqual(state.lastError, 'startup apply failed earlier');
+        assert.strictEqual(state.convergencePending, false);
+        assert.strictEqual(state.lastTestTimestamp, 1234);
+        assert.strictEqual(state.gitConfigured, true);
+    };
+
+    test('manual setup keeps bookkeeping committed while the prompt was open', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .resolves(i18n.t('action.manualSetup'));
+        (sandbox.stub(vscode.window, 'showInputBox') as sinon.SinonStub).callsFake(async () => {
+            // Same-identity bookkeeping lands while the prompt is open.
+            await h.write(bookkeeping);
+            return 'http://manual.example:3128';
+        });
+
+        await flow.askForInitialSetup();
+
+        const state = h.state();
+        assert.strictEqual(state.manualProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.deepStrictEqual(h.applies, [{ url: 'http://manual.example:3128', enabled: true }]);
+        assertBookkeepingKept(state);
+    });
+
+    test('auto setup with a detected proxy keeps bookkeeping committed while the prompt was open', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        sandbox.stub(DetectUtils, 'detectSystemProxySettingsWithSource').resolves(
+            { proxyUrl: 'http://detected.example:8080', source: 'windows' } as never
+        );
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .callsFake(async () => {
+                // Same-identity bookkeeping lands while the prompt is open.
+                await h.write(bookkeeping);
+                return i18n.t('action.autoSystem');
+            });
+
+        await flow.askForInitialSetup();
+
+        const state = h.state();
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://detected.example:8080');
+        assert.deepStrictEqual(h.applies, [{ url: 'http://detected.example:8080', enabled: true }]);
+        assertBookkeepingKept(state);
+    });
+
+    test('a conflict on the first commit attempt is refolded onto the newer state', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .resolves(i18n.t('action.manualSetup'));
+        (sandbox.stub(vscode.window, 'showInputBox') as sinon.SinonStub)
+            .resolves('http://manual.example:3128');
+        // Another writer's bookkeeping lands between the read and the
+        // compare-and-set: the first CAS loses, the refold must keep it.
+        h.queuedCommitWrites.push(async () => {
+            await h.write(bookkeeping);
+        });
+
+        await flow.askForInitialSetup();
+
+        const state = h.state();
+        assert.strictEqual(state.manualProxyUrl, 'http://manual.example:3128');
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assertBookkeepingKept(state);
+    });
+
+    test('a signature change between the prompt answer and the commit skips the apply', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .resolves(i18n.t('action.manualSetup'));
+        (sandbox.stub(vscode.window, 'showInputBox') as sinon.SinonStub)
+            .resolves('http://manual.example:3128');
+        // A real change (another window's toggle) lands inside the CAS window:
+        // the guard rejects and the answer must not be saved or applied.
+        h.queuedCommitWrites.push(async () => {
+            await h.write(current => ({
+                ...current,
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://other.example:9090'
+            }));
+        });
+
+        await flow.askForInitialSetup();
+
+        assert.strictEqual(h.state().manualProxyUrl, undefined);
+        assert.strictEqual(h.state().autoProxyUrl, 'http://other.example:9090');
+        assert.strictEqual(h.applies.length, 0, 'moved state means no apply');
     });
 });
