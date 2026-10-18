@@ -213,6 +213,101 @@ suite('InitialSetupFlow answer survives a revision-only commit (#78)', () => {
         assertBookkeepingKept(state);
     });
 
+    test('a manual answer whose commit is exhausted reports the unsaved setup and resolves false', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .resolves(i18n.t('action.manualSetup'));
+        (sandbox.stub(vscode.window, 'showInputBox') as sinon.SinonStub)
+            .resolves('http://manual.example:3128');
+        const configUpdates: string[] = [];
+        (vscode.workspace.getConfiguration as sinon.SinonStub).returns({
+            get: (_key: string, defaultValue?: unknown) => defaultValue,
+            update: (key: string) => { configUpdates.push(key); return Promise.resolve(); },
+            has: () => true,
+            inspect: () => undefined
+        } as unknown as vscode.WorkspaceConfiguration);
+        // Revision-only writers win every CAS attempt while the signature
+        // stays current: the answer is never stored.
+        for (let i = 0; i < 3; i++) {
+            h.queuedCommitWrites.push(async () => {
+                await h.write(current => ({ ...current, lastTestTimestamp: Date.now() + i }));
+            });
+        }
+
+        const result = await flow.askForInitialSetup();
+
+        assert.strictEqual(result, false, 'an unsaved answer must resolve false');
+        assert.deepStrictEqual(
+            h.notifications.filter(n => n === 'error.initialSetupNotSaved'),
+            ['error.initialSetupNotSaved'],
+            'the unsaved-setup error is shown once'
+        );
+        assert.strictEqual(h.applies.length, 0, 'nothing was committed, so nothing may be applied');
+        assert.deepStrictEqual(configUpdates, [], 'no otakProxy.proxyUrl setting may be written');
+        assert.strictEqual(h.state().manualProxyUrl, undefined);
+        assert.strictEqual(h.state().mode, ProxyMode.Off, 'the stored mode is unchanged');
+    });
+
+    test('an auto answer whose commit is exhausted reports the unsaved setup and resolves false', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        sandbox.stub(DetectUtils, 'detectSystemProxySettingsWithSource').resolves(
+            { proxyUrl: 'http://detected.example:8080', source: 'windows' } as never
+        );
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .resolves(i18n.t('action.autoSystem'));
+        for (let i = 0; i < 3; i++) {
+            h.queuedCommitWrites.push(async () => {
+                await h.write(current => ({ ...current, lastTestTimestamp: Date.now() + i }));
+            });
+        }
+
+        const result = await flow.askForInitialSetup();
+
+        assert.strictEqual(result, false, 'an unsaved answer must resolve false');
+        assert.deepStrictEqual(
+            h.notifications.filter(n => n === 'error.initialSetupNotSaved'),
+            ['error.initialSetupNotSaved'],
+            'the unsaved-setup error is shown once'
+        );
+        assert.strictEqual(h.applies.length, 0, 'nothing was committed, so nothing may be applied');
+        assert.strictEqual(h.state().mode, ProxyMode.Off, 'the stored mode is unchanged');
+        assert.strictEqual(h.state().autoProxyUrl, undefined);
+    });
+
+    test('a signature change on the last CAS attempt still counts as moved and resolves true', async () => {
+        const h = harness();
+        const flow = new InitialSetupFlow(h.context, async () => {});
+        (sandbox.stub(vscode.window, 'showInformationMessage') as sinon.SinonStub)
+            .resolves(i18n.t('action.manualSetup'));
+        (sandbox.stub(vscode.window, 'showInputBox') as sinon.SinonStub)
+            .resolves('http://manual.example:3128');
+        // Attempts 1-2 lose to revision-only bumps; attempt 3 loses to a real
+        // signature change (another window's toggle). 'moved' keeps today's
+        // meaning: another writer owns the state, the setup is finished.
+        for (let i = 0; i < 2; i++) {
+            h.queuedCommitWrites.push(async () => {
+                await h.write(current => ({ ...current, lastTestTimestamp: Date.now() + i }));
+            });
+        }
+        h.queuedCommitWrites.push(async () => {
+            await h.write(current => ({
+                ...current,
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://other.example:9090'
+            }));
+        });
+
+        const result = await flow.askForInitialSetup();
+
+        assert.strictEqual(result, true, 'moved means another writer owns the state; not an unsaved answer');
+        assert.deepStrictEqual(h.notifications.filter(n => n === 'error.initialSetupNotSaved'), []);
+        assert.strictEqual(h.state().manualProxyUrl, undefined);
+        assert.strictEqual(h.state().mode, ProxyMode.Auto);
+        assert.strictEqual(h.applies.length, 0);
+    });
+
     test('a signature change between the prompt answer and the commit skips the apply', async () => {
         const h = harness();
         const flow = new InitialSetupFlow(h.context, async () => {});

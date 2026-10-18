@@ -18,8 +18,13 @@ export class InitialSetupFlow {
 
     /**
      * Ask for initial setup.
+     *
+     * Returns `false` only when the user's answer could not be stored (the
+     * commit was exhausted): the error is reported and the setup must be
+     * offered again on the next start. Every other end — stored, skipped,
+     * dismissed, invalid URL, or superseded by another writer — is `true`.
      */
-    async askForInitialSetup(): Promise<void> {
+    async askForInitialSetup(): Promise<boolean> {
         const state = await this.context.proxyStateManager.getState();
         const initialStateSignature = this.setupStateSignature(state);
         const i18n = I18nManager.getInstance();
@@ -33,13 +38,17 @@ export class InitialSetupFlow {
 
         if (!await this.isSetupStateCurrent(initialStateSignature)) {
             Logger.log('Initial setup skipped because proxy state changed while the prompt was open.');
-            return;
+            return true;
         }
 
         if (modeAnswer === i18n.t('action.autoSystem')) {
-            await this.handleAutoSetup(state, i18n, initialStateSignature);
+            if (!await this.handleAutoSetup(state, i18n, initialStateSignature)) {
+                return false;
+            }
         } else if (modeAnswer === i18n.t('action.manualSetup')) {
-            await this.handleManualSetup(state, i18n, initialStateSignature);
+            if (!await this.handleManualSetup(state, i18n, initialStateSignature)) {
+                return false;
+            }
         }
 
         // Some setup branches (notably configureUrl fallback) operate on a state
@@ -49,6 +58,7 @@ export class InitialSetupFlow {
         if (committedState.mode === ProxyMode.Auto) {
             await this.startSystemProxyMonitoring();
         }
+        return true;
     }
 
     private setupStateSignature(state: ProxyState): string {
@@ -82,13 +92,16 @@ export class InitialSetupFlow {
      * while the signature still matches the pre-prompt one. Saving the whole
      * pre-prompt object would roll back bookkeeping other writers committed
      * meanwhile (apply results, detection, test fields). On `moved` or
-     * `exhausted` nothing is written and the branch stops.
+     * `exhausted` nothing is written and the branch stops. `moved` means
+     * another writer owns the state and the setup is finished; `exhausted`
+     * means the answer was not stored and is reported, so the setup is
+     * offered again on the next start.
      */
     private async commitSetupDecision(
         prePromptState: ProxyState,
         decidedState: ProxyState,
         initialStateSignature: string
-    ): Promise<boolean> {
+    ): Promise<'committed' | 'moved' | 'exhausted'> {
         const manager = this.context.proxyStateManager;
         const outcome = await commitDecidedPatch(
             {
@@ -98,32 +111,43 @@ export class InitialSetupFlow {
             diffProxyState(prePromptState, decidedState),
             latest => this.setupStateSignature(latest) === initialStateSignature
         );
-        if (outcome.kind === 'committed') {
-            return true;
+        if (outcome.kind === 'exhausted') {
+            Logger.warn('Initial setup answer could not be saved: the proxy state kept changing under the commit window.');
+            this.context.userNotifier.showError(
+                'error.initialSetupNotSaved',
+                ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
+            );
+            return 'exhausted';
         }
-        Logger.log('Initial setup action skipped because proxy state changed while setup was waiting.');
-        return false;
+        if (outcome.kind === 'moved') {
+            Logger.log('Initial setup action skipped because proxy state changed while setup was waiting.');
+        }
+        return outcome.kind;
     }
 
     private async handleAutoSetup(
         state: ProxyState,
         i18n: I18nManager,
         initialStateSignature: string
-    ): Promise<void> {
+    ): Promise<boolean> {
         const detected = await detectSystemProxySettingsWithSource();
         const detectedProxy = detected.proxyUrl;
 
         if (isUnsupportedAutoConfig(detected)) {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
-                return;
+                return true;
             }
             const decided: ProxyState = { ...state };
             decided.systemProxyDetected = true;
             decided.lastDetectionKind = detected.kind;
             decided.lastDetectionCapability = detected.capability;
             decided.lastDetectionSource = detected.source ?? undefined;
-            if (!await this.commitSetupDecision(state, decided, initialStateSignature)) {
-                return;
+            const commitOutcome = await this.commitSetupDecision(state, decided, initialStateSignature);
+            if (commitOutcome === 'exhausted') {
+                return false;
+            }
+            if (commitOutcome !== 'committed') {
+                return true;
             }
             const configure = await vscode.window.showWarningMessage(
                 i18n.t('warning.unsupportedAutoConfig', {
@@ -135,17 +159,21 @@ export class InitialSetupFlow {
             if (configure === i18n.t('action.configureManual')) {
                 await vscode.commands.executeCommand('otak-proxy.configureUrl');
             }
-            return;
+            return true;
         }
 
         if (detectedProxy && validateProxyUrl(detectedProxy)) {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
-                return;
+                return true;
             }
             const decided: ProxyState = { ...state };
             this.useAutoProxy(decided, detectedProxy, false, detected.source ?? undefined);
-            if (!await this.commitSetupDecision(state, decided, initialStateSignature)) {
-                return;
+            const commitOutcome = await this.commitSetupDecision(state, decided, initialStateSignature);
+            if (commitOutcome === 'exhausted') {
+                return false;
+            }
+            if (commitOutcome !== 'committed') {
+                return true;
             }
             const applied = await applyProxyThroughContext(this.context, detectedProxy, true);
             this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
@@ -155,7 +183,7 @@ export class InitialSetupFlow {
                     { url: this.context.sanitizer.maskPassword(detectedProxy) }
                 );
             }
-            return;
+            return true;
         }
 
         const fallback = await vscode.window.showInformationMessage(
@@ -166,7 +194,7 @@ export class InitialSetupFlow {
 
         if (fallback === i18n.t('action.yes')) {
             if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
-                return;
+                return true;
             }
             await vscode.commands.executeCommand('otak-proxy.configureUrl');
             const updatedState = await this.context.proxyStateManager.getState();
@@ -177,20 +205,21 @@ export class InitialSetupFlow {
                 this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
             }
         }
+        return true;
     }
 
     private async handleManualSetup(
         state: ProxyState,
         i18n: I18nManager,
         initialStateSignature: string
-    ): Promise<void> {
+    ): Promise<boolean> {
         const manualProxyUrl = await vscode.window.showInputBox({
             prompt: i18n.t('prompt.proxyUrl'),
             placeHolder: i18n.t('prompt.proxyUrlPlaceholder')
         });
 
         if (!manualProxyUrl) {
-            return;
+            return true;
         }
 
         const canonicalUrl = canonicalizeValidProxyUrl(manualProxyUrl);
@@ -203,18 +232,22 @@ export class InitialSetupFlow {
                     'suggestion.validHostname'
                 ]
             );
-            return;
+            return true;
         }
 
         if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
-            return;
+            return true;
         }
 
         const decided: ProxyState = { ...state };
         decided.manualProxyUrl = canonicalUrl;
         this.useAutoProxy(decided, canonicalUrl, true);
-        if (!await this.commitSetupDecision(state, decided, initialStateSignature)) {
-            return;
+        const commitOutcome = await this.commitSetupDecision(state, decided, initialStateSignature);
+        if (commitOutcome === 'exhausted') {
+            return false;
+        }
+        if (commitOutcome !== 'committed') {
+            return true;
         }
 
         await vscode.workspace.getConfiguration('otakProxy').update(
@@ -231,6 +264,7 @@ export class InitialSetupFlow {
                 { url: this.context.sanitizer.maskPassword(canonicalUrl) }
             );
         }
+        return true;
     }
 
     private useAutoProxy(

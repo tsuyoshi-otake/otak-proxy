@@ -259,8 +259,8 @@ export class ExtensionInitializer {
     /**
      * Ask for initial setup
      */
-    async askForInitialSetup(): Promise<void> {
-        await this.initialSetupFlow.askForInitialSetup();
+    async askForInitialSetup(): Promise<boolean> {
+        return await this.initialSetupFlow.askForInitialSetup();
     }
 
     /**

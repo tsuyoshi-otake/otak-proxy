@@ -238,6 +238,40 @@ suite('I18nManager Unit Tests', () => {
     });
 
     /**
+     * Unit Test: localized values must not contain mojibake markers
+     *
+     * Guards against values written through a non-UTF-8 path (a console
+     * code page): U+FFFD replacement characters, runs of '?' where
+     * characters were dropped, and '?' sitting between two letters.
+     */
+    test('Translation values should contain no replacement or placeholder characters', () => {
+        const fs = require('fs');
+        const path = require('path');
+
+        const locales = [
+            'en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'vi',
+            'es', 'pt-br', 'fr', 'de', 'hi', 'id', 'it', 'ru', 'ar', 'tr'
+        ];
+
+        for (const locale of locales) {
+            const p = path.join(__dirname, '../../i18n/locales', `${locale}.json`);
+            const translations = JSON.parse(fs.readFileSync(p, 'utf-8'));
+
+            for (const [key, value] of Object.entries(translations)) {
+                if (typeof value !== 'string') {
+                    continue;
+                }
+                assert.ok(!value.includes('\uFFFD'),
+                    `${locale}.${key} contains a U+FFFD replacement character: ${value}`);
+                assert.ok(!/\?\?/.test(value),
+                    `${locale}.${key} contains a run of two or more '?': ${value}`);
+                assert.ok(!/\p{L}\?\p{L}/u.test(value),
+                    `${locale}.${key} contains a '?' directly between two letters: ${value}`);
+            }
+        }
+    });
+
+    /**
      * Unit Test: package.nls file validation
      *
      * Validates that all package.nls.*.json files have the same set of keys

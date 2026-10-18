@@ -97,6 +97,71 @@ suite('commitDecidedPatch folds a decided patch onto the latest state (#78)', ()
         assert.deepStrictEqual(h.stored(), { revision: 1, mode: ProxyMode.Off });
     });
 
+    test('a last-attempt loss to a guard-moving write reports moved, not exhausted', async () => {
+        const h = harness({ revision: 1, mode: ProxyMode.Off });
+        // Attempts 1-2 lose to revision-only bumps; attempt 3 loses to a write
+        // that moves the mode past the guard. Without the final guarded read
+        // the loop reports 'exhausted' even though the state moved.
+        for (let i = 0; i < 2; i++) {
+            h.queuedCommitWrites.push(() => {
+                h.write(current => ({ ...current, lastTestTimestamp: Date.now() + i }));
+            });
+        }
+        h.queuedCommitWrites.push(() => {
+            h.write(current => ({
+                ...current,
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://other.example:9090'
+            }));
+        });
+
+        const outcome = await commitDecidedPatch(
+            h.writer,
+            { mode: ProxyMode.Auto },
+            latest => latest.mode === ProxyMode.Off
+        );
+
+        assert.strictEqual(outcome.kind, 'moved');
+        assert.strictEqual(outcome.kind === 'moved' && outcome.state.mode, ProxyMode.Auto);
+        assert.strictEqual(outcome.kind === 'moved' && outcome.state.autoProxyUrl, 'http://other.example:9090');
+        assert.strictEqual(h.stored().mode, ProxyMode.Auto);
+        assert.strictEqual(h.writes.length, 0, 'the patch was never stored');
+    });
+
+    test('the moved/exhausted check reads through getState, not the superseded payload', async () => {
+        // ProxyStateManager.commitState returns the stored state, which can
+        // lack hydrated credentials; an identity guard that ran on that
+        // payload would see a false identity change. Only getState() sees the
+        // credentials, so the outcome must stay 'exhausted' here.
+        const h = harness({
+            revision: 1,
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://user:pass@a.example:8080'
+        });
+        const writer = {
+            getState: h.writer.getState,
+            commitState: async (expected: number, next: ProxyState): Promise<StateCommitResult> => {
+                // Revision-only loss; the returned `current` drops the
+                // credentials the stored/hydrated state carries.
+                h.write(current => ({ ...current, lastTestTimestamp: Date.now() }));
+                const stored = await h.writer.getState();
+                return {
+                    kind: 'superseded',
+                    current: { ...stored, autoProxyUrl: 'http://a.example:8080' }
+                };
+            }
+        };
+
+        const outcome = await commitDecidedPatch(
+            writer,
+            { lastError: 'x' },
+            latest => latest.autoProxyUrl === 'http://user:pass@a.example:8080'
+        );
+
+        assert.strictEqual(outcome.kind, 'exhausted',
+            'getState still carries the credentials, so the identity is unchanged and the outcome is exhausted');
+    });
+
     test('exhausted after three conflicts; nothing is written', async () => {
         const h = harness({ revision: 1, mode: ProxyMode.Off });
         // Every attempt loses the CAS race to a revision bump.

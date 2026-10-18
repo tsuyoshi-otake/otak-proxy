@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "Échec du test de connexion du proxy pour : {url}",
     "error.proxyDoesNotWork": "Le proxy détecté ne fonctionne pas",
     "error.toggleFailed": "Échec du changement de mode du proxy",
+    "error.initialSetupNotSaved": "La configuration initiale du proxy n'a pas pu être enregistrée car l'état du proxy changeait sans cesse. Elle sera proposée à nouveau au prochain démarrage de la fenêtre.",
     "error.configureUrlFailed": "Échec de la configuration de l'URL du proxy",
     "error.testProxyFailed": "Échec du test de connexion du proxy",
     "error.importProxyFailed": "Échec de l'importation du proxy système",

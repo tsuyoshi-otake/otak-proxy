@@ -324,7 +324,9 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 5. commitDecidedPatch() (ApplyConvergence, at most 3 attempts)
    └─→ Commit the changed fields plus convergencePending: true onto
        the latest stored state with a revision check; guarded by
-       "same mode and same proxy identity as the decision's basis"
+       "same mode and same proxy identity as the decision's basis";
+       when the attempts run out, one final guarded read decides
+       between moved and exhausted
    ↓
 6. Commit landed → applyCommittedToggle()
    ├─→ Off: stop monitoring, then remove the proxy settings
@@ -342,10 +344,12 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
    └─→ Run the collected notifications
    ↓
 7. Commit did not land
-   ├─→ Mode changed: superseded, refresh status bar only
+   ├─→ Mode changed (also detected by the final guarded read after
+   │   the last attempt): superseded, refresh status bar only
    ├─→ Same mode, new proxy identity: decide again (at most 3 rounds)
-   └─→ Every attempt lost the race or the rounds ran out:
-       "Failed to toggle proxy mode" is shown, nothing is applied
+   └─→ Every attempt lost and the final read still passes the
+       guard, or the rounds ran out: "Failed to toggle proxy mode"
+       is shown, nothing is applied
 ```
 
 ### Auto Mode Monitoring Flow
@@ -409,7 +413,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ExtensionInitializer
 - **Responsibility**: First-launch processing, state migration, component initialization
 - **Key features**:
-  - First-launch detection and setup dialog
+  - First-launch detection and setup dialog (`InitialSetupFlow.askForInitialSetup`): the setup decision commits through `commitDecidedPatch` like the toggle; an answer that could not be saved (`exhausted`) shows `error.initialSetupNotSaved` and `performInitialSetup` leaves `hasInitialSetup` unset, so the setup is offered again on the next start
   - Migration from legacy settings
   - Auto mode monitoring startup
 
@@ -445,9 +449,9 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   1. First read fixes the current mode and the next mode (Off ↔ Auto) for the whole toggle
   2. Each round re-reads the state; Off → Auto with no detected proxy runs detection first, then reads again
   3. The next state is decided on a copy; notifications and prompts the decision wants are only collected here
-  4. `commitDecidedPatch` commits the changed fields plus `convergencePending: true` onto the latest stored state with a revision check, guarded by same mode and same proxy identity (at most 3 attempts)
+  4. `commitDecidedPatch` commits the changed fields plus `convergencePending: true` onto the latest stored state with a revision check, guarded by same mode and same proxy identity (at most 3 attempts); when the attempts run out, a final guarded read decides between `moved` and `exhausted`
   5. On commit: Off stops monitoring and removes the proxy settings, Auto applies them; `ProxyApplier` shows "proxy configured" with the masked URL after an apply and "proxy disabled" after a removal (the toggle's call is not silent), or the aggregated error when a target failed; `clearPendingThenPublish` clears the pending flag and publishes the state (reaching other windows via `SyncManager.notifyChange` when sync is on); Auto then starts monitoring; the status bar refreshes from the stored state and the collected notifications run
-  6. When the commit does not land: a mode change supersedes the toggle (status bar refresh only); a same-mode identity change re-decides (at most 3 rounds); every attempt lost or rounds exhausted shows "Failed to toggle proxy mode" and nothing is applied
+  6. When the commit does not land: a mode change supersedes the toggle (status bar refresh only); a same-mode identity change re-decides (at most 3 rounds); every attempt lost with the basis still current, or the rounds exhausted, shows "Failed to toggle proxy mode" and nothing is applied
 
 #### ConfigureUrlCommand
 - **Responsibility**: Configure the Auto fallback proxy URL (`otak: Configure Manual Proxy`)

@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "Uji koneksi proxy gagal untuk: {url}",
     "error.proxyDoesNotWork": "Proxy yang terdeteksi tidak berfungsi",
     "error.toggleFailed": "Gagal mengalihkan mode proxy",
+    "error.initialSetupNotSaved": "Pengaturan proxy awal tidak dapat disimpan karena status proxy terus berubah. Pengaturan akan ditawarkan lagi saat jendela dimulai berikutnya.",
     "error.configureUrlFailed": "Gagal mengonfigurasi URL proxy",
     "error.testProxyFailed": "Gagal menguji koneksi proxy",
     "error.importProxyFailed": "Gagal mengimpor proxy sistem",

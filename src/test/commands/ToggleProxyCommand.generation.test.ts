@@ -443,6 +443,71 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
         assert.strictEqual(state.convergencePending, false);
     });
 
+    test('a mode change on the last CAS attempt supersedes instead of failing', async () => {
+        // The third compare-and-set of the round loses to another writer that
+        // already owns the mode. The final guarded read must see the move:
+        // the toggle is superseded (success, status bar from the other
+        // writer's state), not failed.
+        const h = harness({ mode: ProxyMode.Off }, { detectedUrl: 'http://a.example:8080' });
+        h.queuedCommitWrites.push(async () => {
+            await h.ctx.saveProxyState({ ...(await h.state()), lastTestTimestamp: Date.now() });
+        });
+        h.queuedCommitWrites.push(async () => {
+            await h.ctx.saveProxyState({ ...(await h.state()), lastTestTimestamp: Date.now() + 1 });
+        });
+        h.queuedCommitWrites.push(async () => {
+            // Another window's toggle lands inside the third attempt.
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://other.example:9090'
+            });
+        });
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.deepStrictEqual(h.errors, [], 'a superseded toggle shows no error');
+        assert.strictEqual(h.applies.length, 0, 'nothing was committed, so nothing may be applied');
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://other.example:9090');
+        assert.ok(h.events.includes('statusBar'),
+            "the status bar is refreshed from the other writer's state");
+    });
+
+    test('a same-mode identity change on the last CAS attempt triggers a re-decide round', async () => {
+        // The third attempt loses to a same-mode identity change (a newer
+        // detection URL). Not 'exhausted': the round ends moved and the
+        // toggle decides again on the fresh basis, then commits and applies
+        // exactly once.
+        const h = harness({ mode: ProxyMode.Off }, { detectedUrl: 'http://a.example:8080' });
+        h.queuedCommitWrites.push(async () => {
+            await h.ctx.saveProxyState({ ...(await h.state()), lastTestTimestamp: Date.now() });
+        });
+        h.queuedCommitWrites.push(async () => {
+            await h.ctx.saveProxyState({ ...(await h.state()), lastTestTimestamp: Date.now() + 1 });
+        });
+        h.queuedCommitWrites.push(async () => {
+            // Same mode, different proxy identity: a newer detection URL.
+            await h.ctx.saveProxyState({
+                ...(await h.state()),
+                autoProxyUrl: 'http://b.example:9090'
+            });
+        });
+
+        const result = await executeToggleProxy(h.ctx);
+        const state = await h.state();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(state.mode, ProxyMode.Auto);
+        assert.strictEqual(state.autoProxyUrl, 'http://b.example:9090',
+            'round 2 decided on the fresh basis');
+        assert.deepStrictEqual(h.applies, [{ url: 'http://b.example:9090', enabled: true }],
+            'the re-decided state is applied exactly once');
+        assert.deepStrictEqual(h.errors, []);
+    });
+
     test('a CAS race on every attempt fails the toggle and applies nothing', async () => {
         const h = harness({ mode: ProxyMode.Off }, { detectedUrl: 'http://proxy.example.com:8080' });
         // Every commit attempt is preceded by a same-mode revision bump, so

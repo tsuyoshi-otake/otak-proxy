@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "Şu proxy için bağlantı testi başarısız oldu: {url}",
     "error.proxyDoesNotWork": "Algılanan proxy çalışmıyor",
     "error.toggleFailed": "Proxy modu değiştirilemedi",
+    "error.initialSetupNotSaved": "Proxy durumu sürekli değiştiği için ilk proxy kurulumu kaydedilemedi. Pencere bir sonraki açılışında tekrar sunulacak.",
     "error.configureUrlFailed": "Proxy URL'si yapılandırılamadı",
     "error.testProxyFailed": "Proxy bağlantısı test edilemedi",
     "error.importProxyFailed": "Sistem proxy'si içe aktarılamadı",

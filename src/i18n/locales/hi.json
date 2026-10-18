@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "Proxy कनेक्शन परीक्षण विफल रहा: {url}",
     "error.proxyDoesNotWork": "पता लगाया गया proxy काम नहीं करता",
     "error.toggleFailed": "Proxy मोड टॉगल करने में विफल",
+    "error.initialSetupNotSaved": "प्रॉक्सी स्थिति लगातार बदलती रही, इसलिए प्रारंभिक प्रॉक्सी सेटअप सहेजा नहीं जा सका। अगली बार विंडो शुरू होने पर यह फिर से पेश किया जाएगा।",
     "error.configureUrlFailed": "Proxy URL कॉन्फ़िगर करने में विफल",
     "error.testProxyFailed": "Proxy कनेक्शन का परीक्षण करने में विफल",
     "error.importProxyFailed": "सिस्टम proxy आयात करने में विफल",

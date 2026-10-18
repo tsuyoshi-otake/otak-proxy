@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "Kiểm tra kết nối proxy thất bại: {url}",
     "error.proxyDoesNotWork": "Proxy phát hiện được không hoạt động",
     "error.toggleFailed": "Không thể chuyển đổi chế độ proxy",
+    "error.initialSetupNotSaved": "Không thể lưu thiết lập proxy ban đầu vì trạng thái proxy liên tục thay đổi. Thiết lập sẽ được đề xuất lại vào lần khởi động cửa sổ tiếp theo.",
     "error.configureUrlFailed": "Không thể cấu hình URL proxy",
     "error.testProxyFailed": "Không thể kiểm tra kết nối proxy",
     "error.importProxyFailed": "Không thể nhập proxy hệ thống",

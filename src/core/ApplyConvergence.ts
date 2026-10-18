@@ -64,7 +64,11 @@ export interface DecidedPatchWriter {
  * - `committed`: the patch is stored; `state` is what was committed.
  * - `moved`: the guard rejected the latest state; nothing was written and
  *   `state` is that latest state, so the caller decides again or yields.
- * - `exhausted`: every compare-and-set attempt lost the race; nothing written.
+ * - `exhausted`: every compare-and-set attempt lost the race and a final
+ *   guarded read still passes the guard (only writers the guard accepts,
+ *   such as revision-only bookkeeping, won every attempt); the caller may
+ *   report a real failure. A last-attempt loss to a writer that moved the
+ *   state is reported as `moved`, never `exhausted`.
  */
 export type DecidedPatchOutcome =
     | { kind: 'committed'; state: ProxyState }
@@ -96,7 +100,10 @@ export function diffProxyState(before: ProxyState, after: ProxyState): Partial<P
  * its identity moved), nothing is written; when the compare-and-set loses the
  * race, the patch is refolded onto the newer state so fields other writers
  * committed in between are kept. A patch key set to `undefined` removes the
- * field. No timers: a CAS refold is not a network retry.
+ * field. When the attempts run out, one final guarded read decides between
+ * `moved` (another writer owns the state) and `exhausted` (only writers the
+ * guard accepts won every attempt: a real failure). No timers: a CAS refold
+ * is not a network retry.
  */
 export async function commitDecidedPatch(
     writer: DecidedPatchWriter,
@@ -123,6 +130,18 @@ export async function commitDecidedPatch(
         if (result.kind === 'committed') {
             return { kind: 'committed', state: result.state };
         }
+    }
+
+    // The last attempt may have lost to a writer that moved the state; a bare
+    // 'exhausted' would misreport that as a failure. Re-check the guard once
+    // more: 'exhausted' means every winning writer still passed the guard
+    // (revision-only bookkeeping), not that the revision never moved. Read
+    // through getState(), NOT the `current` a superseded result carries: the
+    // stored state can lack hydrated credentials, and URL identity includes
+    // them, so the payload would see a false identity move.
+    const latest = await writer.getState();
+    if (!stillValid(latest)) {
+        return { kind: 'moved', state: latest };
     }
     return { kind: 'exhausted' };
 }
