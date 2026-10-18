@@ -103,6 +103,12 @@
   「印の世代がまだ新しく、routing が保存値と違う」ときだけ proxyChanged に任せる。世代の条件を外すと、
   proxyChanged が stale で捨てられたときに判定が両方から消える。印は保存しない（`stripGeneration`）。
 
+- **revision を含む署名やガードは、自分の apply の結果コミット（revision +1）で必ず stale になる。**
+  比べるのは apply が返す `committedRevision`、または mode と URL の identity。コマンドの flow テストは
+  本物の `ProxyStateManager` と revision を進める applier を通す。stub context は revision を進めないので、
+  toggle が mode を保存しない欠陥（#78 の直接原因、2026-10-18 監査）は全テスト pass のまま v3.2.7〜v3.2.16 に
+  出荷された。初回セットアップの署名と起動ループの署名にも同じ取り違えがあった。
+
 ## 診断レポート
 
 - **派生フィールドは `runtimeState` から導き、issue リストから別に計算しない。**
@@ -228,6 +234,21 @@
 - **README に載せるコマンドは、隔離した設定で実際に実行して出力を確かめる。**
   Troubleshooting の `npm config get proxy` が認証情報付きの値で失敗すること、`npm config get userconfig` が
   UUID を含むパスで失敗すること（#85 の修正漏れ）は、README 更新中に実行して初めて分かった。
+
+## VS Code ホストの前提
+
+- **`http.proxy` は local window で APPLICATION scope。Settings Sync で他の端末へ同期される。**
+  既定の同期除外は MACHINE / MACHINE_OVERRIDABLE / `ignoreSync` だけで、`http.proxy` はどれでもない。
+  remote window（`http.useLocalProxyConfiguration` 既定）では、拡張の Global 書き込みが local の
+  settings.json に入る。VS Code 1.106.3 と 1.141.0 の workbench bundle で確認（2026-10-18 監査）。
+  VS Code の挙動を前提にする判断は、ドキュメントや推測ではなく bundle の実コードで確かめる。
+  エージェントの 1 体は scope 1 を machine と読み違えて「同期されない」と結論した。
+
+- **拡張ホストの `http` / `https` は `@vscode/proxy-agent` でパッチされる（`http.proxySupport` 既定 `override`）。**
+  localhost / 127.0.0.1 以外への `http.request` は `http.proxy` → env → OS の proxy 経由になり、接続失敗は
+  errno の無い "Failed to establish a socket connection to proxies" になる。loopback の fake はこの経路を
+  通らないので、接続テストの判定はテストと本番で別の経路を通る（1.106.3 の proxy-agent 0.36.0、
+  1.141.0 の 0.45 系で確認）。
 
 ## ツール操作
 
