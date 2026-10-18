@@ -304,7 +304,10 @@
 - **PR を作ったら、Codex の自動レビュー（`chatgpt-codex-connector[bot]`）が届くまでマージしない。**
   #109 は作成（01:24:00Z）の 1 分 39 秒後にマージし、P2 の指摘 5 件はマージ後の 01:30:02Z に届いた。
   直しは別の PR になった。作成から 10 分ほど待ち、届いた指摘は同じ PR で直す（#78、#108、2026-10-18）。
-  確認: `gh api repos/tsuyoshi-otake/otak-proxy/pulls/<N>/reviews --jq '.[] | [.user.login, .submitted_at] | @tsv'`。
+  届き方: 指摘ありは inline comment 付きのレビューで届く（#109）。指摘なしはレビューも新しいコメントも付かない。
+  要約コメント（`codex-pull-request-review-summary`）の `codex-review-state` が `"status":"completed"` と
+  `"has_any_findings":false` になり、PR に 👍 のリアクションが付く（#110 は作成の 2 分 26 秒後）。
+  見る場所: `gh api repos/tsuyoshi-otake/otak-proxy/issues/<N>/comments` の要約コメントと、同じ issue の `reactions`。
 
 - **公開 Issue で項目番号を `#1` の形で書くと、同じ番号の別の Issue / PR に自動リンクする。**
   コメントでは code span で書くか、「項目 1」と書く（#108 の本文で起きた、2026-10-18）。
