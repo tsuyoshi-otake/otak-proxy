@@ -159,4 +159,63 @@ suite('Invisible Unicode detector (GlassWorm)', () => {
         assert.ok(formatted.startsWith('src/extension.ts:1:2'), formatted);
         assert.ok(formatted.includes('U+200B'), formatted);
     });
+
+    test('detects the added default-ignorable ranges and the Braille blank', () => {
+        const cases: Array<[number, string]> = [
+            [0x034f, 'combining-grapheme-joiner'],
+            [0x115f, 'hangul-jamo-filler'],
+            [0x1160, 'hangul-jamo-filler'],
+            [0x17b4, 'khmer-inherent-vowel'],
+            [0x17b5, 'khmer-inherent-vowel'],
+            [0x180f, 'mongolian-format'],       // FVS4 extends the old 180B-180E range
+            [0x2065, 'invisible-operator'],     // unassigned but default-ignorable
+            [0x206a, 'deprecated-format'],      // deprecated format controls
+            [0x206f, 'deprecated-format'],
+            [0x3164, 'hangul-filler'],
+            [0xffa0, 'halfwidth-hangul-filler'],
+            [0xfff0, 'unassigned-default-ignorable'],
+            [0xfff8, 'unassigned-default-ignorable'],
+            [0x1bca0, 'shorthand-format'],
+            [0x1bca3, 'shorthand-format'],
+            [0x1d173, 'musical-format'],
+            [0x1d17a, 'musical-format'],
+            [0xe0080, 'default-ignorable-reserved'],
+            [0xe0fff, 'default-ignorable-reserved'],
+            [0x2800, 'braille-blank']           // not Default_Ignorable, but renders blank
+        ];
+
+        for (const [codePoint, expectedCategory] of cases) {
+            const findings = scanTextForInvisibleUnicode(`x${cp(codePoint)}y`);
+            assert.strictEqual(findings.length, 1, `expected a finding for ${expectedCategory}`);
+            assert.strictEqual(findings[0].categoryId, expectedCategory);
+            assert.strictEqual(findings[0].codePoint, codePoint);
+        }
+    });
+
+    test('covers every code point the running Node marks Default_Ignorable', function () {
+        this.timeout(60000);
+        // The category table is hard-coded to Unicode 16.0 (unchanged in 17.0)
+        // because the property tables differ between Node versions. When a
+        // newer Node knows more
+        // default-ignorable code points, this failure names them so the table
+        // can be extended.
+        const defaultIgnorable = /\p{Default_Ignorable_Code_Point}/u;
+        const missing: string[] = [];
+        for (let codePoint = 0; codePoint <= 0x10ffff; codePoint++) {
+            const char = cp(codePoint);
+            if (!defaultIgnorable.test(char)) {
+                continue;
+            }
+            // A printable 'x' before and after defeats both exemptions, so a
+            // covered code point always produces exactly one finding.
+            if (scanTextForInvisibleUnicode(`x${char}y`).length === 0) {
+                missing.push(`U+${codePoint.toString(16).toUpperCase()}`);
+            }
+        }
+        assert.deepStrictEqual(
+            missing,
+            [],
+            'Default_Ignorable code points not covered by the category table: ' + missing.join(', ')
+        );
+    });
 });

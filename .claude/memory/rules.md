@@ -18,6 +18,10 @@
 - **unit lane は worker ごとに tmpdir と Git / npm 設定を分けている（#103）。** `scripts/lib/unit-mocha.mjs` と
   `scripts/unit-worker-isolation.cjs` が持つ。runner を変えたら `npm run test:unit:isolation` を通す。後片付けは
   runner の `finally` で行い、worker の exit handler には置かない（`--bail` が worker を強制終了する）。
+- **テストが作る一時ディレクトリは、suite の後片付けが消す場所に作る。** unit lane は TEMP / TMP / TMPDIR を
+  実行ごとのディレクトリに向けて最後に消すので、`os.tmpdir()` に直接作って消さないテストも unit lane では漏れが
+  見えない。mocha を直接動かすと残る（PR #114 の repository モードのテストが `otak-iuc-repo-*` を 2 個残した。
+  `makeDir` で suite の `workDir` の下に移し、mocha を直接動かす前後で数が変わらないことを確かめた）。
 - **mocha を直接叩くときは `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を自分で設定する。**
   分離を用意しているのは `scripts/run-unit-tests.mjs` と `.vscode-test.mjs` の側であって
   mocha ではない。`npx mocha ...` を直に実行すると `GitConfigManager.test.ts` の
@@ -51,6 +55,16 @@
 
 - **テスト後にプロセスが本当に終了したか確認する。** `Get-CimInstance Win32_Process` で
   `mocha|vscode-test` を grep。残っていたら CPU を焼き続ける。
+
+- **ブランチを切り替えたら、対応するソースの無い `out/` のビルドを消してからテストを回す。** `tsc` は消えたソースの
+  出力を消さず、unit lane と host lane は `out/test/**/*.test.js` をすべて拾う。T04 のブランチでビルドした
+  `out/test/security/CredentialDisplayMasking.test.js`（と `out/test/realProxyStateManager.js`）が、T04 のマージ前の
+  main から作ったブランチの unit lane で失敗した（#108）。node で `out/**/*.js` と `src/**/*.ts` を突き合わせて探す。
+
+- **外部仕様の表（Unicode のプロパティなど）は、実物で両方向に確かめる。** 表が実物を覆うこと（漏れ 0）と、
+  表のうちその性質を名乗る行が実物に含まれること（非該当 0）。Devin の下書きは Kaithi の記号（U+110BD〜U+110CD）と
+  Egyptian の format controls（U+13430〜U+1343F）を Default_Ignorable として入れ、漏れだけを見る網羅テストは
+  通っていた。Node 26 で `/\p{Default_Ignorable_Code_Point}/u` を全コードポイントに当てて見つけた（#108）。
 
 - **入力を正規化してから検証するときは、正規化が拒否すべき文字を消さないか確かめる。**
   `String.prototype.trim()` は末尾の `\n` も消すので、拒否していた `http://proxy.com/\n` が
@@ -287,9 +301,21 @@
 ## リリース
 
 - **`v*` タグの push が publish の唯一のトリガで、不可逆。** `.github/workflows/publish-vscode.yml`
-  が VS Marketplace と Open VSX の両方に publish する。タグを打つ前に CI と同じゲートを
-  ローカルで通す: `npm run lint` / `npm run test:unit:parallel` / `npm run test:smoke` /
-  `npm run lint:unicode:dist`。VS Code host の全件 (`npm test`) は gate ではない。
+  が VS Marketplace と Open VSX の両方に publish する。build job は、タグが `v` + `package.json` の version で、
+  タグのコミットが main から辿れることを確かめてから進む（`scripts/release/check-release-ref.mjs`。v3.2.16 の
+  タグで一致・version 違い・branch・main に無いコミットの 4 通りを確認、#108）。版上げの PR を main に merge して
+  から、その merge コミットに打つ。同じゲート（`npm run lint` / `npm run test:unit:parallel` /
+  `npm run test:smoke` / `npm run lint:unicode:dist`、package と VSIX の走査）は PR の CI
+  （`.github/workflows/ci.yml`、Linux）でも走る。タグを打つ前にローカルでも通す。VS Code host の全件
+  (`npm test`) は gate ではない。
+
+- **公開のゲートは、確かめなかったものを通さない。** 中身を見ずに飛ばす判定は、攻撃者が選べない性質で行う。
+  拡張子は選べるうえ、`require()` は `.json` / `.node` 以外の拡張子を JavaScript として読む。不可視文字のスキャナは
+  中身のシグネチャで binary を判定し、飛ばしたものが `require()` で `SyntaxError` になることをテストで確かめる
+  （`src/test/security/BinarySignature.test.ts`）。読めないファイルと通常ファイルでないエントリは失敗にし、
+  想定内の欠落（repository モードの ENOENT）だけを名前を付けて数える。「数えるだけ」のカウンタを通過の根拠に
+  しない（PR #114 で Codex が指摘。元のスキャナで payload 入りの `.png` が `0 scanned, 3 skipped by extension`、
+  symlink が `2 scanned` で通ることを確かめた、#108）。
 
 - **実物の外部ツールを叩くテストは、タグを打つ前に CI と同じ版でもローカルで回す。** CI は ubuntu-latest +
   Node 22（npm 10.9.9）で、ローカルの npm 11 だけでは版差の不具合を見逃す（#88）。npm は `~/tmp` の一時 dir に
@@ -460,6 +486,11 @@
   errno の無い "Failed to establish a socket connection to proxies" になる。loopback の fake はこの経路を
   通らないので、接続テストの判定はテストと本番で別の経路を通る（1.106.3 の proxy-agent 0.36.0、
   1.141.0 の 0.45 系で確認）。
+
+- **`.vscode-test.mjs` は `vscode-test` の CLI のプロセスでだけ評価される。** 拡張ホストの runner は設定を
+  `VSCODE_TEST_OPTIONS` で受け取り、このファイルを読まない（`@vscode/test-cli` 0.0.11 の `out/bin.mjs`、
+  `out/cli/config.mjs`、`out/cli/platform/desktop.mjs` で確認）。CLI は `process.exit` するので、後片付けは同期の
+  `exit` リスナー（`rmSync`）で書く。smoke の前後でプロファイルの数が変わらないことで確かめた（226 → 226、#108）。
 
 ## ツール操作
 

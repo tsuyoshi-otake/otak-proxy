@@ -1,0 +1,21 @@
+version: 2
+
+# Weekly update PRs for npm and GitHub Actions. The 3-day cooldown keeps
+# Dependabot from proposing versions younger than the supply-chain minimum
+# release age; nothing auto-merges.
+# `cooldown` applies to version updates only, not to security-update PRs, so
+# the 3-day minimum release age is checked by hand before merging one of those.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
