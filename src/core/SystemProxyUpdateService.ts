@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
 import { Logger } from '../utils/Logger';
-import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptionsFromState } from '../config/DetectedProxyValue';
+import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptionsFromState, splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource, isProxyEndpointReachable } from '../utils/ProxyUtils';
@@ -77,7 +77,7 @@ export class SystemProxyUpdateService {
         detectedSource: AppliedProxySource | undefined
     ): Promise<void> {
         const previousProxy = state.autoProxyUrl;
-        const previousHttps = state.autoHttpsProxyUrl;
+        const previousSplitRouting = splitRoutingIdentity(state);
         const wasAutoModeOff = state.autoModeOff === true;
         const previousKind = state.lastDetectionKind;
         const detectedProxy = detected.proxyUrl;
@@ -99,7 +99,7 @@ export class SystemProxyUpdateService {
 
         if (
             previousProxy === state.autoProxyUrl &&
-            previousHttps === state.autoHttpsProxyUrl &&
+            previousSplitRouting === splitRoutingIdentity(state) &&
             !wasAutoModeOff &&
             !this.hasKnownConvergenceFailure(state, Boolean(state.autoProxyUrl)) &&
             !this.shouldEnsureDisabledProxy(state)

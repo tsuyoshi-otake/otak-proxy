@@ -592,4 +592,241 @@ suite('SystemProxyUpdateService Tests', () => {
             sinon.assert.notCalled(connectionTester!.testProxyAuto);
         });
     });
+
+    suite('split-routing changes with the same primary URL (#108)', () => {
+        type DetectedShape = {
+            proxyUrl: string | null;
+            source: 'windows' | 'environment';
+            kind?: ProxyState['autoProxyKind'];
+            httpUrl?: string;
+            httpsUrl?: string;
+            bypass?: string;
+        };
+
+        const singleProxyState = (bypass?: string, httpsUrl = 'http://proxy.example.com:8080'): ProxyState => ({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example.com:8080',
+            autoHttpProxyUrl: 'http://proxy.example.com:8080',
+            autoHttpsProxyUrl: httpsUrl,
+            autoProxyKind: 'singleProxy',
+            detectedBypass: bypass
+        });
+
+        const singleProxyDetection = (bypass?: string): DetectedShape => ({
+            proxyUrl: 'http://proxy.example.com:8080',
+            source: 'windows',
+            kind: 'singleProxy',
+            httpUrl: 'http://proxy.example.com:8080',
+            httpsUrl: 'http://proxy.example.com:8080',
+            bypass
+        });
+
+        const runStartupPath = async (seed: ProxyState, detected: DetectedShape): Promise<void> => {
+            state = { ...seed };
+            applyProxyStub.resetHistory();
+            notifyStub.resetHistory();
+            detectStub.reset();
+            detectStub.resolves(detected);
+            await service.checkAndUpdateSystemProxy();
+        };
+
+        const runMonitorPath = async (seed: ProxyState, detected: DetectedShape): Promise<void> => {
+            state = { ...seed };
+            applyProxyStub.resetHistory();
+            notifyStub.resetHistory();
+            const result: ProxyDetectionResult = {
+                proxyUrl: detected.proxyUrl,
+                source: detected.source,
+                kind: detected.kind,
+                httpUrl: detected.httpUrl,
+                httpsUrl: detected.httpsUrl,
+                bypass: detected.bypass,
+                timestamp: Date.now(),
+                success: true
+            };
+            await handleProxyChanged(context, result, draft => service.resolveManualFallback(draft));
+        };
+
+        const systemProxyChangedCalls = (): number =>
+            notifyStub.getCalls().filter(call => call.args[0] === 'message.systemProxyChanged').length;
+
+        test('bypass-only change with the same primary URL: applies and notifies', async () => {
+            const transitions: Array<{ label: string; stored: string | undefined; detected: string | undefined }> = [
+                { label: 'unset -> set', stored: undefined, detected: 'localhost,.corp.example' },
+                { label: 'set -> different', stored: 'localhost', detected: 'localhost,.corp.example' },
+                { label: 'set -> unset', stored: 'localhost,.corp.example', detected: undefined }
+            ];
+
+            for (const { label, stored, detected } of transitions) {
+                await runStartupPath(singleProxyState(stored), singleProxyDetection(detected));
+
+                assert.strictEqual(state.detectedBypass, detected, label);
+                sinon.assert.calledOnce(applyProxyStub);
+                sinon.assert.calledOnceWithExactly(notifyStub, 'message.systemProxyChanged', sinon.match.any);
+            }
+        });
+
+        test('HTTP-side-only change in a per-scheme pair: applies and notifies', async () => {
+            await runStartupPath({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy-a.example.com:8080',
+                autoProxyKind: 'perSchemeProxy',
+                autoHttpProxyUrl: 'http://proxy-a.example.com:8080',
+                autoHttpsProxyUrl: 'http://proxy-b.example.com:8443'
+            }, {
+                proxyUrl: 'http://proxy-a.example.com:8080',
+                source: 'environment',
+                kind: 'perSchemeProxy',
+                httpUrl: 'http://proxy-a2.example.com:8080',
+                httpsUrl: 'http://proxy-b.example.com:8443'
+            });
+
+            assert.strictEqual(state.autoHttpProxyUrl, 'http://proxy-a2.example.com:8080');
+            sinon.assert.calledOnce(applyProxyStub);
+            sinon.assert.calledOnceWithExactly(notifyStub, 'message.systemProxyChanged', sinon.match.any);
+        });
+
+        test('identical detection, with and without a bypass list: neither applies nor notifies', async () => {
+            await runStartupPath(
+                singleProxyState('localhost,.corp.example'),
+                singleProxyDetection('localhost,.corp.example')
+            );
+
+            sinon.assert.notCalled(applyProxyStub);
+            sinon.assert.neverCalledWith(notifyStub, 'message.systemProxyChanged');
+
+            await runStartupPath(singleProxyState(), singleProxyDetection());
+
+            sinon.assert.notCalled(applyProxyStub);
+            sinon.assert.neverCalledWith(notifyStub, 'message.systemProxyChanged');
+        });
+
+        test('Auto OFF + bypass-only change: still applies, as before', async () => {
+            await runStartupPath({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy.example.com:8080',
+                autoHttpProxyUrl: 'http://proxy.example.com:8080',
+                autoHttpsProxyUrl: 'http://proxy.example.com:8080',
+                autoProxyKind: 'singleProxy',
+                detectedBypass: 'localhost',
+                autoModeOff: true,
+                gitConfigured: false,
+                npmConfigured: false
+            }, singleProxyDetection('localhost,.corp.example'));
+
+            sinon.assert.calledOnce(applyProxyStub);
+        });
+
+        test('startup check and monitor agree on what counts as a change', async () => {
+            const perSchemeSeed: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://proxy-a.example.com:8080',
+                autoProxyKind: 'perSchemeProxy',
+                autoHttpProxyUrl: 'http://proxy-a.example.com:8080',
+                autoHttpsProxyUrl: 'http://proxy-b.example.com:8443'
+            };
+            const rows: Array<{
+                label: string;
+                seed: ProxyState;
+                detected: DetectedShape;
+                expected: { monitor: number; startup: number };
+            }> = [
+                {
+                    label: 'no change',
+                    seed: singleProxyState('localhost'),
+                    detected: singleProxyDetection('localhost'),
+                    expected: { monitor: 0, startup: 0 }
+                },
+                {
+                    label: 'bypass-only change',
+                    seed: singleProxyState('localhost'),
+                    detected: singleProxyDetection('localhost,.corp.example'),
+                    expected: { monitor: 1, startup: 1 }
+                },
+                {
+                    label: 'HTTP-side-only change in a per-scheme pair',
+                    seed: perSchemeSeed,
+                    detected: {
+                        proxyUrl: 'http://proxy-a.example.com:8080',
+                        source: 'environment',
+                        kind: 'perSchemeProxy',
+                        httpUrl: 'http://proxy-a2.example.com:8080',
+                        httpsUrl: 'http://proxy-b.example.com:8443'
+                    },
+                    expected: { monitor: 1, startup: 1 }
+                },
+                {
+                    label: 'HTTPS-side-only change in a per-scheme pair',
+                    seed: perSchemeSeed,
+                    detected: {
+                        proxyUrl: 'http://proxy-a.example.com:8080',
+                        source: 'environment',
+                        kind: 'perSchemeProxy',
+                        httpUrl: 'http://proxy-a.example.com:8080',
+                        httpsUrl: 'http://proxy-c.example.com:8443'
+                    },
+                    expected: { monitor: 1, startup: 1 }
+                },
+                {
+                    label: 'new primary URL',
+                    seed: singleProxyState(),
+                    detected: {
+                        proxyUrl: 'http://other.example.com:8080',
+                        source: 'windows',
+                        kind: 'singleProxy',
+                        httpUrl: 'http://other.example.com:8080',
+                        httpsUrl: 'http://other.example.com:8080'
+                    },
+                    expected: { monitor: 1, startup: 1 }
+                },
+                {
+                    // Accepted divergence (#108): under singleProxy without a
+                    // bypass list the apply ignores the stored http/https
+                    // copies, so their drift is save-only on both paths, like
+                    // the monitor decided in #93. Before this task the startup
+                    // path applied on autoHttpsProxyUrl drift alone.
+                    label: 'singleProxy HTTPS copy drift without a bypass list',
+                    seed: singleProxyState(undefined, 'http://stale-https.example.com:8443'),
+                    detected: singleProxyDetection(),
+                    expected: { monitor: 0, startup: 0 }
+                },
+                {
+                    // Once a bypass list is set, the single proxy's http/https
+                    // copies are part of splitRoutingIdentity, so their drift
+                    // counts as a change on both paths.
+                    label: 'singleProxy HTTPS copy drift with the same bypass list set',
+                    seed: singleProxyState('localhost', 'http://stale-https.example.com:8443'),
+                    detected: singleProxyDetection('localhost'),
+                    expected: { monitor: 1, startup: 1 }
+                },
+                {
+                    // Intentional divergence: the monitor carries a test result
+                    // and can tell "no new proof" apart (stillOffWithoutProof),
+                    // while the startup check cannot and re-applies to turn
+                    // Auto back ON. This is the behavior the "Auto OFF +
+                    // bypass-only change" guard test above pins.
+                    label: 'Auto OFF + bypass-only change',
+                    seed: { ...singleProxyState('localhost'), autoModeOff: true },
+                    detected: singleProxyDetection('localhost,.corp.example'),
+                    expected: { monitor: 0, startup: 1 }
+                }
+            ];
+
+            for (const row of rows) {
+                await runMonitorPath(row.seed, row.detected);
+                const monitorApplies = applyProxyStub.callCount;
+                const monitorNotifications = systemProxyChangedCalls();
+
+                await runStartupPath(row.seed, row.detected);
+                const startupApplies = applyProxyStub.callCount;
+                const startupNotifications = systemProxyChangedCalls();
+
+                assert.strictEqual(monitorApplies, row.expected.monitor, `${row.label}: monitor apply count`);
+                assert.strictEqual(startupApplies, row.expected.startup, `${row.label}: startup apply count`);
+                const expectedNotifications = (applies: number) => (applies > 0 ? 1 : 0);
+                assert.strictEqual(monitorNotifications, expectedNotifications(row.expected.monitor), `${row.label}: monitor systemProxyChanged`);
+                assert.strictEqual(startupNotifications, expectedNotifications(row.expected.startup), `${row.label}: startup systemProxyChanged`);
+            }
+        });
+    });
 });

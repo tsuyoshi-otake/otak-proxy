@@ -19,8 +19,7 @@ function startupEnforcementTarget(
         autoModeOff: state.autoModeOff === true,
         requiresAuth: state.requiresAuth === true,
         authRequiredProxyUrls: state.authRequiredProxyUrls ?? [],
-        splitRouting: splitRoutingIdentity(state),
-        noProxy: state.noProxy ?? ''
+        splitRouting: splitRoutingIdentity(state)
     });
 }
 
