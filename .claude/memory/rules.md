@@ -14,6 +14,10 @@
   「should start ProxyMonitor when monitoring starts in Auto mode」は、double の `commitState` に本物の契約を
   持たせてから通る。
   切り分けは `git stash -u` → HEAD で再実行 → 失敗集合を diff。
+  rubric に書くスクリプトの合否（`npm run verify:traceability` など）も、main で 1 回走らせてから書く。期待は
+  「main と同じ結果で、増やさない」の形にする。`verify:traceability` は main でも exit 1（2026-09-05 から孤立した
+  stable test ID が 5 件。CI はこのスクリプトを実行しない）で、#108 項目 4 の C8 は「exit 0」と書いたため、無関係の
+  既存の問題で fail になった（独立検証が `git archive main` で同じ 5 件を確かめた）。
 
 - **`npm run test:unit:parallel` は `--bail` 付き。** 失敗の全体像が見えない。
   全件を見たいときは `out/test/**/*.test.js` から VS Code 依存と `.integration.` を除いた
@@ -36,6 +40,9 @@
 - **unit lane は worker ごとに tmpdir と Git / npm 設定を分けている（#103）。** `scripts/lib/unit-mocha.mjs` と
   `scripts/unit-worker-isolation.cjs` が持つ。runner を変えたら `npm run test:unit:isolation` を通す。後片付けは
   runner の `finally` で行い、worker の exit handler には置かない（`--bail` が worker を強制終了する）。
+  Git 設定の mutex は worker の tmpdir の中にできる（Windows は `<tmp>/otak-proxy.gitconfig.mutex`、POSIX は
+  `<tmp>/otak-proxy-<uid>/otak-proxy.gitconfig.mutex`。#108 項目 4）。`check-unit-worker-isolation.mjs` は共有の
+  場所をこの規則で計算するので、場所を変えたら両方を直す。
 - **テストが作る一時ディレクトリは、suite の後片付けが消す場所に作る。** unit lane は TEMP / TMP / TMPDIR を
   実行ごとのディレクトリに向けて最後に消すので、`os.tmpdir()` に直接作って消さないテストも unit lane では漏れが
   見えない。mocha を直接動かすと残る（PR #114 の repository モードのテストが `otak-iuc-repo-*` を 2 個残した。
@@ -157,6 +164,15 @@
   エラーが出た（検出の経路の `SystemProxyUpdateService.ts` だけで `getState()` の呼び出しが 6 か所ある）。ログを出さない
   `tryCanonicalizeProxyUrl` に分け、取り込み、起動時の確認、Configure の初期値をログを出す形に戻すミューテーションは、
   `Logger.error` を stub したテストでどれも red になった（#108）。
+- **省略可能な依存の「未指定」を、キーの有無（`'x' in deps`）で判定しない。** 渡す側が `{ x: options.x }` と
+  常にキーを書くと、何も指定していない本番の構成が「無し」になる。`undefined` は既定値、`null` は「無し」と値で
+  区別し、何も注入しない（本番と同じ）構成の行を必ず置く — verified by: #108 項目 4 の 1 回目のレビュー。
+  `process.getuid` を 1000 を返す関数にして `getuid` を渡さずに `tryAcquire` したプローブが `ioError`（`noUid`）を
+  返し、POSIX の適用がすべて止まる状態だった。テストはすべて `getuid` を明示していたので緑だった。値での判定に
+  直した後、同じプローブで取得できた。
+- **POSIX の実ファイルシステムで所有者を比べる行は、uid を定数にせず `process.getuid()` を使う。** CI の runner の
+  uid は開発機と同じとは限らない。Windows ではその行を skip するので、誤りは CI でしか表に出ない — #108 項目 4 の
+  1 回目のレビューでコードを読んで見つけた（CI の uid が 1000 でないことは観測していない）。
 
 ## 外部ツールのスタブ
 
@@ -330,10 +346,19 @@
 - **`FileLease` のタイムアウトメッセージは契約。** `Timed out acquiring <name>`。
   `isGitConfigMutexTimeout` がこの文字列に依存している。`name` を変えない。
 
-- **`syncDir` にファイルを増やすときは 2 つ確認する。**
-  `SharedStateFile.recover()` が `TEMP_FILE_SUFFIX` を含むファイルを掃除すること、
-  `FileWatcher` が state file の basename でフィルタしていること。
-  publish lock を `sync-state.lock`（`.tmp` ではない）にしているのはこのため。
+- **`syncDir` にファイルを増やすときは、`FileWatcher` が state file の basename でフィルタしていることを確かめる。**
+  一時ファイルを掃除する処理はもう無い（本番から呼ばれていなかった `SharedStateFile.recover()` を #108 項目 4 で
+  消した）。壊れた state file は `read()` が null を返し、次の `write()` が置き換える。クラッシュした書き込みの
+  `sync-state.json.*.tmp` は残る。publish lock の名前 `sync-state.lock` は変えない（古い版のウィンドウと同じ
+  ファイルで排他するため）。
+
+- **POSIX のロックディレクトリは `src/utils/PerUserLockDir.ts` だけが決める（#108 項目 4）。**
+  `<tmpdir>/otak-proxy-<uid>` を mode 0700 で作り、`lstat` で実ディレクトリ（symlink でない）、所有者が自分の
+  uid、group / other の権限が無いことを確かめる。使えないディレクトリと mkdir / lstat / open の EACCES・EPERM は
+  例外にせず `ioError` の結果にする。適用は書き込みをせずに停止理由 `lockIoError` で止まり、Git 設定の書き込みは
+  `NO_PERMISSION` を返す。Git 設定の mutex も同じディレクトリに置く。新しいロックファイルはこのヘルパーを通す
+  — verified by: 元の `ApplyLockService` で新しい suite が 9 件 red。POSIX の実ファイルシステムの行は ubuntu の CI
+  でだけ走る。
 
 ## 形式モデル
 

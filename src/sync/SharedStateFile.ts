@@ -68,12 +68,6 @@ export interface ISharedStateFile {
     exists(): Promise<boolean>;
 
     /**
-     * Recover from corrupted file
-     * @returns True if recovery was performed, false if nothing to recover
-     */
-    recover(): Promise<boolean>;
-
-    /**
      * Get the file path for external use (e.g., file watcher)
      */
     getFilePath(): string;
@@ -94,7 +88,7 @@ export interface ISharedStateFile {
  * without changing production source or the surrounding process filesystem.
  */
 export type SharedStateFileSystem = Pick<typeof fs,
-    'existsSync' | 'readFileSync' | 'writeFileSync' | 'renameSync' | 'unlinkSync' | 'readdirSync' | 'mkdirSync' | 'statSync'>;
+    'existsSync' | 'readFileSync' | 'writeFileSync' | 'renameSync' | 'unlinkSync' | 'mkdirSync' | 'statSync'>;
 
 export interface SharedStateFileOptions {
     fileSystem?: SharedStateFileSystem;
@@ -114,9 +108,10 @@ const STATE_FILE_NAME = 'sync-state.json';
 /**
  * Lock file serialising compare-and-swap across windows.
  *
- * Deliberately not `*.tmp`: recover() sweeps temp files, and it must not delete
- * a lock that another window is actively holding. FileWatcher filters the sync
- * directory by the state file's basename, so this file raises no change events.
+ * Deliberately not `*.tmp`: stray temp files from a crashed write are never
+ * swept, and a lock another window is actively holding must never look like
+ * one. FileWatcher filters the sync directory by the state file's basename,
+ * so this file raises no change events.
  */
 const PUBLISH_LOCK_FILE_NAME = 'sync-state.lock';
 
@@ -323,55 +318,6 @@ export class SharedStateFile implements ISharedStateFile {
      */
     async exists(): Promise<boolean> {
         return this.fileSystem.existsSync(this.stateFilePath);
-    }
-
-    /**
-     * Recover from corrupted file
-     *
-     * Attempts to:
-     * 1. Delete corrupted file
-     * 2. Clean up any temp files
-     *
-     * @returns True if recovery was performed, false if nothing to recover
-     */
-    async recover(): Promise<boolean> {
-        let recovered = false;
-
-        try {
-            // Check if state file exists
-            if (this.fileSystem.existsSync(this.stateFilePath)) {
-                // Try to read it
-                const state = await this.read();
-
-                if (state === null) {
-                    // File exists but is corrupted - delete it
-                    Logger.info('Recovering from corrupted state file');
-                    this.fileSystem.unlinkSync(this.stateFilePath);
-                    recovered = true;
-                }
-            }
-
-            // Clean up any temp files
-            if (this.fileSystem.existsSync(this.syncDir)) {
-                const files = this.fileSystem.readdirSync(this.syncDir);
-                for (const file of files) {
-                    if (!file.includes(TEMP_FILE_SUFFIX)) {
-                        continue;
-                    }
-                    try {
-                        this.fileSystem.unlinkSync(path.join(this.syncDir, file));
-                        recovered = true;
-                    } catch {
-                        // Ignore cleanup errors
-                    }
-                }
-            }
-
-        } catch (error) {
-            Logger.error('Error during recovery:', error);
-        }
-
-        return recovered;
     }
 
     /**

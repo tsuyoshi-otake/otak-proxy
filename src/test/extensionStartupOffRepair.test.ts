@@ -8,6 +8,7 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { ProxyMode } from '../core/types';
 import { publicFingerprint } from '../core/TargetOwnershipStore';
+import { ProxyMonitor } from '../monitoring/ProxyMonitor';
 
 const execFileAsync = promisify(execFile);
 
@@ -352,6 +353,44 @@ suite('Extension startup OFF self-repair', () => {
             releaseGate();
             extension.__setStartupApplyRunnerForTest(undefined);
         }
+    });
+
+    test('startup still starts monitoring when the apply lock directory is unusable (#108)', async function () {
+        this.timeout(15000);
+        // Point the lock override at a regular file: the lstat check rejects it
+        // and the startup apply stops with a lock ioError instead of throwing.
+        const notADir = path.join(baseDir, 'locks-file');
+        await fs.writeFile(notADir, 'x');
+        process.env.OTAK_PROXY_LOCK_DIR = notADir;
+
+        const globalState = new Map<string, unknown>([
+            ['hasInitialSetup', true],
+            ['proxyState', {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://stale.example.com:8080',
+                autoModeOff: false,
+                gitConfigured: false,
+                vscodeConfigured: false,
+                npmConfigured: false
+            }]
+        ]);
+        const monitorStart = sandbox.spy(ProxyMonitor.prototype, 'start');
+        const extension = require('../extension') as {
+            activate: (context: vscode.ExtensionContext) => Promise<void>;
+            whenStartupProxyApplied: () => Promise<void>;
+        };
+        await extension.activate(createContext(baseDir, globalState));
+        await extension.whenStartupProxyApplied();
+
+        const env = { ...process.env };
+        assert.strictEqual(
+            await readGitProxy(env), undefined,
+            'a lock ioError writes nothing'
+        );
+        assert.strictEqual(
+            monitorStart.called, true,
+            'a lock ioError is an explicit outcome, so monitoring still starts'
+        );
     });
 
     test('startup enforcement reconciles on the latest state, not the activation snapshot', async function () {

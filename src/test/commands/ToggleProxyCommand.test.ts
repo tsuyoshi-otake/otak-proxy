@@ -1,11 +1,18 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
 import * as http from 'http';
+import * as os from 'os';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { executeToggleProxy } from '../../commands/ToggleProxyCommand';
 import { CommandContext } from '../../commands/types';
 import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyRuntimeDiagnostics } from '../../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../../i18n/I18nManager';
+import { ApplyLockService } from '../../remediation/ApplyLockService';
+import { runProxyApplyAttempt } from '../../remediation/ProxyApplyAttempt';
+import { ProxyRemediationService } from '../../remediation/ProxyRemediationService';
 
 suite('ToggleProxyCommand Unit Tests', () => {
     let sandbox: sinon.SinonSandbox;
@@ -424,5 +431,108 @@ suite('ToggleProxyCommand Unit Tests', () => {
         assert.ok(painted, 'toggle must refresh the status bar after apply');
         assert.strictEqual(painted?.applyBlocked, 'untrustedWorkspace');
         assert.ok(painted?.lastError?.toLowerCase().includes('untrusted'));
+    });
+
+    /**
+     * #108 P3: a toggle whose apply dies inside the real ApplyLockService ->
+     * ProxyRemediationService path. The lock's baseDir is a regular file, so
+     * the real directory check reports notDirectory -> ioError and the apply
+     * stops before any writer. Seam: `ctx.applyProxySettings` is wired to
+     * `runProxyApplyAttempt` exactly like extension.ts's applyProxySafely;
+     * the writers sit behind the `applyDetailed` delegate, which the lock
+     * must never reach.
+     */
+    test('a lock-directory ioError through the real remediation path fails the toggle without toggleFailed (#108)', async () => {
+        const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-toggle-lock-'));
+        const lockDirFile = path.join(workDir, 'not-a-dir');
+        fs.writeFileSync(lockDirFile, 'x');
+        try {
+            const store = new Map<string, unknown>();
+            const extensionContext = {
+                globalState: {
+                    get: (key: string, defaultValue?: unknown) => store.has(key) ? store.get(key) : defaultValue,
+                    update: async (key: string, value: unknown) => {
+                        if (value === undefined) {
+                            store.delete(key);
+                        } else {
+                            store.set(key, value);
+                        }
+                    },
+                    keys: () => [...store.keys()],
+                    setKeysForSync: () => {}
+                }
+            } as unknown as vscode.ExtensionContext;
+            const remediation = new ProxyRemediationService(
+                extensionContext,
+                async () => fixture.getState(),
+                {
+                    lockService: new ApplyLockService({ baseDir: lockDirFile }),
+                    diagnostics: { run: async () => undefined } as unknown as ProxyRuntimeDiagnostics,
+                    sleep: async () => {}
+                }
+            );
+            let writerCalls = 0;
+            const fixture = createContext(
+                { mode: ProxyMode.Auto, autoProxyUrl: 'http://system.example.com:8080' },
+                async () => {},
+                async (url, enabled) => (await runProxyApplyAttempt(
+                    {
+                        getState: async () => fixture.getState(),
+                        saveState: next => fixture.ctx.saveProxyState(next),
+                        commitState: (revision, next) => fixture.ctx.commitProxyState(revision, next)
+                    },
+                    async (proxyUrl, applyEnabled) => {
+                        writerCalls += 1;
+                        return {
+                            success: true,
+                            enabled: applyEnabled,
+                            proxyUrl,
+                            results: {
+                                gitSuccess: true,
+                                vscodeSuccess: true,
+                                npmSuccess: true,
+                                terminalEnvSuccess: true
+                            },
+                            errors: []
+                        };
+                    },
+                    remediation,
+                    url,
+                    enabled,
+                    'manual'
+                )).success
+            );
+            const errorKeys: string[] = [];
+            fixture.ctx.userNotifier.showError = (key) => {
+                errorKeys.push(key);
+            };
+            const unhandledRejections: unknown[] = [];
+            const onUnhandledRejection = (reason: unknown) => {
+                unhandledRejections.push(reason);
+            };
+            process.on('unhandledRejection', onUnhandledRejection);
+
+            let result: Awaited<ReturnType<typeof executeToggleProxy>>;
+            try {
+                result = await executeToggleProxy(fixture.ctx);
+                // The applyFailed notification is fire-and-forget; let it settle.
+                await new Promise(resolve => setTimeout(resolve, 20));
+            } finally {
+                process.removeListener('unhandledRejection', onUnhandledRejection);
+            }
+
+            const i18n = I18nManager.getInstance();
+            assert.strictEqual(result.success, false);
+            sinon.assert.calledOnceWithExactly(
+                showWarningMessageStub,
+                i18n.t('remediation.notification.applyFailed'),
+                i18n.t('action.showDetails')
+            );
+            assert.deepStrictEqual(errorKeys, [], 'error.toggleFailed must not fire for a lock ioError');
+            assert.strictEqual(writerCalls, 0, 'the lock stops the apply before any writer runs');
+            assert.deepStrictEqual(unhandledRejections, [], 'no unhandled rejection may escape the apply path');
+        } finally {
+            fs.rmSync(workDir, { recursive: true, force: true });
+        }
     });
 });

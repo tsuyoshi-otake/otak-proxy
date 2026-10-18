@@ -2020,3 +2020,77 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - (c) `skippedUnavailable` は書いたものとして数える（後から入れたツールは、次の計画の変更かローカルの適用で設定される）。最後の適用の後の手での編集は、次の実際の変更かローカルの適用まで残る。
 - `deactivate()` は配信の鎖を待たない。
 - host lane の基準の失敗 7 件は残る。host lane の全体は CI で走らない。
+
+## 2026-10-19 — #108 項目 4: POSIX のロックディレクトリをユーザーごとにし、ロックの I/O エラーを例外ではなく結果にし、使われていない `SharedStateFile.recover()` を消す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 4）
+**PR**: [#121](https://github.com/tsuyoshi-otake/otak-proxy/pull/121)
+**コミット**: `7fc3d5f`（fix/108-per-user-lock-dir）
+**分担**: 実装は Devin（06 の 1 回目、1 回目のレビューの R1〜R4、2 回目のレビューの unhandled rejection の検出）。設計の指示（task-06、go-06）、レビュー、uid の解決のプローブ、コミット、PR は Claude Code。
+
+### 症状
+
+- Linux と macOS で、適用のロック（`<tmp>/otak-proxy-v3-locks`）と Git 設定の mutex（`<tmp>/otak-proxy.gitconfig.mutex`）が、システムの一時ディレクトリの中の、ユーザーを区別しない場所にあった。別のローカルアカウントが先に作ると、そのユーザーの適用はすべて EACCES で例外になった。所有者と権限の確認も無かった。
+- ロックの EACCES は例外として上に伝わった。トグルは `error.toggleFailed` を出し、同期の受け手は rejected の適用をログに出し、起動では例外が監視の開始を飛ばした。
+- `SharedStateFile.recover()` は本番から呼ばれていなかった。呼べば、別のウィンドウが書き込み中の一時ファイル（`*.tmp`）を消せた。
+
+### 原因
+
+- ロックの場所を、POSIX でもユーザーを区別しない固定のパスにしていた。
+- `ApplyLockService.tryAcquire` は、EEXIST 以外の I/O エラーをそのまま投げていた。呼び出し側に「ロックが使えない」という結果が無かった。
+
+### 修正
+
+- `src/utils/PerUserLockDir.ts`（新規）が、ロックディレクトリの規則の唯一の持ち主:
+  - POSIX: `<tmpdir>/otak-proxy-<uid>`。uid は `process.getuid()`（`os.userInfo()` は passwd のエントリが無いと投げる）。mode 0700 で作り、`lstat` で実ディレクトリ（symlink でない）、uid が所有者、group/other の権限が無いことを確かめる。
+  - 使えない理由は `noUid`、`accessDenied`、`notDirectory`、`wrongOwner`、`insecureMode`。それ以外の errno（ENOSPC、EIO）はそのまま投げる。
+  - `getuid` を注入しない（キーが無い、または `undefined`）ときは `process.getuid` を使う。`null` は「uid が無い」（テスト用）。
+  - Windows は `<tmp>/otak-proxy-v3-locks` と従来の mutex の場所のまま。`OTAK_PROXY_LOCK_DIR` / `baseDir` の上書きと Windows の既定は、実ディレクトリの確認だけをする。
+- `ApplyLockService`: POSIX の既定のディレクトリはユーザーごとのディレクトリ。使えないディレクトリと、mkdir / lstat / open の EACCES と EPERM は `{ acquired: false, reason: 'ioError', ioError: { dir, why } }` を返す。
+- `ProxyRemediationService.applyWithSafety`: ioError では、どのターゲットも書かない。ディレクトリと理由を書いた警告を 1 行出し（proxy URL は出さない）、診断をやり直し、停止理由 `lockIoError` を記録し、`remediation.notification.applyFailed` を「詳細を表示」付きで出す（silent と `notificationLevel: off` では出さない。flap tracker が、ディレクトリと理由から作る fingerprint で重複を抑える）。トグルは `error.toggleFailed` を出さずに失敗し、同期の受け手は false で終わり、起動は監視を始める。
+- `GitConfigLocking`: mutex はユーザーごとのディレクトリの中。`withGitConfigWriteMutex` は `gitConfigLease.run` の前にディレクトリを確かめ、使えなければ code EACCES（ディレクトリと理由を含むメッセージ）で投げる。`GitConfigManager` は git を実行せず、mutex も作らずに `NO_PERMISSION` を返す。`classifyGitPermission` は EPERM も `NO_PERMISSION` にする。
+- `SharedStateFile.recover()` を消した。壊れた state file は今も `read()` が null を返し、次の `write()` が置き換える（CT-STATE-001 と F-CRASH-001 をこの形に書き直した）。一時ファイルを掃除する処理はもう無い。
+- unit の分離の確認（`check-unit-worker-isolation.mjs`）は、共有の mutex の場所をプラットフォームごとに計算する。run-dir の比較は `path.resolve` で正規化し、失敗したときだけ観測を JSON で出す。正規化は、Devin の報告では比較がこの環境で外れたため。私は再現していない（Git Bash から `/` 区切りの TEMP を渡しても、node には `\` 区切りで届いた）。
+- Docs: README（停止理由の `lockIoError`、Troubleshooting の項目）、ARCHITECTURE（ユーザーごとのディレクトリ、`lstat` から `open` までの残留、所有者の確認が stub だけで試されていること、新旧の版の混在）、CHANGELOG、CLAUDE.md（分離の mutex の場所）、multi-instance-sync の design.md（`recover()` の削除）。
+
+### レビューで直させた点
+
+1. R1（リリースを止める不具合。私のプローブで発見）: `ApplyLockService` は依存に `getuid: options.getuid` を常に入れ、`resolvedUid` は `'getuid' in deps` を「uid が無い」と読んだ。そのため何も注入しない本番の構成では uid が解決されず、POSIX の適用がすべて `ioError`（`noUid`）になった。コンパイル済みのコードで、`process.getuid` を 1000 を返す関数にし、`getuid` を渡さずに `tryAcquire` すると `{"acquired":false,"reason":"ioError","why":"noUid"}` だった。linux の行はすべて `getuid` を明示し、host lane は `OTAK_PROXY_LOCK_DIR` を設定していたので、テストは緑だった。キーの有無ではなく値で判定させ（`undefined` は既定、`null` は無し）、プラットフォームの解決を 1 か所にさせた。注入しない行（stub の `process.getuid` が 4242 を返す）を足させ、元の判定で red（`{"acquired":false,…,"why":"noUid"}} — expected true` ほか計 3 件）を記録させた。修正後のプローブは `{"acquired":true,"lockDir":"otak-proxy-1000"}`。go-06 は「非 Windows で getuid が無い、または投げる」とだけ書き、注入の「未指定」と「無し」の区別を指定していなかった。これも原因の一部。
+2. R2: POSIX の実ファイルシステムの行（0777 のディレクトリを `insecureMode` で拒む）は、実ユーザーで作ったディレクトリに `getuid: () => 1000` を渡していた。CI の runner の uid が 1000 でなければ、`wrongOwner` が先に返って落ちる。`process.getuid()` にさせ、ほかの POSIX の実行の行も確かめさせた（symlink の行は所有者の確認の前に `notDirectory` で返るので、1000 のままでよい）。
+3. R3: go-06 の P3（本物の改善の経路を通るトグル）のテストが無かった。`runProxyApplyAttempt`、本物の `ProxyRemediationService`、`baseDir` が通常のファイルの `ApplyLockService` で、トグルが失敗する、`applyFailed` が 1 回出る、`error.toggleFailed` が出ない、writer が 1 回も呼ばれない、を assert させた。ioError の分岐をコンパイル済みの JS から消すと red（`expected showWarningMessage to be called once and with exact arguments`）。2 回目のレビューで、`unhandledRejection` を集めて空であることも assert させた（rubric の C3）。
+4. R4: 通知のテストが警告の数だけを数えていた。メッセージ（`remediation.notification.applyFailed`）とボタン（`action.showDetails`）を assert させた。
+
+### Verification
+
+- Devin（1 回目）: lint は検出 0（652 件を走査）、unit 1212 + 74 passing・4 pending、host 610 passing・既知の 7 件だけ失敗、smoke 4、isolation OK、traceability pass。元の `ApplyLockService` で新しい suite が 9 件 red（ユーザーごとのディレクトリにならない、EACCES / EPERM が ioError にならずに投げられる）。
+- Devin（R1〜R4 の後）: lint は検出 0、unit 1215 + 74 passing・5 pending（POSIX の実行の行は win32 で skip）、host 611 passing・1 pending・既知の 7 件だけ失敗、smoke 4、isolation OK。
+- Devin（2 回目）: R3 のテストを単独で走らせて 1 passing。
+- 独立検証（rubric-verifier、sonnet）: C1〜C17 のうち 16 件が pass。lint は検出 0（652 件を走査）、unit 1215 + 74 passing・5 pending、isolation OK、host 611 passing・1 pending・失敗は既知の 7 件だけ、smoke 4。何も注入しない構成のプローブ（C16）は `otak-proxy-1000` の中でロックを取得した。検証者は作業ツリーのコピーで 0700、所有者、権限、notDirectory、getuid の既定、EEXIST、ENOSPC を 1 つずつ外し、どれもテストが red になることを確かめた。
+- C8 だけ fail: `npm run verify:traceability` が exit 1（孤立した stable test ID が 5 件）。検証者は `git archive main` でも同じ 5 件で exit 1 になることを確かめた。5 件はどれも 2026-09-05 のコミット（`899b131`、`6ba9eb3`、`539b657`）で入ったもので、CI はこのスクリプトを実行していない。C8 の期待を「main が出す問題と同じで、増やさない」に直し、C8 だけを再検証した: pass。ブランチと `git archive main` の展開のどちらも `integrity-problems=5` で、問題の一覧は同じ 5 件（ブランチだけにある問題は 0 件）。`recover` は src から消え、CT-STATE-001 と F-CRASH-001 は残って 2 passing、変異の対象 `attempt < RENAME_RETRY_ATTEMPTS - 1` は 1 か所だけ。検証者は追跡されている traceability のファイルを書き換えないよう、出力先を一時ディレクトリに向けて走らせた。
+- Devin の報告の「traceability は pass」は誤りだった（検証者が発見）。
+- CI（run 39167973345、ubuntu、`7fc3d5f`）: success。unit 1220 passing（Windows で skip した POSIX の実ファイルシステムの行がここで走って pass: `creates the per-user directory and accepts it`、symlink は `notDirectory`、実の 0777 は `insecureMode`、何も注入しない POSIX の既定で 0700 の per-user ディレクトリの中にロックを取得）、もう 1 つのレーン 73 passing・1 pending、smoke 4 passing。
+
+### Learning
+
+1. 省略可能な依存の「未指定」をキーの有無（`'x' in deps`）で判定しない。渡す側が `{ x: options.x }` と常にキーを書くと、指定していなくても「無し」になる。未指定（`undefined`）は既定値、「無し」は `null` で表し、何も注入しない（本番と同じ）構成の行を必ず置く。→ rules.md「検証・回帰」
+2. POSIX の実ファイルシステムで所有者を比べる行は、uid を定数にせず `process.getuid()` を使う。CI の runner の uid は開発機と違ってよい。Windows では `this.skip()` するので、この誤りは CI でしか表に出ない。→ rules.md「検証・回帰」
+3. ロックの置き場所の規則は 1 つのヘルパーに置き、使えないディレクトリは例外ではなく結果（`ioError`）にする。→ rules.md「排他制御」。`recover()` を前提にしていた「`syncDir` にファイルを増やすとき」の規則も直した。
+4. 自分の作業: 設計の指示で、テストの差し込み口（注入の「未指定」と「無し」）の意味を指定しなかった。報告の「注入できる」は、何も注入しない構成のプローブで確かめて、初めて誤りが分かった。報告を受けたら、本番と同じ構成で 1 回動かしてから受け入れる。
+5. 自分の作業: rubric の C8 に「traceability のスクリプトが exit 0」と書いたが、main で走らせて確かめていなかった。main でも exit 1 だったので、この PR と関係のない既存の問題で fail になった。rubric に既存のスクリプトの合否を書く前に main で 1 回走らせ、期待は「main と同じ結果で、増やさない」の形にする。→ rules.md「検証・回帰」のベースラインの規則に足した。
+
+### 残留リスク
+
+- `lstat` から `open` までの間にディレクトリを差し替えられる（TOCTOU）。
+- 所有者が違うディレクトリは、stub の `lstat` でだけ試した（実物には root が要る）。
+- 更新の途中: POSIX で、同じユーザーの古い版のウィンドウと新しい版のウィンドウは、すべてのウィンドウが再起動するまで互いを排他しない。
+- POSIX の実行の行は CI（ubuntu）でだけ走り、この Windows の開発機では skip される。
+- Windows の `open(wx)` の一時的な EPERM（削除待ち）は、例外ではなく `lockIoError` として報告される。どちらもリトライはしない。
+- クラッシュした書き込みの一時ファイル（`sync-state.json.*.tmp`）は掃除されずに残る。`recover()` は本番から呼ばれていなかったので、挙動は前と同じ。
+- `npm run verify:traceability` は main でも exit 1 になる。孤立と表示される 5 つの stable ID（CT-CLI-GIT-002、CT-CLI-GIT-003、CT-CLI-NPM-002、F-PARTIAL-WRITE-001、F-GIT-UNSET-5。ソースでは F-GIT-UNSET-5-001）は 2026-09-05 から残っている。どの要件に対応づけるかは仕様の判断なので、この PR では直さず、再生成した生成物もコミットしていない。CI がこのスクリプトを実行していないので、孤立は CI では見えない。
+
+### Codex のレビュー（PR #121、c411d4e に対する P2 が 2 件）
+
+- 症状: `ApplyLockService` は `baseDir` を構築時に、Git 設定の mutex は `GIT_CONFIG_MUTEX_PATH` をモジュールの読み込み時に 1 回だけ決める。一方、ロックの前の確認は `os.tmpdir()` からユーザーごとのディレクトリを毎回計算し直していた。途中で `TMPDIR` が変わると、確認するディレクトリとロックを作るディレクトリがずれる（新しいほうが使えると古いほうの所有者・権限の確認を素通りし、古いほうが無いと `ioError` ではなく ENOENT で例外になる）。
+- 修正（`b903353`）: `ensurePerUserLockDir` が、呼び出し側が実際にロックを置くディレクトリを任意の引数で受け取り、同じ uid・0700 の規則で確かめる。`ApplyLockService` はキャッシュした `baseDir`、`withGitConfigWriteMutex` は `path.dirname(GIT_CONFIG_MUTEX_PATH)` を渡す。
+- Verification: 新しい 3 行（明示したディレクトリだけを mkdir / lstat する、構築後に tmpdir が変わってもキャッシュしたディレクトリで確認して取得し新しい方には何も作らない、Git の mutex の確認が mutex 自身のディレクトリを受け取る）。後ろ 2 行はコンパイル済みの修正前のロジックで red（ENOENT、引数なし）。lint は検出 0、unit 1218 + 74 passing・5 pending、smoke 4、CI success。Codex の再レビューは指摘なし。
+- Learning: 場所を 1 回だけ決めてキャッシュするなら、使う前の確認もそのキャッシュした値に対して行う。確認の側で場所を計算し直すと、確認とロックが別のディレクトリを見る。

@@ -1,7 +1,8 @@
 // Checks that the unit lane gives every mocha --parallel worker its own
 // temporary directory, Git global config, and npm user config, so workers
-// never share the Git config mutex (os.tmpdir()/otak-proxy.gitconfig.mutex),
-// and that it leaves nothing behind in the system temporary directory (#103).
+// never share the Git config mutex (os.tmpdir()/otak-proxy.gitconfig.mutex on
+// Windows; os.tmpdir()/otak-proxy-<uid>/otak-proxy.gitconfig.mutex on POSIX,
+// #108), and that it leaves nothing behind in the system temporary directory (#103).
 //
 // Two probe files run under scripts/lib/unit-mocha.mjs with --parallel --jobs 2;
 // each records what its worker sees. Run with `npm run test:unit:isolation`
@@ -22,7 +23,11 @@ if (!fs.existsSync(path.join(repoRoot, 'out', 'config', 'GitConfigLocking.js')))
 const probeDir = path.join(repoRoot, 'scripts', 'fixtures', 'unit-isolation');
 const probes = ['probe-a.cjs', 'probe-b.cjs'].map(name => path.join(probeDir, name));
 const systemTmp = os.tmpdir();
-const sharedMutex = path.join(systemTmp, 'otak-proxy.gitconfig.mutex');
+// The shared Git config mutex path differs per platform (#108): on POSIX it
+// sits inside the per-user lock directory os.tmpdir()/otak-proxy-<uid>.
+const sharedMutex = process.platform === 'win32' || typeof process.getuid !== 'function'
+  ? path.join(systemTmp, 'otak-proxy.gitconfig.mutex')
+  : path.join(systemTmp, `otak-proxy-${process.getuid()}`, 'otak-proxy.gitconfig.mutex');
 
 function unitRunDirs() {
   return new Set(fs.readdirSync(systemTmp).filter(name => name.startsWith('otak-proxy-unit-')));
@@ -77,11 +82,14 @@ for (const r of reports) {
     `worker ${r.pid}: GIT_CONFIG_GLOBAL ${r.gitGlobal} is not in its directory ${workerDir}`);
   expect(r.npmUser === path.join(workerDir, 'npmrc'),
     `worker ${r.pid}: NPM_CONFIG_USERCONFIG ${r.npmUser} is not in its directory ${workerDir}`);
-  expect(path.dirname(runDir) === systemTmp && path.basename(runDir).startsWith('otak-proxy-unit-'),
+  expect(path.resolve(path.dirname(runDir)) === path.resolve(systemTmp) && path.basename(runDir).startsWith('otak-proxy-unit-'),
     `worker ${r.pid}: directory ${workerDir} is not inside an otak-proxy-unit-* run directory`);
   expect(!fs.existsSync(workerDir), `worker ${r.pid}: ${workerDir} was left behind`);
 }
 
+if (failures.length > 0) {
+  console.error(JSON.stringify({ systemTmp, sharedMutex, reports }, null, 2));
+}
 const added = [...unitRunDirs()].filter(name => !before.has(name));
 expect(added.length === 0, `left behind in ${systemTmp}: ${added.join(', ')}`);
 

@@ -252,7 +252,7 @@ suite('SharedStateFile Unit Tests', () => {
      * Requirement 5.5, 7.2: Error handling and recovery
      */
     suite('Error Handling and Recovery (Requirements 5.5, 7.2)', () => {
-        test('should recover from corrupted JSON file', async () => {
+        test('a corrupted JSON file reads as no state and the next write replaces it', async () => {
             // Write valid state first
             const state: SharedState = {
                 version: 1,
@@ -266,24 +266,19 @@ suite('SharedStateFile Unit Tests', () => {
             const filePath = path.join(testDir, 'otak-proxy-sync', 'sync-state.json');
             fs.writeFileSync(filePath, '{invalid json}}}}}', 'utf-8');
 
-            // Recovery should fix the file
-            const recovered = await sharedStateFile.recover();
-            assert.strictEqual(recovered, true);
-
-            // File should now be readable (or deleted)
-            const exists = await sharedStateFile.exists();
-            // After recovery, file should either be valid or removed
-            if (exists) {
-                const readState = await sharedStateFile.read();
-                // If file exists, it should be readable
-                assert.ok(readState === null || readState.version !== undefined);
-            }
-        });
-
-        test('should return false from recover when nothing to recover', async () => {
-            // No file exists
-            const recovered = await sharedStateFile.recover();
-            assert.strictEqual(recovered, false);
+            // A corrupt file reads as no state; the next write replaces it,
+            // so no separate recovery step is needed.
+            assert.strictEqual(await sharedStateFile.read(), null);
+            const next: SharedState = {
+                version: 2,
+                lastModified: Date.now(),
+                lastModifiedBy: 'instance-2',
+                proxyState: { mode: ProxyMode.Off }
+            };
+            await sharedStateFile.write(next);
+            const readState = await sharedStateFile.read();
+            assert.strictEqual(readState?.version, 2);
+            assert.strictEqual(readState?.lastModifiedBy, 'instance-2');
         });
 
         test('should handle read errors gracefully', async () => {

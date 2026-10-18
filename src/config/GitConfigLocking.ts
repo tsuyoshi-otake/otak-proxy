@@ -1,7 +1,7 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { getErrorMessage, getErrorStderr } from '../utils/ErrorUtils';
+import * as PerUserLockDir from '../utils/PerUserLockDir';
 import { FileLease } from '../utils/FileLease';
 import { Logger } from '../utils/Logger';
 import { GitConfigOperationOptions } from './GitConfigTypes';
@@ -10,7 +10,7 @@ import { GIT_CONFIG_MUTEX_STALE_MS, GIT_CONFIG_MUTEX_TIMEOUT_MS } from './Config
 export const GIT_CONFIG_LOCK_RETRY_DELAYS_MS = [50, 100, 200, 400] as const;
 
 /** Exported so tests can inspect the lock this module actually uses. */
-export const GIT_CONFIG_MUTEX_PATH = path.join(os.tmpdir(), 'otak-proxy.gitconfig.mutex');
+export const GIT_CONFIG_MUTEX_PATH = path.join(PerUserLockDir.perUserLockDirPath(), 'otak-proxy.gitconfig.mutex');
 
 const MUTEX_STALE_MS = GIT_CONFIG_MUTEX_STALE_MS;
 const MUTEX_RETRY_DELAY_MS = 25;
@@ -38,6 +38,22 @@ export async function withGitConfigWriteMutex<T>(
     fn: () => Promise<T>,
     options?: GitConfigOperationOptions
 ): Promise<T> {
+    // Create and check the per-user lock directory here so the lease below
+    // finds it already in place (POSIX: mode 0700). An unusable directory must
+    // not silently fall back to a shared path or rely on the filesystem
+    // refusing the write — a directory owned by another uid can still be
+    // writable — so the write fails through the same EACCES channel a real
+    // permission error uses (#108).
+    // Check the directory the cached mutex path lives in, not a freshly
+    // resolved one: TMPDIR may have changed since this module was loaded.
+    const lockDir = PerUserLockDir.ensurePerUserLockDir(undefined, path.dirname(GIT_CONFIG_MUTEX_PATH));
+    if (!lockDir.usable) {
+        const error = new Error(
+            `Cannot write Git configuration: the otak-proxy lock directory ${lockDir.dir} is unusable (${lockDir.why})`
+        ) as NodeJS.ErrnoException;
+        error.code = 'EACCES';
+        throw error;
+    }
     return gitConfigLease.run(fn, {
         onWaiting: () => options?.onStatus?.('progress.gitConfigWaiting')
     });

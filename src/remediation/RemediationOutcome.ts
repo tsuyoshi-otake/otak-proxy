@@ -15,6 +15,8 @@ export type RemediationStopReason =
     | 'consentRequired'
     /** Another window kept the apply lock past the bounded wait; nothing was written. */
     | 'lockSkipped'
+    /** The apply lock's directory could not be used (permissions, wrong owner); nothing was written. */
+    | 'lockIoError'
     /** A newer logical generation replaced this request; its remaining attempts were dropped. */
     | 'superseded'
     /** A retryable failure or blocker remained, but automatic remediation or retry is disabled. */
@@ -47,6 +49,7 @@ export interface RemediationOutcome {
     retryAttempted: boolean;
     retrySuppressed: boolean;
     lockSkipped: boolean;
+    lockIoError: boolean;
     superseded: boolean;
     targetOutcomes: Partial<Record<RemediationTarget, ProxyTargetOutcome>>;
     errorTypes: string[];
@@ -65,6 +68,8 @@ export interface RemediationOutcomeInput {
     retryAttempted: boolean;
     retrySuppressed: boolean;
     lockSkipped: boolean;
+    /** The apply lock's directory could not be used; no target was written. */
+    lockIoError?: boolean;
     consentDenied: boolean;
     /** The remaining failure or blocker is of a kind automatic retry would handle. */
     retryableFailure: boolean;
@@ -75,6 +80,9 @@ export interface RemediationOutcomeInput {
 export function classifyStopReason(input: RemediationOutcomeInput): RemediationStopReason {
     if (input.consentDenied) {
         return 'consentRequired';
+    }
+    if (input.lockIoError) {
+        return 'lockIoError';
     }
     if (input.lockSkipped) {
         return 'lockSkipped';
@@ -114,6 +122,7 @@ export function buildRemediationOutcome(input: RemediationOutcomeInput): Remedia
         retryAttempted: input.retryAttempted,
         retrySuppressed: input.retrySuppressed,
         lockSkipped: input.lockSkipped,
+        lockIoError: input.lockIoError === true,
         superseded: Boolean(input.applyResult?.superseded),
         targetOutcomes: input.applyResult ? targetOutcomes(input.applyResult.results) : {},
         errorTypes: [...new Set(
