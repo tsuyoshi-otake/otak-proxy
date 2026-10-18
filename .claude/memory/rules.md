@@ -132,8 +132,20 @@
   差分は、検出の後に読み直した state と決定の差（`diffProxyState`、キーの和集合。決定で消したフィールドは消す）。
   スナップショット全体や、検出のときに読んだ値のコピーを重ねると、その後に他 writer が書いた検出・テスト結果を
   消す（#109 への Codex の指摘 F5、F2）。CAS の結果は分けて扱う: revision だけが進んだら重ね直す、mode が
-  変わったら superseded、同じ mode で identity が変わったら決め直す、上限まで負けたら失敗としてエラーを出す
-  （success を返すと、何も起きないトグルになる、F4）。（#78、各分岐はミューテーションで回帰テストが red になることを確認）
+  変わったら superseded、同じ mode で identity が変わったら決め直す、上限まで負けて最後の読み直し（次の項目）
+  でもガードを通ったら失敗としてエラーを出す（success を返すと、何も起きないトグルになる、F4）。（#78、各分岐は
+  ミューテーションで回帰テストが red になることを確認）
+- **CAS を使い切ったら、最新の state をもう一度ガードにかけてから `exhausted`（失敗）と決める。**
+  3 回目の負けで勝ったのが別のウィンドウのトグルや新しい検出なら、失敗ではなく `moved`（superseded か決め直し）。
+  この読み直しが無かったので、他 writer の正当な変更で「トグル失敗」が出た（#111 への Codex の指摘 F6）。
+  読むのは `writer.getState()` で、`superseded` の結果の `current` ではない。`commitState` が返す保存値は
+  資格情報を持たないことがあり、`proxyUrlIdentity` は資格情報を含むので、identity が変わったと誤判定する
+  （テスト「the moved/exhausted check reads through getState, not the superseded payload」がミューテーションで
+  red になることを確認、#78）。
+- **初回セットアップの完了の印（`hasInitialSetup`）は、回答を保存できたときだけ書く。** セットアップは
+  `exhausted` を `moved` と同じ「終わった」に畳み、`performInitialSetup` が印を書いて、保存されなかった回答は
+  二度と聞かれなかった（F7）。`askForInitialSetup()` は `exhausted` のときだけ false を返し、セットアップは
+  `error.initialSetupNotSaved` を出す。次の起動で再び聞く（#78、ミューテーションで red を確認）。
 - **再試行のラウンドで、ユーザーの意図を読み直した state から計算し直さない。** トグルの次の mode は今の mode
   から決まる。ラウンド 2 で計算し直すと、別のウィンドウが先に Auto を保存したときに Off をコミットし、相手の
   選択を打ち消した（テスト「a mode change before a re-decide round supersedes instead of undoing it」、修正前は `false !== true`）。`fromMode` / `nextMode` は最初の読み取りで固定し、
@@ -307,8 +319,16 @@
   `<<'PY'` の中の `\n` / `\\` が壊れ、パッチスクリプトが無言で不一致になる。
   バックスラッシュを含むスクリプトは Write ツールでファイルに書いてから実行する。
 
-- **Write ツールは LF で書く。** 作業ツリーは CRLF（core.autocrlf=true、.gitattributes なし）なので、
-  Write で丸ごと書いたファイルは CRLF に戻し、CRLF 数と LF 数が一致することを確かめる（README 更新）。
+- **Devin のシェル経由のヒアドキュメント（`node <<'EOF'`）は非 ASCII を壊す。** 文字がコンソールの
+  コードページ 932 を通り、16 ロケールのうち 15 個の翻訳が `?`、U+FFFD、ダイアクリティカルマークの欠落に
+  なった（テストは全部 pass、レビューで発見、#78）。非 ASCII はファイルツールで UTF-8 のファイルに書かせるか、
+  ASCII だけのソースに `\u` エスケープで書かせる。確かめるときはコンソールの表示を信じず、node で
+  コードポイントを読むか、UTF-8 のファイルに書き出して Read で読む。
+
+- **Write ツールは LF で書く。作業ツリーの改行コードはファイルごとに違う。** core.autocrlf=true、
+  .gitattributes なしで、2026-10-18 の `git ls-files --eol` は w/crlf 397、w/lf 191、w/mixed 25。
+  編集の前に node で数え、そのファイルの改行コードを保つ（CRLF のファイルは CRLF 数と LF 数が一致する、
+  LF のファイルは CR が 0）。「README は LF」「作業ツリーは CRLF」と一般化して、2 回とも間違えた（#78）。
 
 - **Write ツールは行末空白を削る。** 空白だけの行を含むパッチのアンカーは一致しなくなる。
   アンカーに空白行を入れない（#78）。

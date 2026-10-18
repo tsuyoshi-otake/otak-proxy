@@ -1344,3 +1344,67 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - `sameLogicalIdentity` は per-scheme の URL（`autoHttpProxyUrl` / `autoHttpsProxyUrl`）を比べない。コミットの窓でそれだけが変わった場合、トグルの patch は触れないので値は残るが、決め直しは起きない。
 - `applyStartupProxyState` の skip 時の保存は、丸ごと保存のまま。
 - 確認したのはユニットテストと VS Code ホストのテストまで。実際の複数ウィンドウでは試していない。
+
+## 2026-10-18 — #78 PR #111 への Codex の指摘 2 件（F6、F7）を直す
+
+**Issue**: [#78](https://github.com/tsuyoshi-otake/otak-proxy/issues/78)（#108 の項目 7）
+**PR**: [#111](https://github.com/tsuyoshi-otake/otak-proxy/pull/111)（指摘は `c85cc8c` へのレビュー）
+**コミット**: `9ee938a`（fix/78-toggle-followups、基準 `36c9584`）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状（`c85cc8c` への Codex の指摘、どちらも P2）
+
+- F6: `commitDecidedPatch` は 3 回目の CAS に負けると、勝った state をガードにかけずに `exhausted` を返した。勝ったのが別のウィンドウのトグル（別の mode）や新しい検出（別の proxy）でも、トグルは「Failed to toggle proxy mode」を出した。本来は superseded か決め直しになる。
+- F7: 初回セットアップのコミットが 3 回とも revision だけの書き込みに負けると、セットアップは黙って戻り、`performInitialSetup` が `hasInitialSetup` を立てた。ユーザーが選んだ Auto / Manual は保存されないまま、二度と聞かれなかった。
+
+### 原因
+
+- F6: 3 回目の負けの後に、最新の state をガードにかける読み取りが無かった。「上限まで負けた」と「他 writer が mode や proxy を変えた」を区別していなかった。
+- F7: `commitSetupDecision` は boolean を返し、`exhausted` と `moved` を同じ「終わった」に畳んでいた。`askForInitialSetup` は `Promise<void>` で、呼び出し側は結果を見ずにセットアップ完了の印を書いた。保存できなかったという途中の状態が、完了という終端状態になっていた。
+
+### 修正
+
+- `commitDecidedPatch` は 3 回目の負けの後に `writer.getState()` でもう一度読み、ガードが拒否したら `moved`（その state 付き）、通ったときだけ `exhausted` を返す。`superseded` の結果の `current` は使わない。`ProxyStateManager.commitState` が返すのは保存値で、hydrate された資格情報を持たないことがある。`proxyUrlIdentity` は資格情報を含むので、ガードは identity が変わったと誤判定する。タイマーは使わず、試行は 3 回のまま。
+- `ToggleProxyCommand` は変更なし。既存の分岐（別の mode の `moved` は superseded、同じ mode の `moved` は決め直し、`exhausted` は失敗）が、新しい結果の意味のまま正しく動く。
+- 初回セットアップ: `commitSetupDecision` は `'committed' | 'moved' | 'exhausted'` を返す。`exhausted` では `error.initialSetupNotSaved` を「出力ログを確認」「ウィンドウを再読み込み」の提案付きで 1 回出し、何も apply せず、`otakProxy.proxyUrl` も書かない。`handleAutoSetup` / `handleManualSetup` / `askForInitialSetup` は `Promise<boolean>` を返し、false は `exhausted` のときだけ。`moved` は従来どおり完了扱い（別の writer が設定した）。
+- `ExtensionInitializer.askForInitialSetup` は結果を返す。`performInitialSetup`（`src/extension.ts`）は true のときだけ `hasInitialSetup` を書き、false なら警告をログに出して false を返す（次の起動で再び聞く）。initializer が無い経路は変えていない。
+- 新しいキー `error.initialSetupNotSaved` を 16 ロケールに足した（`error.toggleFailed` の直後）。
+- ロケールのテスト「Translation values should contain no replacement or placeholder characters」を足した。U+FFFD、2 個以上続く `?`、文字に挟まれた `?` を拒否する。
+- ドキュメント: ARCHITECTURE.md（トグル図の手順 5 と 7、ToggleProxyCommand の Flow の 4 と 6、ExtensionInitializer のセットアップ経路）、README の Troubleshooting（新しいメッセージの項目を「Failed to toggle proxy mode」の隣に）、CHANGELOG（#78 の 2 項目をその場で直した）。
+
+### レビューで直させた点
+
+1. 15 ロケールの翻訳が壊れていた。ar / hi / ko は全部の文字が `?`、ja / ru / zh-cn / zh-tw は U+FFFD の文字化け、tr / vi は一部が `?`、de / es / fr / it / pt-br はダイアクリティカルマークが落ちていた。原因は、Devin が値を書いたスクリプトを `node <<'EOF'` のヒアドキュメントで渡したこと。非 ASCII がコンソールのコードページ 932 を通って変換された。テストは全部 pass で、見つけたのはレビュー（node で値をコードポイントとして読んだ）。UTF-8 のファイルに書いたスクリプトで書き直させ、16 個すべてを UTF-8 のダンプで読んで確かめた。同じ壊れ方を検出するテストを足した（修正前の版で "ja.error.initialSetupNotSaved contains a U+FFFD replacement character" で落ちる）。
+2. テストの補助関数 `activateWithStubbedApi` は何も activate しない。`stubVscodeApiAndCreateContext` に改名させ、`performInitialSetup` を型の必須メンバーにして `!` を消させた。
+3. `exhausted` の説明が「basis は実際には動かなかった」だった。revision は動いている。成り立つのは「最新の state がまだガードを通る」なので、そう書き直させた（ドキュメントコメント、コードのコメント、ARCHITECTURE.md の手順 7）。
+4. CHANGELOG の最初の #78 の項目の「only when the state never actually settled somewhere new」は意味が取りにくい。別のウィンドウが保存した mode や proxy は失敗ではない、と平易に書き直させた。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 修正前（`c85cc8c` のロジック） | 3 回目に mode が変わるコミットのテストが `'exhausted' !== 'moved'`。最後の試行のトグルのテスト 2 件とセットアップの `moved` のテストが `false !== true`。ロケールのテストは壊れた翻訳で U+FFFD を報告して落ちる |
+| ミューテーション | 4 件とも単独で red: 最後の読み直しを消す（4 件）、`superseded` の `current` でガード（資格情報のテスト）、セットアップの `exhausted` を `moved` 扱い（exhausted の 2 件、"an unsaved answer must resolve false"）、`hasInitialSetup` を結果に関係なく書く（activation のテスト）。セットアップの exhausted の 2 件は、`Promise<void>` の旧契約ではコンパイルできないので、旧動作を戻す 3 番目のミューテーションを修正前の代わりにした |
+| `npm run lint` | pass（ESLint と `lint:unicode`、630 ファイル） |
+| `npm run test:unit:parallel` | 1098 + 74 passing、0 failing |
+| `npm test`（拡張ホスト） | 533 passing、1 pending、9 failing（基準と同じ 9 件） |
+| `npm run test:smoke` | 4 passing |
+| 独立 verifier | D1〜D9 すべて pass。各ミューテーションを out/ のコピーで再現し、16 個の翻訳をコードポイントで読んだ |
+| 翻訳 | 16 個の値をファイルのバイトからコードポイントとして読んだ。U+FFFD と `?` は無い。ar はアラビア文字、hi はデーヴァナーガリー、ko はハングル、ja はかなと漢字、ru はキリル文字、zh-cn / zh-tw は漢字。ラテン文字のロケールはダイアクリティカルマーク付き |
+| テストランナーの残存プロセス | なし |
+
+### Learning
+
+1. CAS を使い切った後は、最新の state をもう一度ガードにかけてから失敗と判定する。読むのは `getState()` で、`superseded` の結果の `current` ではない（資格情報を持たないことがある）。→ rules.md「世代フェンス」に追記した。
+2. 保存できなかった操作を完了として記録しない。結果の型で `exhausted` を区別し、完了の印は成功したときだけ書く。→ rules.md「世代フェンス」に追記した。
+3. Devin のシェル経由のヒアドキュメントは非 ASCII を壊す。非 ASCII はファイルツールで UTF-8 のファイルに書かせ、確かめるときはコンソールの表示ではなく、node でコードポイントを読むか、UTF-8 のファイルに書き出して読む。→ rules.md「ツール操作」に追記した。
+4. 自分の作業ミス: rules.md の「作業ツリーは CRLF」は一般化しすぎだった。`git ls-files --eol` では w/crlf 397、w/lf 191、w/mixed 25（2026-10-18）。前の項目の Learning 7 で書いた「作業ツリーは CRLF」は README.md と ARCHITECTURE.md については正しいが、全体には当てはまらない。`extensionActivationNonBlocking.test.ts` は LF のまま。→ rules.md「ツール操作」の項目を、ファイルごとの改行コードを保つ形に直した。
+5. 翻訳の壊れは、lint（ESLint と `lint:unicode`）、型検査、キーの数をそろえるテストのどれでも見つからなかった。見つけたのは、レビューで node を使って値を読んだとき。→ 同じ壊れ方を検出するロケールのテストを足した（rules.md には足さない。テストが守る）。
+
+### 残留リスク
+
+- 検出とフォールバックの到達性テストは、ラウンドごとに走り直すことがある（最大 3 ラウンド）。
+- configureUrl の分岐は、直前に読み直した state を丸ごと保存する。
+- `sameLogicalIdentity` は per-scheme の URL を比べない。
+- 新しいメッセージの 15 個の翻訳は、ネイティブの確認を受けていない。
+- 確認したのはユニットテストと VS Code ホストのテストまで。実際の複数ウィンドウでは試していない。
