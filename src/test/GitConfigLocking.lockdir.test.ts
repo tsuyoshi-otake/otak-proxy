@@ -7,6 +7,7 @@
 
 import * as assert from 'assert';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { GIT_CONFIG_MUTEX_PATH, withGitConfigWriteMutex } from '../config/GitConfigLocking';
 import { GitConfigManager } from '../config/GitConfigManager';
@@ -44,6 +45,19 @@ suite('Git config mutex lock directory (#108)', () => {
 
         assert.strictEqual(entered, false, 'the critical section must not run without the mutex');
         assert.strictEqual(fs.existsSync(GIT_CONFIG_MUTEX_PATH), false, 'no mutex file may be created');
+    });
+
+    test('the check judges the directory of the cached mutex path', async () => {
+        // TMPDIR may change after the module is loaded; the mutex path does
+        // not, so the directory checked must be the mutex's own (Codex review
+        // on #121).
+        const ensure = sandbox.stub(PerUserLockDir, 'ensurePerUserLockDir')
+            .returns({ usable: false, dir: path.dirname(GIT_CONFIG_MUTEX_PATH), why: 'wrongOwner' });
+
+        await assert.rejects(withGitConfigWriteMutex(async () => undefined));
+
+        assert.strictEqual(ensure.callCount, 1);
+        assert.strictEqual(ensure.firstCall.args[1], path.dirname(GIT_CONFIG_MUTEX_PATH));
     });
 
     test('a Git write on an unusable lock directory reports NO_PERMISSION', async () => {

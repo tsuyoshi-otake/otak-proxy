@@ -129,6 +129,23 @@ suite('PerUserLockDir (#108)', function() {
             });
         });
 
+        test('an explicit directory is the one checked, not a freshly resolved one', () => {
+            const checked: fs.PathLike[] = [];
+            const fileSystem = {
+                mkdirSync: (dir: fs.PathLike) => { checked.push(dir); return undefined; },
+                lstatSync: (dir: fs.PathLike) => {
+                    checked.push(dir);
+                    return fakeStats({ directory: true, uid: 1000, mode: 0o40700 });
+                }
+            } as unknown as LockDirDeps['fileSystem'];
+            const status = ensurePerUserLockDir(
+                deps({ platform: 'linux', getuid: () => 1000, fileSystem }),
+                '/cached/otak-proxy-1000'
+            );
+            assert.deepStrictEqual(status, { usable: true, dir: '/cached/otak-proxy-1000' });
+            assert.deepStrictEqual(checked, ['/cached/otak-proxy-1000', '/cached/otak-proxy-1000']);
+        });
+
         test('a throwing getuid reports noUid', () => {
             const status = ensurePerUserLockDir(deps({
                 platform: 'linux',

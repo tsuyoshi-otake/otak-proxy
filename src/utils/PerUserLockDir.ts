@@ -155,15 +155,21 @@ export function ensureLockDir(
  * fails closed: without a uid there is no safe fallback directory, so the
  * callers report the unusable directory through their existing error
  * channels instead of falling back to a shared one.
+ *
+ * `dir` is the directory the caller will actually put its locks in, normally
+ * the `perUserLockDirPath()` it computed once and cached. Passing it makes the
+ * check judge that exact directory: recomputing here would follow a changed
+ * `TMPDIR` and validate a different directory than the one the lock is then
+ * created in.
  */
-export function ensurePerUserLockDir(deps?: LockDirDeps): LockDirStatus {
+export function ensurePerUserLockDir(deps?: LockDirDeps, dir?: string): LockDirStatus {
     const tmp = resolvedTmpdir(deps);
     if (resolvedPlatform(deps) === 'win32') {
-        return { usable: true, dir: tmp };
+        return { usable: true, dir: dir ?? tmp };
     }
     const uid = resolvedUid(deps);
     if (uid === undefined) {
-        return { usable: false, dir: tmp, why: 'noUid' };
+        return { usable: false, dir: dir ?? tmp, why: 'noUid' };
     }
-    return ensureLockDir(path.join(tmp, `${PER_USER_DIR_PREFIX}${uid}`), uid, deps);
+    return ensureLockDir(dir ?? path.join(tmp, `${PER_USER_DIR_PREFIX}${uid}`), uid, deps);
 }

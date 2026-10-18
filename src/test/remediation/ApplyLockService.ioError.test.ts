@@ -93,6 +93,45 @@ suite('ApplyLockService lock directory ioError (#108)', () => {
         await service.release(result.handle);
     });
 
+    test('a temp directory that changes after construction still checks and uses the cached directory', async () => {
+        const mkdirCalls: fs.PathLike[] = [];
+        const fileSystem = {
+            mkdirSync: (dir: fs.PathLike, options?: { mode?: number }) => {
+                mkdirCalls.push(dir);
+                return fs.mkdirSync(dir, options as fs.MakeDirectoryOptions);
+            },
+            lstatSync: (dir: fs.PathLike) => {
+                const stat = fs.lstatSync(dir);
+                return {
+                    ...stat,
+                    isDirectory: () => stat.isDirectory(),
+                    uid: 1000,
+                    mode: 0o40700
+                } as fs.Stats;
+            }
+        } as unknown as LockFileSystem;
+        // TMPDIR changes after the service was built: the lock must stay in
+        // the directory the service resolved, and that directory is the one
+        // checked (Codex review on #121).
+        let tmp = workDir;
+        const service = new ApplyLockService({
+            platform: 'linux',
+            getuid: () => 1000,
+            tmpdir: () => tmp,
+            fileSystem
+        });
+        tmp = path.join(workDir, 'changed-tmpdir');
+
+        const result = await service.tryAcquire(target, ttlMs);
+
+        const perUserDir = path.join(workDir, 'otak-proxy-1000');
+        assert.ok(result.acquired && result.handle, JSON.stringify(result));
+        assert.strictEqual(path.dirname(result.handle.path), perUserDir);
+        assert.deepStrictEqual(mkdirCalls, [perUserDir]);
+        assert.strictEqual(fs.existsSync(tmp), false, 'nothing may be created under the new temp directory');
+        await service.release(result.handle);
+    });
+
     test('the POSIX default resolves the uid from process.getuid when no getuid option is given', async () => {
         await withTemporaryGetuid(4242, async () => {
             const fileSystem = {

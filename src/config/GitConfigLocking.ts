@@ -44,7 +44,9 @@ export async function withGitConfigWriteMutex<T>(
     // refusing the write — a directory owned by another uid can still be
     // writable — so the write fails through the same EACCES channel a real
     // permission error uses (#108).
-    const lockDir = PerUserLockDir.ensurePerUserLockDir();
+    // Check the directory the cached mutex path lives in, not a freshly
+    // resolved one: TMPDIR may have changed since this module was loaded.
+    const lockDir = PerUserLockDir.ensurePerUserLockDir(undefined, path.dirname(GIT_CONFIG_MUTEX_PATH));
     if (!lockDir.usable) {
         const error = new Error(
             `Cannot write Git configuration: the otak-proxy lock directory ${lockDir.dir} is unusable (${lockDir.why})`

@@ -135,7 +135,7 @@ export class ApplyLockService {
     async tryAcquire(target: ApplyLockRequest, ttlMs: number): Promise<ApplyLockAcquireResult> {
         try {
             const dirStatus = this.perUserDefaultDir
-                ? ensurePerUserLockDir(this.lockDirDeps)
+                ? ensurePerUserLockDir(this.lockDirDeps, this.baseDir)
                 : ensureLockDir(this.baseDir, undefined, this.lockDirDeps);
             if (!dirStatus.usable) {
                 return { acquired: false, reason: 'ioError', ioError: { dir: dirStatus.dir, why: dirStatus.why } };
