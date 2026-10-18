@@ -829,7 +829,13 @@ export function getTestIterations(): number {
   (strict `<credentials>@` for diagnostics/state text) share one set of
   credential patterns, so every occurrence in a message is masked — including
   credentials after `/`, `:`, `@` and `DOMAIN\user` authorities that URL
-  parsing moves into the path (#108)
+  parsing moves into the path (#108). A password with an unencoded `/`, `?` or
+  `#` in an absolute URL is masked too: a URL parser rejects such a URL or
+  splits the authority at that character, so the pattern's fallback alternative
+  consumes the userinfo up to the last `@` of the run; the run stops at the
+  next `://` so the scan stays linear. A port followed by an `@` later in the
+  same token (`http://localhost:3000/@vite/client`) has the same shape and is
+  masked as well (`http://localhost:****@vite/client`)
 - Git, npm, and pip config managers mask their own error results before
   returning them (execFile errors echo the command line), and `ErrorAggregator`
   masks every error at ingestion, so `lastError`, the tooltip, and

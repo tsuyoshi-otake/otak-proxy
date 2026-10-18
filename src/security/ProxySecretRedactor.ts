@@ -1,11 +1,26 @@
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]/g;
 const ANSI_ESCAPE_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]/g;
-// Greedy credential part: backtracks to the LAST "@" before the host, so
-// passwords containing an unencoded "@" (http://user:p@ss@host) are fully consumed.
+// Two userinfo alternatives, tried left to right:
+// 1) [^/\s]+ covers every well-formed absolute URL: userinfo has no "/" or
+//    whitespace. It wins wherever it matches, so in
+//    "https://user:pass@registry.example.com/@scope/pkg" the host stays visible.
+// 2) [^/\s:@]+:(?:(?!:\/\/)\S)* covers a password with an unencoded "/", "?"
+//    or "#" ("http://user:pa/ss@host:8080"), which a URL parser rejects or
+//    splits at that character. The password run may contain "/", "?", "#",
+//    "\" and "@" but never crosses another "://"; that bound keeps the scan
+//    linear (without it, 140k characters of "x://a:b" take about 1.6 s).
+// Both are greedy and backtrack to the LAST "@" before the host, so a password
+// with an unencoded "@" (http://user:p@ss@host) is fully consumed.
+// Accepted over-masking: a port followed by an "@" later in the same
+// whitespace-free token has the same shape as a password containing "/" and
+// cannot be told apart from it. "http://user:12/ss@host:8080" and
+// "http://localhost:3000/@vite/client" are both valid URLs, and both are
+// masked ("http://localhost:****@vite/client"); hiding a port is the safe
+// direction.
 // Module-private (#108): /g regexes carry lastIndex state across calls, so
 // callers go through maskCredentialOccurrences instead of touching the
 // patterns directly.
-const URL_CREDENTIAL_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)([^/\s]+)@/gi;
+const URL_CREDENTIAL_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)([^/\s]+|[^/\s:@]+:(?:(?!:\/\/)\S)*)@/gi;
 // Scheme-less "user:pass@host" as returned by git/npm config reads. Requires a
 // ":" between user and password so plain email addresses never match. The
 // boundary also accepts "/", ":", "@" and "\" so credentials embedded inside a

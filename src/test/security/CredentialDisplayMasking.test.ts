@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fc from 'fast-check';
 import { InputSanitizer } from '../../validation/InputSanitizer';
+import { ProxySecretRedactor } from '../../security/ProxySecretRedactor';
 import { GitConfigManager } from '../../config/GitConfigManager';
 import { ErrorAggregator } from '../../errors/ErrorAggregator';
 import { saveProxyConfigResults } from '../../core/ProxyConfigStateTracker';
@@ -94,8 +95,9 @@ suite('Credential display masking (#108)', () => {
                         fc.record({
                             user: fc.stringMatching(/^usr[a-z0-9]{3,8}$/),
                             pass: fc.stringMatching(/^pw[a-z0-9]{6,12}$/),
+                            slashPass: fc.stringMatching(/^pw[a-z0-9]{3,6}[/?#]pw[a-z0-9]{3,6}$/),
                             host: fc.stringMatching(/^h[a-z0-9]{2,10}\.example$/),
-                            shape: fc.constantFrom('url', 'bare', 'path', 'domain')
+                            shape: fc.constantFrom('url', 'bare', 'path', 'domain', 'urlSlash')
                         }),
                         { minLength: 1, maxLength: 3 }
                     ),
@@ -104,6 +106,7 @@ suite('Credential display masking (#108)', () => {
                         const embedded = credentials.map(c => {
                             switch (c.shape) {
                                 case 'url': return `http://${c.user}:${c.pass}@${c.host}`;
+                                case 'urlSlash': return `http://${c.user}:${c.slashPass}@${c.host}`;
                                 case 'path': return `pre/${c.user}:${c.pass}@${c.host}`;
                                 case 'domain': return `D\\${c.user}:${c.pass}@${c.host}`;
                                 default: return `${c.user}:${c.pass}@${c.host}`;
@@ -111,15 +114,132 @@ suite('Credential display masking (#108)', () => {
                         }).join(` ${noise} `);
                         const masked = sanitizer.maskPassword(embedded);
                         for (const c of credentials) {
-                            assert.ok(
-                                !masked.includes(c.pass),
-                                `password ${c.pass} leaked in "${embedded}" -> "${masked}"`
-                            );
+                            if (c.shape === 'urlSlash') {
+                                // The whole password run must be masked; neither
+                                // the part before nor the part after the "/",
+                                // "?" or "#" separator may survive.
+                                const separatorIndex = c.slashPass.search(/[/?#]/);
+                                const secondPart = c.slashPass.slice(separatorIndex + 1);
+                                assert.ok(
+                                    !masked.includes(c.slashPass),
+                                    `password ${c.slashPass} leaked in "${embedded}" -> "${masked}"`
+                                );
+                                assert.ok(
+                                    !masked.includes(secondPart),
+                                    `password tail ${secondPart} leaked in "${embedded}" -> "${masked}"`
+                                );
+                            } else {
+                                assert.ok(
+                                    !masked.includes(c.pass),
+                                    `password ${c.pass} leaked in "${embedded}" -> "${masked}"`
+                                );
+                            }
                         }
                     }
                 ),
                 { numRuns: getPropertyTestRuns() }
             );
+        });
+    });
+
+    suite('passwords containing unencoded "/", "?" or "#" (PR #113 review)', () => {
+        const redactor = new ProxySecretRedactor();
+
+        // Pinned by the Codex review of PR #113: a password with a raw "/",
+        // "?" or "#" makes new URL() reject the input or splits the authority
+        // at that character, so both consumers of the shared credential
+        // patterns must still mask the userinfo up to the last "@" of the run.
+        const rows: Array<{ input: string; masked: string; redacted: string }> = [
+            {
+                input: 'http://user:pa/ss@host:8080',
+                masked: 'http://user:****@host:8080',
+                redacted: 'http://<credentials>@host:8080'
+            },
+            {
+                input: 'Command failed: git config --global http.proxy http://user:pa/ss@host:8080',
+                masked: 'Command failed: git config --global http.proxy http://user:****@host:8080',
+                redacted: 'Command failed: git config --global http.proxy http://<credentials>@host:8080'
+            },
+            {
+                input: 'http://user:12/ss@host:8080',
+                masked: 'http://user:****@host:8080',
+                redacted: 'http://<credentials>@host:8080'
+            },
+            {
+                input: 'http://user:12?ss@host',
+                masked: 'http://user:****@host',
+                redacted: 'http://<credentials>@host'
+            },
+            {
+                input: 'http://user:12#ss@host',
+                masked: 'http://user:****@host',
+                redacted: 'http://<credentials>@host'
+            },
+            // Rows that must keep today's output.
+            {
+                input: 'https://user:pass@registry.example.com/@scope/pkg',
+                masked: 'https://user:****@registry.example.com/@scope/pkg',
+                redacted: 'https://<credentials>@registry.example.com/@scope/pkg'
+            },
+            {
+                input: 'http://user:p@ss@host',
+                masked: 'http://user:****@host/',
+                redacted: 'http://<credentials>@host'
+            },
+            {
+                input: 'https://registry.npmjs.org/@types/node',
+                masked: 'https://registry.npmjs.org/@types/node',
+                redacted: 'https://registry.npmjs.org/@types/node'
+            },
+            // Accepted over-masking: a port followed by an "@" later in the same
+            // whitespace-free token cannot be told apart from a password that
+            // contains "/" (http://user:12/ss@host:8080), so the port run is
+            // masked as userinfo, inside text and in a standalone valid URL
+            // alike. Pinned so a later change is deliberate.
+            {
+                input: 'GET https://registry.example.com:8443/@scope/pkg failed',
+                masked: 'GET https://registry.example.com:****@scope/pkg failed',
+                redacted: 'GET https://<credentials>@scope/pkg failed'
+            },
+            {
+                input: 'http://localhost:3000/@vite/client',
+                masked: 'http://localhost:****@vite/client',
+                redacted: 'http://<credentials>@vite/client'
+            }
+        ];
+
+        test('maskPassword and redactString mask malformed absolute-URL userinfo', () => {
+            const failures: string[] = [];
+            for (const { input, masked, redacted } of rows) {
+                const actualMasked = sanitizer.maskPassword(input);
+                if (actualMasked !== masked) {
+                    failures.push(
+                        `maskPassword(${JSON.stringify(input)})\n  want: ${masked}\n  got:  ${actualMasked}`
+                    );
+                }
+                const actualRedacted = redactor.redactString(input);
+                if (actualRedacted !== redacted) {
+                    failures.push(
+                        `redactString(${JSON.stringify(input)})\n  want: ${redacted}\n  got:  ${actualRedacted}`
+                    );
+                }
+            }
+            assert.deepStrictEqual(failures, [], failures.join('\n'));
+        });
+
+        test('masking stays linear on credential-run input', () => {
+            const input = 'x://a:b'.repeat(40000);
+
+            const maskStart = process.hrtime.bigint();
+            sanitizer.maskPassword(input);
+            const maskMs = Number(process.hrtime.bigint() - maskStart) / 1e6;
+
+            const redactStart = process.hrtime.bigint();
+            redactor.redactString(input);
+            const redactMs = Number(process.hrtime.bigint() - redactStart) / 1e6;
+
+            assert.ok(maskMs < 1000, `maskPassword took ${maskMs.toFixed(1)} ms`);
+            assert.ok(redactMs < 1000, `redactString took ${redactMs.toFixed(1)} ms`);
         });
     });
 

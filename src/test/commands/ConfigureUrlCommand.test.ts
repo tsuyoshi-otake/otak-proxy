@@ -1,7 +1,8 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { executeConfigureUrl } from '../../commands/ConfigureUrlCommand';
+import { executeConfigureUrl, showInvalidProxyUrl } from '../../commands/ConfigureUrlCommand';
+import { InputSanitizer } from '../../validation/InputSanitizer';
 import { CommandContext } from '../../commands/types';
 import { ProxyMode, ProxyState } from '../../core/types';
 import { ProxyStateManager } from '../../core/ProxyStateManager';
@@ -380,6 +381,33 @@ suite('ConfigureUrlCommand Unit Tests', () => {
         const errorNotif = notifications.find(n => n.type === 'error');
         assert.ok(errorNotif, 'user must see an error notification');
         assert.strictEqual(errorNotif?.key, 'error.configureUrlFailed');
+    });
+
+    test('invalid URL with a "/" in the password: error details carry only the masked value (PR #113 review)', async () => {
+        // Regression for the Codex review finding on PR #113: a password such
+        // as "pa/ss" makes new URL() reject the whole URL, so the details
+        // shown for 'error.invalidProxyUrl' depend entirely on the text masker.
+        const capturedDetails: unknown[] = [];
+        const { ctx } = createContext({ mode: ProxyMode.Off }, {
+            sanitizer: new InputSanitizer(),
+            userNotifier: {
+                showSuccess: () => {},
+                showWarning: () => {},
+                showError: () => {},
+                showErrorWithDetails: async (_message, details) => {
+                    capturedDetails.push(details);
+                },
+                showProgressNotification: async (_title, task) =>
+                    task({ report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>)
+            }
+        });
+
+        await showInvalidProxyUrl(ctx, 'http://user:pa/ss@host:8080', i18n);
+
+        assert.strictEqual(capturedDetails.length, 1);
+        const serialized = JSON.stringify(capturedDetails[0]);
+        assert.ok(!serialized.includes('pa/ss'), `details leak the password: ${serialized}`);
+        assert.ok(!serialized.includes('ss@'), `details leak the password tail: ${serialized}`);
     });
 
     suite('credential-bearing stored URL (#108)', () => {
