@@ -65,6 +65,27 @@
   identity のガードが `moved` にして吸収した。ガードが守らない範囲（同じ proxy の新しい bookkeeping）でテストを
   書くと、単独で red になった（#78、テスト「same-identity bookkeeping committed inside the CAS window is kept」）。
 
+- **テストは本番の合成そのものを呼ぶ。手順の写しを持たない。** #108 の初稿のテストは `applyProxySafely` の手順
+  （state を読む → 計画 → フェンス → `applyWithSafety`）を写していて、本番が未解決の options を渡すように壊しても
+  緑だった。合成を `runProxyApplyAttempt`（`src/remediation/ProxyApplyAttempt.ts`）に移して本番とテストが同じ関数を
+  呼ぶと、同じミューテーションで 6 件が red になった（#108）。
+
+- **テストの state は本番の書き込み経路（`ProxyStateManager.saveState`）で作る。** 資格情報付きの state を globalState に
+  直接書くと、本番には存在しない state になる（永続化は資格情報を外して SecretStorage に分ける）。#108 の初稿はその
+  state を通すために `V3MigrationService` の候補を変え、primary と衝突時の優先順位まで変えていた。存在しない state の
+  ためにプロダクションコードを変えない。
+
+- **`saveState` の後は、globalState を直接書き換えても `getState()` には見えない。** `saveState` は in-memory の state
+  を設定し、`getState()` はそれを返す。テストの途中で state を動かすときは、`getState()` から見える形で動かし、守る
+  不変条件を壊すミューテーションで red になることを確かめる。#108 のテスト「state moves under the open prompt」は seed を
+  `saveState` に変えた後も globalState を直接書いていて、「applier が同意の後で state を読み直す」ミューテーションでも
+  緑だった（独立 verifier が out/ のコピーで確認）。
+
+- **`vscode` の API をスタブするテストは `vscode` を直接 import する。** `scripts/run-unit-tests.mjs` はテストファイル中の
+  `import/require('vscode')` で host lane に振り分ける。再エクスポートするヘルパー（#108 の初稿の
+  `src/test/vscodeRuntime.ts`）は振り分けをすり抜けて unit lane に残り、2 つ目の流儀になる。直接 import に直すと、
+  10 件が host lane に移った（#108）。
+
 ## 外部ツールのスタブ
 
 - **`{stdout:'', stderr:''}` を返すだけのコマンドスタブは書かない。**
@@ -278,6 +299,20 @@
   `http://proxy:8080`、`http://proxy:8080/`、`HTTP://PROXY:8080` は同じキーになる。生の文字列を
   `getCredentialKeyForPublicUrl` に渡したときだけ、別のキーになる。キーを引く経路を足すときは `getProxyPublicUrl` を通す
   （node で out/ を読み込んで確認、#108、2026-10-18）。
+
+- **資格情報は proxy のアドレス（公開 URL）単位で保存・復元される。同じアドレスの URL は、どのフィールドでも
+  同じ資格情報で復元される。** `hydrateStateForRuntime` は `autoProxyUrl` / `autoHttpProxyUrl` / `autoHttpsProxyUrl` を
+  同じキーで引く。`HTTP_PROXY=http://proxy:3128` と `HTTPS_PROXY=http://user:secret@proxy:3128` を保存して再読み込みすると、
+  3 つとも資格情報付きで復元され、書き込み計画は 1 つの URL に畳まれる（out/ の probe とテスト「same-host split: after a
+  reload every written URL is one consent judged」で確認、#108）。本番で `deleteCredentialsForPublicUrl` を呼ぶ経路は無いので、
+  URL から外した資格情報も復元時に付き直る。scheme ごとの資格情報を扱う変更のテストには、両 scheme が同じアドレスの
+  場合を必ず入れる。
+
+- **applied-proxy の provider が返す URL と、拡張が `http.proxy` に書いた値は一致しないことがある。** provider は
+  hydrate 済みの `autoProxyUrl`（同じアドレスの資格情報が SecretStorage にあれば資格情報付き）を返す。検出経路
+  （`SystemProxyUpdateService.saveAndApplyAutoProxyState`、監視の経路）は検出した URL をそのまま書くので、Windows /
+  macOS の proxy なら資格情報が無い。エコー判定を資格情報まで一致させると自分の書き込みを検出し直し、OS の proxy の
+  変更を拾えなくなる（#29 の再発、out/ の probe で再現、#108）。資格情報の無い候補は、同じアドレスならエコーとして扱う。
 
 ## ドキュメント
 

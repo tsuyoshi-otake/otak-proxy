@@ -1408,3 +1408,76 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - `sameLogicalIdentity` は per-scheme の URL を比べない。
 - 新しいメッセージの 15 個の翻訳は、ネイティブの確認を受けていない。
 - 確認したのはユニットテストと VS Code ホストのテストまで。実際の複数ウィンドウでは試していない。
+
+## 2026-10-18 — #108 項目 1 資格情報の同意とポリシーが、書き込むすべての URL を判定する（PR #112）
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 1）
+**PR**: [#112](https://github.com/tsuyoshi-otake/otak-proxy/pull/112)
+**コミット**: `de43ff6`（fix/108-credential-consent-all-urls、基準 `3e4542c`）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状
+
+- scheme ごとの proxy（`HTTP_PROXY=http://proxy:3128`、`HTTPS_PROXY=http://user:secret@proxy:3128`）で、同意のプロンプト、`otakProxy.credentialTargetPolicy`、未認証スキップが判定したのは primary（資格情報の無い HTTP 側）だけだった。apply は state を読み直し、HTTPS 側の資格情報付き URL を `.npmrc` の `https-proxy` とターミナルの `HTTPS_PROXY` に書いた。プロンプトは出ず、`blockPlaintextTargets` でも止まらなかった。
+- split の URL の資格情報は SecretStorage に入らず、永続化で取り除かれた。ウィンドウを再読み込みすると HTTPS 側は資格情報を失い、起動時の apply は資格情報の無い URL を書いた。
+- VS Code の `http.proxy` のエコー抑止は資格情報を外した形で比べたので、資格情報だけが違う値や、資格情報を足した値を、自分の書き込みとして無視した。
+
+### 原因
+
+- 判定と書き込みが別々に state を読んでいた。`ProxyRemediationService` は呼び出し側の URL だけを判定し、`ProxyApplier.resolveApplyOptions` が判定の後で state を読み直して split の URL と bypass を決めた。判定した集合と書いた集合が同じだという保証が無かった。
+- in-lock の再試行と収束の再試行は `{ silent: true }` だけを渡し、kind、split の URL、bypass を落としていた。applier はそれを、その時点の state から補っていた。
+- split のフィールド（b3bce25、2026-09-05）は永続化のサニタイズにだけ足され、`persistProxySecrets`、`hydrateStateForRuntime`、`proxyUrlsHaveCredentials` は扱っていなかった。
+- `isSelfWrittenVSCodeValue` は資格情報を外した形で比べていた。
+
+### 修正
+
+- `src/core/ProxyApplyPlan.ts`（新規）: 旧 `ProxyApplier.resolveApplyOptions` の規則から I/O を除いた `resolveProxyApplyOptions`、計画が書く URL の集合 `proxyApplyPlanUrls`、そのうち資格情報付きの `proxyApplyPlanCredentialUrls`。
+- `src/remediation/ProxyApplyAttempt.ts`（新規）: `runProxyApplyAttempt` は state を 1 回だけ読み、その値から世代フェンス（`captureLogicalGeneration` → `createFencedApply`）と書き込み計画を作って `applyWithSafety` に渡す。`applyProxySafely`（`src/extension.ts`）はこれを呼ぶだけ。依存は remediation → core の向きだけ（`src/core` から `src/remediation` への import は無い）。
+- `ProxyApplier`: `resolveApplyOptions` を削除。渡された計画をそのまま書く。
+- `ProxyRemediationService`: 計画のうち資格情報付きの URL をすべて判定する。`blockPlaintextTargets` は 1 つでもあれば止め、silent の apply はスキップし、プロンプトは 1 回、承認すると URL ごとに同意を記録する。キーは従来どおり資格情報を外した URL の `publicFingerprint` なので、既存の同意はそのまま一致する。2 つの再試行は計画全体に `silent: true` を足して渡す。
+- `ProxyStateManager` は split の URL の資格情報を SecretStorage に保存・復元する。`proxyUrlsHaveCredentials` は split のフィールドも見るので、`requiresAuth` も追従する。`shouldSkipUnauthenticatedApply` は計画の URL の集合を受け取り（文字列 1 つなら従来どおり）、起動時の apply と同期の受信側がそれを使う。
+- `SystemProxyDetector.isSelfWrittenVSCodeValue`: 候補が適用中の URL と資格情報まで含めた正規形で一致するか、資格情報を持たずに同じ proxy のアドレスを指すときだけ、拡張自身の書き込みとして無視する。資格情報が違う値と、資格情報を足した値は検出する。
+- `src/core/AppliedProxyProvenance.ts`（新規）: `appliedProxyInfoFromState` は、`extension.ts` が provider として直書きしていた対応づけ（Auto の URL と検出元、3.2.2 より前の state の fallback の規則）。本番とテストが同じ関数を呼び、検出器は `ProxyState` を知らないまま。
+- ドキュメント: README（`ignoreSelfWrittenVSCodeProxy`、`credentialTargetPolicy` の `ask`）、ARCHITECTURE.md（フォルダ構成、ProxyApplier の説明、ProxyApplyAttempt の節、監視と同期のフロー）、CHANGELOG。
+
+### レビューで直させた点
+
+1. テストのレーン回避。`src/test/vscodeRuntime.ts` が `vscode` を再エクスポートし、`scripts/run-unit-tests.mjs` の振り分け（テストファイル中の `import/require('vscode')`）をすり抜けて unit lane に残っていた。ファイルを消させ、テストは `vscode` を直接 import する（host lane の 10 件）。
+2. テストが本番の合成の写しを検査していた。テスト内の `applySafely` は `applyProxySafely` の手順を写したもので、`extension.ts` が未解決の options を `applyWithSafety` に渡しても、どのテストも落ちなかった。合成を `runProxyApplyAttempt` に移させ、本番とテストが同じ関数を呼ぶ。同じミューテーションで 6 件が red になる。
+3. `V3MigrationService.findCredentialCandidates` の変更を戻させた。split のフィールドは v3 移行（29cd8c9、2026-07-04）より後に足され、永続化は当初から split の資格情報を取り除くので、保存済みの state に split の資格情報は無い。変更は、テストが資格情報付きの state を globalState に直接書いたことの埋め合わせで、primary と衝突時の優先順位まで変えていた。テストは `saveState` で state を作る。
+4. Issue の再現手順そのもの（1 つの proxy、HTTPS だけ資格情報付き）がテストされていなかった。テストは 2 つのホストを使っていた。同じホストのテストを 3 件足させた（初回ウィンドウの拒否、`blockPlaintextTargets`、再読み込み後の 3 つの場面）。Devin の初稿は hydrate 済みの state から options を作り、プロンプトを通らないまま green になった（hydrate すると HTTP 側も資格情報付きになり、split にならない）。本番の検出と同じく、生のフィールドから作らせた。
+5. ARCHITECTURE.md が古いままだった（フォルダ構成に新しいモジュールが無い、監視と同期のフローが `ProxyApplier.applyProxy()`）。直させた。小さな片付け（`as never`、未使用の引数、`consentKeyFor` のコメント）。README の `ask` の説明は「URL ごとに 1 回」と読めたので、「proxy のアドレスごとに 1 回、1 回のプロンプトで apply のすべての資格情報付き URL」に直させた（同意のキーはアドレス単位）。
+6. エコー抑止の回帰（レビューで発見）。T03 は `isSelfWrittenVSCodeValue` を「資格情報まで含めて一致したときだけ抑止」に変えた。比較相手は provider が返す hydrate 済みの `autoProxyUrl` で、SecretStorage に同じアドレスの資格情報（手動 URL のものなど）があると資格情報付きになる。一方、検出経路は検出した URL をそのまま `http.proxy` に書く（Windows / macOS の proxy なら資格情報なし）。自分の書いた値をエコーと認識できず、`vscode` ソースの値として検出し、後で OS の proxy が変わっても拾えなくなる（#29 の再発）。out/ の probe で再現した（main は公開 URL で比べるので抑止される）。資格情報を持たない候補は、同じアドレスならエコーとして扱う規則に直させた。原因は自分の T03 ブリーフで、Issue が求めたのは「同じ proxy の別の資格情報を検出する」だけなのに、「外した資格情報も検出する」まで書いていた。
+7. テスト 5（プロンプト中に state が動く）が不変条件を守っていなかった（独立 verifier が発見）。03b で seed を `saveState` に変えた結果、`getState()` は in-memory の state を返し、プロンプト中の生の `globalState.set` は見えなくなった。「applier が同意の後で state を読み直して計画を作る」ミューテーションでも green のままだった。revision を変えずに `getState()` から見える形（`getState` のスタブ）で動かさせ、同じミューテーションで red になることを記録させた。
+8. provider の対応づけの置き場所。Devin は `appliedProxyInfoFromState` を `src/config/SystemProxyDetector.ts` に置き、`src/core/types` から値（`ProxyMode`）を import した。main では `src/config` から `src/core` への import はすべて型だけで、検出器は `AppliedProxyProvider` の契約を通してしか適用中の proxy を見ていなかった。state の意味（どの mode、どのフィールド、fallback の規則）は state の持ち主の知識なので、`src/core` のモジュールに移させた。
+
+### Verification
+
+- `npm run lint`: 0 で終了（`lint:unicode` 634 ファイル、検出なし）。
+- `npm run test:unit:parallel`: 1098 + 74 passing、0 failing。
+- `npm test`: 547 passing / 1 pending / 9 failing。9 件はすべて既知（ExtensionInitializer 3、SystemProxyUpdateService 1、ProxyOwnership.integration 3、FailureInjection.integration 1、ProxyRuntimeDiagnostics 1）。#108 のスイートは 7 + 3 件、エコー抑止のスイートは 13 件、すべて pass。
+- `npm run test:smoke`: 4 passing。実行後、テストのプロセスは残っていない。
+- fail-before（Devin のレポート）: テスト 1〜3、6、8 は修正前に red。エコーの回帰テストは T03 の規則で red（`+ 'http://corp.example.com:8080' - null`）。
+- ミューテーション（独立 verifier が out/ のコピーで再実行）: applier が `getState()` から計画を作り直す → テスト 5 だけ red。未解決の options を渡す → 6 件 red。同意が primary だけを判定 → 5 件 red。split の資格情報を保存しない → 2 件 red。エコーの (b) を外す → 回帰テストが red。
+- 独立 verifier（sonnet、ルーブリック 11 項目）: 1 回目は C6 が fail（テスト 5）。03d・03e の後の 2 回目は 11 項目すべて pass。
+- 改行: 変更・新規の 16 ファイルはすべて CRLF で一様、`git ls-files --eol` は `i/lf`（`core.autocrlf=true`）。
+
+### Learning
+
+1. テストは本番の合成そのものを呼ぶ。写しを検査すると、本番の合成が壊れても緑のまま。→ rules.md「検証・回帰」に追記した。
+2. テストの state は本番の書き込み経路（`saveState`）で作る。本番に存在しない state を通すためにプロダクションコードを変えない。→ rules.md「検証・回帰」に追記した。
+3. `vscode` の API をスタブするテストは `vscode` を直接 import する。→ rules.md「検証・回帰」に追記した。
+4. 資格情報は proxy のアドレス単位で保存・復元される。同じアドレスの URL はどのフィールドでも同じ資格情報で復元され、外した資格情報も付き直る。scheme ごとの資格情報のテストには、同じアドレスの場合を入れる。→ rules.md「資格情報と URL」に追記した。
+5. 自分の作業ミス: T03 のブリーフは split の資格情報をアドレス単位の既存の保存に載せるよう指示したが、同じアドレスの場合を書かなかった。Devin のテストも 2 つのホストを使って、その場合を避けていた。再現手順に書いた値をそのままテストに使うよう、ブリーフで指定する。
+6. エコー抑止の比較相手（provider が返す hydrate 済みの URL）と、実際に `http.proxy` に書いた値は一致しないことがある。検出経路は検出した URL をそのまま書く。→ rules.md「資格情報と URL」に追記した。
+7. 自分の作業ミス: ブリーフに Issue の要求より強い保証（外した資格情報も検出）を書き、それが自分の書き込みを壊した。仕様は Issue の要求文から書き、強い保証を足すときは、拡張自身の書き込みがその条件に当たらないかを先に確かめる。
+8. seed を `saveState` に変えると、in-memory の state がテスト中の `globalState` の書き換えを隠す。state を動かすテストは、`getState()` から見える形で動かし、ミューテーションで red になることを確かめる。→ rules.md「検証・回帰」に追記した。
+
+### 残留リスク
+
+- 1 つの proxy で HTTPS にだけ資格情報がある場合、再読み込み後は 3 つのフィールドがすべて資格情報付きで復元され、起動時の apply は資格情報付きの URL を全ターゲットに書く（同意の判定は通る）。次の検出が生の split との差を見つけて split を apply し直すので、起動ごとに apply が 2 回になる。scheme ごとに資格情報を分けるには、scheme ごとの資格情報の記録が要る。仕様の判断としてユーザーに確認する。
+- 外した資格情報は、SecretStorage の値が消えるまで付き直る（primary は以前から、split もこの変更から）。本番で `deleteCredentialsForPublicUrl` を呼ぶ経路は無い。
+- 同じアドレスで資格情報が違う 2 つの URL は区別できない。秘密の値も同意の記録も 1 つを共有する。
+- VS Code の `http.proxy` から手で資格情報を外した値は、今もエコーとして無視される。拡張自身の検出経路の書き込みと区別できないため。区別するには、実際に書いた値（所有権の記録の fingerprint など）と比べる必要がある。
+- テスト専用の fallback（`applyProxySettings` が無いときの `context.proxyApplier.applyProxy`）は計画も同意も通らない。本番は常に `applyProxySettings` を設定する。
+- 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際に認証する proxy では試していない。
