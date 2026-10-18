@@ -69,10 +69,21 @@ suite('ToggleProxyCommand Unit Tests', () => {
 
         const ctx: CommandContext = {
             extensionContext: {} as vscode.ExtensionContext,
-            getProxyState: async () => state,
+            // Real ProxyStateManager returns a fresh persisted object; returning
+            // the same reference would let the command's mutations silently pass
+            // as committed state (#78 stub fidelity).
+            getProxyState: async () => ({ ...state }),
             saveProxyState: async (nextState) => {
                 state = { ...nextState };
             },
+            commitProxyState: async (expectedRevision, next) => {
+                if ((state.revision ?? 0) !== expectedRevision) {
+                    return { kind: 'superseded' as const, current: { ...state } };
+                }
+                state = { ...next, revision: expectedRevision + 1 };
+                return { kind: 'committed' as const, revision: expectedRevision + 1, state: { ...state } };
+            },
+            publishProxyState: async () => {},
             getActiveProxyUrl: (proxyState) => {
                 if (proxyState.mode === ProxyMode.Auto) {
                     return proxyState.autoProxyUrl || '';

@@ -9,7 +9,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState } from '../core/types';
+import { ProxyMode, ProxyState, StateCommitResult } from '../core/types';
 import { Logger } from '../utils/Logger';
 import { CommandContext } from './types';
 import { executeToggleProxy } from './ToggleProxyCommand';
@@ -35,6 +35,10 @@ export interface CommandRegistryConfig {
     /** Terminal record of the last apply in this window, shown by the diagnose command (#78). */
     getLastRemediationOutcome?: () => RemediationOutcome | undefined;
     saveProxyState: (context: vscode.ExtensionContext, state: ProxyState) => Promise<void>;
+    /** Revision-checked desired-state commit for commands (#78). */
+    commitProxyState: (context: vscode.ExtensionContext, expectedRevision: number, next: ProxyState) => Promise<StateCommitResult>;
+    /** Publish a converged state to other windows after the apply finished. */
+    publishProxyState: (context: vscode.ExtensionContext, state: ProxyState) => Promise<void>;
     getActiveProxyUrl: (state: ProxyState) => string;
     getNextMode: (currentMode: ProxyMode) => ProxyMode;
 
@@ -99,6 +103,9 @@ export class CommandRegistry {
             extensionContext: context,
             getProxyState: () => this.config.getProxyState(context),
             saveProxyState: (state) => this.config.saveProxyState(context, state),
+            commitProxyState: (expectedRevision, next) =>
+                this.config.commitProxyState(context, expectedRevision, next),
+            publishProxyState: (state) => this.config.publishProxyState(context, state),
             getActiveProxyUrl: this.config.getActiveProxyUrl,
             getNextMode: this.config.getNextMode,
             applyProxySettings: (url, enabled) => this.config.applyProxySettings(url, enabled, context),

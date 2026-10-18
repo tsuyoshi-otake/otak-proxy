@@ -9,8 +9,8 @@
  */
 
 import * as vscode from 'vscode';
-import { captureLogicalGeneration, isStaleGeneration } from '../core/LogicalGeneration';
-import { ProxyMode, type ProxyState, type ProxyTestResult } from '../core/types';
+import { clearPendingThenPublish, ApplyConvergenceContext } from '../core/ApplyConvergence';
+import { ProxyMode, stateRevision, type ProxyState, type ProxyTestResult } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import {
@@ -261,41 +261,106 @@ async function prepareNextMode(
     state.mode = nextMode;
 }
 
-async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promise<boolean> {
-    const started = captureLogicalGeneration(await ctx.getProxyState());
-    const newActiveUrl = ctx.getActiveProxyUrl(state);
+/**
+ * Bound on desired-state commit retries. A same-mode writer that only moves
+ * the revision or detection/test fields (monitor test results, apply results,
+ * the startup apply) makes the compare-and-set fail; refolding onto the new
+ * latest and retrying a few times absorbs that without dropping the toggle.
+ */
+const TOGGLE_COMMIT_MAX_ATTEMPTS = 3;
 
-    const applied = await ctx.applyProxySettings(
-        newActiveUrl,
-        state.mode !== ProxyMode.Off && Boolean(newActiveUrl)
-    );
+/**
+ * Fields `prepareNextMode` changed between the pre-toggle snapshot and the
+ * desired state. Only these are folded onto the latest state on each CAS
+ * attempt: folding the whole snapshot would roll back fields other writers
+ * own (fresh detection results, monitor test results, apply-result commits)
+ * that landed between the snapshot and the commit (#78).
+ */
+function changedToggleFields(before: ProxyState, after: ProxyState): Partial<ProxyState> {
+    const changed: Partial<ProxyState> = {};
+    for (const key of Object.keys(after) as (keyof ProxyState)[]) {
+        if (before[key] !== after[key]) {
+            (changed as Record<keyof ProxyState, unknown>)[key] = after[key];
+        }
+    }
+    return changed;
+}
 
-    if (state.mode === ProxyMode.Auto) {
-        await ctx.startSystemProxyMonitoring();
-    } else {
+/**
+ * Commits the desired mode with `convergencePending: true` before the apply,
+ * without publishing. The toggle is superseded only when another writer
+ * changed the saved mode (a sync toggle, another command): the fold then
+ * returns undefined and the caller does not apply. Detection/test churn under
+ * the same mode is folded onto the latest state and retried (#78).
+ */
+async function commitToggleDesiredState(
+    ctx: CommandContext,
+    desiredFields: Partial<ProxyState>,
+    fromMode: ProxyMode
+): Promise<ProxyState | undefined> {
+    for (let attempt = 0; attempt < TOGGLE_COMMIT_MAX_ATTEMPTS; attempt++) {
+        const latest = await ctx.getProxyState();
+        if (latest.mode !== fromMode) {
+            return undefined;
+        }
+        const next: ProxyState = {
+            ...latest,
+            ...desiredFields,
+            revision: latest.revision,
+            convergencePending: true
+        };
+        const result = await ctx.commitProxyState(stateRevision(latest), next);
+        if (result.kind === 'committed') {
+            return result.state;
+        }
+    }
+    Logger.warn('Toggle proxy superseded: proxy state kept changing under the commit window.');
+    return undefined;
+}
+
+function toggleConvergenceContext(ctx: CommandContext): ApplyConvergenceContext {
+    return {
+        proxyStateManager: {
+            getState: ctx.getProxyState,
+            saveState: ctx.saveProxyState,
+            commitState: ctx.commitProxyState
+        },
+        publishProxyState: ctx.publishProxyState
+    };
+}
+
+async function applyPreparedState(
+    ctx: CommandContext,
+    desiredFields: Partial<ProxyState>,
+    fromMode: ProxyMode
+): Promise<boolean> {
+    const committed = await commitToggleDesiredState(ctx, desiredFields, fromMode);
+    if (!committed) {
+        // Another writer owns the state now; nothing is owed, like a
+        // superseded fenced apply. Refresh the status bar from what they saved.
+        ctx.updateStatusBar(await ctx.getProxyState());
+        return true;
+    }
+
+    const newActiveUrl = ctx.getActiveProxyUrl(committed);
+
+    // Off stops the monitor before the removal so a queued check cannot race
+    // the unset. Auto starts it only after the apply; both read the committed
+    // mode, which now is the desired one.
+    if (committed.mode === ProxyMode.Off) {
         await ctx.stopSystemProxyMonitoring();
     }
 
-    const latest = await ctx.getProxyState();
-    if (isStaleGeneration(started, latest) && latest.mode !== state.mode) {
-        ctx.updateStatusBar(latest);
-        return applied;
+    const applied = await ctx.applyProxySettings(
+        newActiveUrl,
+        committed.mode !== ProxyMode.Off && Boolean(newActiveUrl)
+    );
+
+    if (committed.mode === ProxyMode.Auto) {
+        await ctx.startSystemProxyMonitoring();
     }
 
-    // Publish after apply so other windows do not treat an unapplied desired as
-    // converged. Fold onto latest so apply-result fields survive.
-    await ctx.saveProxyState({
-        ...latest,
-        mode: state.mode,
-        autoProxyUrl: state.autoProxyUrl,
-        manualProxyUrl: state.manualProxyUrl,
-        autoModeOff: state.autoModeOff,
-        usingFallbackProxy: state.usingFallbackProxy,
-        fallbackProxyUrl: state.fallbackProxyUrl,
-        lastSystemProxyUrl: state.lastSystemProxyUrl,
-        lastDetectionSource: state.lastDetectionSource,
-        convergencePending: false
-    });
+    await clearPendingThenPublish(toggleConvergenceContext(ctx), 'toggle', committed);
 
     // ProxyApplier records per-target success/failure in state. Refresh from that
     // authoritative result instead of presenting the pre-apply desired snapshot.
@@ -314,11 +379,17 @@ async function applyPreparedState(ctx: CommandContext, state: ProxyState): Promi
 async function executeToggleProxyOnce(ctx: CommandContext): Promise<CommandResult> {
     try {
         const currentState = await ctx.getProxyState();
+        const fromMode = currentState.mode;
         const nextMode = ctx.getNextMode(currentState.mode);
         const i18n = I18nManager.getInstance();
 
+        const preToggleSnapshot = { ...currentState };
         await prepareNextMode(ctx, currentState, nextMode, i18n);
-        const applied = await applyPreparedState(ctx, currentState);
+        const applied = await applyPreparedState(
+            ctx,
+            changedToggleFields(preToggleSnapshot, currentState),
+            fromMode
+        );
 
         return { success: applied };
     } catch (error) {
