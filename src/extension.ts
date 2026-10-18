@@ -8,9 +8,10 @@
  */
 
 import * as vscode from 'vscode';
+import { AppliedPlanTracker } from './core/AppliedPlanTracker';
 import { proxyApplyPlanUrls, resolveProxyApplyOptions } from './core/ProxyApplyPlan';
 import { runProxyApplyAttempt } from './remediation/ProxyApplyAttempt';
-import { ProxyMode, ProxyState } from './core/types';
+import { ProxyMode, ProxyState, stateRevision } from './core/types';
 import { ProxyStateManager } from './core/ProxyStateManager';
 import { ProxyApplier } from './core/ProxyApplier';
 import { ExtensionInitializer } from './core/ExtensionInitializer';
@@ -57,6 +58,10 @@ let syncManager: SyncManager | null = null;
 let syncConfigManager: SyncConfigManager | null = null;
 let syncStatusProvider: SyncStatusProvider | null = null;
 let proxyRemediationService: ProxyRemediationService;
+// The record of what this window verifiably applied (#108): the sync
+// receiver skips applies that would rewrite the same plan. In memory only;
+// created at the composition root, never logged, persisted or published.
+let appliedPlanTracker: AppliedPlanTracker;
 let userNotifier: UserNotifier;
 let environmentNotificationMonitor: WindowsProxyEnvironmentMonitor | undefined;
 
@@ -154,6 +159,7 @@ function createCoreServices(context: vscode.ExtensionContext): CoreServices {
 
 function initializeCoreManagers(context: vscode.ExtensionContext, services: CoreServices): void {
     userNotifier = services.userNotifier;
+    appliedPlanTracker = new AppliedPlanTracker();
     proxyStateManager = new ProxyStateManager(context);
     proxyApplier = new ProxyApplier(
         new GitConfigManager(),
@@ -207,7 +213,8 @@ async function applyProxySafely(
         url,
         enabled,
         trigger,
-        options
+        options,
+        appliedPlanTracker
     );
     return result.success;
 }
@@ -218,23 +225,41 @@ function initializeStatusBar(context: vscode.ExtensionContext, services: CoreSer
     initializer.setStatusBarUpdater((s) => statusBarManager.update(s));
 }
 
-async function applyRemoteSyncState(remoteState: ProxyState): Promise<void> {
+async function applyRemoteSyncState(
+    remoteState: ProxyState,
+    adoptRemoteState?: () => Promise<boolean>
+): Promise<void> {
     Logger.log('Received remote state change from another instance');
     await convergeRemoteSyncState(remoteState, {
         saveState: state => proxyStateManager.saveState(state),
         getState: () => proxyStateManager.getState(),
+        commitState: (expected, next) => proxyStateManager.commitState(expected, next),
         getActiveProxyUrl: state => proxyStateManager.getActiveProxyUrl(state),
         applyProxy: (url, enabled) => applyProxySafely(url, enabled, 'sync', { silent: true }),
         startMonitoring: () => initializer.startSystemProxyMonitoring(),
         stopMonitoring: () => initializer.stopSystemProxyMonitoring(),
         updateStatus: state => statusBarManager.update(state),
-        onApplyFailure: () => userNotifier.showWarning('remediation.notification.applyFailed')
+        onApplyFailure: () => userNotifier.showWarning('remediation.notification.applyFailed'),
+        adoptRemoteState,
+        lastAppliedPlan: () => appliedPlanTracker?.lastAppliedPlan(),
+        isApplyInFlight: () => appliedPlanTracker?.isApplyInFlight() ?? false
     });
 }
 
 function registerSyncEventHandlers(context: vscode.ExtensionContext): void {
-    syncManager!.on('remoteChange', async (remoteState) => {
-        await applyRemoteSyncState(remoteState);
+    // Every remote delivery is adopted at emission (version check + save on
+    // the SyncManager's transition section, ordered against this window's
+    // own publications) and converged on the delivery chain, one at a time
+    // in emission order (#108).
+    syncManager!.on('remoteChange', (delivery) => {
+        void syncManager!.absorbRemoteChange(
+            delivery,
+            async state => {
+                await proxyStateManager.saveState(state);
+                return stateRevision(await proxyStateManager.getState());
+            },
+            adopted => applyRemoteSyncState(delivery.state, adopted)
+        ).catch(error => Logger.error('Remote sync apply failed:', error));
     });
 
     syncManager!.on('conflictResolved', (conflictInfo) => {

@@ -71,3 +71,35 @@ export function proxyApplyPlanUrls(proxyUrl: string, options?: ProxyApplyOptions
 export function proxyApplyPlanCredentialUrls(proxyUrl: string, options?: ProxyApplyOptions): string[] {
     return proxyApplyPlanUrls(proxyUrl, options).filter(url => hasProxyCredentials(url));
 }
+
+/**
+ * What one apply attempt wrote, compared against a remote state to decide
+ * whether its apply would rewrite anything (#108). `url` and `plan` carry
+ * hydrated credentials, so a credential rotation for the same address is a
+ * real difference.
+ */
+export interface AppliedPlan {
+    enabled: boolean;
+    url: string;
+    plan: Pick<ProxyApplyOptions, 'kind' | 'httpUrl' | 'httpsUrl' | 'bypass'>;
+}
+
+/**
+ * A disable has no write plan: only `enabled === false` decides. An enable
+ * compares the primary URL and the resolved plan field by field — a
+ * per-scheme URL or bypass change is a different plan even when the primary
+ * URL stays the same.
+ */
+export function sameAppliedPlan(a: AppliedPlan, b: AppliedPlan): boolean {
+    if (a.enabled !== b.enabled) {
+        return false;
+    }
+    if (!a.enabled) {
+        return true;
+    }
+    return a.url === b.url &&
+        a.plan.kind === b.plan.kind &&
+        a.plan.httpUrl === b.plan.httpUrl &&
+        a.plan.httpsUrl === b.plan.httpsUrl &&
+        a.plan.bypass === b.plan.bypass;
+}

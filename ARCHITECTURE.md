@@ -69,7 +69,7 @@ src/
 │   ├── InstanceRegistry.ts     # Instance registration and lifecycle management
 │   ├── SharedStateFile.ts      # Shared state file (atomic read/write)
 │   ├── FileWatcher.ts          # File change monitoring (with debounce)
-│   ├── ConflictResolver.ts     # Timestamp-based conflict resolution
+│   ├── ConflictResolver.ts     # Version-first conflict resolution
 │   ├── SyncConfigManager.ts    # Sync configuration management
 │   ├── SyncStatusProvider.ts   # Status bar sync state display
 │   └── index.ts         # Module exports
@@ -263,7 +263,7 @@ proxyMonitor.on('proxyTestComplete', (result) => { /* Process test result */ });
 proxyMonitor.on('proxyStateChanged', (reachable) => { /* Update UI */ });
 
 // Events emitted by SyncManager
-syncManager.on('remoteChange', (state) => { /* Apply remote change */ });
+syncManager.on('remoteChange', (delivery) => { /* delivery: {state, version}; apply via absorbRemoteChange */ });
 syncManager.on('conflictResolved', (resolution) => { /* Handle conflict resolution */ });
 syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 ```
@@ -387,22 +387,87 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 
 ### Multi-Instance Sync Flow
 
+Ordering between windows uses the shared file's `version` (a compare-and-set
+counter in the file itself), never a window's `revision`: `revision` is a
+per-window monotonic counter, so two windows' counters are unrelated numbers
+(#108). SyncManager owns both watermarks per window:
+
+- `localHistoryRevision` — the highest `revision` this window published or
+  adopted; a `notifyChange` snapshot below it is a stale local snapshot and is
+  discarded without writing.
+- `highestSharedVersion` — the highest shared-file `version` this window
+  published or adopted; a remote delivery at or below it is superseded and is
+  skipped without saving, applying, monitoring, status updates, or failure
+  notifications.
+
+Two serialized sections keep the ordering consistent without deadlocking:
+
+- `transitionQueue` (short bookkeeping only): publication, reassert, and
+  adoption (version check → save → advance watermarks). An adoption is
+  enqueued **at emission** — the `remoteChange` listener calls
+  `absorbRemoteChange` synchronously — so adoptions run in emission order,
+  interleaved with this window's own publications. A queued delivery has
+  already moved the fence and the watermark before its convergence starts:
+  a background result that captured its generation earlier is discarded
+  instead of published over the delivery. Tasks here never await apply,
+  monitoring, or another delivery.
+- `deliveryQueue` (remote convergence): each `remoteChange` delivery —
+  `{state, version}` — converges one at a time, in emission order. The
+  convergence awaits the outcome of its own adoption instead of starting it,
+  then works from this window's *current* local state (which may already be
+  a later delivery's adopted state or a newer local change); each
+  convergence brings this window's targets, monitoring and status to that
+  current state. A delivery whose monitoring start/stop publishes through
+  notifyChange, or awaits a concurrent publication, does not deadlock
+  because publications use the transition section, not the delivery chain.
+
 ```
 1. Instance A: Changes proxy settings
    ↓
-2. SyncManager.propagateState()
-   └─→ Write to SharedStateFile (atomic write-then-rename)
+2. SyncManager.notifyChange() → transition section
+   └─→ SharedStateFile.compareAndSwap() (atomic write-then-rename,
+       version = max(disk, current) + 1)
    ↓
 3. Instance B: FileWatcher detects file change
    ↓
 4. SyncManager.reconcileWithSharedFile()
    ├─→ Compare local state with remote state
-   └─→ Resolve conflicts via ConflictResolver (timestamp-based, latest wins)
+   └─→ Resolve conflicts via ConflictResolver (version first, then timestamp)
    ↓
-5. Instance B: Apply remote change
-   ├─→ applyProxySafely → apply attempt → ProxyApplier.applyProxyDetailed()
-   └─→ StatusBarManager.update()
+5. Instance B: emit 'remoteChange' {state, version}
+   → SyncManager.absorbRemoteChange()
+   ├─→ transition section (at emission): adopt if
+   │   version > highestSharedVersion — save, advance watermarks — else skip
+   └─→ delivery chain (one at a time, emission order):
+       ├─→ await this delivery's adoption outcome; skipped → stop here
+       ├─→ credential gate → fenced bookkeeping write
+       ├─→ applyProxySafely → apply attempt → ProxyApplier.applyProxyDetailed()
+       │   (skipped when this window's own record proves the same plan applied)
+       └─→ monitoring start/stop + StatusBarManager.update()
 ```
+
+**Known limitations** (#108):
+
+- A background publication from another window (a scheduled connection test,
+  or a detection) that lands while this window's own toggle or Configure
+  apply is still running is adopted and replaces the unpublished change, so
+  the toggle reverts when its own publication is then judged stale. The
+  publisher side of the same race: this window can publish a background
+  result within the file watcher's 100 ms debounce of another window's
+  toggle, before adopting that toggle.
+- The watermarks live in memory only, so a reloaded window starts with both
+  at 0. At activation the window saves the shared file's current state as
+  its own state, applies it through the startup path and publishes it; that
+  publication sets both watermarks again. A delivery that the previous
+  extension host had emitted but not yet converged is not delivered again:
+  the startup apply of the shared file's state takes its place.
+- Receiver dedupe counts a target reported `skippedUnavailable` (the tool
+  was not installed) as written: a tool installed later is configured at the
+  next real plan change or local apply, not by the next identical sync
+  publication. Likewise, a hand edit of a configured file (`.npmrc`,
+  `.gitconfig`) made after the last apply stays until the next real proxy
+  change or local apply — the next identical publication no longer rewrites
+  it.
 
 ## Module Details
 
@@ -609,11 +674,11 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 ### Sync Modules
 
 #### SyncManager
-- **Responsibility**: Multi-instance synchronization orchestrator
+- **Responsibility**: Multi-instance synchronization orchestrator; sole owner of this window's publication/adoption ordering (the revision fence, the shared-version watermark, and the two serialized sections)
 - **Key features**:
   - Instance lifecycle management
   - State change propagation
-  - Remote change detection and application
+  - Remote change detection and application (version-ordered deliveries via `absorbRemoteChange`)
   - Error handling
 - **Features**: Heartbeat (10s), cleanup (30s), polling fallback
 
@@ -641,8 +706,9 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ConflictResolver
 - **Responsibility**: Conflict resolution for simultaneous changes
 - **Resolution strategy**:
-  - Timestamp-based (latest wins)
-  - Deterministic tiebreaker (remote wins on equal timestamps)
+  - Version-based: the higher version wins
+  - Timestamp breaks a tie only when versions are equal; equal version and timestamp: remote wins
+  - Updates from the same instance are not conflicts
   - Clock drift protection (rejects timestamps >30s in the future)
 
 #### SyncConfigManager

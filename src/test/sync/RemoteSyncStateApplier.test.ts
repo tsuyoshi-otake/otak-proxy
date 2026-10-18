@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, stateRevision } from '../../core/types';
 import { applyRemoteSyncState, RemoteSyncApplyContext } from '../../sync/RemoteSyncStateApplier';
 import { UNRESOLVED_LOCAL_CREDENTIAL_ERROR } from '../../utils/ProxyStateSanitizer';
 
@@ -12,6 +12,13 @@ suite('RemoteSyncStateApplier integration', () => {
         const context: RemoteSyncApplyContext = {
             saveState: async next => { state = { ...next }; },
             getState: async () => ({ ...state }),
+            commitState: async (expectedRevision, next) => {
+                if (stateRevision(state) !== expectedRevision) {
+                    return { kind: 'superseded', current: { ...state } };
+                }
+                state = { ...next, revision: expectedRevision + 1 };
+                return { kind: 'committed', revision: expectedRevision + 1, state: { ...state } };
+            },
             getActiveProxyUrl: current => current.mode === ProxyMode.Auto && !current.autoModeOff
                 ? current.autoProxyUrl || ''
                 : '',

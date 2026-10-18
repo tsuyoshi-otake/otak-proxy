@@ -1,7 +1,8 @@
+import { AppliedPlanTracker } from '../core/AppliedPlanTracker';
 import { commitUnlessStale, createFencedApply, StateWriter } from '../core/GenerationFence';
 import { captureLogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
-import { proxyApplyPlanUrls, resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
+import { AppliedPlan, proxyApplyPlanUrls, resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
 import { Logger } from '../utils/Logger';
 import {
     planUrlsMissingRequiredCredentials,
@@ -31,10 +32,25 @@ export interface ProxyApplyAttemptResult {
     stopReason?: RemediationStopReason;
 }
 
+function appliedPlanPart(plan: ProxyApplyOptions | undefined): AppliedPlan['plan'] {
+    return {
+        kind: plan?.kind,
+        httpUrl: plan?.httpUrl,
+        httpsUrl: plan?.httpsUrl,
+        bypass: plan?.bypass
+    };
+}
+
 /**
  * Runs one apply attempt: one `getState()`, then either the remediation
  * service (consent, policy, retries) or — when no service is wired — the
  * fenced apply directly, both over the same resolved plan.
+ *
+ * `appliedPlanTracker` (optional, from the composition root) records the
+ * attempt's inputs only when it succeeded and wrote them (`success`, a
+ * successful `applyResult`, not `superseded`); every other outcome —
+ * credential-gate refusal, consent denial, lock skip, supersede, retries
+ * suppressed or exhausted, a thrown error — clears the record (#108).
  */
 export async function runProxyApplyAttempt(
     stateWriter: StateWriter,
@@ -43,50 +59,69 @@ export async function runProxyApplyAttempt(
     url: string,
     enabled: boolean,
     trigger: ProxyApplyTrigger,
-    options?: ProxyApplyOptions
+    options?: ProxyApplyOptions,
+    appliedPlanTracker?: AppliedPlanTracker
 ): Promise<ProxyApplyAttemptResult> {
-    const state = await stateWriter.getState();
-    const generation = captureLogicalGeneration(state);
-    const plan = enabled && url
-        ? resolveProxyApplyOptions(url, options, state)
-        : options;
+    appliedPlanTracker?.noteAttemptStarted();
+    let applied: AppliedPlan | undefined;
+    try {
+        const state = await stateWriter.getState();
+        const generation = captureLogicalGeneration(state);
+        const plan = enabled && url
+            ? resolveProxyApplyOptions(url, options, state)
+            : options;
 
-    if (enabled && url) {
-        // The per-address rule only. The aggregate `requiresAuth` check must
-        // not run here: it is derived from all six URL fields, so it would
-        // also refuse a credential-free plan merely because an unrelated
-        // field (the manual fallback, say) carries credentials (#108).
-        const missing = planUrlsMissingRequiredCredentials(state, proxyApplyPlanUrls(url, plan));
-        if (missing.length > 0) {
-            Logger.warn(
-                `Skipping proxy apply: credentials for ${missing.join(', ')} are unavailable on this machine.`
-            );
-            // Reachability stays as the connection test's verdict: the
-            // address is reachable, it only lacks its credentials.
-            await commitUnlessStale(stateWriter, generation, 'applyResults', current => ({
-                ...current,
-                lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR
-            }));
-            return { success: false };
+        if (enabled && url) {
+            // The per-address rule only. The aggregate `requiresAuth` check must
+            // not run here: it is derived from all six URL fields, so it would
+            // also refuse a credential-free plan merely because an unrelated
+            // field (the manual fallback, say) carries credentials (#108).
+            const missing = planUrlsMissingRequiredCredentials(state, proxyApplyPlanUrls(url, plan));
+            if (missing.length > 0) {
+                Logger.warn(
+                    `Skipping proxy apply: credentials for ${missing.join(', ')} are unavailable on this machine.`
+                );
+                // Reachability stays as the connection test's verdict: the
+                // address is reachable, it only lacks its credentials.
+                await commitUnlessStale(stateWriter, generation, 'applyResults', current => ({
+                    ...current,
+                    lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR
+                }));
+                return { success: false };
+            }
         }
+
+        const fencedApply = createFencedApply(
+            stateWriter,
+            generation,
+            trigger,
+            applyDetailed
+        );
+
+        const result = !remediationService
+            ? await runAttemptWithoutRemediation(fencedApply, url, enabled, plan)
+            : await remediationService.applyWithSafety(url, enabled, { ...plan, trigger }, fencedApply)
+                .then(r => ({
+                    success: r.success,
+                    applyResult: r.applyResult,
+                    stopReason: r.outcome.stopReason
+                }));
+
+        if (result.success && result.applyResult?.success === true && !result.applyResult.superseded) {
+            applied = { enabled, url, plan: appliedPlanPart(plan) };
+        }
+        return result;
+    } finally {
+        appliedPlanTracker?.noteAttemptFinished(applied);
     }
+}
 
-    const fencedApply = createFencedApply(
-        stateWriter,
-        generation,
-        trigger,
-        applyDetailed
-    );
-
-    if (!remediationService) {
-        const applyResult = await fencedApply(url, enabled, plan);
-        return { success: applyResult.success, applyResult };
-    }
-
-    const result = await remediationService.applyWithSafety(url, enabled, { ...plan, trigger }, fencedApply);
-    return {
-        success: result.success,
-        applyResult: result.applyResult,
-        stopReason: result.outcome.stopReason
-    };
+async function runAttemptWithoutRemediation(
+    fencedApply: ReturnType<typeof createFencedApply>,
+    url: string,
+    enabled: boolean,
+    plan: ProxyApplyOptions | undefined
+): Promise<ProxyApplyAttemptResult> {
+    const applyResult = await fencedApply(url, enabled, plan);
+    return { success: applyResult.success, applyResult };
 }

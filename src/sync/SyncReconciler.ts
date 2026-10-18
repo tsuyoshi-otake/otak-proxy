@@ -2,10 +2,21 @@ import { ProxyState } from '../core/types';
 import { SharedState } from './SharedStateFile';
 import { ConflictInfo, ConflictResolver, SyncableState } from './ConflictResolver';
 
+/**
+ * One remote state delivery: the shared file's state plus the shared
+ * `version` it was read at. The version is the cross-window ordering the
+ * SyncManager's watermark checks against (#108); the per-window `revision`
+ * inside `state` is never compared across windows.
+ */
+export interface RemoteSyncDelivery {
+    state: ProxyState;
+    version: number;
+}
+
 export interface SyncReconciliationResult {
     conflictsResolved: number;
     currentState: SyncableState | null;
-    remoteChange?: ProxyState;
+    remoteChange?: RemoteSyncDelivery;
     conflictDetails?: ConflictInfo;
     conflictLog?: string;
     reassertLocalState?: ProxyState;
@@ -47,7 +58,7 @@ function createInitialRemoteResult(fileState: SyncableState, sharedState: Shared
     return {
         conflictsResolved: 0,
         currentState: fileState,
-        remoteChange: sharedState.proxyState,
+        remoteChange: { state: sharedState.proxyState, version: sharedState.version },
         markSynced: true
     };
 }
@@ -61,7 +72,7 @@ function createRemoteWinnerResult(
     return {
         conflictsResolved,
         currentState: resolution.resolvedState,
-        remoteChange: sharedState.proxyState,
+        remoteChange: { state: sharedState.proxyState, version: sharedState.version },
         conflictDetails: resolution.conflictDetails ?? undefined,
         conflictLog: resolution.conflictDetails ? 'Conflict resolved: remote state applied' : undefined,
         markSynced: true
