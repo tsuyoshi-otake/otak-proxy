@@ -106,8 +106,13 @@
 - **revision を含む署名やガードは、自分の apply の結果コミット（revision +1）で必ず stale になる。**
   比べるのは apply が返す `committedRevision`、または mode と URL の identity。コマンドの flow テストは
   本物の `ProxyStateManager` と revision を進める applier を通す。stub context は revision を進めないので、
-  toggle が mode を保存しない欠陥（#78 の直接原因、2026-10-18 監査）は全テスト pass のまま v3.2.7〜v3.2.16 に
-  出荷された。初回セットアップの署名と起動ループの署名にも同じ取り違えがあった。
+  toggle が mode を保存しない欠陥（#78 の症状をコードで再現した原因、2026-10-18 監査）は全テスト pass のまま
+  v3.2.7〜v3.2.16 に出荷された。初回セットアップの署名と起動ループの署名にも同じ取り違えがあった。
+- **目的の状態は apply の前にコミットし、最新の保存値には自分が変えたフィールドだけを重ねる。**
+  トグルは `convergencePending: true` でコミットしてから apply する（apply 中の診断が新しい mode を読む）。
+  スナップショット全体を重ねると、スナップショットから CAS までに他 writer が書いた検出・テスト結果を消す。
+  CAS の失敗で superseded にするのは、決定のフィールド（mode）が変わったときだけ。revision だけが進んだ
+  ときは重ね直して再試行する（#78、どちらもミューテーションで回帰テストが red になることを確認）。
 
 ## 診断レポート
 
@@ -278,6 +283,9 @@
   （`Codex Review: Didn't find any major issues` か指摘付きのレビュー）の「Reviewed commit: <sha10>」の行で届く。
   要約表のコメント（`codex-pull-request-review-summary`）は最初のレビューで作られ、その後は上書きされる。
   「最後の codex comment に `Completed` と sha の両方」で待った待機スクリプトは結果を見落とした（#97、v3.2.15）。
+
+- **公開 Issue で項目番号を `#1` の形で書くと、同じ番号の別の Issue / PR に自動リンクする。**
+  コメントでは code span で書くか、「項目 1」と書く（#108 の本文で起きた、2026-10-18）。
 
 - `package.nls*.json` は `npm run gen:nls` の生成物。手で編集しない。
   作業ツリーで modified に見えていても中身は改行コード差だけのことがある（`git diff` で確認）。
