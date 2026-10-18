@@ -2087,3 +2087,10 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - Windows の `open(wx)` の一時的な EPERM（削除待ち）は、例外ではなく `lockIoError` として報告される。どちらもリトライはしない。
 - クラッシュした書き込みの一時ファイル（`sync-state.json.*.tmp`）は掃除されずに残る。`recover()` は本番から呼ばれていなかったので、挙動は前と同じ。
 - `npm run verify:traceability` は main でも exit 1 になる。孤立と表示される 5 つの stable ID（CT-CLI-GIT-002、CT-CLI-GIT-003、CT-CLI-NPM-002、F-PARTIAL-WRITE-001、F-GIT-UNSET-5。ソースでは F-GIT-UNSET-5-001）は 2026-09-05 から残っている。どの要件に対応づけるかは仕様の判断なので、この PR では直さず、再生成した生成物もコミットしていない。CI がこのスクリプトを実行していないので、孤立は CI では見えない。
+
+### Codex のレビュー（PR #121、c411d4e に対する P2 が 2 件）
+
+- 症状: `ApplyLockService` は `baseDir` を構築時に、Git 設定の mutex は `GIT_CONFIG_MUTEX_PATH` をモジュールの読み込み時に 1 回だけ決める。一方、ロックの前の確認は `os.tmpdir()` からユーザーごとのディレクトリを毎回計算し直していた。途中で `TMPDIR` が変わると、確認するディレクトリとロックを作るディレクトリがずれる（新しいほうが使えると古いほうの所有者・権限の確認を素通りし、古いほうが無いと `ioError` ではなく ENOENT で例外になる）。
+- 修正（`b903353`）: `ensurePerUserLockDir` が、呼び出し側が実際にロックを置くディレクトリを任意の引数で受け取り、同じ uid・0700 の規則で確かめる。`ApplyLockService` はキャッシュした `baseDir`、`withGitConfigWriteMutex` は `path.dirname(GIT_CONFIG_MUTEX_PATH)` を渡す。
+- Verification: 新しい 3 行（明示したディレクトリだけを mkdir / lstat する、構築後に tmpdir が変わってもキャッシュしたディレクトリで確認して取得し新しい方には何も作らない、Git の mutex の確認が mutex 自身のディレクトリを受け取る）。後ろ 2 行はコンパイル済みの修正前のロジックで red（ENOENT、引数なし）。lint は検出 0、unit 1218 + 74 passing・5 pending、smoke 4、CI success。Codex の再レビューは指摘なし。
+- Learning: 場所を 1 回だけ決めてキャッシュするなら、使う前の確認もそのキャッシュした値に対して行う。確認の側で場所を計算し直すと、確認とロックが別のディレクトリを見る。
