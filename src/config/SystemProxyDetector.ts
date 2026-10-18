@@ -197,10 +197,11 @@ export class SystemProxyDetector {
                 : emptyDetection();
         }
 
-        if (this.validateDetectedProxy(result.proxyUrl)) {
+        const canonical = this.validateDetectedProxy(result.proxyUrl);
+        if (canonical) {
             return buildDetectedProxyValue({
-                http: result.proxyUrl,
-                https: result.proxyUrl,
+                http: canonical,
+                https: canonical,
                 bypass: result.bypass,
                 source: result.source
             });
@@ -214,8 +215,9 @@ export class SystemProxyDetector {
         if (!url) {
             return undefined;
         }
-        if (this.validateDetectedProxy(url)) {
-            return url;
+        const canonical = this.validateDetectedProxy(url);
+        if (canonical) {
+            return canonical;
         }
         Logger.warn(`${label} proxy failed validation:`, url);
         return undefined;
@@ -300,18 +302,18 @@ export class SystemProxyDetector {
      * Logs validation errors but doesn't throw.
      * 
      * @param url - Proxy URL to validate
-     * @returns boolean - True if valid, false otherwise
+     * @returns The canonical URL to store and apply (#108), or undefined when invalid
      */
-    private validateDetectedProxy(url: string): boolean {
+    private validateDetectedProxy(url: string): string | undefined {
         const result = this.validator.validate(url);
-        
+
         if (!result.isValid) {
             Logger.warn('Detected proxy URL failed validation:', url);
             Logger.warn('Validation errors:', result.errors);
-            return false;
+            return undefined;
         }
-        
-        return true;
+
+        return result.normalizedUrl ?? url;
     }
 }
 

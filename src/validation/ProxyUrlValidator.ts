@@ -9,6 +9,44 @@ import {
 export interface ValidationResult {
     isValid: boolean;
     errors: string[];
+    /** The canonical form the URL was validated as (#108). Present when valid. */
+    normalizedUrl?: string;
+}
+
+/**
+ * Brings a proxy URL into its one canonical form without changing what is
+ * accepted (#108):
+ * - surrounding ASCII spaces are trimmed and the scheme is lowercased
+ *   (tab/CR/LF are shell metacharacters and stay rejected, never trimmed);
+ * - a path that is exactly `/` (no query, no fragment) is dropped — any other
+ *   path, query or fragment is left in place and stays invalid;
+ * - in the userinfo, a `%` not followed by two hex digits is a literal `%` and
+ *   is written as `%25`, so the credential decode cannot throw on it.
+ *
+ * For every URL accepted without canonicalization, the result equals the
+ * input except for the scheme's letter case.
+ */
+export function canonicalizeProxyUrl(url: string): string {
+    const trimmed = url.replace(/^ +| +$/g, '');
+    const schemeMatch = /^(https?):\/\//i.exec(trimmed);
+    if (!schemeMatch) {
+        return trimmed;
+    }
+
+    const scheme = `${schemeMatch[1].toLowerCase()}://`;
+    let rest = trimmed.substring(schemeMatch[0].length);
+
+    const at = rest.lastIndexOf('@');
+    if (at > 0) {
+        const userinfo = rest.slice(0, at).replace(/%(?![0-9a-fA-F]{2})/g, '%25');
+        rest = userinfo + rest.slice(at);
+    }
+
+    if (rest.endsWith('/') && !/[/?#\s\\]/.test(rest.slice(0, -1))) {
+        rest = rest.slice(0, -1);
+    }
+
+    return scheme + rest;
 }
 
 /**
@@ -28,31 +66,37 @@ export class ProxyUrlValidator {
      * @returns ValidationResult with success status and error details
      */
     validate(url: string): ValidationResult {
-        const requiredError = this.validateRequiredUrl(url);
+        // Validate the canonical form so that every caller accepts the same
+        // set of real-world URLs (#108). The canonical URL is handed back on
+        // success so entry points can store and apply it unchanged.
+        const canonical = canonicalizeProxyUrl(url);
+
+        const requiredError = this.validateRequiredUrl(canonical);
         if (requiredError) {
             return { isValid: false, errors: [requiredError] };
         }
 
-        const securityError = this.validateSecurity(url);
+        const securityError = this.validateSecurity(canonical);
         if (securityError) {
             return { isValid: false, errors: [securityError] };
         }
 
-        const preParseError = this.validateProxyAuthoritySyntax(url);
+        const preParseError = this.validateProxyAuthoritySyntax(canonical);
         if (preParseError) {
             return { isValid: false, errors: [preParseError] };
         }
 
-        const parsed = this.parseUrl(url);
+        const parsed = this.parseUrl(canonical);
         if (parsed instanceof Error) {
             return { isValid: false, errors: ['Invalid URL format'] };
         }
 
-        const errors = this.validateParsedUrl(parsed, url);
+        const errors = this.validateParsedUrl(parsed, canonical);
 
         return {
             isValid: errors.length === 0,
-            errors
+            errors,
+            normalizedUrl: errors.length === 0 ? canonical : undefined
         };
     }
 

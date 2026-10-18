@@ -1184,3 +1184,76 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
   - 仕様の判断が必要な 2 件を分けた（検出した bypass を書き込むか、Off で手で設定した同じ値も消すか）。
 - Verification: 2 件とも API で取り直し、下書きと一致した（末尾の改行だけ違う）。
 - Learning: 公開 Issue で項目番号を `#1` の形で書くと、同じ番号の別の Issue / PR に自動リンクする。コメントでは code span で書くか、「項目 1」と書く。→ rules.md「ツール操作」に追記した。
+
+## 2026-10-18 — #108 項目 8 実在する proxy URL を 1 つの正規形で受け付ける（PR #110）
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 8、訂正コメントの A4）
+**PR**: [#110](https://github.com/tsuyoshi-otake/otak-proxy/pull/110)
+**コミット**: `5069155`（fix/108-proxy-url-canonical-form、基準 `f3286fe`）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状
+
+- ブラウザの URL パーサが受け付ける次の URL を、拡張は不正として捨てた。検出は「proxy なし」になった。
+  - 末尾の `/`（`HTTP_PROXY=http://proxy.corp.com:8080/`）
+  - host 名の `_`（`http://squid_proxy:3128`、Docker のサービス名）
+  - userinfo の生の `%`（`http://user:100%@proxy:8080`）
+- 認証付きの split URL（`autoHttpProxyUrl` / `autoHttpsProxyUrl`）は、保存すると末尾に `/` が付き、再読み込み後の apply が `invalidProxyUrl` で止まった（A4）。
+- SecretStorage との往復で、`%` を含むパスワードが壊れた。`100%` は不正な URL になり、`a%41b` は `aAb` に化けた。
+
+### 原因
+
+- `validateProxyAuthoritySyntax` は `http(s)://` の後ろを path ごと authority として検査し、`/` を拒否した。scheme の正規表現は大文字小文字を区別したので、`HTTP://` は authority の検査を丸ごと素通りした。
+- `DNS_HOSTNAME_PATTERN` が `_` を拒否した。
+- `validateCredentials` は userinfo を `decodeURIComponent` するので、16 進 2 桁が続かない `%` で例外になった。
+- `InputSanitizer.removeCredentials` は `new URL().toString()` を返すので、path `/` が付く。
+- `buildProxyUrlWithCredentials` は復号済みの資格情報を WHATWG の setter に渡すが、setter は `%` を encode しない。
+
+### 修正
+
+- `canonicalizeProxyUrl`（`src/validation/ProxyUrlValidator.ts`）は次の 4 つを行う。
+  - 前後の ASCII 空白を除く。
+  - scheme を小文字にする。
+  - userinfo の孤立した `%` を `%25` にする。
+  - ちょうど `/` だけの path を落とす。
+- タブ・CR・LF は trim しない。シェルのメタ文字として拒否のまま。
+- `validate` は正規形を検査し、有効なら `normalizedUrl` で返す。
+- 次の取り込み口は、正規形を保存して適用する（`canonicalizeValidProxyUrl`）。
+  - 検出
+  - `otak: Configure Manual Proxy`
+  - 初回セットアップの手入力
+  - `otakProxy.proxyUrl` の変更
+- `DNS_HOSTNAME_PATTERN` に `_` を加えた。IP リテラルはこのパターンに来ない。
+- `buildProxyUrlWithCredentials` は、setter の前に `%` を `%25` にする。`%` を含まない資格情報では、出力がバイト単位で同じ。
+- 保存済みの認証付き URL の末尾 `/` は残し、その形が検証を通るようにした。以前の版が保存した state は、バイト単位で同じまま。
+- レビューで CHANGELOG を直した。Devin の版は `HTTP://` を「拒否されていた URL」に含めていた。main では、`HTTP://` は authority の検査を飛ばして受け付けられていた。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 修正前のロジック | 新しいテストのうち 15 件が落ちる。末尾 `/` の検出は `actual was null`、再読み込みした split state は `invalidProxyUrl` で止まる |
+| ミューテーション | `buildProxyUrlWithCredentials` の `%` エスケープを外すと、資格情報のテストが 4 件落ちる（縮小した反例はパスワード `"% "`） |
+| 資格情報テストの入力範囲 | fast-check 4.3.0 の `fc.string()` は ASCII だけを生成する。全 Unicode の grapheme と `%` `@` `:` `/` `?` `#` 空白に広げ、seed 固定のテストで非 ASCII と astral の code point が入ることを確かめた |
+| `npm run lint` | pass（ESLint と `lint:unicode`、629 ファイル） |
+| `npm run test:unit:parallel` | 1087 + 74 passing、0 failing |
+| `npm test`（拡張ホスト） | 513 passing、1 pending、9 failing（基準と同じ 9 件） |
+| `npm run test:smoke` | 4 passing |
+| 独立 verifier（rubric C1〜C9） | 1 回目は C5 が fail（資格情報の property が ASCII だけだった）。テストを直した 2 回目は 9/9 pass |
+| テストランナーの残存プロセス | なし |
+
+### Learning
+
+1. SecretStorage の資格情報キーは、公開 URL の WHATWG href（末尾 `/` 付き、scheme と host は小文字）の sha256。保存側（`splitProxyUrl().publicUrl`）も参照側（`getProxyPublicUrl()`）も WHATWG で直列化し直すので、state に保存する URL の綴りはキーに影響しない。レビューでは保存側だけを読んで「綴りを変えると資格情報が見つからなくなる」と書きかけた。node で 3 つの綴りを比べ、同じキーになることを確かめた。生の文字列をそのまま `getCredentialKeyForPublicUrl` に渡したときだけ、別のキーになる。→ rules.md に追記した。
+2. 正規化で `String.prototype.trim()` を使うと、末尾の改行も落ちる。今まで拒否していた URL を受け付けてしまう（property test の反例 `http://proxy.com/\n`）。除くのは ASCII の空白だけにする。→ rules.md に追記した。
+3. 「今まで拒否されていた」と書く前に、main のコードで確かめる。scheme の正規表現は大文字小文字を区別していたので、`HTTP://` はかえって検査を素通りしていた。→ rules.md に追記した。
+4. PR を作ったら Codex の自動レビューを待ってからマージする。#109 は作成の 1 分 39 秒後にマージし、指摘 5 件はマージ後に届いた。→ rules.md に追記した。
+
+### 残留リスク
+
+- `validation.proxyUrl.hostnameInvalid` の文言（16 言語）は、まだ「英数字、ドット、ハイフンのみ」。`_` も通るので不正確。T11（honest UI）の locale 作業で直す。
+- 大文字の scheme で保存済みの状態は、更新後の最初の検出で小文字になる。そのとき、再 apply と「システム proxy が変わった」通知が 1 回ずつ起きる。
+- 認証付き URL の保存形は末尾 `/` 付きで、正規形と違う。単一の URL は復元時に `buildProxyUrlWithCredentials` が `/` を落とすので、検出結果との比較には響かない。
+- 認証付き split URL の資格情報は、再読み込み後に SecretStorage から戻らない（T03）。
+- split 値の片側だけが不正なとき（例 `HTTP_PROXY=http://proxy:99999`）は、その側を警告付きで捨て、HTTPS 側を両方に使う。この方針は変えていない。
+- 確認したのはユニットテストと VS Code ホストのテストまで。実際の proxy では試していない。

@@ -1,10 +1,12 @@
 import * as net from 'net';
 
 /**
- * DNS labels stay alphanumeric / dot / hyphen only.
- * Do not add `:`; IPv6 is a separate semantic branch (Issue #53).
+ * DNS labels stay alphanumeric / dot / hyphen / underscore only.
+ * Underscore is accepted because WHATWG parses it and Docker/compose service
+ * names use it (#108); IP literals never reach this pattern. Do not add `:`;
+ * IPv6 is a separate semantic branch (Issue #53).
  */
-export const DNS_HOSTNAME_PATTERN = /^[a-zA-Z0-9.-]+$/;
+export const DNS_HOSTNAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 export const INVALID_DNS_HOSTNAME_ERROR =
     'Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)';

@@ -105,10 +105,11 @@ suite('ProxyUrlValidator Test Suite', () => {
             assert.strictEqual(result.isValid, true);
         });
 
-        test('should reject hostname with underscores', () => {
+        test('should accept hostname with underscores (#108)', () => {
+            // Docker/compose service names use '_'; WHATWG accepts them.
             const result = validator.validate('http://proxy_server.example.com:8080');
-            assert.strictEqual(result.isValid, false);
-            assert.ok(result.errors.some(e => e.includes('Hostname')));
+            assert.strictEqual(result.isValid, true, result.errors.join(', '));
+            assert.strictEqual(result.normalizedUrl, 'http://proxy_server.example.com:8080');
         });
 
         test('should reject hostname with spaces', () => {
@@ -222,10 +223,10 @@ suite('ProxyUrlValidator Test Suite', () => {
             ));
         });
 
-        test('should reject malformed percent encoding in credentials without throwing', () => {
+        test('should treat a % without hex digits in credentials as literal (#108)', () => {
             const result = validator.validate('http://user%ZZ:pass@proxy.example.com:8080');
-            assert.strictEqual(result.isValid, false);
-            assert.ok(result.errors.some(e => e.includes('Invalid URL format')));
+            assert.strictEqual(result.isValid, true, result.errors.join(', '));
+            assert.strictEqual(result.normalizedUrl, 'http://user%25ZZ:pass@proxy.example.com:8080');
         });
     });
 
@@ -416,7 +417,8 @@ suite('ProxyUrlValidator Test Suite', () => {
          * Validates: Requirements 3.4
          * 
          * For any proxy URL with a hostname containing invalid characters (anything other than
-         * alphanumeric, dots, hyphens), the validation function should reject the URL with an
+         * alphanumeric, dots, hyphens, underscores — underscores are allowed since #108),
+         * the validation function should reject the URL with an
          * explanation of hostname requirements.
          */
         test('Property 9: Hostname validation', () => {
@@ -428,8 +430,9 @@ suite('ProxyUrlValidator Test Suite', () => {
                         const excludedChars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')', '@'];
                         return !excludedChars.some(char => s.includes(char));
                     }),
-                    // Invalid characters for hostname (excluding shell metacharacters and @)
-                    fc.constantFrom('!', '#', '$', '%', '^', '*', '=', '+', '[', ']', '{', '}', '_', ' ', '~', '/', '\\', '?', ','),
+                    // Invalid characters for hostname (excluding shell
+                    // metacharacters, @, and '_' which is accepted since #108)
+                    fc.constantFrom('!', '#', '$', '%', '^', '*', '=', '+', '[', ']', '{', '}', ' ', '~', '/', '\\', '?', ','),
                     fc.string({ minLength: 0, maxLength: 20 }).filter(s => {
                         // Exclude shell metacharacters and @ to avoid security/credential check rejection
                         const excludedChars = [';', '|', '&', '`', '\n', '\r', '<', '>', '(', ')', '@'];
