@@ -41,6 +41,9 @@ suite('CommandRegistry Smoke Tests', () => {
             context: extensionContext,
             getProxyState: async () => ({ mode: ProxyMode.Off } as ProxyState),
             saveProxyState: async () => {},
+            commitProxyState: async (_ctx, expected, next) =>
+                ({ kind: 'committed' as const, revision: expected + 1, state: { ...next, revision: expected + 1 } }),
+            publishProxyState: async () => {},
             getActiveProxyUrl: () => '',
             getNextMode: () => ProxyMode.Off,
             applyProxySettings: async () => true,

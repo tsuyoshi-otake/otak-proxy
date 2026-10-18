@@ -39,6 +39,7 @@ import { readV3Settings } from './core/V3Settings';
 import { TargetOwnershipStore } from './core/TargetOwnershipStore';
 import { ProxyCredentialStore } from './security/ProxyCredentialStore';
 import { applyRemoteSyncState as convergeRemoteSyncState } from './sync/RemoteSyncStateApplier';
+import { reconcileStartupProxyApply } from './core/StartupEnforcement';
 import {
     shouldSkipUnauthenticatedApply,
     UNRESOLVED_LOCAL_CREDENTIAL_ERROR
@@ -314,6 +315,8 @@ function registerExtensionCommands(context: vscode.ExtensionContext, services: C
             await proxyStateManager.saveState(s);
             await publishProxyState(s);
         },
+        commitProxyState: (_ctx, expected, next) => proxyStateManager.commitState(expected, next),
+        publishProxyState: (_ctx, s) => publishProxyState(s),
         getActiveProxyUrl: (s) => proxyStateManager.getActiveProxyUrl(s),
         getNextMode: (mode) => proxyStateManager.getNextMode(mode),
         applyProxySettings: (url, enabled) => applyProxySafely(url, enabled, 'manual', { showProgress: true }),
@@ -365,21 +368,6 @@ async function loadSharedStateIfEnabled(state: ProxyState): Promise<ProxyState> 
     const updatedState = await proxyStateManager.getState();
     statusBarManager.update(updatedState);
     return updatedState;
-}
-
-/**
- * A stable signature of everything applyStartupProxyState acts on. Used to detect
- * whether the persisted state changed while the (slow) startup enforcement ran,
- * so we can reconcile on the latest instead of a stale activation snapshot (#12).
- */
-function startupEnforcementTarget(state: ProxyState): string {
-    return JSON.stringify({
-        revision: state.revision ?? 0,
-        mode: state.mode,
-        activeUrl: proxyStateManager.getActiveProxyUrl(state),
-        autoModeOff: state.autoModeOff === true,
-        noProxy: state.noProxy ?? ''
-    });
 }
 
 async function applyStartupProxyState(state: ProxyState, terminalEnvManager?: TerminalEnvConfigManager): Promise<void> {
@@ -544,21 +532,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // tiny remaining window (a command landing between the final read and the
         // monitoring update) is the same irreducible concurrency the steady-state
         // monitor-vs-command path already has. (#12)
-        let target = state;
-        for (let attempt = 0; attempt < 3; attempt++) {
-            const applyTarget = attempt === 0 ? startupApplyRunner : applyStartupProxyState;
-            await applyTarget(target, services.terminalEnvManager);
-            if (generation !== activationGeneration) {
-                return;
-            }
-            const latest = await proxyStateManager.getState();
-            const stable = startupEnforcementTarget(latest) === startupEnforcementTarget(target);
-            target = latest;
-            if (stable) {
-                break;
-            }
-        }
-        if (generation !== activationGeneration) {
+        const target = await reconcileStartupProxyApply(
+            state,
+            s => proxyStateManager.getActiveProxyUrl(s),
+            (applyTarget, attempt) =>
+                (attempt === 0 ? startupApplyRunner : applyStartupProxyState)(applyTarget, services.terminalEnvManager),
+            () => proxyStateManager.getState(),
+            () => generation === activationGeneration
+        );
+        if (target === undefined) {
             return;
         }
         statusBarManager.update(target);

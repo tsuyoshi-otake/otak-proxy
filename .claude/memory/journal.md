@@ -1061,3 +1061,126 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - 先の handler と proxyChanged の間に toggle / sync がコミットすると、判定は stale のイベントと一緒に消える。
 - 拡張ホスト lane と直接の mocha 実行は system temp の mutex を共有したまま。過去の実行が残した `otak-proxy-unit-*`（33 個）は未削除（ユーザーの判断待ち）。
 - 実ネットワーク・実 VPN 切替では未確認。
+
+## 2026-10-18 — 全体監査（バグバウンティ形式、HEAD d4f59a5 / v3.2.16、コード変更なし）
+
+### 症状
+
+依頼は「この拡張の不具合や改善点を探す」。6 分野（セキュリティ、並行性と同期、設定 writer、検出と接続テスト、UI とコマンド、ビルドとサプライチェーン）を sonnet エージェント 6 体で並行に調べ、上位の主張は自分で再現した。#108（2026-10-17 22:41Z 起票、このセッションの外）と重複する指摘は除いた。
+
+### 原因（確定したもの）
+
+1. **トグルが mode を保存しない（Critical）。** `ToggleProxyCommand.ts:280` のガード `isStaleGeneration(started, latest) && latest.mode !== state.mode` が、apply 自身の結果コミット（revision +1）を他 writer の変更と取り違え、`saveProxyState` を飛ばす。Off→Auto は git / npm / VS Code に書くが、保存 mode は off、ステータスバーも OFF、モニタは起動しない。Auto→Off も逆向きに同じ。open #78「トグル 1 回後も Proxy: Off のまま設定が残る」の直接原因。14bbc08（#17、v3.2.7 以降）。同じ取り違えが `InitialSetupFlow.ts:55`（初回セットアップの回答が捨てられ、二度と聞かれない）と `extension.ts:377`（起動時 apply が毎回 3 回走る）にもある。
+2. **末尾 `/` 付きの proxy URL を拒否する。** `ProxyHost.ts:66` が `/ ? #` を含む authority をホスト名エラーにし、`http://proxy:8080/` の検出は「proxy なし」になる（ログ 1 行だけ）。`_` を含むホスト名、生の `%` を含むパスワードも同じ。
+3. **接続テストの CONNECT が VS Code の proxy パッチを通る。** `ProxyConnectRequest.ts:36-41` の `http.request` は拡張ホストで @vscode/proxy-agent に包まれる（`http.proxySupport` 既定 `override`）。proxy 自身の URL も `http.proxy` → env → OS の proxy 経由になり、ECONNREFUSED は errno の無い "Failed to establish a socket connection to proxies" に変わって `unknown` 判定になる。Auto: OFF に入る唯一の入力 `unreachable` が出ない。別の proxy を経由した場合は判定を誤り、テスト対象の認証情報を経由先へ送る。
+4. **`http.proxy` は local window で APPLICATION scope。** Settings Sync の既定除外は MACHINE / MACHINE_OVERRIDABLE / ignoreSync だけなので、同期される（Off の `''` も同期される）。remote window では USER 書き込みが local の settings.json に入る。
+5. **パスワードが UI とログに出る。** git の失敗時、Node のメッセージ "Command failed: git config ... <URL>" を `GitConfigErrorClassifier.ts:43,82` がそのまま返し、エラー通知とステータスバー tooltip（`StatusBarDisplay.ts:43` → `StatusBarTooltip.ts:27`）に平文で出る。`DOMAIN\user:pw@host` 形式は `InputSanitizer.maskPassword` を素通りし、Output channel に出る。
+6. **その他。** invisible-Unicode スキャナは NUL 1 バイトでファイルを丸ごとスキップし、U+3164 を検出しない。v3.2.1 は workflow_dispatch（767b736）で公開され、後のタグ v3.2.1（b198755）の run は "already published" で success になった。数値設定に文字列を入れると monitor が 1 ms 間隔で空回りし、検出が止まる。
+
+### 修正
+
+なし（調査のみ。`src/` は無変更）。issue の起票はユーザーの判断待ち（公開 repo なので、セキュリティ項目は private advisory を推奨）。
+
+### Verification
+
+- トグル: 本物の `ProxyStateManager` / `ProxyApplier` / `createFencedApply` / `executeToggleProxy`（writer と notifier だけ stub）で、Off→Auto は `persisted off rev1 -> off rev2 | success=true | statusBar ["off"] | monitorStarts=0 | writes vscode/git/npm.setProxy`。Auto→Off は `auto -> auto`、writes は unsetProxy 3 件。2 体のエージェントが独立に同じ結果を出した。
+- 末尾 `/`: `HTTP_PROXY=http://proxy.corp.com:8080/` で `detectSystemProxyWithSource()` が `null`。`/` なしでは検出する。
+- proxy-agent: VS Code 1.106.3（proxy-agent 0.36.0）と 1.141.0（0.45 系、`node_modules.asar`）のソースで `useProxySettings`、`isLocalhost`（localhost と 127.0.0.1 だけ除外）、失敗時の例外文言を確認した。`http.proxySupport` の既定は両方 `override`。拡張ホスト内では未実行（エージェントが VS Code の proxy-agent を Node で読み込んで再現した）。
+- Settings Sync / remote: 1.141.0 の workbench で `scope:s?1:2`（`G8o(s=!0,o=!0)`）、除外の述語 `ignoreSync||i===2||i===7`、remote の USER 書き込み先 `if(i===2||i===7||i===3)return 2 ... return 1`（USER_LOCAL）を確認した。実 Settings Sync と実 remote では未実行。
+- パスワード表示: 壊れた `.gitconfig` で git 書き込みを失敗させ、通知文字列にパスワードが含まれることを確認した（自分とエージェントで計 2 回、エージェントは実 git）。
+- スキャナ: `String.fromCodePoint` で作ったフィクスチャで、NUL ありは exit 0 で「1 skipped as binary」、NUL なしは exit 1。
+- リリース: `gh run view 30320482241`（dispatch、767b736、Published v3.2.1）と `30602322737`（tag v3.2.1 = b198755、"already published. Skipping"、success）。
+- 隔離: git / npm を呼ぶ再現は `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` / `OTAK_PROXY_LOCK_DIR` を scratchpad に向けた。テスト runner は使っていない。
+
+### Learning
+
+1. 「自分のコミットの後のガードは committedRevision と比べる」は rules.md にあったが、toggle、初回セットアップ、起動ループの 3 箇所は直っていなかった。コマンドのテストは revision を進めない stub context を使うので、全テスト pass のまま出荷された。→ rules.md「世代フェンス」
+2. VS Code の `http.proxy` は local window で APPLICATION scope で、Settings Sync で同期される。remote window からの Global 書き込みは local の settings.json に入る。エージェントの 1 体は scope 1 を machine と読み違えて「同期されない」と結論した。VS Code の挙動を前提にする判断は bundle の実コードで確かめる。→ rules.md「VS Code ホストの前提」
+3. 拡張ホストの `http` / `https` は proxy-agent でパッチされ、loopback の fake はこれを通らない（localhost / 127.0.0.1 は DIRECT）。接続テストの判定は、テストと本番で別の経路を通る。→ rules.md「VS Code ホストの前提」
+4. #108 は監査の途中に外部で起票された。起票の直前に open / 直近の issue を取り直して重複を除く。
+
+### 残留リスク
+
+- トグル不具合は実 VS Code ホストでは未実行（モジュール単位で本物の部品を使用）。#78 の報告症状とは一致する。
+- Settings Sync、Remote-SSH / WSL、マルチユーザー Linux、macOS / Linux の platform 検出は未実行。
+- 接続テストの経路は VS Code の proxy-agent を Node で動かした再現だけで、拡張ホスト内では未実行。
+
+### 追記: Issue への反映（同日）
+
+- ユーザーの指示（「Issue更新して」）で、#78 に直接原因のコメント（https://github.com/tsuyoshi-otake/otak-proxy/issues/78#issuecomment-6243068785）、#108 に追加指摘 7〜16 のコメント（https://github.com/tsuyoshi-otake/otak-proxy/issues/108#issuecomment-6243069914）を投稿した。#108 は公開のセキュリティレビュー Issue なので、セキュリティ項目も載せた。個人情報に近い文字列の指摘（Snyk の org ID、evidence のホスト名とユーザーパス）は公開 Issue に書いていない。
+- #108 の本文と既存コメントでは、作成時の文字コード変換で `—` と範囲の `〜` が `?` になっていた（本文 7 箇所、コメント 15 箇所）。API で取り直した本文が読んだときと同じであることを確かめてから PATCH で直し、取り直して期待値と一致することを確認した。`??` 演算子の 2 文字は残した。
+- Verification: 投稿した 2 件のコメントを API で取り直し、下書きと完全に一致した（末尾の改行だけ正規化）。
+- Learning: Windows で gh に本文を渡すときは、UTF-8 のファイルを `--body-file` / `--input` で渡し、投稿後に API で取り直して照合する。CP932 に無い文字（`—`、`–`、`〜`）が `?` に化けた実例が #108 にあった（化けた経路は未確認）。
+
+## 2026-10-18 — #78 トグルが選んだ mode を保存しない不具合の修正（#108 項目 7、PR #109）
+
+**Issue**: [#78](https://github.com/tsuyoshi-otake/otak-proxy/issues/78)（#108 の項目 7）
+**PR**: [#109](https://github.com/tsuyoshi-otake/otak-proxy/pull/109)
+**コミット**: `6be1d00`（fix/78-toggle-saves-mode、基準 `d4f59a5`。監査記録 `ae30516` も同じブランチ）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状
+
+- Off → Auto で Git / VS Code / npm に proxy を書くが、保存される mode は `off` のまま。ステータスバーも Off で、モニタは起動しない。Auto → Off は proxy を消すが `auto` のまま。ウィンドウを再読み込みすると古い mode に戻る（v3.2.7、14bbc08 以降）。
+- 初回セットアップの質問を表示している間に、起動時の apply の結果コミットが入ると、回答が捨てられる。`hasInitialSetup` が立つので、二度と聞かれない。
+- 起動時の apply が、起動のたびに最大 3 回走る。
+
+### 原因
+
+- 3 箇所とも revision を identity として比べていた。apply は自分の結果を per-target でコミットして revision を進める。そのため、トグルのガード、初回セットアップの署名、起動ループの署名が、自分の書き込み（または revision だけを進める書き込み）を他 writer の変更と取り違えた。
+- トグルは apply の後に保存していたので、apply 中の診断はトグル前の mode を読んだ（#78 の仮説 2）。ガードとは独立した不整合。
+
+### 修正
+
+- トグルは apply の前に、目的の状態を `convergencePending: true` で `commitProxyState`（revision 付きの CAS）にコミットする。
+  - コミットする状態は、最新の保存値に、トグルが変えたフィールドだけ（`changedToggleFields`）を重ねたもの。
+  - CAS が失敗したら最新値に重ね直し、最大 3 回まで試す。superseded にするのは、他 writer が mode を変えたときだけ。
+- Off は apply の前にモニタを止め、Auto は apply の後に始める。
+- apply の後は `clearPendingThenPublish` が、論理 identity が目的のままのときだけ flag を外して publish する。この関数は `ExtensionProxyEventHandlers` から `src/core/ApplyConvergence.ts` へ、変更なしで移した（owner `'toggle'`）。
+- `CommandContext` に `commitProxyState` と `publishProxyState` を追加した。
+- `setupStateSignature` と起動時の署名から `revision` を外した。起動ループは `src/core/StartupEnforcement.ts` の `reconcileStartupProxyApply` に移し、unit lane でテストする（`getActiveProxyUrl` は引数で受け取る）。拡張の export は変えていない。
+- CHANGELOG に Fixed を 4 件書いた。古い版が保存 mode を食い違わせたままにした場合は、更新後に 1 回トグルすれば合う、とも書いた。
+
+### Verification
+
+| 項目 | 結果 |
+| --- | --- |
+| 修正前のロジック | 起動ループのテストは `3 !== 1`。初回セットアップのテストは `manualProxyUrl` が `undefined`。generation suite は元のガードで red |
+| ミューテーション | 次の 4 件とも、#78 のテストが少なくとも 1 件 red になる: CAS の失敗で常に superseded、apply の後にコミット、コミット前にモニタ開始、スナップショット全体を重ねる |
+| `npm run lint` | pass |
+| `npm run test:unit:parallel` | 1058 + 74 passing、0 failing |
+| `npm test`（拡張ホスト） | 513 passing、1 pending、9 failing（基準と同じ 9 件） |
+| `npm run test:smoke` | 4 passing |
+| 独立 verifier（rubric C1〜C10） | 10/10 pass |
+| テストランナーの残存プロセス | なし |
+
+### Learning
+
+1. 目的の状態を apply の前にコミットするときは、最新の保存値に、自分が変えたフィールドだけを重ねる。スナップショット全体を重ねると、スナップショットから CAS までに他 writer が書いた検出・テスト結果を消す（ミューテーションで、回帰テスト 2 件が red になることを確認）。→ rules.md「世代フェンス」に追記した。
+2. CAS の失敗を一律に superseded にしない。revision だけを進める書き込み（apply の結果、テスト結果）は、同じ決定の下で起きる。superseded にするのは、決定のフィールド（mode）が変わったときだけ（ミューテーションで確認）。
+3. 実装した側（Devin）の最初の版は、スナップショット全体を重ねていた。レビューで指摘して直させた後、この観点を rubric（C10）に加えてから独立 verifier に渡した。
+
+### 残留リスク
+
+- コミットの間に同じ mode の書き込みが 3 回入ると、トグルはログに警告を出して諦める。ステータスバーは保存値を表示し、apply はしない。
+- Off → Auto が store からコピーする検出フィールドは、検出時に読んだ値で重ねる。その読み取りからコミットまでに入ったモニタの結果は上書きされる。
+- 報告者の端末では未確認。確認したのは、本物の `ProxyStateManager` を使う generation テストまで。
+
+### 追記: Issue の訂正コメント（同日）
+
+- ユーザーの指示（「登録されていIssueに考慮漏れや矛盾がないかチェック」）で、#78 と #108 を `d4f59a5` で読み直した。訂正コメントを 2 件投稿した:
+  - #78: https://github.com/tsuyoshi-otake/otak-proxy/issues/78#issuecomment-6243975189
+  - #108: https://github.com/tsuyoshi-otake/otak-proxy/issues/108#issuecomment-6243975413
+- #78 の訂正:
+  - 「直接原因」を「コードで再現した原因（報告者の端末では未確認）」に改めた。
+  - 症状と操作の対応を逆に訂正した。Off 表示なのに値が残るのは Off → Auto。
+  - 仮説 2 はガードの帰結ではなく、独立した不整合。
+  - `committedRevision` と比べる方針はトグルでは使えない（`applyProxySettings` は boolean を返す）。
+  - 初回セットアップの不一致の原因は、並行する別の書き込み。
+  - 受け入れ条件 6〜8 と、更新後に 1 回トグルが必要な場合の案内を追加した。
+- #108 の訂正:
+  - 誤り 11 件を訂正した。例: 項目番号の `#1` 形式が別の Issue に自動リンクする、git に `http.noProxy` という設定は無い、`ProxyRuntimeDiagnostics` が読むのは VS Code の `http.noProxy`、マスク漏れの範囲、接続テストは 3 本並行で約 90 秒間隔。
+  - 13 段の解決順序と、それぞれの受け入れ条件を書いた。
+  - 仕様の判断が必要な 2 件を分けた（検出した bypass を書き込むか、Off で手で設定した同じ値も消すか）。
+- Verification: 2 件とも API で取り直し、下書きと一致した（末尾の改行だけ違う）。
+- Learning: 公開 Issue で項目番号を `#1` の形で書くと、同じ番号の別の Issue / PR に自動リンクする。コメントでは code span で書くか、「項目 1」と書く。→ rules.md「ツール操作」に追記した。

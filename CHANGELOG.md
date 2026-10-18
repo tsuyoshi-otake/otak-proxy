@@ -1,5 +1,13 @@
 # Change Log
 
+## [Unreleased]
+
+### Fixed
+- The proxy toggle now persists the new mode. Off → Auto saves `auto` and starts monitoring, and Auto → Off saves `off`, so the status bar no longer shows the pre-toggle mode and a window reload no longer restores it. The apply's own bookkeeping write used to make the toggle discard the mode it had just chosen. If an earlier version left the saved mode out of step (for example `auto` after turning the proxy off), the first start after updating applies that saved mode; toggle once to bring it in line (#78).
+- During a toggle, diagnostics now see the new mode, so Off → Auto no longer reports the proxy it just wrote as a leftover and no longer runs a needless convergence retry (#78).
+- The first-run setup answer is no longer discarded when the startup apply finishes while the prompt is open (#78).
+- The startup proxy enforcement no longer applies the same proxy up to three times: it now re-runs only when the proxy state actually changed during the apply (#78).
+
 ## [3.2.16] - 2026-10-03
 
 ### Fixed

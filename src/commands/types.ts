@@ -9,7 +9,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState } from '../core/types';
+import { ProxyMode, ProxyState, StateCommitResult } from '../core/types';
 
 /**
  * Command execution context providing all dependencies needed by commands
@@ -22,6 +22,18 @@ export interface CommandContext {
     // State management functions
     getProxyState: () => Promise<ProxyState>;
     saveProxyState: (state: ProxyState) => Promise<void>;
+    /**
+     * Revision-checked write used by commands that commit a desired state
+     * before applying it. Writes `next` only when the stored revision is still
+     * `expectedRevision` (#78).
+     */
+    commitProxyState: (expectedRevision: number, next: ProxyState) => Promise<StateCommitResult>;
+    /**
+     * Publishes a converged state to other windows. Distinct from
+     * saveProxyState: the publish happens only once the apply finished, so
+     * other windows never see an unapplied desired as converged.
+     */
+    publishProxyState: (state: ProxyState) => Promise<void>;
     getActiveProxyUrl: (state: ProxyState) => string;
     getNextMode: (currentMode: ProxyMode) => ProxyMode;
 

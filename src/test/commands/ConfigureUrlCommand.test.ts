@@ -64,6 +64,14 @@ suite('ConfigureUrlCommand Unit Tests', () => {
                 counters.saveStateCalls++;
                 state = { ...next };
             },
+            commitProxyState: async (expectedRevision, next) => {
+                if ((state.revision ?? 0) !== expectedRevision) {
+                    return { kind: 'superseded' as const, current: { ...state } };
+                }
+                state = { ...next, revision: expectedRevision + 1 };
+                return { kind: 'committed' as const, revision: expectedRevision + 1, state: { ...state } };
+            },
+            publishProxyState: async () => {},
             getActiveProxyUrl: (s) => {
                 if (s.mode === ProxyMode.Auto) {
                     return s.autoProxyUrl ?? '';

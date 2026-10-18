@@ -11,14 +11,14 @@ import {
     TestResult
 } from '../utils/ProxyUtils';
 import type { ReportedProxyChange } from '../utils/ProxyTestTypes';
+import { clearPendingThenPublish } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, commitUnlessStaleWithRevision, publishUnlessStale } from './GenerationFence';
 import {
     LogicalGeneration,
     captureLogicalGeneration,
     isStaleGeneration,
-    proxyUrlIdentity,
-    sameLogicalIdentity
+    proxyUrlIdentity
 } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import type { ManualFallbackOutcome } from './SystemProxyUpdateService';
@@ -355,42 +355,6 @@ async function saveApplyThenPublish(
 
     await apply();
     await clearPendingThenPublish(context, owner, desired);
-}
-
-/**
- * Ends an apply that started from a state saved with convergencePending:
- * clears the flag and publishes the converged state. A state that moved to
- * another logical identity meanwhile belongs to the writer that moved it.
- * The revision is not compared: the apply itself writes the Configured flags.
- */
-async function clearPendingThenPublish(
-    context: InitializerContext,
-    owner: 'detection' | 'connectionTest' | 'autoMonitoring' | 'stateChanged',
-    desired: ProxyState
-): Promise<void> {
-    const afterApply = await context.proxyStateManager.getState();
-    const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
-    if (!sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(afterApply))) {
-        return;
-    }
-
-    const cleared = await commitUnlessStale(
-        context.proxyStateManager,
-        captureLogicalGeneration(afterApply),
-        owner,
-        current => ({ ...current, convergencePending: false })
-    );
-    if (cleared === 'stale') {
-        return;
-    }
-
-    const published = await context.proxyStateManager.getState();
-    await publishUnlessStale(
-        context.publishProxyState,
-        captureLogicalGeneration(published),
-        owner,
-        published
-    );
 }
 
 function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetectionResult): void {
