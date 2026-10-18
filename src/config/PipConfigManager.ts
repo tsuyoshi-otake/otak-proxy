@@ -6,8 +6,10 @@ import { ProxyConfigInspection } from './ProxyConfigInspection';
 import { getErrorCode, getErrorMessage, getErrorSignal, getErrorStderr, wasProcessKilled } from '../utils/ErrorUtils';
 import { compareThenDelete, UNSET_UNREADABLE } from './ValueAwareUnset';
 import { UNREADABLE } from './PartialProxyWriteCompensation';
+import { InputSanitizer } from '../validation/InputSanitizer';
 
 const execFileAsync = promisify(execFile);
+const resultSanitizer = new InputSanitizer();
 
 export interface OperationResult {
     success: boolean;
@@ -380,7 +382,10 @@ export class PipConfigManager {
 
         return {
             success: false,
-            error: classification.error,
+            // Raw execFile errors echo the full command line, including any
+            // credential-bearing URL (#108). Mask here so the error is safe to
+            // return to every caller (notifications, state, tooltip).
+            error: resultSanitizer.maskPassword(classification.error),
             errorType: classification.errorType
         };
     }

@@ -285,6 +285,65 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         }
     });
 
+    test('migration ignores an invalid credential-bearing otakProxy.proxyUrl setting (#108)', async () => {
+        // The v3 migration used to read the setting raw: an invalid value such
+        // as a credential-bearing URL with a path was stored in SecretStorage
+        // and rewritten credential-free before the runtime validation could
+        // reject it. An invalid setting must be left exactly as the user wrote
+        // it, and nothing may reach SecretStorage.
+        const invalidSetting = 'http://user:secret@proxy:8080/path';
+        const store: Store = new Map();
+        const secrets = new Map<string, string>();
+        const restoreConfig = stubConfiguration(invalidSetting);
+        try {
+            await new ProxyStateManager(createContext(store, secrets)).getState();
+
+            assert.ok(
+                ![...secrets.values()].some(value => value.includes('secret')),
+                `no secret may hold the invalid setting's password: ${JSON.stringify([...secrets.entries()])}`
+            );
+            const setting = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
+            assert.strictEqual(setting, invalidSetting, 'an invalid setting must be left untouched');
+            const journal = store.get(V3_MIGRATION_JOURNAL_KEY) as { phase: string };
+            assert.strictEqual(journal.phase, 'completed');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('migration migrates a valid credential-bearing otakProxy.proxyUrl in canonical form', async () => {
+        // Regression guard for the validation step: a valid but non-canonical
+        // setting (upper-case scheme and host, trailing "/") passes
+        // tryCanonicalizeProxyUrl and is still migrated. The credential
+        // reaches SecretStorage, the setting is rewritten credential-free in
+        // lower case (with the "/" the serializer adds), and getState()
+        // hydrates the manual URL with the credential. Reading the setting
+        // raw passes this test too: the secret key comes from the parsed
+        // public URL, so it does not depend on how the setting is spelled.
+        // A stored state makes getState() take the hydration path that
+        // reattaches migrated credentials to the manual URL.
+        const store: Store = new Map([['proxyState', { mode: ProxyMode.Auto } as ProxyState]]);
+        const secrets = new Map<string, string>();
+        const restoreConfig = stubConfiguration('HTTP://user:secret@Proxy.Example.com:8080/');
+        try {
+            const context = createContext(store, secrets);
+            const manager = new ProxyStateManager(context);
+            const state = await manager.getState();
+
+            assert.ok(
+                [...secrets.values()].some(value => value.includes('secret')),
+                `the credential must be migrated to SecretStorage: ${JSON.stringify([...secrets.entries()])}`
+            );
+            const setting = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
+            assert.strictEqual(setting, 'http://proxy.example.com:8080/',
+                'the setting must be rewritten credential-free with a lower-case scheme and host');
+            assert.strictEqual(state.manualProxyUrl, 'http://user:secret@proxy.example.com:8080',
+                'a following getState() must hydrate the manual URL with its credentials');
+        } finally {
+            restoreConfig();
+        }
+    });
+
     test('two fields with the identical losing login count as one dropped credential', async () => {
         const persistedState: ProxyState = {
             mode: ProxyMode.Manual,

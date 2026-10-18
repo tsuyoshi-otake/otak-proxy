@@ -7,6 +7,7 @@ import {
     createCommandRegistry
 } from '../../commands/CommandRegistry';
 import { ProxyMode, ProxyState } from '../../core/types';
+import { createRealStateManager } from '../realProxyStateManager';
 
 const EXPECTED_COMMANDS = [
     'otak-proxy.toggleProxy',
@@ -174,6 +175,109 @@ suite('CommandRegistry Smoke Tests', () => {
             'config must store the credential-stripped URL');
 
         sinon.assert.calledWith(getConfigStub, 'otakProxy');
+    });
+
+    test('config-change callback: invalid proxyUrl is neither saved nor published and reports invalidProxyUrl once', async () => {
+        let saveCalls = 0;
+        let publishCalls = 0;
+        const detailedErrors: string[] = [];
+        const config: CommandRegistryConfig = {
+            ...baseConfig,
+            getProxyState: async () =>
+                ({ mode: ProxyMode.Manual, manualProxyUrl: 'http://old.example:8080' } as ProxyState),
+            saveProxyState: async () => { saveCalls++; },
+            publishProxyState: async () => { publishCalls++; },
+            userNotifier: {
+                ...baseConfig.userNotifier,
+                showErrorWithDetails: async (message) => { detailedErrors.push(message); }
+            }
+        };
+
+        sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) =>
+                key === 'proxyUrl' ? 'not a proxy url' : defaultValue,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        } as unknown as vscode.WorkspaceConfiguration);
+
+        new CommandRegistry(config).registerAll();
+        const cb = configListenerStub.firstCall.args[0] as (
+            e: vscode.ConfigurationChangeEvent
+        ) => Promise<void>;
+
+        await cb({ affectsConfiguration: (k: string) => k === 'otakProxy.proxyUrl' } as
+            vscode.ConfigurationChangeEvent);
+
+        assert.strictEqual(saveCalls, 0, 'invalid value must not be saved');
+        assert.strictEqual(publishCalls, 0, 'invalid value must not be published');
+        assert.deepStrictEqual(detailedErrors, ['error.invalidProxyUrl']);
+    });
+
+    test('config-change callback: valid proxyUrl is saved in canonical form', async () => {
+        let savedState: ProxyState | undefined;
+        const config: CommandRegistryConfig = {
+            ...baseConfig,
+            getProxyState: async () =>
+                ({ mode: ProxyMode.Off, manualProxyUrl: 'http://old.example:8080' } as ProxyState),
+            saveProxyState: async (_ctx, next) => { savedState = next; }
+        };
+
+        sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) =>
+                key === 'proxyUrl' ? 'HTTP://NEW.EXAMPLE:3128/' : defaultValue,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        } as unknown as vscode.WorkspaceConfiguration);
+
+        new CommandRegistry(config).registerAll();
+        const cb = configListenerStub.firstCall.args[0] as (
+            e: vscode.ConfigurationChangeEvent
+        ) => Promise<void>;
+
+        await cb({ affectsConfiguration: (k: string) => k === 'otakProxy.proxyUrl' } as
+            vscode.ConfigurationChangeEvent);
+
+        assert.strictEqual(savedState?.manualProxyUrl, 'http://NEW.EXAMPLE:3128',
+            'the stored value must be the canonical form (lowercase scheme, no bare trailing slash)');
+    });
+
+    test('config-change callback: replacing a credential-bearing URL with a credential-free one clears the stale auth markers', async () => {
+        // Regression for #108: without the recompute, requiresAuth stayed true
+        // with an empty authRequiredProxyUrls and the fallback was skipped.
+        // Run through a real ProxyStateManager + a fresh-manager reload so the
+        // assertion covers what is persisted and read back, not only the object
+        // handed to the save seam.
+        const harness = createRealStateManager(config =>
+            sandbox.stub(vscode.workspace, 'getConfiguration').returns(config));
+        await harness.manager.saveState({
+            mode: ProxyMode.Auto,
+            manualProxyUrl: 'http://user:pass@old.example:8080'
+        } as ProxyState);
+        harness.settings.set('proxyUrl', 'http://new.example:9000');
+
+        const config: CommandRegistryConfig = {
+            ...baseConfig,
+            getProxyState: () => harness.manager.getState(),
+            saveProxyState: (_ctx, next) => harness.manager.saveState(next),
+            applyProxySettings: async () => true
+        };
+
+        new CommandRegistry(config).registerAll();
+        const cb = configListenerStub.firstCall.args[0] as (
+            e: vscode.ConfigurationChangeEvent
+        ) => Promise<void>;
+
+        await cb({ affectsConfiguration: (k: string) => k === 'otakProxy.proxyUrl' } as
+            vscode.ConfigurationChangeEvent);
+
+        const reloaded = await harness.reload();
+        assert.strictEqual(reloaded.manualProxyUrl, 'http://new.example:9000');
+        assert.strictEqual(reloaded.requiresAuth, undefined,
+            'a credential-free URL must not keep a sticky requiresAuth');
+        assert.strictEqual(reloaded.authRequiredProxyUrls, undefined,
+            'a credential-free URL must not keep authRequiredProxyUrls');
     });
 
     test('config-change callback: status bar display settings refresh the status bar', async () => {

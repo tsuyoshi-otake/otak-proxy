@@ -45,6 +45,7 @@ import {
     shouldSkipUnauthenticatedApply,
     UNRESOLVED_LOCAL_CREDENTIAL_ERROR
 } from './utils/ProxyStateSanitizer';
+import { tryCanonicalizeProxyUrl } from './utils/ProxyUrlUtils';
 
 // Module-level instances
 let proxyStateManager: ProxyStateManager;
@@ -273,17 +274,21 @@ function initializeSync(context: vscode.ExtensionContext): void {
     }
 }
 
-async function migrateManualUrlFromConfig(
-    state: ProxyState,
-    config: vscode.WorkspaceConfiguration
-): Promise<ProxyState> {
+/**
+ * Logs once per activation when a configured `otakProxy.proxyUrl` value is
+ * non-empty but invalid (#108). Every read of the setting ignores an invalid
+ * value (ProxyStateManager validates and canonicalizes it like every other
+ * URL entry point), so this is the single place the rejection is surfaced —
+ * one masked warning, no notification: activation is not a user action.
+ */
+export function warnOnInvalidConfiguredProxyUrl(
+    config: Pick<vscode.WorkspaceConfiguration, 'get'>,
+    sanitizer: Pick<InputSanitizer, 'maskPassword'>
+): void {
     const configProxyUrl = config.get<string>('proxyUrl', '');
-    if (configProxyUrl && !state.manualProxyUrl) {
-        state.manualProxyUrl = configProxyUrl;
-        await proxyStateManager.saveState(state);
+    if (configProxyUrl && !tryCanonicalizeProxyUrl(configProxyUrl)) {
+        Logger.warn(`Ignoring invalid otakProxy.proxyUrl setting: ${sanitizer.maskPassword(configProxyUrl)}`);
     }
-
-    return state;
 }
 
 function registerExtensionCommands(context: vscode.ExtensionContext, services: CoreServices): void {
@@ -493,7 +498,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     initializeStatusBar(context, services);
 
     let state = await proxyStateManager.getState();
-    state = await migrateManualUrlFromConfig(state, services.config);
+    warnOnInvalidConfiguredProxyUrl(services.config, services.sanitizer);
     registerExtensionCommands(context, services);
 
     statusBarManager.update(state);

@@ -3,8 +3,15 @@ import {
   formatAggregatedErrors,
   getAggregatedErrorDisplayParts
 } from './ErrorAggregatorDisplay';
+import { InputSanitizer } from '../validation/InputSanitizer';
 
 export type { AggregatedErrorDisplayParts } from './ErrorAggregatorDisplay';
+
+// Error texts are arbitrary upstream output (execFile failures echo command
+// lines, exceptions embed URLs). Mask once at ingestion (#108) so every
+// downstream consumer - notifications, lastError, the tooltip - is safe even
+// when a producer forgot to pre-mask.
+const errorSanitizer = new InputSanitizer();
 
 export interface AggregatedError {
   operation: string;
@@ -27,7 +34,7 @@ export class ErrorAggregator {
    * @param errorType - Structured error classification for retry decisions
    */
   addError(operation: string, error: string, errorType?: string): void {
-    this.errors.set(operation, error);
+    this.errors.set(operation, errorSanitizer.maskPassword(error));
     if (errorType) {
       this.errorTypes.set(operation, errorType);
     } else {

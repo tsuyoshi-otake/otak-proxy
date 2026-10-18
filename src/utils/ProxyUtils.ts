@@ -12,7 +12,7 @@ export {
     testProxyConnectionParallel
 } from './ProxyConnectionTest';
 export { resetInstances } from './ProxyUtilityInstances';
-export { canonicalizeValidProxyUrl, sanitizeProxyUrl, validateProxyUrl } from './ProxyUrlUtils';
+export { canonicalizeValidProxyUrl, sanitizeProxyUrl, tryCanonicalizeProxyUrl, validateProxyUrl } from './ProxyUrlUtils';
 export type { ProxyTestFailureKind, TestResult, TestUrlError } from './ProxyTestTypes';
 export type { ProxyEndpointVerdict } from './ProxyTestFailure';
 export {

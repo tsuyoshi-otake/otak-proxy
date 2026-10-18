@@ -1,10 +1,14 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { executeConfigureUrl } from '../../commands/ConfigureUrlCommand';
+import { executeConfigureUrl, showInvalidProxyUrl } from '../../commands/ConfigureUrlCommand';
+import { InputSanitizer } from '../../validation/InputSanitizer';
 import { CommandContext } from '../../commands/types';
 import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyStateManager } from '../../core/ProxyStateManager';
+import { createRealStateManager } from '../realProxyStateManager';
 import { I18nManager } from '../../i18n/I18nManager';
+import { Logger } from '../../utils/Logger';
 
 suite('ConfigureUrlCommand Unit Tests', () => {
     let sandbox: sinon.SinonSandbox;
@@ -377,5 +381,171 @@ suite('ConfigureUrlCommand Unit Tests', () => {
         const errorNotif = notifications.find(n => n.type === 'error');
         assert.ok(errorNotif, 'user must see an error notification');
         assert.strictEqual(errorNotif?.key, 'error.configureUrlFailed');
+    });
+
+    test('invalid URL with a "/" in the password: error details carry only the masked value (PR #113 review)', async () => {
+        // Regression for the Codex review finding on PR #113: a password such
+        // as "pa/ss" makes new URL() reject the whole URL, so the details
+        // shown for 'error.invalidProxyUrl' depend entirely on the text masker.
+        const capturedDetails: unknown[] = [];
+        const { ctx } = createContext({ mode: ProxyMode.Off }, {
+            sanitizer: new InputSanitizer(),
+            userNotifier: {
+                showSuccess: () => {},
+                showWarning: () => {},
+                showError: () => {},
+                showErrorWithDetails: async (_message, details) => {
+                    capturedDetails.push(details);
+                },
+                showProgressNotification: async (_title, task) =>
+                    task({ report: () => {} } as vscode.Progress<{ message?: string; increment?: number }>)
+            }
+        });
+
+        await showInvalidProxyUrl(ctx, 'http://user:pa/ss@host:8080', i18n);
+
+        assert.strictEqual(capturedDetails.length, 1);
+        const serialized = JSON.stringify(capturedDetails[0]);
+        assert.ok(!serialized.includes('pa/ss'), `details leak the password: ${serialized}`);
+        assert.ok(!serialized.includes('ss@'), `details leak the password tail: ${serialized}`);
+
+        // A password that starts with "/" parses as host "user" with an empty
+        // port, so the raw-text pass before parsing has to mask it; the
+        // details must carry neither the password nor its "abc@" tail.
+        capturedDetails.length = 0;
+        await showInvalidProxyUrl(ctx, 'http://user:/abc@host:8080', i18n);
+
+        assert.strictEqual(capturedDetails.length, 1);
+        const serialized2 = JSON.stringify(capturedDetails[0]);
+        assert.ok(!serialized2.includes('/abc'), `details leak the password: ${serialized2}`);
+        assert.ok(!serialized2.includes('abc@'), `details leak the password tail: ${serialized2}`);
+
+        // Whitespace + "/" passwords: only the pre-#108 loose display
+        // fallbacks mask these; the details must never contain "pa ss".
+        for (const value of [
+            'http://user:pa ss/x@host:8080',
+            'http://user:/pa ss@host:8080'
+        ]) {
+            capturedDetails.length = 0;
+            await showInvalidProxyUrl(ctx, value, i18n);
+
+            assert.strictEqual(capturedDetails.length, 1);
+            const serialized3 = JSON.stringify(capturedDetails[0]);
+            assert.ok(!serialized3.includes('pa ss'), `details leak the password: ${serialized3}`);
+        }
+    });
+
+    suite('credential-bearing stored URL (#108)', () => {
+        function realManager() {
+            return createRealStateManager(config => getConfigurationStub.returns(config));
+        }
+
+        function realManagerContext(manager: ProxyStateManager): CommandContext {
+            const { ctx } = createContext({ mode: ProxyMode.Auto });
+            ctx.getProxyState = () => manager.getState();
+            ctx.saveProxyState = (state) => manager.saveState(state);
+            return ctx;
+        }
+
+        test('prefill shows the credential-free URL, never the password', async () => {
+            const { manager } = realManager();
+            await manager.saveState({
+                mode: ProxyMode.Auto,
+                manualProxyUrl: 'http://user:secret@proxy.example:8080'
+            } as ProxyState);
+            showInputBoxStub.resolves(undefined);
+
+            await executeConfigureUrl(realManagerContext(manager));
+
+            const options = showInputBoxStub.firstCall.args[0] as vscode.InputBoxOptions;
+            assert.strictEqual(options.value, 'http://proxy.example:8080');
+            assert.ok(!String(options.value).includes('secret'), `prefill leaked: ${options.value}`);
+        });
+
+        test('a stored value that is not a valid proxy URL prefills empty', async () => {
+            const { manager } = realManager();
+            await manager.saveState({
+                mode: ProxyMode.Auto,
+                manualProxyUrl: 'not a valid proxy url'
+            } as ProxyState);
+            showInputBoxStub.resolves(undefined);
+            // Opening the prompt is not a rejection (#108): the quiet prefill
+            // path must not log a validation error for the stored value.
+            const errorStub = sandbox.stub(Logger, 'error');
+            const warnStub = sandbox.stub(Logger, 'warn');
+
+            await executeConfigureUrl(realManagerContext(manager));
+
+            const options = showInputBoxStub.firstCall.args[0] as vscode.InputBoxOptions;
+            assert.strictEqual(options.value, '',
+                `a non-URL stored value must not be prefilled, got: ${options.value}`);
+            sinon.assert.notCalled(errorStub);
+            sinon.assert.notCalled(warnStub);
+        });
+
+        test('resubmitting the prefilled public URL keeps the stored credentials', async () => {
+            const { manager, reload, persistedState } = realManager();
+            await manager.saveState({
+                mode: ProxyMode.Auto,
+                manualProxyUrl: 'http://user:secret@proxy.example:8080'
+            } as ProxyState);
+            showInputBoxStub.callsFake(async (options?: vscode.InputBoxOptions) => options?.value);
+
+            const result = await executeConfigureUrl(realManagerContext(manager));
+            assert.strictEqual(result.success, true);
+
+            // The keep-branch decides the persisted bookkeeping, not only the
+            // hydrated URL: a reload re-derives the credentials from
+            // SecretStorage by address, so only the committed markers show the
+            // branch ran (#108).
+            const persisted = persistedState();
+            assert.strictEqual(persisted?.requiresAuth, true,
+                'keeping the stored credentials must persist requiresAuth');
+            assert.deepStrictEqual(persisted?.authRequiredProxyUrls,
+                ['http://proxy.example:8080/'],
+                'keeping the stored credentials must persist the address marker');
+
+            const reloaded = await reload();
+            assert.ok(
+                reloaded.manualProxyUrl?.includes('secret'),
+                `expected hydrated credentials, got: ${reloaded.manualProxyUrl}`
+            );
+            assert.strictEqual(reloaded.requiresAuth, true);
+            assert.deepStrictEqual(reloaded.authRequiredProxyUrls, ['http://proxy.example:8080/']);
+        });
+
+        test('submitting the same address with new credentials replaces them', async () => {
+            const { manager, reload } = realManager();
+            await manager.saveState({
+                mode: ProxyMode.Auto,
+                manualProxyUrl: 'http://user:secret@proxy.example:8080'
+            } as ProxyState);
+            showInputBoxStub.resolves('http://other:replaced@proxy.example:8080');
+
+            const result = await executeConfigureUrl(realManagerContext(manager));
+            assert.strictEqual(result.success, true);
+
+            const reloaded = await reload();
+            assert.strictEqual(reloaded.manualProxyUrl, 'http://other:replaced@proxy.example:8080');
+            assert.strictEqual(reloaded.requiresAuth, true);
+            assert.deepStrictEqual(reloaded.authRequiredProxyUrls, ['http://proxy.example:8080/']);
+        });
+
+        test('submitting a different credential-free URL stores no credentials', async () => {
+            const { manager, reload } = realManager();
+            await manager.saveState({
+                mode: ProxyMode.Auto,
+                manualProxyUrl: 'http://user:secret@proxy.example:8080'
+            } as ProxyState);
+            showInputBoxStub.resolves('http://other.example:9000');
+
+            const result = await executeConfigureUrl(realManagerContext(manager));
+            assert.strictEqual(result.success, true);
+
+            const reloaded = await reload();
+            assert.strictEqual(reloaded.manualProxyUrl, 'http://other.example:9000');
+            assert.strictEqual(reloaded.requiresAuth, undefined);
+            assert.strictEqual(reloaded.authRequiredProxyUrls, undefined);
+        });
     });
 });

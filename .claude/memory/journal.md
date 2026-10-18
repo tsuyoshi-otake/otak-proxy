@@ -1605,3 +1605,212 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す（前回の記録と同じ）。同じアドレスの資格情報の無い観測を「資格情報を外した」と読むかは仕様の判断で、最終報告でユーザーに聞く。
 - 結果コミットが捨てられても、古い計画の書き込みは対象に残る。別のウィンドウの apply が後から書けば上書きされるが、書き込みの順序が逆になると、対象は古い計画の値のまま残りうる。fence の確認と書き込みは原子的でない（従来から）。
 - 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の認証 proxy と SecretStorage の書き込み失敗は試していない。
+
+## 2026-10-18 — #108 項目 5、6、11 と低の 2 件: パスワードを通知、tooltip、ログ、入力ボックスに出さない
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 5、6、11、低の「Configure の入力ボックスの初期値」と「settings.json の `otakProxy.proxyUrl` の検証」）
+**PR**: [#113](https://github.com/tsuyoshi-otake/otak-proxy/pull/113)
+**コミット**: `baddb39`（fix/108-credential-redaction）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状
+
+- 項目 5: `InputSanitizer` の資格情報の正規表現に `/g` が無く、1 つの文字列の 2 個目以降の `//user:pass@` が残った。scheme の無い資格情報の境界は `[\s=]` だけで、`/`、`:`、`@` の直後に空白なしで続く裸の資格情報が Output channel に出た。正規表現は `ProxySecretRedactor` にも別に定義され、境界がずれていた。
+- 項目 6: `SystemProxyUpdateService` の `Using fallback proxy` と `Testing fallback proxy` のログは、マスクしていない URL を Logger に渡していた（Logger の中のマスク頼み）。
+- 項目 11: git の書き込みが失敗すると、分類器が Node のエラー文（`Command failed: git config --global --replace-all http.proxy http://user:pass@…`）をそのまま返し、エラー通知、`lastError`、ステータスバーの tooltip に平文のパスワードが出た。`maskPassword` は `http://DOMAIN\user:pass@proxy:8080` を `http://domain/user:pass@…` に変え、パスワードを残した。
+- 低: `otak: Configure Manual Proxy` の入力ボックスの初期値が `state.manualProxyUrl`（資格情報付き）だった。settings.json の `otakProxy.proxyUrl` の変更は検証を通らずに state に入り、同期で他のウィンドウに伝わった。
+- レビュー中に見つけたもの: `ProxyStateManager.getState()` は、state に手動 URL が無いと、設定の `otakProxy.proxyUrl` を検証も正規化もせずに取り込み（`hydrateManualProxyUrl` → `normalizeConfiguredManualProxyUrl`。`migrateOldSettings` も同じ関数）、後の保存でそのまま永続化した。`extension.ts` の `migrateManualUrlFromConfig` は `getState()` の後に呼ばれるので、本番では本体が走らない。
+
+### 原因
+
+- 任意の文字列から資格情報を消す規則（正規表現と境界）が 2 か所（`InputSanitizer`、`ProxySecretRedactor`）にあり、片方だけが直されていた。
+- エラー文が通知、`lastError`、tooltip に入る口（`ErrorAggregator`）でマスクしておらず、呼び出し元ごとのマスクに頼っていた。
+- `maskPassword` は `new URL()` で解析してから userinfo を置き換える。WHATWG の解析は special scheme の `\` を `/` として扱うので、`DOMAIN\user:pass@` はパスの一部になり、userinfo として扱われなかった。
+- 設定の値が state に入る経路が 3 つ（設定変更のハンドラ、`getState()` の取り込み、起動時の移行）あり、どこにも検証が無かった。
+
+### 修正
+
+- `ProxySecretRedactor.ts` の `maskCredentialOccurrences(text, maskUserinfo)` に、URL の資格情報と scheme の無い資格情報の正規表現（どちらも `/g`、非公開）をまとめた。置き換える文字列は呼び出し元が渡す（表示とログは `user:****@`、診断と永続化は `<credentials>@`）。scheme の無い資格情報の境界に `/`、`:`、`@`、`\` を足した。`InputSanitizer.maskPassword` と `ProxySecretRedactor.redactString` はこの関数を使う。1 つの URL の表示形式（`http://user:****@proxy:8080/`）は main と同じ。
+- `ErrorAggregator.addError` が取り込むときにマスクする。Git / npm / pip の manager も返すエラーをマスクする。`ProxyConfigStateTracker` は集約した文をそのまま `lastError` にコミットし、コミット時の 2 回目の redaction（改行を `\n` の文字列に変えていた）をやめた。
+- fallback の 2 つのログは、マスクした URL を渡す。
+- Configure の入力ボックスの初期値は、保存された URL の資格情報の無い正規形（`tryCanonicalizeProxyUrl(publicUrl) ?? ''`）。同じ公開 URL をそのまま確定すると、保存された資格情報を残す。資格情報付きの URL は資格情報を置き換え、資格情報の無い別の URL は資格情報を持たない。保存の前に `setRequiresAuthFromLiveUrls` で `requiresAuth` と `authRequiredProxyUrls` を作り直す。
+- 設定変更のハンドラは、無効な値を保存も同期もせず、既存の無効 URL のエラーを 1 回出す。有効な値は正規形で保存し、`requiresAuth` と一覧を作り直す。
+- `normalizeConfiguredManualProxyUrl` は最初に `tryCanonicalizeProxyUrl` で検証、正規化する。無効な値は `''` を返し、SecretStorage にも設定にも書かない。`extension.ts` の移行は、無効な設定を起動時に 1 回、マスクした値で `Logger.warn` するだけにした（`warnOnInvalidConfiguredProxyUrl`）。検証は、ログを出さない `tryCanonicalizeProxyUrl`（`src/utils/ProxyUrlUtils.ts`）に置き、`canonicalizeValidProxyUrl` はそれに委ねてから失敗をログに出す。取り込み、起動時の警告、Configure の入力ボックスの初期値はログを出さない形を使う。
+- Docs: `README.md`（Configure の入力の段落と、`otakProxy.proxyUrl` の設定の行。初期値に資格情報を出さないこと、無効な設定を拒否または無視すること）、`ARCHITECTURE.md`（起動時の確認、`getState()` の検証、設定変更のハンドラ、Configure の流れ、`***:***` をやめて実際のマスクの形式、資格情報の正規表現の持ち主が 1 か所、集約に入るときのマスク）、`CHANGELOG.md`（`[Unreleased]` の項目）。
+
+### レビューで直させた点
+
+1. 1 回目のレビュー（7 点）:
+   - コミット時の `redactString` が改行を `\n` の文字列に変え、tooltip に `\n` がそのまま出た。取り込み時のマスクだけにし、tooltip のテストは `state.lastError` から `getStatusBarDisplay` と `buildStatusBarTooltip` を通す形にした。
+   - `/g` の正規表現を export していた（`lastIndex` の状態が呼び出しをまたぐ）。関数 1 つの export にした。
+   - 初期値の到達しない分岐が、資格情報付きの文字列を返す形だった。無効な値は `''` にした。
+   - 設定変更のハンドラが `requiresAuth` を作り直さず、資格情報付きの URL を資格情報の無い別の URL に置き換えても `requiresAuth: true` が残った。
+   - ほかに、テストの一時ディレクトリの削除漏れ、property test の実行回数の固定、起動時の移行の検証（下の 3 で誤りと分かった）。
+2. 2 回目のレビュー（5 点）:
+   - ミューテーションが 12 種中 2 種生き残った。取り込み時のマスクを外しても（`aggNoMask`）関連の 150 件が green だった（Git のテストは manager がマスク済みの文を渡していた）。`ErrorAggregator.addError` に未マスクの複数行の文を直接渡すテストを足させた。再確定で保存された URL を残す分岐を外しても（`keepCredsOff`）28 件が green だった（再読み込みが SecretStorage から資格情報を引き直し、`requiresAuth` も導き直す）。コマンドの直後に永続化された state の印を確かめさせた。
+   - 1 回目のレビューの「起動時の移行を検証する」は、本番で到達しない分岐を直させていた（自分の作業ミス）。`out/` の probe で、`getState()` の取り込みが無効な値（`"not a proxy url"`）と非正規形（`HTTP://PROXY.EXAMPLE:3128/`）を state に入れ、後の保存で永続化することを確かめ、取り込みの関数を直させた。移行の分岐は消させた。
+   - 設定の置き換えのテストが stub の `saveProxyState` に渡った値を見ていた。実際の `ProxyStateManager` の再読み込みを通す形にし、in-memory の context を作る部品を Configure のテストと共有させた。
+   - ARCHITECTURE.md の「資格情報は `***:***` に置き換える」は、どのマスクも出さない形式だった。実際の形式に直させた。
+3. 3 回目のレビュー（5 点）:
+   - 取り込みの検証に使った `canonicalizeValidProxyUrl` は、無効な値で `Logger.error` を出す。取り込みは `getState()` のたびに走る（検出の経路の `SystemProxyUpdateService.ts` だけで呼び出しが 6 か所ある）ので、無効な設定のままだと Output channel にエラーが出続けた。2 回目のレビューのブリーフは「ここではログを出さない」と書きながら、ログを出す関数を指定していた（自分の作業ミス）。ログを出さない `tryCanonicalizeProxyUrl` を `ProxyUrlUtils` に置き、`canonicalizeValidProxyUrl` はそれに委ねてログを残す形にさせた。
+   - 共有の部品の globalState が `proxyState` 以外のキーを捨てていた。v3 の移行が完了を記録できず `getState()` のたびに走り、資格情報付きの設定を移行が処理するので、取り込みの資格情報の分岐をテストが見ていなかった。本番と同じくすべてのキーを残す形にさせた。
+   - 移行の経路のテストの mode の assert は、旧版の有効フラグが無いと値に関係なく成り立っていた（Property 4 がフラグ付きで両方の値を引くので、そちらに任せた）。非正規形の行は、本番の経路（手動 URL の無い保存済みの state）でも走らせた。
+   - 取り込みのテストが改行の保持を確かめていなかった。入力の行の区切りが本当の改行のまま残ることを assert させた。
+   - Configure の入力ボックスの初期値の計算も、ログを出さない形にした（開くたびに検証の失敗を記録していた）。
+4. 4 回目のレビュー（1 点）: ミューテーション 18 種のうち、初期値の計算をログを出す形に戻すもの（`prefillLoud`）だけが生き残り、Configure のテスト 36 件が green だった。保存された値が無効なまま Configure を開いても `Logger.error` と `Logger.warn` が呼ばれないこと（`notCalled`）を assert させた。最初の版は「Proxy URL validation failed」で始まる呼び出しだけを見ていたので、ブリーフどおり厳密な形に直させた。
+
+### Verification
+
+- `npm run lint`: exit 0。`No invisible Unicode characters found (repository files: 636 scanned)`。
+- `npm run test:unit:parallel`: exit 0。1113 passing と 74 passing、失敗 0。
+- `npm test`: 601 passing、1 pending、9 failing。失敗は既知の 9 件と完全に一致（ExtensionInitializer 3、SystemProxyUpdateService 1、ProxyOwnership.integration 3、FailureInjection.integration 1、ProxyRuntimeDiagnostics 1）。
+- `npm run test:smoke`: exit 0。4 passing。
+- ミューテーション（`npm run compile` の後、`out/` に当てて戻した）: 18 種すべて red。unit レーン 9 種（取り込みのマスクを外す、Git の manager のマスクを外す、コミット時の 2 回目の redaction、直列化した URL をそのまま返す、scheme の無い資格情報の境界を狭める、取り込みで制御文字をエスケープ、起動時の確認がログを出す、警告をマスクしない、警告を消す）。host レーン 9 種（初期値をそのまま返す、初期値の計算がログを出す、再確定で保存された資格情報を捨てる、Configure と設定変更のハンドラが印を作り直さない、ハンドラと取り込みが検証しない、取り込みがログを出す、取り込みが SecretStorage に入れない）。初期値の計算がログを出すものは 1 回目に生き残り、4 回目のレビューで足したテストで red になった。
+- 独立 verifier（sonnet、ルーブリック 11 項目）: 11 項目すべて pass。verifier は 4 つのスイートを自分で流し直し、fail-before のミューテーションも `out/` の複製で再現した。上の 4 行の数字は verifier が観測した値。
+- 改行: 変更した 23 ファイルすべてで行末が揃っている（単独の CR 0、U+FFFD 0）。`git ls-files --eol` では変更した追跡ファイルすべてが `i/lf`。
+
+### Learning
+
+1. ガードや検証を足す前に、守る経路が本番で到達するかを確かめる。今回は `activate()` が `getState()` を先に呼ぶので、移行の本体は走らなかった。→ rules.md「検証・回帰」に追記した。
+2. 再読み込みで効果が隠れる分岐（保存された値を「残す」分岐など）は、ミューテーションで確かめる。assert は再読み込みの後でなく、永続化された state か、秘密を返さない SecretStorage での再読み込みで行う。→ rules.md「検証・回帰」に追記した。
+3. 任意の文字列の資格情報のマスクは、`maskCredentialOccurrences` 1 か所が持つ。エラー文は `ErrorAggregator` に入るときにマスクし、表示の直前にもう一度 redaction しない。→ rules.md「資格情報と URL」に追記した。
+4. WHATWG の URL 解析は special scheme の `\` を `/` に変えるので、`DOMAIN\user:pass@host` は userinfo にならない。`new URL()` の結果だけでマスクを判断しない。→ rules.md「資格情報と URL」に追記した。
+5. 設定の `otakProxy.proxyUrl` が state に入る経路（設定変更のハンドラ、`getState()` の取り込み）は、どれも同じ検証と正規化を通す。`getState()` のたびに走る取り込みは、ログを出さない形を使う。→ rules.md「資格情報と URL」に追記した。
+6. ブリーフで既存の関数を使わせるときは、その関数の副作用（ログ、通知、書き込み）を読んでから、呼ばれる頻度と合わせて書く。→ rules.md「検証・回帰」に追記した。
+7. テストの fake の globalState は、本番と同じくすべてのキーを残す。`proxyState` だけを残す fake では v3 の移行が毎回走り、移行が代わりに処理するので、取り込みの分岐をテストが見なくなる。→ rules.md「検証・回帰」の既存の規則（fake には本番と同じ契約を持たせる）に追記した。
+
+### 残留リスク
+
+- `setRequiresAuthFromLiveUrls` は、資格情報を hydrate できなかったアドレスの印を落とす（検出の経路と同じ、既存の方針）。
+- `maskPassword` は、全体が URL として解析できる文字列（パス付きの URL で始まり空白を含むもの）をパーセントエンコードした形で返す（main から同じ）。`ErrorAggregator` がすべてのエラー文を `maskPassword` に通すようになったので、そうした文で始まるエラーは通知でパーセントエンコードされて見える。秘密は残らない。
+- 無効な設定の警告は、起動時に 1 回だけ出る。起動後に設定を無効な値に変えた場合は、既存の無効 URL のエラーが出る。
+- `V3MigrationService` は、検証していない設定の値から資格情報を SecretStorage に移す（今回の範囲外、後続の課題）。
+- 確認したのはユニットテストと VS Code ホストのテストまで。実際の認証 proxy と、SecretStorage の書き込み失敗は試していない。
+
+## 2026-10-18 — #108 項目 5、6、11 PR #113 への Codex の指摘（「/」を含むパスワードがマスクされない）を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 5、6、11）
+**PR**: [#113](https://github.com/tsuyoshi-otake/otak-proxy/pull/113)（指摘は `979714a` へのレビュー）
+**コミット**: `2fd78c9`（fix/108-credential-redaction）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。過剰マスクの表の 1 行と、コメントと ARCHITECTURE.md の過剰マスクの記述は Claude Code が直した。
+
+### 症状（`979714a` への Codex の指摘、P1）
+
+- パスワードにエンコードされていない `/` を含む URL（`http://user:pa/ss@host:8080`）がマスクされなかった。`new URL()` が例外を投げるので、`showInvalidProxyUrl`（`src/commands/ConfigureUrlCommand.ts`）はエラー詳細に `maskPassword(value)` の結果、つまりパスワードそのものを出した。Logger と `ProxySecretRedactor` も同じパターンを使う。main の `maskPassword` のフォールバック `(\/\/[^:@]+):([^@]+)@` はこれをマスクしていた。
+
+### 原因
+
+- T04 で main の `maskPassword` のフォールバックを共有パターンに置き換えたとき、古い経路と新しい経路が何をマスクするかを同じ入力で比べなかった。共有パターンの userinfo（`[^/\s]+`）は整形式の URL だけを想定しており、パーサーが拒む形（`/`、`?`、`#` をそのまま含むパスワード）を落とした。
+
+### 修正
+
+- `URL_CREDENTIAL_PATTERN` に 2 つ目の選択肢 `[^/\s:@]+:(?:(?!:\/\/)\S)*` を足した。整形式の選択肢の後に試す。パスワードの並びは `/`、`?`、`#`、`\`、`@` を含んでよく、並びの最後の `@` で終わる。次の `://` はまたがないので、走査は線形のまま（`x://a:b` を 14 万文字: 約 1 ms。上限なしでは 1.6 s、main のフォールバックは 1.2 s）。
+- 受け入れた過剰マスク: ポートの後、同じ空白なしの並びに `@` がある形は、`/` を含むパスワードと区別できない。`http://user:12/ss@host:8080` と `http://localhost:3000/@vite/client` はどちらも正しい URL で、どちらもマスクする（`http://localhost:****@vite/client`）。main は後者の単独の URL をそのまま出し、文中の同じ形は過剰マスクしていた。
+- テスト: `maskPassword` と `redactString` の完全一致の表（`/`、`?`、`#` の行、今の出力を保つ行、過剰マスクの 2 行）、埋め込みパスワードの property に `urlSlash` の形、線形時間のテスト（`'x://a:b'.repeat(40000)` で 1 回 1000 ms 未満）、`showInvalidProxyUrl` のエラー詳細にパスワードが出ないことを確かめるホストのテスト。
+- Docs: ARCHITECTURE.md の Credential Masking、CHANGELOG。README のマスクの記述は端末の環境変数と `npm config list` だけで、この修正で誤りにならない（`git grep` で確認）。
+
+### レビューで直させた点
+
+1. Devin のコードとテストのコメントは、過剰マスクを「main のフォールバックと同じ」と書いていた。`new URL()` が通る単独の URL（`http://localhost:3000/@vite/client`）は、main ではそのまま、このブランチでは過剰マスクになる。T04 で、host のある URL も直列化した後に共有パターンを通すようにしたため（`DOMAIN\user` の対策）。レビュアーがこの行を表に足し、コメントと ARCHITECTURE.md の記述を直した。
+
+### Verification
+
+- `npm run lint`: exit 0（`lint:unicode` は 636 ファイルを走査、検出なし）
+- `npm run test:unit:parallel`: 1115 + 74 passing、0 failing（レビュアーの再実行）。実行後、テストのプロセスは残っていない
+- `npm test`: 602 passing / 9 failing。9 件は既知の失敗だけ。新しい `showInvalidProxyUrl` のテストは pass（Devin の実行）
+- `npm run test:smoke`: 4 passing（Devin の実行）
+- Fail-before: 表、property、`showInvalidProxyUrl` のテストが修正前のパターンで red（Devin の記録）
+- ミューテーション（レビュアーが `src` に当てて `tsc` し、unit lane で実行して戻した。property は 200 回）: 2 つ目の選択肢を外す → property が red（`urlSlash` の反例）。`://` の上限を外す → 線形時間のテストが red（約 10 s）。選択肢を入れ替える → scoped registry の行が red。Devin はホストの lane でも、2 つ目の選択肢を外すと `showInvalidProxyUrl` のテストが red になることを確かめた
+- 計算量: 14 万文字の入力 6 種で main と比べた。`a.a.a…` の並びは main もこのブランチも二乗（約 6 s）。原因はスキームの部分 `\b[a-z][a-z0-9+.-]*:\/\/` で、main の `usernameOnlyPattern` も同じ形を持つ
+- 改行: 変更した 5 ファイルはすべて CRLF で一様
+
+### Learning
+
+1. マスクやバリデーションの古い経路を共有の実装に置き換えるときは、同じ入力の表で古い経路と新しい経路の出力を比べる。→ rules.md「資格情報と URL」に追記した。
+2. 区切りまで戻る貪欲な並びは、次の開始点をまたがないように上限を付け、時間を測るテストで守る。→ rules.md「資格情報と URL」に追記した。
+3. 自分の作業ミス: T04 のレビューで、main の `maskPassword` のフォールバックを共有パターンに置き換えることを、マスクする入力を比べずに受け入れた。Codex が見つけた。
+
+### 残留リスク
+
+- main と同じくマスクしない: scheme の無い `user:pa/ss@host`、`/` を含むユーザー名だけのトークン（`http://to/ken@host`）、パスワードに `/` を含む `DOMAIN\user`（`maskPassword`。`redactString` は scheme 付きの形ならマスクする）、`http://user:p@s/s@host` の後半（`s/s`。`http://user:p@s/s@host` は host が `s` の正しい URL として読める）。
+- main と違ってマスクしない: 文中の、空白をそのまま含むパスワード（`err http://user:pa ss@host:8080 x`）と、単独の同じ URL の `redactString`。並びを空白で止めるのは、単語をまたいでマスクしないため。バリデーターは `/` も空白もそのまま含む URL を拒むので、そうした URL は保存されず、対象にも書かれない。出るのは、外部の値（環境変数、エラー文）を文に含めた場合だけ。
+- `a.a.a…` のような長い並びで、スキームの部分の走査が二乗になる（main と同じ）。14 万文字で約 6 s。フォローアップに回す。
+
+## 2026-10-19 — #108 項目 5、6、11 PR #113 への Codex の再レビューの指摘 2 件と、レビューと独立検証で見つけた 4 件を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 5、6、11）
+**PR**: [#113](https://github.com/tsuyoshi-otake/otak-proxy/pull/113)（指摘は `89f4f7f` へのレビュー）
+**コミット**: `2426b8c`（fix/108-credential-redaction）
+**分担**: 実装は Devin（tmux の隣のペイン、04h〜04n の 7 回）。レビュー、main との差分ファジング、修正案のシミュレーション、検証、コミット、PR は Claude Code。`maskPassword` の 2 回目のマスクのコメント、v3 移行のテスト (b) のコメント、04m の後の折り返しの崩れ 4 か所は Claude Code が直した。
+
+### 症状
+
+1. Codex P1（`ProxySecretRedactor.ts:23`）: パスワードに空白をそのまま含む URL（`failed http://user:pa ss@host:8080`）が、`maskPassword` でも `redactString` でもマスクされなかった。前回の修正で足した選択肢を含め、userinfo の選択肢はどれも空白で止まる。main の `maskPassword` のフォールバック `(\/\/[^:@]+):([^@]+)@` はこれをマスクしていた。
+2. Codex P2（`ProxyStateManager.ts:374`）: `getState()` は最初に `V3MigrationService.migrateIfNeeded` を呼ぶ。移行は `otakProxy.proxyUrl` を検証せずに読み、無効な資格情報入りの値（`http://user:secret@proxy:8080/path`）を SecretStorage に保存し、設定を書き換えていた。
+3. レビューで見つけた 1 件目: パスワードの先頭が `/`、`?`、`#`、`\` の単独の URL（`http://user:/abc@host:8080`）が、`maskPassword` で `http://user/abc@host:8080` と出た（main も同じ）。URL パーサーは `user:` を host と空のポートとして読み、パスワードをパス側へ移す。直列化した文字列には `user` の後の `:` が無いので、パターンが見つけられない。`showInvalidProxyUrl` のエラー詳細に届く。
+4. レビューで見つけた 2 件目（main との差分ファジング）: 生成した 20 万件の入力のうち 17,380 件で、main の `maskPassword` はパスワードを隠し、このブランチは出した（`http://user:pa ss/x@host:8080`、`err http://user:pa<LF>ss@host x`、`git: u:SEC'k#RET@host x` など）。
+5. レビューで見つけた 3 件目（property の生成器を確かめていて見つけた）: 先頭が `/`、`?`、`#`、`\` で、空白も含むパスワード（`http://user:/pa ss@host:8080`）が `http://user/pa%20ss@host:8080` と出た（main も同じ。04j の案だけでは 20 万件中 420 件が漏れた）。
+6. 独立検証（ルーブリック r4）で見つかった 4 件目: `maskPassword` が、main ではマスクしていたトークン風のユーザー名を出した。`http://ghp_SECRET:@proxy:8080` が `http://ghp_SECRET:****@proxy:8080/` と出た（main は `http://****@proxy:8080/`）。04k の作業ツリーを main と比べると、ユーザー名の位置の生成器 50 万件で 210,412 件、広い生成器 3 つ（各 50 万件）で 17、25、9 件が回帰だった。
+
+### 原因
+
+1. 前回、「文中の、空白をそのまま含むパスワードはマスクしない。バリデーターが拒むので保存されない」を残留リスクとして受け入れた。拒んだ値そのものがエラー詳細とログに載る経路を見落としていた。
+2. 設定を state や SecretStorage に入れる経路を、設定変更のハンドラと `getState()` の取り込みの 2 つと考えていた。v3 移行は `getState()` の中で、検証より先に設定を読んでいた。
+3. `maskPassword` は値をパースしてからマスクしていた。パーサーが値を別の意味に読むと、資格情報の形が直列化した文字列から消える。埋め込みパスワードの property の生成器は、パスワードを固定の接頭辞（`pw`）で始めていたので、先頭が区切り文字の形を一度も作らなかった。
+4. T04 の最初のコミットで、main の `maskPassword` のフォールバック 2 つ（`(\/\/[^:@]+):([^@]+)@` と `(^|[\s=])([^\s@:/]+):([^\s@/]+)@`。値がパースできないか host が無いときに当てていた）を、整形式の userinfo を想定した共有パターンに置き換えた。その後のレビューでは手で選んだ表で main と比べていたので、表に無い形（空白と `/` を両方含むパスワード、改行をまたぐパスワード、引用符を含む scheme の無い形）の回帰が残っていた。
+5. 生の文字列のマスク（症状 3 の修正）は、共有パターンの選択肢がマッチする形しか消せない。空白を含むとどの選択肢もマッチせず、値はパースできる（`user` が host、ポートが空）ので、パースの経路に入る。
+6. 3 か所あった。(a) 表示用のコールバックは、パスワードが空でも `user:` を残した。(b) 最初の `:` より前に生の `@` があっても `user:` を残した。パターンの userinfo は最後の `@` まで進むので、`err http://TOKEN@proxy:8080,user@corp x` では `TOKEN@proxy` が user になる（main は最初の `@` より前を隠していた）。(c) 04i から、`maskPassword` は先にマスクした文字列をパースしていた。マスクがパーサーの読む host と userinfo を変えることがある。`http://TOKEN:@h?a:b@host` は、パーサーにとってはユーザー名だけの `TOKEN` で host は `h`（authority は `?` で終わる）だが、先にマスクすると `http://TOKEN:****@host` になり、そのパースではパスワード付きのユーザー名 `TOKEN` になる。main は書いた値のパース結果で経路を決めていた。レビュアーの差分ファジングは、パスワードの位置と、パスワードの無いトークン（`scheme://TOKEN@host`）しか作っていなかったので、空のパスワード（`TOKEN:@`）と、authority が `?`、`#`、`\` で切れる形の回帰が見えなかった。
+
+### 修正
+
+- `URL_CREDENTIAL_PATTERN` に 3 つ目の選択肢 `[^/\s:@]+:[^@/\r\n]*` を足した。最後に試す。最初の `@` で止まり（空白を含む並びが最後の `@` まで進むと、同じ行の後ろにメールアドレスがあるときに host を飲み込む）、`/` と改行をまたがない（後ろの URL や次の行に入らない）。
+- 表示用のコールバックは、userinfo に `:` が無いとき、パスワードが空のとき、最初の `:` より前に生の `@` があるときに userinfo 全体を `****` にする（`http://ghp_SECRET:@proxy:8080` → `http://****@proxy:8080/`）。それ以外は `user:****` にする。
+- `maskPassword` は、経路を main と同じく書いた値のパース結果で決める。パースの経路では、生の文字列を先にマスクし（`premasked`）、そのパース結果は、host、ユーザー名、パスワードの有無（空かどうか）が書いた値のパース結果と同じときだけ使う。違えば書いた値のパース結果を使う。どちらでも、パーサーのパスワード（無ければユーザー名だけの userinfo）をマスクし、直列化した文字列をもう一度マスクする（パーサーがタブを取り除いた後に資格情報の形が現れる: `http://proxy/u:p<TAB>ass@h` → `http://proxy/u:pass@h`）。パースの経路は main のパースの経路が隠したものを隠し、マスクした文字列のパースは、書いた値のパースが見逃す形も覆う（`http://DOMAIN\user:pa\ss@proxy:8080` は `http://domain/user:****@proxy:8080`。main はパスワードを出していた）。04k まであった「`maskPassword` は `redactString` がマスクするものを必ずマスクする」という主張は取り下げ、コメントから消した。
+- `ProxySecretRedactor.maskLooseCredentials` を足した。main のフォールバック 2 つと同じ意味で、どちらも全ての出現に当て（main は最初の 1 つだけ）、左から右への 1 回の走査で書いた（main の正規表現は 14 万文字の入力で 1.6 秒と 2.4 秒かかった）。表示用のマスクだけが使う。`//x:` から次の `@` まで、空白・`/`・改行をまたいで過剰にマスクするので、診断用の `redactString` には使わない（main でも使っていなかった）。
+- `maskPassword` は、main がフォールバックを当てていた経路（書いた値がパースできない、または host が無い）と、パース結果に userinfo が無く、書いた値の authority が空のポートで終わるとき（タブと改行を除いてから判定する。パーサーと同じ）に、`maskLooseCredentials(premasked, '****')` を返す。これらの値は書いたままの形で出る（`http://user:pa/ss@host:8080` → `http://user:****@host:8080`、`http://user:/abc@host:8080` → `http://user:****@host:8080`、`http://host:/path` は `http://host:/path` のまま）。
+- `V3MigrationService.migrateIfNeeded` は、設定を `tryCanonicalizeProxyUrl(...) ?? ''` で 1 回だけ正規化し、資格情報の候補と設定の書き換えの両方にその結果を使う。無効な値は書かれたまま残し、SecretStorage にも何も入れない。
+- 受け入れた過剰マスク: ポートの後、同じ行で `/` より前に `@` を含む文が続く形（`see http://proxy:8080 is down, mail admin@corp` → `see http://proxy:****@corp`）。表示用では、`//x:` から次の `@` まで（main と同じ）。
+- テスト: 空白の行・先頭が区切り文字の行・過剰マスクの行を足した完全一致の表、空白入りパスワードの property（英小文字、数字、空白、タブ、`:?#\%!$&'()*+,;=~._-` から作り、出力を完全一致で確かめる）、埋め込みパスワードの property に `urlLeadingSeparator` の形、2 回目のマスクを固定する行、線形時間のテストに入力 2 つ、main 以上にマスクすることを固定するスイート（完全一致の表、authority の形の property、scheme の無い形の property、`maskLooseCredentials` の線形時間のテスト、main がマスクしていたトークン風のユーザー名の 12 行の表、空のパスワードか無しのトークン風のユーザー名の property）、`showInvalidProxyUrl` のホストのテストに `http://user:/abc@host:8080`、`http://user:pa ss/x@host:8080`、`http://user:/pa ss@host:8080`、v3 移行のホストのテスト 2 件（(a) 無効な設定は書かれたまま、secret は保存されず、移行は完了する。(b) 正しいが正規形でない設定は移行され、取り込まれる）。
+- Docs: ARCHITECTURE.md（Credential Masking、`ProxyStateManager.getState`）、CHANGELOG（#108 のマスクの項目）。
+
+### レビューで直させた点
+
+1. 04h の Devin の報告は「テスト (b) は修正前にも失敗した。2 つ目の不具合」と書いていた。同じ報告のミューテーション（移行を生の読み取りに戻す）では (b) は pass していた。レビュアーがホストの lane で同じミューテーションを当て直し、(a) だけが red、(b) は pass を確かめた。SecretStorage のキーはパースした公開 URL の sha256 なので、設定の綴りに依らない。(b) は回帰を防ぐテストで、生の読み取りとは区別しない。コメントをそう書き直した。
+2. 04h の後のレビューで、先頭が区切り文字のパスワードの漏れ（症状 3）を node の表で見つけ、04i で直させた。前回の表の 4 行の期待値は、04i でパーサーの形（末尾の `/`）に直し、04l で書いたままの形に戻した（経路を書いた値で決めるので、パースできない値は書いたまま出る）。
+3. `maskPassword` の 2 回目のマスクのコメント: `DOMAIN\user` は生の文字列のマスクで先に消えるので、2 回目のマスクが要る理由をタブの例に書き直した（Claude Code）。
+4. 04i の検証の後、レビュアーが main のビルドとこのブランチの `maskPassword` を同じ生成器の入力で比べ（差分ファジング）、症状 4 を見つけた。直し方（main のフォールバックを線形の走査で戻し、main と同じ経路でだけ当てる）を 30 万件でシミュレーションして回帰 0 件を確かめてから、04j で Devin に実装させた。指示の property の生成器を確かめる途中で症状 5 を見つけ、空のポートの規則を足した案を 20 万件でシミュレーションして漏れ 0 件を確かめてから、同じ指示に入れた。
+5. 04j の走査は、レビュアーの総当たり（`/ : @ = 空白 LF a` の長さ 8 以下、672 万件）とランダム 200 万件で、正規表現と結果が一致した。ただし 2 か所が二乗だった。パス 1 は user が空のときも `@` を探してから捨て、次の `//` で同じ範囲を探し直していた。パス 2 は `:` の探索が run の外まで進んでいた。138 万文字の入力で 4.6〜6.9 秒かかった（13.8 万文字では 60 ms で、既存の 1000 ms の上限では見えなかった）。04k で直させ、138 万文字の入力 4 つを線形時間のテストに足させた。
+6. 04j のコメントの誤り: 空のポートの分岐に「main もここでフォールバックを当てていた」と書いていた（main はこの形のパスワードを出していた）。残留リスクのコメントと ARCHITECTURE.md は、`maskPassword` が 2 つ目の残留を文中でも覆うように読めた（覆うのは単独の URL だけ）。04k で直させた。
+7. ルーブリック r4 の独立検証が症状 6 を見つけた。レビュアーはユーザー名の位置の生成器（トークンだけの userinfo、空のパスワード、authority の切れ目、後ろに続く userinfo らしい文字列）を足し、修正案を preload のパッチで実装して main と比べた。全ての経路で生の文字列のパターンを当てる案は 1,820 件の回帰。マスク後のパースを使わない案（D2）は回帰 0 件だが、`DOMAIN\user` の形の覆いを失い、パスワードの位置で `redactString` が隠すものを 507 件出した。案 E（経路を書いた値で決め、マスク後のパースは host、ユーザー名、パスワードの有無が一致するときだけ使う）は、5 つの生成器の 250 万件で回帰 0 件、トークン風のユーザー名の総当たり 41,472 件で漏れ 0 件（main は 21,888 件）、パスワードの位置で `redactString` が隠すものを出すのは 2 件だった。案 E を 04l で Devin に実装させた。
+8. 04j〜04l のコメント、テスト名 2 つ、ARCHITECTURE.md は、比べる相手を「main」と書いていた（27 行）。マージすると main はこのコードそのものになり、「main と同じ」が意味を失う。「pre-#108 の masker」（3.2.16。`git log v3.2.16..main` で 2 つのマスクのファイルに変更なし）に直させた。あわせて、`redactString` の残留の一覧に、改行をそのまま含むパスワード（`http://user:pa<LF>ss@host`。選択肢 3 は改行で止まる。main の `redactString` も出していた）が抜けていたので足させた。`maskPassword` はこれをマスクする（単独の URL はパーサーが改行を除き、文中は `maskLooseCredentials`）。04m。
+9. ルーブリック r5 の独立検証が、`InputSanitizer.ts` と `ProxySecretRedactor.ts` のコメント 2 か所の誤りを見つけた。どちらも「2 つのマスカーは同じ箇所を見つけ、違うのは置き換える文字列だけ」と書いていた。04g 以降の `maskPassword` はパーサーの見方と `maskLooseCredentials` も使うので、片方だけがマスクする形がある（`http://user:pa ss/x@host:8080` は `maskPassword` だけ、`https://u:SEC@k?RET@host:8080` の `RET` は `redactString` だけがマスクする）。「共有のパターンを使うが、カバー範囲は違う（ARCHITECTURE.md の Credential Masking）」に直させた。04n。
+
+### Verification
+
+- Devin（04j）: lint（不可視 Unicode なし、636 ファイル）、unit 1122 + 74 passing、`npm test` 604 passing・9 failing（既知の 9 件と同じ）、smoke 4 passing。04i の形に戻すと、新しい表、property 2 つ、ホストのテストの 4 件が red。ミューテーション m1〜m7（空のポート以外の B1 を外す、authority のパスだけにする、各パスを正規表現に戻す、全てのパース経路でパスを当てる、B2 を外す、B2 でタブと改行を除かない）はすべて red。
+- Devin（04k）: lint、unit 1122 + 74 passing（`maskLooseCredentials` の線形時間のテストは 82 ms）、smoke 4 passing。04j の走査に戻すと線形時間のテストが 6,331 ms で red。ミューテーション m8（user が空かを見る前に `@` を探す）6,357 ms、m9（`:` の探索に上限が無い）6,427 ms で red。
+- Devin（04l）: lint（不可視 Unicode なし、636 ファイル）、対象の 5 ファイル 104 passing、unit 1124 + 74 passing、ホストの 3 件 passing、smoke 4 passing、`npm test` 604 passing・9 failing（既知の 9 件と同じ）。修正前の作業ツリーでは、新しい 12 行の表の 1〜8 行目と 11 行目が red（9、10、12 行目は修正前も pass）、新しい property が `http://SECRET:@proxy:8080` で red。ミューテーション M1〜M10（空のパスワードの規則を外す、生の `@` の規則を外す、マスク後のパースを常に使う、host・ユーザー名・パスワードの有無の一致を 1 つずつ外す、マスク後の値で経路を決める、空のポートの分岐を外す、2 回目のマスクを外す、書いた値のパースを常に使う）はすべて red。
+- Devin（04m）: `main` を指す語は 0 件（`do/main` の入力値は除く）、lint、マスクのテストファイル 23 passing（名前を変えた 2 件を含む）、unit 1124 + 74 passing、改行は 8 ファイルとも一様。
+- レビュアー（04m の後のビルド）: パスワードの位置の 50 万件のうち、`redactString` がパスワードを隠す 431,211 件で `maskPassword` が出すのは 2 件。どちらも残留リスクに書いた `@` と `?` の形（`https://o'k:SEC@k?RET@host:8080` など）。
+- レビュアー（04k のビルド）: 2 つの走査を main の正規表現（グローバル）と比べ、総当たり 6,725,601 件（`/ : @ = 空白 LF a`、長さ 8 以下）とランダム 200 万件（タブ、VT、U+0085、U+00A0、U+1680、U+2028、U+3000、U+FEFF を含む 20 文字種、長さ 30 以下）で、パス 1、パス 2、合成のどれも差分 0。138 万文字の入力 4 つは 5〜23 ms。
+- レビュアー（04l のビルド、main との差分ファジング）: 広い生成器 3 つ、パスワードの位置、ユーザー名の位置（各 50 万件、計 250 万件）で回帰 0 件（main がマーカーを出したのは 362,610 / 363,061 / 362,901 / 56,925 / 238,017 件）。トークン風のユーザー名の総当たり 41,472 件で漏れ 0 件（main は 21,888 件）。probe-r5 の 41 行（P1〜P16、U1〜U12、T1〜T10）はすべて期待どおりで、`maskLooseCredentials` の 138 万文字の入力 4 つは 4〜17 ms。
+- Devin（04n）: 同じ主張の grep（`same occurrences` など）は 0 件、compile と lint は exit 0、2 ファイルとも CRLF で一様。
+- 独立検証: ルーブリック r5 は 11 項目中 10 項目が pass、C6 (d)（コメントの主張）が fail（レビューで直させた点 9）。04n の後のルーブリック r6: 11 項目すべて pass（compile と lint、probe の 41 行、unit 1124 + 74 passing、ホストのテスト 3 件、v3 移行が設定を 1 回だけ読むこと、`maskPassword` の構造とコメント、ドキュメント、変更範囲と改行、テストのプロセスが残らないこと、main との差分ファジング 250 万件で回帰 0（検証者が別の生成器で試した約 440 万件でも 0）、`maskLooseCredentials` の 138 万文字の入力は 24 ms 以下）。
+- 改行: 変更した 8 ファイルは CRLF か LF で一様（`V3MigrationService.ts` は LF のまま）
+
+### Learning
+
+1. 「バリデーターが拒む」は、マスクの漏れを残留リスクとして受け入れる理由にならない。拒んだ値はエラー詳細とログに載る。→ rules.md「資格情報と URL」の、古い経路と新しい経路を比べるルールに追記した。
+2. 古い経路と比べるときは、手で選んだ表だけでは足りない。同じ生成器の入力で古い経路と新しい経路の出力を比べ、古い経路だけが隠した件数を数える（差分ファジング）。手で選んだ表で 2 回直した後も、20 万件中 17,380 件の回帰が残っていた。→ 同じルールに追記した。
+3. 設定を読む経路は、ハンドラと取り込みだけでなく、`'proxyUrl'` を `src` 全体で grep して数える。v3 移行が検証より先に読んでいた。→ rules.md の `otakProxy.proxyUrl` のルールに追記した。
+4. 文字種を広げる property の生成器は、区切り文字を値の先頭と末尾にも置く。→ rules.md に追記した。
+5. 正規表現を手書きの走査に置き換えるときは、結果の一致だけでなく、探索した範囲を探し直す経路が無いかを読む。線形時間のテストの入力は、ベクトル化された `indexOf` の速さを見込んで大きくする。→ rules.md に追記した。
+6. 差分ファジングの生成器は、マスクする値の位置ごとに作る（パスワードの位置と、ユーザー名の位置）。経路の分岐（パースするか、文字列でマスクするか、どちらのパース結果を使うか）は、古い経路と同じ値（書いた値）で決める。先にマスクした値で分岐すると、マスクがパーサーの読み方を変え、ユーザー名の位置で 50 万件中 210,412 件の回帰になった。→ rules.md に追記した。
+7. 自分の作業ミス: T04 で main のフォールバックを置き換えたとき、生成した入力で比べなかった。前回、空白入りパスワードの漏れを残留リスクとして受け入れた（Codex が P1 で指摘）。04h の指示では、ミューテーション m5 で選択肢 2 と 3 が同じ位置で両方マッチすると予想したが、そうなる入力は無く、観測できなかった。ルーブリック r3 の C2 で、`redactString` の出力にも `****` を期待した（`redactString` は `<credentials>` を出す）。04i で、先にマスクしてからパースする形に変えたとき、main の経路の決め方が変わることを確かめなかった。トークンの差分ファジングで、空のパスワードと authority が切れる形を作らなかった（独立検証が見つけた）。
+
+### 残留リスク
+
+- `redactString`（診断用）でマスクしない（どれも main と同じ）: パスワードに空白と `/` を両方そのまま含む形（`http://user:pa ss/x@host`）、改行をそのまま含むパスワード（`http://user:pa<LF>ss@host`）、空白と `@` を両方含むパスワードの最初の `@` より後ろ（`http://user:pa ss@w@host` の `w`）、scheme の無い `user:pa ss@host`。
+- `maskPassword`（表示用）でマスクしない: 文中の、空白と `@` を両方含むパスワードの最初の `@` より後ろ（`err http://user:pa ss@w@host x` の `w`）、scheme の無い、空白を含むパスワード（`user:pa ss@host`）、パーサーが authority を後ろの `?` や `#` で切るときの、パスワードの生の `@` より後ろ（`https://u:SEC@k?RET@host:8080` の `RET`。`redactString` はマスクする）。どれも main と同じ。
+- 前回の残留リスク「文中の、空白をそのまま含むパスワード」は、この修正で取り下げた。
+- 二乗になる走査（フォローアップ）: スキームの部分の `a.a.a…`（main と同じ）、共有の scheme の無いパターンの `'=a:b'` の繰り返し（14 万文字で約 6 秒。main の `maskPassword` は同じ入力で 2.4 秒）。
