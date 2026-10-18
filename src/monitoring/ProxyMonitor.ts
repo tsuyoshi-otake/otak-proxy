@@ -213,11 +213,28 @@ export class ProxyMonitor extends EventEmitter {
         this.isCheckInProgress = true;
         this.inFlightEpoch = epoch;
         this.state.recordCheckStart();
-        const startedGeneration = this.connectionState.captureGeneration
-            ? await this.connectionState.captureGeneration()
-            : undefined;
 
         try {
+            let startedGeneration: ProxyDetectionResult['startedGeneration'];
+            try {
+                startedGeneration = this.connectionState.captureGeneration
+                    ? await this.connectionState.captureGeneration()
+                    : undefined;
+            } catch (error) {
+                // Without the fence the check cannot run safely; it ends as a failed
+                // detection, publishes nothing, and releases the in-progress flag below.
+                const message = error instanceof Error ? error.message : String(error);
+                Logger.warn(`Proxy check aborted: capturing the state generation failed: ${message}`);
+                this.state.recordCheckFailure();
+                return {
+                    proxyUrl: this.lastProxyUrl,
+                    source: null,
+                    timestamp: Date.now(),
+                    success: false,
+                    error: `Generation capture failed: ${message}`
+                };
+            }
+
             const result = {
                 ...(await this.detectWithRetry(trigger)),
                 startedGeneration

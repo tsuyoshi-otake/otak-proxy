@@ -33,6 +33,13 @@ export class SystemProxyUpdateService {
 
         const started = captureLogicalGeneration(stateBeforeDetection);
         const detected = await detectSystemProxySettingsWithSource();
+        if (detected.kind === 'unknown') {
+            // The query failed, so nothing is known: keep the stored proxy, the
+            // fallback flags and the targets as they are, and do not stamp the
+            // check time (the next trigger asks the OS again).
+            Logger.warn('System proxy detection failed; keeping the last known proxy state');
+            return;
+        }
         const detectedProxy = detected.proxyUrl;
         const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
         // Detection can wait on several external sources. Re-read after it so a

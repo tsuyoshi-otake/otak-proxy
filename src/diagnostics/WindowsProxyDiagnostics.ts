@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ProxyIssue } from '../core/v3Types';
 import { createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
+import { parseRegValue, dwordIsEnabled } from '../utils/WindowsRegistryValue';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,24 +24,6 @@ const DEFAULT_RUNNER: CommandRunner = async (command, args) => execFileAsync(com
     encoding: 'utf8',
     windowsHide: true
 });
-
-/**
- * `<name>    REG_<TYPE>    <value>` as printed by `reg query`. Static (no value name
- * interpolated into a regex) and free of ambiguous quantifiers, so untrusted registry
- * output cannot steer the pattern.
- */
-const REG_VALUE_LINE_PATTERN = /^\s*(\S+)\s+REG_\w+\s+(.+)$/i;
-
-function parseRegValue(stdout: string, name: string): string | undefined {
-    const target = name.toLowerCase();
-    for (const line of stdout.split(/\r?\n/)) {
-        const match = REG_VALUE_LINE_PATTERN.exec(line);
-        if (match && match[1].toLowerCase() === target) {
-            return match[2].trim();
-        }
-    }
-    return undefined;
-}
 
 type WinHttpParse = Pick<WindowsProxyObservation, 'winHttpProxy' | 'winHttpBypass' | 'winHttpParseStatus'>;
 
@@ -253,11 +236,11 @@ export class WindowsProxyDiagnostics {
             this.readWinInetValue(key, 'AutoDetect')
         ]);
         return {
-            winInetProxyEnable: proxyEnable !== undefined ? proxyEnable.endsWith('1') : undefined,
+            winInetProxyEnable: proxyEnable !== undefined ? dwordIsEnabled(proxyEnable) : undefined,
             winInetProxyServer: proxyServer,
             winInetAutoConfigUrl: autoConfigUrl,
             winInetProxyOverride: proxyOverride,
-            winInetAutoDetect: autoDetect !== undefined ? /0x0*1\b/i.test(autoDetect) || autoDetect === '1' : undefined
+            winInetAutoDetect: autoDetect !== undefined ? dwordIsEnabled(autoDetect) : undefined
         };
     }
 

@@ -1,4 +1,5 @@
 import { Logger } from './Logger';
+import { unknownDetection } from '../config/DetectedProxyValue';
 import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import {
     getSanitizer,
@@ -21,7 +22,9 @@ export async function detectSystemProxySettings(): Promise<string | null> {
  * Detects system proxy settings, reporting which source produced the value.
  * The source is needed to persist provenance for echo suppression (issue #29).
  *
- * @returns The detected proxy URL with its source, or nulls if not found/invalid
+ * @returns The detected proxy URL with its source, or nulls if not found/invalid.
+ *          kind 'unknown' means the query itself failed: callers keep their
+ *          last known value instead of treating it as "no proxy".
  */
 export async function detectSystemProxySettingsWithSource(): Promise<ProxyDetectionWithSource> {
     const detector = getSystemProxyDetector();
@@ -35,6 +38,11 @@ export async function detectSystemProxySettingsWithSource(): Promise<ProxyDetect
         if (isUnsupportedAutoConfig(detected)) {
             Logger.log(`System auto-config detected but unsupported (${detected.kind})`);
             return detected;
+        }
+
+        if (detected.kind === 'unknown') {
+            Logger.warn('System proxy detection failed; the system proxy is unknown');
+            return unknownDetection();
         }
 
         if (!detected.proxyUrl) {
@@ -67,6 +75,6 @@ export async function detectSystemProxySettingsWithSource(): Promise<ProxyDetect
 
         notifier.showWarning('warning.detectionFailed');
 
-        return { proxyUrl: null, source: null };
+        return unknownDetection();
     }
 }

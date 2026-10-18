@@ -29,6 +29,9 @@ suite('ImportProxyCommand Unit Tests', () => {
         detectStub = sandbox.stub();
         sandbox.stub(DetectUtils, 'detectSystemProxySettingsWithSource').callsFake(async () => {
             const url = await detectStub();
+            if (url && typeof url === 'object') {
+                return url;
+            }
             return { proxyUrl: url ?? null, source: url ? 'windows' : null };
         });
         testProxyStub = sandbox.stub(ConnectionTest, 'testProxyConnection');
@@ -185,6 +188,36 @@ suite('ImportProxyCommand Unit Tests', () => {
         sinon.assert.calledTwice(showWarningMessageStub);
         sinon.assert.notCalled(executeCommandStub);
         assert.deepStrictEqual(applyCalls, []);
+    });
+
+    test('unknown detection says detection failed, not "no system proxy", with the same actions (#108)', async () => {
+        detectStub.resolves({ proxyUrl: null, source: null, kind: 'unknown' });
+        showWarningMessageStub.resolves(undefined);
+        const { ctx, getState, applyCalls } = createContext({ mode: ProxyMode.Off });
+
+        const result = await executeImportProxy(ctx);
+
+        assert.strictEqual(result.success, true);
+        sinon.assert.calledOnceWithExactly(
+            showWarningMessageStub,
+            i18n.t('warning.detectionFailed'),
+            i18n.t('action.configureManual'),
+            i18n.t('action.redetect')
+        );
+        assert.strictEqual(getState().mode, ProxyMode.Off);
+        assert.deepStrictEqual(applyCalls, []);
+    });
+
+    test('unknown detection + Redetect re-invokes detection', async () => {
+        detectStub.resolves({ proxyUrl: null, source: null, kind: 'unknown' });
+        showWarningMessageStub.onFirstCall().resolves(i18n.t('action.redetect'));
+        showWarningMessageStub.onSecondCall().resolves(undefined);
+        const { ctx } = createContext({ mode: ProxyMode.Off });
+
+        await executeImportProxy(ctx);
+
+        sinon.assert.calledTwice(detectStub);
+        sinon.assert.calledTwice(showWarningMessageStub);
     });
 
     test('detected proxy + Cancel leaves state untouched', async () => {

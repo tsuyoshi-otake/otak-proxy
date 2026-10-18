@@ -63,7 +63,13 @@ async function detectProxy(
     detector: ISystemProxyDetector
 ): Promise<Pick<ProxyDetectionResult, 'proxyUrl' | 'source' | 'kind' | 'httpUrl' | 'httpsUrl' | 'bypass' | 'capability'>> {
     if (detector.detectSystemProxyWithSource) {
-        return await detector.detectSystemProxyWithSource();
+        const detection = await detector.detectSystemProxyWithSource();
+        // A failed platform query is not "no proxy": fail the attempt so the
+        // retry, backoff and keep-last-value handling apply.
+        if (detection.kind === 'unknown') {
+            throw new Error('System proxy detection failed: the platform query returned no usable answer');
+        }
+        return detection;
     }
 
     const proxyUrl = await detector.detectSystemProxy();

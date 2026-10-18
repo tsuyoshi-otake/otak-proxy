@@ -829,4 +829,82 @@ suite('SystemProxyUpdateService Tests', () => {
             }
         });
     });
+
+    suite('failed detection (#108)', () => {
+        const unknownDetection = { proxyUrl: null, source: null, kind: 'unknown' as const };
+
+        test('Auto + unknown detection keeps the stored proxy, the fallback flags and the targets', async () => {
+            const seed: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://stored.example:8080',
+                autoHttpProxyUrl: 'http://stored.example:8080',
+                autoHttpsProxyUrl: 'http://stored-tls.example:8443',
+                autoProxyKind: 'perSchemeProxy',
+                manualProxyUrl: 'http://manual.example:3128',
+                lastDetectionSource: 'windows',
+                lastDetectionKind: 'perSchemeProxy',
+                lastSystemProxyCheck: 1234,
+                systemProxyDetected: true,
+                autoModeOff: false,
+                usingFallbackProxy: false,
+                gitConfigured: true,
+                npmConfigured: true
+            };
+            state = { ...seed };
+            detectStub.resolves(unknownDetection);
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.deepStrictEqual(state, seed, 'state is exactly what it was');
+            sinon.assert.notCalled(saveStateStub);
+            sinon.assert.notCalled(applyProxyStub);
+            sinon.assert.notCalled(publishStateStub);
+            sinon.assert.notCalled(notifyStub);
+            const testProxyAuto = (connectionTester as ConnectionTesterStub).testProxyAuto;
+            sinon.assert.notCalled(testProxyAuto);
+        });
+
+        test('Auto engaged on the fallback stays engaged on an unknown detection', async () => {
+            const seed: ProxyState = {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://manual.example:3128',
+                manualProxyUrl: 'http://manual.example:3128',
+                usingFallbackProxy: true,
+                fallbackProxyUrl: 'http://manual.example:3128',
+                autoModeOff: false
+            };
+            state = { ...seed };
+            detectStub.resolves(unknownDetection);
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.deepStrictEqual(state, seed);
+            sinon.assert.notCalled(applyProxyStub);
+        });
+
+        test('a non-Auto mode keeps its detected proxy on an unknown detection', async () => {
+            const seed: ProxyState = {
+                mode: ProxyMode.Manual,
+                autoProxyUrl: 'http://stored.example:8080',
+                lastDetectionKind: 'singleProxy'
+            };
+            state = { ...seed };
+            detectStub.resolves(unknownDetection);
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.deepStrictEqual(state, seed);
+            sinon.assert.notCalled(saveStateStub);
+        });
+
+        test('a successful "no proxy" detection still clears Auto (the contrast case)', async () => {
+            state = { mode: ProxyMode.Auto, autoProxyUrl: 'http://stored.example:8080' };
+            detectStub.resolves({ proxyUrl: null, source: null, kind: 'direct' });
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.strictEqual(state.autoProxyUrl, undefined);
+            assert.strictEqual(state.autoModeOff, true);
+        });
+    });
 });

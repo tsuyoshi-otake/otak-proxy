@@ -62,6 +62,22 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
             return { success: true };
         }
 
+        if (detected.kind === 'unknown') {
+            const action = await vscode.window.showWarningMessage(
+                i18n.t('warning.detectionFailed'),
+                i18n.t('action.configureManual'),
+                i18n.t('action.redetect')
+            );
+
+            if (action === i18n.t('action.configureManual')) {
+                await vscode.commands.executeCommand('otak-proxy.configureUrl');
+            } else if (action === i18n.t('action.redetect')) {
+                return await executeImportProxy(ctx);
+            }
+
+            return { success: true };
+        }
+
         if (detectedProxy) {
             // Requirement 2.3: Display sanitized proxy URL to user
             const sanitizedProxy = ctx.sanitizer.maskPassword(detectedProxy);

@@ -634,6 +634,8 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - **Windows**: Internet Explorer registry settings
   - **macOS**: System network settings (Wi-Fi, Ethernet, Thunderbolt Ethernet)
   - **Linux**: GNOME proxy settings (gsettings)
+- **Failure vs. none**: a platform query that really failed returns `kind: 'unknown'` (`unknownDetection()`), distinct from a successful `direct` "no proxy"; later sources are still tried and `unknown` is returned only when none found a proxy. "Not applicable" stays none: Linux without `gsettings` (ENOENT) or without the GNOME proxy schema (`gsettings` runs with `LANGUAGE=C`/`LC_MESSAGES=C` via `CommandExecutor`'s `options.env`). On macOS a manual proxy on a listed service wins; otherwise any failed query on a real service list is unknown, and with the fallback service names it is unknown only when every query failed; the first PAC is reported only after those checks. The platform layer never throws. Consumers keep the last known value on `unknown`: `ProxyMonitorDetection` turns it into a failed attempt (retry, backoff, `allRetriesFailed`, no `proxyChanged`), `SystemProxyUpdateService` returns without touching state, and `ImportProxyCommand` shows `warning.detectionFailed`.
+- **Windows registry values**: `utils/WindowsRegistryValue.ts` parses `reg query` output and decides REG_DWORD "enabled" (non-zero) for both detection and `WindowsProxyDiagnostics`.
 - **Features**: Detection source tracking, configurable priority, URL validation
 
 ### Monitoring Modules
@@ -646,7 +648,8 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - `triggerCheck()`: Debounced check trigger
   - `updateConfig()`: Dynamic configuration update
 - **Events**: `proxyChanged`, `proxyTestComplete`, `proxyStateChanged`, `checkComplete`, `allRetriesFailed`
-- **Default config**: 30s polling, 1s debounce, 3 retries, connection testing enabled (60s interval)
+- **Default config**: 30s polling, 1s debounce, 3 retries, connection testing enabled (60s interval, measured from the start of the previous test)
+- **Failed generation capture**: `executeCheck` captures the state generation inside its `try`; a rejection ends the check as a failed detection (no events, in-progress flag released)
 
 #### ProxyMonitorState
 - **Responsibility**: Immutable holder for monitoring state

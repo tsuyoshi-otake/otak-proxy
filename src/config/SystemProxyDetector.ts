@@ -3,8 +3,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { canonicalizeProxyUrl, ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
-import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
-import { buildDetectedProxyValue } from './DetectedProxyValue';
+import { detectPlatformProxyWithSource, type CommandOptions } from './PlatformProxyDetection';
+import { buildDetectedProxyValue, unknownDetection } from './DetectedProxyValue';
 import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { sameProxyUrlWithCredentials } from '../utils/ProxyUrlIdentity';
 import type { ProxyCapability, ProxyIssue, ProxyValueKind } from '../core/v3Types';
@@ -83,11 +83,16 @@ export class SystemProxyDetector {
         this.appliedProxyProvider = provider;
     }
 
-    private async exec(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+    private async exec(
+        command: string,
+        args: string[],
+        options?: CommandOptions
+    ): Promise<{ stdout: string; stderr: string }> {
         return execFileAsync(command, args, {
             timeout: this.timeoutMs,
             encoding: 'utf8',
-            windowsHide: true
+            windowsHide: true,
+            ...(options?.env ? { env: { ...process.env, ...options.env } } : {})
         });
     }
 
@@ -106,7 +111,8 @@ export class SystemProxyDetector {
     /**
      * Detects system proxy settings for the current platform.
      * Validates detected proxy URLs before returning them.
-     * Returns null if no proxy is detected or if detection fails.
+     * Returns null if no proxy is detected or if detection fails; use
+     * detectSystemProxyWithSource() to tell those two apart (kind 'unknown').
      *
      * @returns Promise<string | null> - Detected and validated proxy URL, or null
      */
@@ -120,21 +126,27 @@ export class SystemProxyDetector {
      * Uses configured priority order for detection sources.
      * Validates detected proxy URLs before returning them.
      *
+     * A source whose query failed reports kind 'unknown' (not "no proxy"):
+     * later sources are still tried, and 'unknown' is returned only when none
+     * of them produced a proxy.
+     *
      * @returns Promise<ProxyDetectionWithSource> - Detection result with source info
      */
     async detectSystemProxyWithSource(): Promise<ProxyDetectionWithSource> {
         try {
+            let queryFailed = false;
             for (const source of this.detectionSourcePriority) {
                 const result = await this.detectFromSource(source);
                 if (result.proxyUrl !== null || isUnsupportedAutoConfig(result)) {
                     return result;
                 }
+                queryFailed ||= result.kind === 'unknown';
             }
 
-            return emptyDetection();
+            return queryFailed ? unknownDetection() : emptyDetection();
         } catch (error) {
             Logger.error('System proxy detection failed:', error);
-            return emptyDetection();
+            return unknownDetection();
         }
     }
 
@@ -149,7 +161,7 @@ export class SystemProxyDetector {
             return await this.detectKnownSource(source);
         } catch (error) {
             Logger.warn(`Detection from source '${source}' failed:`, error);
-            return emptyDetection();
+            return unknownDetection();
         }
     }
 
@@ -167,7 +179,7 @@ export class SystemProxyDetector {
             }
             case 'platform':
                 return this.validateDetectedValue(
-                    await detectPlatformProxyWithSource((command, args) => this.exec(command, args)),
+                    await detectPlatformProxyWithSource((command, args, options) => this.exec(command, args, options)),
                     'Platform'
                 );
             default:
@@ -177,7 +189,7 @@ export class SystemProxyDetector {
     }
 
     private validateDetectedValue(result: ProxyDetectionWithSource, label: string): ProxyDetectionWithSource {
-        if (isUnsupportedAutoConfig(result)) {
+        if (isUnsupportedAutoConfig(result) || result.kind === 'unknown') {
             return result;
         }
 
