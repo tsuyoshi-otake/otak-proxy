@@ -408,6 +408,31 @@ suite('ConfigureUrlCommand Unit Tests', () => {
         const serialized = JSON.stringify(capturedDetails[0]);
         assert.ok(!serialized.includes('pa/ss'), `details leak the password: ${serialized}`);
         assert.ok(!serialized.includes('ss@'), `details leak the password tail: ${serialized}`);
+
+        // A password that starts with "/" parses as host "user" with an empty
+        // port, so the raw-text pass before parsing has to mask it; the
+        // details must carry neither the password nor its "abc@" tail.
+        capturedDetails.length = 0;
+        await showInvalidProxyUrl(ctx, 'http://user:/abc@host:8080', i18n);
+
+        assert.strictEqual(capturedDetails.length, 1);
+        const serialized2 = JSON.stringify(capturedDetails[0]);
+        assert.ok(!serialized2.includes('/abc'), `details leak the password: ${serialized2}`);
+        assert.ok(!serialized2.includes('abc@'), `details leak the password tail: ${serialized2}`);
+
+        // Whitespace + "/" passwords: only the pre-#108 loose display
+        // fallbacks mask these; the details must never contain "pa ss".
+        for (const value of [
+            'http://user:pa ss/x@host:8080',
+            'http://user:/pa ss@host:8080'
+        ]) {
+            capturedDetails.length = 0;
+            await showInvalidProxyUrl(ctx, value, i18n);
+
+            assert.strictEqual(capturedDetails.length, 1);
+            const serialized3 = JSON.stringify(capturedDetails[0]);
+            assert.ok(!serialized3.includes('pa ss'), `details leak the password: ${serialized3}`);
+        }
     });
 
     suite('credential-bearing stored URL (#108)', () => {

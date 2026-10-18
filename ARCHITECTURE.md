@@ -431,7 +431,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ProxyStateManager
 - **Responsibility**: ProxyState persistence and retrieval
 - **Key features**:
-  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto; URL credentials are split out to SecretStorage on save and re-hydrated on load, keyed by the credential-free public URL; a configured `otakProxy.proxyUrl` is validated and canonicalized on every read — an invalid value is ignored (no SecretStorage write, no settings rewrite, no log line)
+  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto; URL credentials are split out to SecretStorage on save and re-hydrated on load, keyed by the credential-free public URL; a configured `otakProxy.proxyUrl` is validated and canonicalized on every read — an invalid value is ignored (no SecretStorage write, no settings rewrite, no log line), and the one-time v3 migration canonicalizes the setting through the same path before consuming it
   - `requiresAuth` / `authRequiredProxyUrls` (non-secret, synced): `requiresAuth` records that a URL field carried credentials and `authRequiredProxyUrls` lists those addresses as credential-free public URLs; every apply attempt is refused rather than writing an address without the credentials it requires on this machine — the per-address gate runs inside `runProxyApplyAttempt` before consent, so monitor, toggle, sync and startup applies are all covered (#108)
   - `saveState()`: State saving (with automatic fallback)
   - `getNextMode()`: Off ↔ Auto (a leftover Manual value also advances to Auto)
@@ -833,9 +833,47 @@ export function getTestIterations(): number {
   `#` in an absolute URL is masked too: a URL parser rejects such a URL or
   splits the authority at that character, so the pattern's fallback alternative
   consumes the userinfo up to the last `@` of the run; the run stops at the
-  next `://` so the scan stays linear. A port followed by an `@` later in the
-  same token (`http://localhost:3000/@vite/client`) has the same shape and is
-  masked as well (`http://localhost:****@vite/client`)
+  next `://` so the scan stays linear. A password with raw whitespace
+  (`http://user:pa ss@host:8080`) is masked by a third alternative that runs
+  only to the first `@` — a space-containing run that continued to the last
+  `@` would swallow the host when the line later contains an e-mail address —
+  and that excludes `/` and line breaks so it cannot reach into a later URL or
+  the next line. A port followed by an `@` later in the same token
+  (`http://localhost:3000/@vite/client`), or on the same line before any `/`
+  (`see http://proxy:8080 is down, mail admin@corp` becomes
+  `see http://proxy:****@corp`), has the same shape and is masked as well.
+  Residual leaks of these patterns, and so of `redactString`, accepted: a
+  password with raw whitespace AND a raw `/`, a password with a raw line
+  break (alternative 3 stops at line breaks), the part after the first `@`
+  of a password with raw whitespace AND a raw `@`, and a scheme-less
+  `user:pa ss@host`
+- `maskPassword` decides between the parse path and the loose pass on the
+  value as typed, as the pre-#108 masker did; on the parse path it masks
+  the raw text first and parses that only when the result keeps the host,
+  the username and the presence of a password that the parser reads in the
+  typed value, otherwise it parses the typed value
+  (`http://TOKEN:@h?a:b@host`); it then masks the parser's password, or a
+  username-only userinfo as a token, and masks the serialized form again
+  (the parser rewrites `\` to `/` for special schemes and drops tabs and
+  line breaks); a userinfo match with an empty password, or with a raw `@`
+  before its `:`, is masked completely (`****@`)
+- When the value does not parse, parses without a host, or parses without
+  userinfo and with an empty port (a password that starts with `/`, `?`,
+  `#` or `\`: the parser reads `user:` as the host with an empty port and
+  moves the password into the path, query or fragment), `maskPassword`
+  additionally runs the pre-#108 loose display fallbacks
+  (`maskLooseCredentials`): an authority pass (`//x:` to the next `@`) and a
+  scheme-less pass (`user:pass@` after text start, whitespace or `=`), both
+  global and linear-time. They over-mask — spanning spaces, `/`, quotes and
+  line breaks — which the display masker accepted before #108 and the
+  diagnostics redactor never did. Values on these paths are shown as typed
+  (`http://user:/abc@host:8080` becomes `http://user:****@host:8080`). Of
+  the residuals above, `maskPassword` masks the first two; inside text it
+  keeps the third (`err http://user:pa ss@w@host x` keeps `w`) and the
+  fourth, as the pre-#108 masker did. And as before #108, `maskPassword`
+  shows the part of a password after a raw `@` when the parser ends the
+  authority at a later `?` or `#` (`https://u:SEC@k?RET@host:8080` keeps
+  `RET`); `redactString` masks it
 - Git, npm, and pip config managers mask their own error results before
   returning them (execFile errors echo the command line), and `ErrorAggregator`
   masks every error at ingestion, so `lastError`, the tooltip, and

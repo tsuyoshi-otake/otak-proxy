@@ -13,6 +13,7 @@ import {
     sanitizeProxyStateForPersistence
 } from '../utils/ProxyStateSanitizer';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { tryCanonicalizeProxyUrl } from '../utils/ProxyUrlUtils';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 
@@ -44,7 +45,14 @@ export class V3MigrationService {
         let journal = existingJournal ?? this.createJournal(schemaVersion);
         try {
             const state = this.context.globalState.get<ProxyState>('proxyState');
-            const configuredUrl = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
+            // The setting is validated on every runtime read, but the
+            // migration runs before that validation. Consume the canonical
+            // form (or "" for an invalid value) so an invalid saved setting
+            // touches neither SecretStorage nor the setting itself — it is
+            // left exactly as the user wrote it and logged once at activation.
+            const configuredUrl = tryCanonicalizeProxyUrl(
+                vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '')
+            ) ?? '';
             const legacySecret = await this.readLegacySecret();
             const credentialCandidates = this.findCredentialCandidates(state, configuredUrl, legacySecret);
             let credentialPublicUrl: string | undefined;
