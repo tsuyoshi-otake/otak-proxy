@@ -13,6 +13,7 @@
  */
 
 import * as vscode from 'vscode';
+import { commitDecidedPatch } from './ApplyConvergence';
 import { captureLogicalGeneration } from './LogicalGeneration';
 import { ProxyMode, ProxyState } from './types';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
@@ -157,7 +158,6 @@ export class ExtensionInitializer {
      */
     async startSystemProxyMonitoring(): Promise<void> {
         const state = await this.context.proxyStateManager.getState();
-        const started = captureLogicalGeneration(state);
 
         // Monitoring is only meaningful in Auto mode. In other modes, ensure it's stopped.
         if (state.mode !== ProxyMode.Auto) {
@@ -172,12 +172,23 @@ export class ExtensionInitializer {
 
         // Feature: auto-mode-proxy-testing - Mark state as testing pending
         this.startupTestState.isPending = true;
-        state.proxyReachable = undefined; // Indeterminate until test completes
-        const latest = await this.context.proxyStateManager.getState();
-        if (latest.mode !== ProxyMode.Auto || latest.revision !== started.revision) {
+        // Indeterminate until the test completes. The reset is folded onto
+        // the latest state: a missing revision (fresh install, migrated
+        // state) counts as 0, and a revision-only commit between the reads is
+        // refolded instead of aborting the start (#108).
+        const manager = this.context.proxyStateManager;
+        const outcome = await commitDecidedPatch(
+            manager,
+            { proxyReachable: undefined },
+            latest => latest.mode === ProxyMode.Auto
+        );
+        if (outcome.kind === 'moved') {
             return;
         }
-        await this.context.proxyStateManager.saveState(state);
+        if (outcome.kind === 'exhausted') {
+            Logger.warn('Could not reset proxyReachable before monitoring start (CAS exhausted); starting anyway');
+        }
+        const latest = await this.context.proxyStateManager.getState();
 
         // Check system proxy immediately using legacy method
         await this.checkAndUpdateSystemProxy();
@@ -194,7 +205,7 @@ export class ExtensionInitializer {
             Logger.info('ProxyMonitor started for Auto mode');
 
             // Feature: auto-mode-proxy-testing - Trigger immediate connection test at startup
-            if (state.mode === ProxyMode.Auto && state.autoProxyUrl) {
+            if (latest.mode === ProxyMode.Auto && latest.autoProxyUrl) {
                 Logger.info('Triggering startup connection test');
                 this.proxyMonitor.triggerCheck('config');
             }

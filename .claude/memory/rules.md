@@ -6,14 +6,32 @@
 
 - **実装に触る前に、緑のベースラインを記録する。**
   `npm run test:unit:parallel` と `npm test`（VS Code host）の両方。
-  VS Code host には現在 **9 件の既存失敗**がある（`ExtensionInitializer` 3、
-  `SystemProxyUpdateService` 1、`ProxyOwnership.integration` 3、`FailureInjection.integration` 1、
-  `ProxyRuntimeDiagnostics` 1）。自分の変更のせいだと誤診しないこと。
+  VS Code host には現在 **7 件の既存失敗**がある: `ExtensionInitializer` の「serializes adjacent test and
+  reachability events without rolling back test metadata」、`SystemProxyUpdateService` の「Auto + unsupported PAC +
+  reachable fallback」、`ProxyOwnership.integration` 3、`FailureInjection.integration` の「F-PARTIAL-WRITE-001」、
+  `ProxyRuntimeDiagnostics` の「terminal observation reports ownedVars」。自分の変更のせいだと誤診しないこと。
+  #108 項目 3 より前は 9 件だった。`ExtensionInitializer` の「should mark startup test as pending when in Auto mode」と
+  「should start ProxyMonitor when monitoring starts in Auto mode」は、double の `commitState` に本物の契約を
+  持たせてから通る。
   切り分けは `git stash -u` → HEAD で再実行 → 失敗集合を diff。
 
 - **`npm run test:unit:parallel` は `--bail` 付き。** 失敗の全体像が見えない。
   全件を見たいときは `out/test/**/*.test.js` から VS Code 依存と `.integration.` を除いた
   一覧を作り、`npx mocha --require ./scripts/vscode-shim.cjs --ui tdd --exit` を直接叩く。
+  1 つのミューテーションで複数のテストが red になると書くときは、テストを 1 本ずつ（`.only` か単独のファイルで）
+  走らせて、それぞれの red を記録する。#108 項目 3 では区間全体のミューテーションで 2 本目の deadlock テストが
+  走らず、red の記録が無かった（独立検証 rubric-r3 の C13）。
+
+- **直列化や順序を示すテストは、直列化が無くても同じになる結果だけを assert しない。** #108 項目 3 の
+  「配信を 1 つずつ発行順に適用する」テストは、2 つの適用を同じゲートで待たせて enter / exit の順を比べていたので、
+  配信の鎖が無くても同じ配列になった（独立検証 C5）。1 本目を止めている間に 2 本目が入っていないことを assert し、
+  直列化を外したミューテーションで red になることを確かめる。
+
+- **デッドロックのテストは、処理の鎖全体の完了を、mocha のタイムアウトより短い自前の期限で待つ。** 途中の進み具合
+  （適用が終わった、`stop` が呼ばれた）を待つ条件は、デッドロックの前に満たされうる。#108 項目 3 の「停止が並行の
+  公開を待つ」テストは、その条件だけを待って終わり、配信の鎖も公開も待たなかったので、区間全体のミューテーション
+  でも緑だった（独立検証 C13）。期限切れは `deadlock: <何が> did not settle within <N> ms` のように、テスト自身の
+  メッセージで落とす。
 
 - **unit lane は worker ごとに tmpdir と Git / npm 設定を分けている（#103）。** `scripts/lib/unit-mocha.mjs` と
   `scripts/unit-worker-isolation.cjs` が持つ。runner を変えたら `npm run test:unit:isolation` を通す。後片付けは
@@ -70,6 +88,12 @@
   `String.prototype.trim()` は末尾の `\n` も消すので、拒否していた `http://proxy.com/\n` が
   `http://proxy.com/` になり、受理された（property test の反例、#108）。proxy URL の正規化で除くのは ASCII の空白だけ。
 
+- **property test の期待値は、コードがどの値を返すか（加工前か、保存用に加工した値か）を設計で確かめてから書く。**
+  `ProxyStateManager` の Property 3 は、in-memory の fallback から読んだ `lastError` を
+  `sanitizeProxyStateForPersistence` の結果と比べていた。`writeState` は加工前の state を memory に持つ（#27 から）
+  ので、加工で変わる文字列（反例 `'#:#@'`）が生成されたときだけ落ちた（#108 の host lane で発見）。見つけた反例は
+  fast-check の `examples` に入れ、seed に関係なく毎回走らせる（旧アサーションでは最初のケースで red）。
+
 - **本番が通らない fallback 分岐は消し、fake には本番と同じ契約を持たせる。** 初回セットアップの
   「`commitState` が無ければ `saveState`」は、テストの fake だけが通った。`calledOnce(saveStateStub)` を見る
   3 件のテストは本番が通らない経路を検査し、分岐は直した欠陥（#109 への指摘 F2）を黙って戻せた。fake に
@@ -79,6 +103,9 @@
   分岐をテストが見ていなかった（#108、`src/test/realProxyStateManager.ts`）。すべてのキーを残す fake にすると、
   取り込みが SecretStorage に資格情報を入れる呼び出しを外すミューテーションで「a credential-bearing setting stores the
   secret and rewrites the setting without credentials」が red になった（#108）。
+  本番の型が保証するメソッドを、stub のために `TypeError` の catch で迂回するのも同じ。起動の監視の開始は
+  `commitDecidedPatch` の `TypeError` を catch し、最初に読んだ state を `saveState` で書き戻していた。本物の
+  `TypeError` も飲み込み、間に採用された同期の配信を上書きできた（#108 項目 3 の R3）。
 
 - **ミューテーションが単独で green なら、別の層が吸収していないか調べる。** 「トグル前のスナップショットとの差分」は、
   identity のガードが `moved` にして吸収した。ガードが守らない範囲（同じ proxy の新しい bookkeeping）でテストを
@@ -231,6 +258,26 @@
 - **再実行を決める署名には、守る判断が読む入力をすべて入れる。** 起動の reconcile の署名（`startupEnforcementTarget`）に、
   起動のゲートと書き込み計画が読む `authRequiredProxyUrls` と split の URL（`splitRoutingIdentity`）が無かった。
   それだけが apply 中に変わると、古い判断のまま止まった（PR #112 への Codex の指摘。どちらかを外すと red、#108）。
+
+- **読んだ後に書く記帳は、論理 identity をガードにした `commitDecidedPatch` で書く。`commitUnlessStale` にしない。**
+  `isStaleGeneration` は revision を先に比べるので、revision だけのコミット（接続テストの結果、監視の開始の
+  `proxyReachable` のリセット）でも stale になる。同期の受け手の資格情報のゲートは stale で何もせずに返し、
+  Off → Auto の配信で監視が始まらなかった。それを引き受ける収束も無かった（#108 項目 3 の F1。
+  `commitUnlessStale` に戻すとテスト 12b が red）。「stale なら返す」と決めるときは、間に入りうるコミットの
+  種類ごとに、後の手順（監視、表示、失敗の報告）を誰が引き受けるかを確かめる。
+
+## ウィンドウ間の同期
+
+- **ウィンドウをまたぐ順序は共有ファイルの version で決める。revision を別のウィンドウの revision と比べない。**
+  revision は writer ごとのコミットの回数で、接続テストのたびに増える。受け手が「自分より小さい revision」を
+  捨てたので、忙しいウィンドウは静かなウィンドウのトグルを無視した（#108 項目 3。比較を戻すと
+  `CrossWindowSyncOrdering.test.ts` の (a)(b) がタイムアウト）。revision の比較は、同じウィンドウの中の
+  snapshot の前後（#17）にだけ使う。持ち主は `SyncManager`（`localHistoryRevision`、`highestSharedVersion`）。
+- **届いた配信は届いた時点で採用（保存と watermark の更新）し、遅い副作用（適用、監視、表示）だけを直列にする。**
+  採用を順番待ちにすると、待っている間は世代フェンスが配信を見られず、その間に始まった検出の結果が配信の上に
+  公開された（#108 項目 3 の R1。採用を delivery chain に戻すとテスト 11 が red）。直列区間は 2 つに分け、
+  短い記帳の区間（`transitionQueue`）のタスクは、適用、監視、配信の鎖、公開を待たない。配信全体を記帳の区間で
+  実行すると、監視の開始が公開するときに自分を待って止まる（デッドロックのテストが red）。
 
 ## 診断レポート
 
@@ -471,6 +518,16 @@
   そのコード自身になり、「main と同じ」「main が隠した」は意味を失う。リリース（`3.2.16`）か「#108 より前」と書く。
   T04 は 3 回の修正で 27 行に `main` と書いていた（レビューで直させた、#108）。コミットメッセージ、PR 本文、
   journal は書いた時点の記録なので `main` でよい。
+
+- **実装者の報告書の主張は、コードか実測と照合してから、指示、rubric、ドキュメントに書く。** #108 項目 3 の
+  ARCHITECTURE.md の Known limitations (b) は、報告書の残留リスクの文（リロード後に watermark を入れ直し、
+  配信がもう一度届く）をそのまま指示して書かせた。コードにはどちらの仕組みも無かった（F4）。T10 の rubric の
+  Expect も、報告書の実測と照合せずに書いて誤った。同じ型の誤りの 2 回目。
+  自分で書くコミットメッセージの「すべての X は Y」も、grep で全件を確かめてから書く。#108 項目 3 のメッセージは
+  リモート適用のテストの fake がすべて実契約の `commitState` を持つと書いたが、2 つは常に commit する定数の fake
+  だった（独立検証 rubric-r3 の C17）。コードのコメントの主張も同じ。同じメッセージは `LogicalGeneration.ts` の
+  コメントのとおり「論理 identity は bypass を含む」と書いたが、比べている `noProxy` は本番のコードのどこからも
+  書かれず、常に空だった（#108 項目 2 の 1 点目）。
 
 ## VS Code ホストの前提
 

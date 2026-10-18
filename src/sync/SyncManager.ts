@@ -22,7 +22,7 @@ import { ConflictResolver, SyncableState } from './ConflictResolver';
 import { ISyncConfigManager } from './SyncConfigManager';
 import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
 import { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
-import { reconcileSharedState } from './SyncReconciler';
+import { reconcileSharedState, RemoteSyncDelivery } from './SyncReconciler';
 import { SyncManagerTimers } from './SyncManagerTimers';
 import { handleSyncConfigChange } from './SyncConfigChangeHandler';
 
@@ -52,6 +52,36 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private lastError: string | null = null;
     private currentState: SyncableState | null = null;
     private remoteChangeInProgress: boolean = false;
+    /**
+     * The highest revision of a state this window published or adopted
+     * (#108). `revision` is a per-window counter: it is only ever compared
+     * against this window's own history, so a snapshot older than something
+     * this window already published or adopted is stale, while another
+     * window's counter never blocks a publication.
+     */
+    private localHistoryRevision: number = 0;
+    /**
+     * The highest shared-file `version` this window published or adopted
+     * (#108). A delivery whose version is not above it is superseded.
+     */
+    private highestSharedVersion: number = 0;
+    /**
+     * Short serialized section for this window's shared-history transitions:
+     * snapshot publications, reasserts and adoptions (version check + save +
+     * fence/watermark update). Tasks here never await an apply, monitoring,
+     * the monitor event queue, the delivery chain or another publication, so
+     * the section cannot self-wait (#108).
+     */
+    private transitionQueue: Promise<void> = Promise.resolve();
+    /**
+     * Remote deliveries are converged one at a time in emission order — the
+     * delivery task is the whole applyRemoteSyncState run after adoption
+     * (credential gate, apply, monitoring, status). The adoption itself is
+     * decided at emission on the transition section, so a queued delivery
+     * already moved the fence and the watermark long before its convergence
+     * starts. No coalescing (#108).
+     */
+    private deliveryQueue: Promise<void> = Promise.resolve();
     /**
      * On-disk revision of the shared state file as of the last reconcile.
      * Lets the periodic poll skip read + parse while nothing has been written.
@@ -166,6 +196,8 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             this.isStarted = false;
             this.currentState = null;
             this.activeInstances = 0;
+            this.localHistoryRevision = 0;
+            this.highestSharedVersion = 0;
             this.emitStatusChanged();
 
             Logger.log('SyncManager stopped');
@@ -175,7 +207,22 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     }
 
     /**
-     * Notify other instances of a state change
+     * Serialize one task on a chain. The task's own promise still rejects so
+     * the caller observes the failure, while the chain tail swallows it so
+     * the next queued task still runs.
+     */
+    private enqueue<T>(queueField: 'transitionQueue' | 'deliveryQueue', task: () => Promise<T>): Promise<T> {
+        const run = this[queueField].then(task, task);
+        this[queueField] = run.then(() => undefined, () => undefined);
+        return run;
+    }
+
+    /**
+     * Notify other instances of a state change.
+     *
+     * Publications run inside the transition section, one at a time
+     * interleaved with adoptions, so a snapshot is judged against the
+     * local-history fence at publish time — not at call time (#108).
      *
      * @param state The new proxy state
      */
@@ -184,6 +231,37 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             return;
         }
 
+        await this.enqueue('transitionQueue', () => this.publishSnapshot(state));
+    }
+
+    /**
+     * A snapshot publication is stale only when its revision is below the
+     * highest local revision this window already published or adopted. The
+     * shared file's revision and the last seen remote revision are other
+     * windows' counters and are never compared (#108).
+     */
+    private async publishSnapshot(state: ProxyState): Promise<void> {
+        const snapshotRevision = stateRevision(state);
+        if (snapshotRevision > 0 && snapshotRevision < this.localHistoryRevision) {
+            Logger.warn(
+                `Discarding stale sync publication (snapshot rev ${snapshotRevision}, local history rev ${this.localHistoryRevision}).`
+            );
+            return;
+        }
+
+        await this.publishState(state, snapshotRevision);
+    }
+
+    /**
+     * Write one state to the shared file through the version compare-and-swap.
+     *
+     * `snapshotRevision` marks a snapshot publication: on success it raises
+     * the local-history fence and the shared-version watermark. A reassert
+     * (`undefined`) writes neither: it republishes the state this window
+     * already holds, not a new local snapshot, so it moves neither the fence
+     * nor the watermark (#108).
+     */
+    private async publishState(state: ProxyState, snapshotRevision?: number): Promise<void> {
         try {
             const instanceId = this.instanceRegistry.getInstanceId();
             if (!instanceId) {
@@ -191,24 +269,10 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             }
 
             const onDisk = await this.sharedStateFile.read();
-            const snapshotRevision = stateRevision(state);
-            const diskRevision = stateRevision(onDisk?.proxyState);
-            const rememberedRevision = stateRevision(this.currentState?.state);
-            if (snapshotRevision > 0 && (
-                (onDisk && snapshotRevision < diskRevision) ||
-                snapshotRevision < rememberedRevision
-            )) {
-                Logger.warn(
-                    `Discarding stale sync publication (snapshot rev ${snapshotRevision}, disk rev ${diskRevision}, remembered ${rememberedRevision}).`
-                );
-                return;
-            }
-
             const expectedVersion = onDisk?.version;
             const version = Math.max(
                 onDisk?.version ?? 0,
-                this.currentState?.version ?? 0,
-                snapshotRevision
+                this.currentState?.version ?? 0
             ) + 1;
             const now = Date.now();
             const sharedProxyState = sanitizeProxyStateForPersistence(state);
@@ -241,6 +305,10 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 instanceId,
                 version
             };
+            if (snapshotRevision !== undefined) {
+                this.localHistoryRevision = Math.max(this.localHistoryRevision, snapshotRevision);
+                this.highestSharedVersion = Math.max(this.highestSharedVersion, version);
+            }
             this.lastSyncTime = now;
             this.lastError = null;
             this.emitStatusChanged();
@@ -250,6 +318,71 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             Logger.error('Failed to notify state change:', error);
             this.lastError = error instanceof Error ? error.message : String(error);
         }
+    }
+
+    /**
+     * Absorb one remote delivery.
+     *
+     * The adoption (version check -> save -> fence/watermark update) is a
+     * transition-section task enqueued here, synchronously at the call — the
+     * listener calls this inside emit(), so adoptions run in emission order,
+     * interleaved with this window's own publications. A delivery therefore
+     * moves the fence and the watermark before its convergence starts: a
+     * background result that captured its generation earlier sees the moved
+     * revision and is discarded instead of being published over the delivery
+     * (#108).
+     *
+     * The convergence (`absorb`, i.e. applyRemoteSyncState's gate -> apply ->
+     * monitoring -> status) runs on the delivery chain, one delivery at a
+     * time in emission order, and awaits the outcome of its own adoption
+     * instead of starting it. Because the adoption left the section before
+     * the delivery task runs, an apply that awaits a publication (monitoring
+     * start runs the detection path, which publishes) cannot deadlock the
+     * section.
+     *
+     * `saveRemoteState` is the caller's local persist; it returns the local
+     * revision after the save. `adopted` inside `absorb` resolves to whether
+     * this delivery's adoption — decided at emission — saved the state
+     * (false when the delivery was superseded; nothing was saved).
+     */
+    async absorbRemoteChange(
+        delivery: RemoteSyncDelivery,
+        saveRemoteState: (state: ProxyState) => Promise<number>,
+        absorb: (adopted: () => Promise<boolean>) => Promise<unknown>
+    ): Promise<void> {
+        const adoption: Promise<boolean> = this.enqueue('transitionQueue', async () => {
+            if (delivery.version <= this.highestSharedVersion) {
+                Logger.warn(
+                    `Skipping superseded remote delivery ` +
+                    `(version ${delivery.version}, highest ${this.highestSharedVersion}).`
+                );
+                return false;
+            }
+            try {
+                const localRevision = await saveRemoteState({ ...delivery.state });
+                this.localHistoryRevision = Math.max(this.localHistoryRevision, localRevision);
+                this.highestSharedVersion = Math.max(this.highestSharedVersion, delivery.version);
+                return true;
+            } catch (error) {
+                Logger.error('Failed to adopt remote sync delivery:', error);
+                throw error;
+            }
+        });
+        // The adoption may sit rejected while its delivery waits on the
+        // delivery chain; this sink keeps that wait from being reported as an
+        // unhandled rejection. The delivery task still observes the rejection
+        // through `adoption` itself.
+        adoption.catch(() => undefined);
+
+        let adoptedCalled = false;
+        const adopted = (): Promise<boolean> => {
+            if (adoptedCalled) {
+                return Promise.reject(new Error('adopted() called twice for one remote sync delivery'));
+            }
+            adoptedCalled = true;
+            return adoption;
+        };
+        await this.enqueue('deliveryQueue', () => absorb(adopted));
     }
 
     /**
@@ -442,7 +575,14 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         }
 
         if (result.reassertLocalState) {
-            await this.notifyChange(result.reassertLocalState);
+            // A reassert republishes the state this window already holds
+            // through the same transition section, but it is not a new local
+            // snapshot: the snapshot fence does not apply, and it moves
+            // neither the fence nor the version watermark (#108).
+            if (this.isStarted && this.configManager.isSyncEnabled()) {
+                const reasserted = result.reassertLocalState;
+                await this.enqueue('transitionQueue', () => this.publishState(reasserted));
+            }
             return { conflictsResolved: result.conflictsResolved };
         }
 

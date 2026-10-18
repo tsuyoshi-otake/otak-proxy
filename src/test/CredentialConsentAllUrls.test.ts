@@ -467,6 +467,7 @@ suite('Split credentials survive a reload (#108)', () => {
         const syncContext: RemoteSyncApplyContext = {
             saveState: async next => { await harness.stateManager.saveState(next); },
             getState: () => harness.stateManager.getState(),
+            commitState: (expected, next) => harness.stateManager.commitState(expected, next),
             getActiveProxyUrl: state => harness.stateManager.getActiveProxyUrl(state),
             applyProxy: async (url, enabled) => {
                 applyCalls.push({ url, enabled });
@@ -583,6 +584,7 @@ function remoteSyncContext(harness: Harness, applyCalls: Array<{ url: string; en
     return {
         saveState: async next => { await harness.stateManager.saveState(next); },
         getState: () => harness.stateManager.getState(),
+        commitState: (expected, next) => harness.stateManager.commitState(expected, next),
         getActiveProxyUrl: state => harness.stateManager.getActiveProxyUrl(state),
         applyProxy: async (url, enabled) => {
             applyCalls.push({ url, enabled });

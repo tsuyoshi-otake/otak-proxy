@@ -1937,3 +1937,86 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - 読めないファイルのテストは Windows で skip する（chmod で読み取りを拒めない）。CI（ubuntu、root でない）では走る。symlink のテストは、Windows で Developer Mode が無いと skip する。
 - `--dist` は `out/` を拡張子で選ぶ（上の 3）。出荷物の全件は VSIX の `--dir` の走査が見る。
 - 新しい binary 形式を出荷するときは、`binary-signature.mjs` に形式を足すまで、そのファイルは制御バイトでスキャンに失敗する（意図した fail closed）。
+
+## 2026-10-19 — #108 項目 3: ウィンドウ間の同期を共有ファイルの version で順序付け、配信は届いた時点で採用し、このウィンドウが適用済みの計画だけを省く
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 3）
+**PR**: [#120](https://github.com/tsuyoshi-otake/otak-proxy/pull/120)
+**コミット**: `7ff3ecb`（同期の修正）、`dd5082e`（Property 3 のテスト）（fix/108-sync-ordering）
+**分担**: 実装は Devin（05 の 1 回目と追補 1〜4、1 回目のレビューの R1〜R4、追加の F1〜F4、05p、独立検証の後の 05s と 05t）。設計の指示、レビュー、コミット、PR、Codex への対応は Claude Code。2 回目の独立検証の後のテストのコメント 1 行の修正も Claude Code。
+
+### 症状
+
+ウィンドウ間の同期は、ウィンドウごとの revision（そのウィンドウのローカルのコミットの回数）を比べて順序を決めていた。別のウィンドウの revision とは関係のない数なので、次のことが起きた。
+
+1. 受け手は、自分の revision より小さい revision の state を捨てた。接続テストのたびにローカルのコミットが増える忙しいウィンドウは、静かなウィンドウのトグルを無視した。
+2. 送り手は、共有ファイルか最後に見たリモートの state の revision の方が大きいと、自分の公開を捨てた。静かなウィンドウの公開が同じ理由で失われた。
+3. 公開のたびに、すべてのウィンドウが proxy 設定を書き直した。直前に自分が書いたものと同じでも書いた。
+4. 保存された state に revision が無いとき（新規インストール、移行の直後）と、開始の途中で無関係なコミットが入ったときに、監視が始まらなかった。
+
+### 原因
+
+- revision は writer ごとのカウンタで、ウィンドウをまたいだ順序を表さない。順序を表すのは、CAS で増える共有ファイルの version だけだった。#17 の「遅れて届いた古い snapshot を捨てる」は同じウィンドウの中の規則で、それを別のウィンドウの revision にも当てはめていた。
+- 受け手には「このウィンドウが何を適用したか」の記録が無く、重複を省く根拠が無かったので、毎回適用した。
+- 監視の開始は `latest.revision !== started.revision` で中止した。revision の無い state と、revision だけが進むコミットで中止になった。
+
+### 修正
+
+- 順序（持ち主は `SyncManager`）:
+  - 配信は `{ state, version }`（`RemoteSyncDelivery`）。version に snapshot の revision を埋め込むのをやめた。
+  - `localHistoryRevision`（このウィンドウが公開か採用した最大のローカル revision）は、このウィンドウの snapshot だけを止める。共有ファイルの revision と、覚えているリモートの revision とは比べない。
+  - `highestSharedVersion`（このウィンドウが公開か採用した最大の共有 version）以下の配信は superseded になる。保存、適用、監視、表示、失敗の報告のどれもしない。
+  - reassert（今持っている state の再公開）は、どちらの watermark も動かさない。
+- 2 つの直列区間:
+  - `transitionQueue`（短い記帳）: 公開、reassert、採用（version の確認、配信の state のコピーの保存、watermark の更新）。`absorbRemoteChange` は呼ばれたその場で採用を積む。`remoteChange` の listener は `emit()` の中でそれを呼ぶので、採用は発行順に、このウィンドウの公開と交互に並ぶ。
+  - `deliveryQueue`: 配信ごとの収束（資格情報のゲート、適用、監視、表示）を、発行順に 1 件ずつ実行する。収束は自分の採用の結果を待ち、今のローカル state から収束する。監視の開始や停止が公開しても、公開は transition の区間を使うので、自分を待つことはない。
+  - 採用の失敗はその場でログに出し、待っている収束に届く。発行時に付けた sink が unhandled rejection を防ぐ。`deactivate()` は配信の鎖を待たない。
+- 受け手:
+  - 資格情報のゲートの記帳（`lastError`、`proxyReachable: false`）は、読んだ state の論理 identity をガードにした `commitDecidedPatch` で書く。新しい論理 state（mode か、自動・手動・fallback の proxy URL が違う state）が間に入ったら何も書かず、監視、表示、失敗の報告はその state の持ち主に任せる。revision だけのコミットなら重ね直して、監視、表示、失敗の報告を続ける。`RemoteSyncApplyContext.commitState` を必須にし、`ProxyStateManager.commitState` につないだ。
+  - 重複は肯定の記録で省く。`AppliedPlanTracker`（composition root で作り、`runProxyApplyAttempt` に渡す）が、このウィンドウが確かに適用した最後の計画を持つ。記録するのは、成功し、計画を書き、superseded でなく、ほかの試行と重ならなかった試行の後だけ。試行の開始とそれ以外の結果では消す。受け手は、試行が無く、`sameAppliedPlan`（`ProxyApplyPlan.ts`: enabled、主 URL、scheme ごとの URL、bypass、資格情報の identity）が記録と一致するときだけ適用を省く。監視と表示は採用した mode に従う。
+- 起動: `startSystemProxyMonitoring` は、mode が Auto のままであることをガードにした `commitDecidedPatch` で `proxyReachable` を戻す。revision が無ければ 0 とみなし、revision だけのコミットは重ね直す。stub のための `TypeError` の fallback は消し、ExtensionInitializer のテストの double に本物の契約の `commitState` を持たせた。
+- 05p（別のコミット）: `ProxyStateManager.property.test.ts` の Property 3 の期待値を直した（下の「レビューで直させた点」6）。
+- Docs: ARCHITECTURE.md（version の順序、ローカルの fence、2 つの区間、フロー図、Known limitations の (a)〜(c)）、CHANGELOG（Fixed、Changed）。README.md、CLAUDE.md、`src/test/README.md` は grep で古い説明が無いことを確かめた。
+
+### レビューで直させた点
+
+1. R1（1 回目のレビュー）: 1 回目の実装は、配信を delivery chain で順番が来たときに採用した。後の配信は、前の配信の収束（適用、監視の開始、表示）が終わるまで採用されずに待つ。待っている間、世代フェンスはその配信を見られない。具体例: B が Off → Auto（D1）、Auto → Off（D2）とトグルする。A は D1 の収束で監視を始め、検出の結果を公開する。D2 はまだ採用されていないので、検出の開始時の世代は動いておらず、検出の結果が D2 の上に version V2+1 で公開される。D2 は自分の番で superseded になり、B の最後のトグル（Off）が失われる。この順番待ちは、私が追補 1 で受け入れた設計だった。送り手の race を、watcher の 100 ms の debounce から収束の長さ（秒単位）に広げていた。採用を発行時に移し、収束だけを直列にさせた。テスト 11 は、採用を delivery chain に戻すと `the detection commit must be fenced by D2's adoption` で red になる。
+2. R2 → F1: ゲートの `saveState({ ...localState, ... })` は、読んだ後に採用された配信やローカルのコミットを、古い state で上書きできた。R2 で `commitUnlessStale` にさせたが、私の指示（stale なら監視にも表示にも触らずに返す）は、revision だけのコミットを考えていなかった。`isStaleGeneration` は revision を先に比べるので、接続テストの結果や、監視の開始の `proxyReachable` のリセットでも stale になる。Off → Auto の配信では監視が始まらず、それを引き受ける収束も無かった。F1 で、トグルと同じ `commitDecidedPatch` + `sameLogicalIdentity` のガードにさせた。テスト 12b（revision だけのコミットに重ね直し、監視 `['start']`、表示 1 回、`onApplyFailure` 1 回）は、`commitUnlessStale` に戻すと `the gate error is recorded despite the revision-only commit` で red になる。
+3. R3: `startSystemProxyMonitoring` は `commitDecidedPatch` の周りで `TypeError` を catch していた。stub の `commitState` が `undefined` を返す場合のために、最初に読んだ state を `saveState` で書き戻す分岐で、本物の `TypeError` も飲み込み、間に採用された配信を上書きできた。fallback を消し、テストの double に本物の契約を持たせた。その結果、基準で失敗していた host lane の 2 件（`should mark startup test as pending when in Auto mode`、`should start ProxyMonitor when monitoring starts in Auto mode`）が通るようになった。1 回目の報告の「2 件減った」はこの 2 件だった。報告書は名前を挙げていなかったので、保存してあった変更前の host の実行ログと突き合わせた。
+4. F2: 採用が `delivery.state`（すべての listener が受け取るオブジェクト）をそのまま保存していた。1 回目のコピー（`{ ...delivery.state }`）に戻させた。F3: reassert の 2 か所のコメントが、1 回目の理由（採用待ちの配信かもしれない）のままだった。発行時の採用では成り立たないので、「今持っている state の再公開で、新しいローカルの snapshot ではない」に直させた。
+5. F4: ARCHITECTURE.md の Known limitations (b) は、リロード後に `loadInitialState` が watermark を入れ直し、配信がもう一度届くと書いていた。コードにはどちらの仕組みも無い。`loadInitialState` は `currentState` を入れるだけで、watermark は 0 から始まる。起動時に共有ファイルの state を保存し、起動の経路で適用して公開し、その公開が両方の watermark を入れる。(b) は Devin の 1 回目の報告の残留リスクの文で、私が R4 で「報告書の残留リスク」としてそのまま指示したものだった。コードと照合した文に置き換えさせた（Devin は書く前に各主張をコードで確かめた）。
+6. 05p: host lane の全体の実行で、`ProxyStateManager Property Tests` の Property 3 が反例 `lastError: '#:#@'` で失敗した。テストは、in-memory の fallback から読んだ `lastError` を、保存用に加工した値（`sanitizeProxyStateForPersistence`）と比べていた。`writeState` は、保存に成功しても失敗しても、加工前の state を memory に持つ（コメント「Keep the full state only in memory for the current session. Persistent state is sanitized.」。#27 の 767b736 の時点から同じ）。加工で変わる文字列（`'#:#@'` → `'<credentials>@'`）が生成されたときだけ落ちる、seed 次第の失敗だった。#113 より前の `BARE_CREDENTIAL_PATTERN` も `#:#@` に当たるので、#113 が持ち込んだものでもない。期待値を `state.lastError` にし、反例を fast-check の `examples` に入れて毎回走らせた。
+7. 独立検証の 1 回目（rubric-r3）は C5、C11、C13、C17 で fail だった。05s と 05t で直させ、2 つの差分を同期の修正のコミットにまとめた。
+   - C5: 発行順のテスト (f) は、2 つの適用を同じゲートで待たせて enter と exit の順を比べていた。配信の鎖が無くても同じ配列になる。(e) は表示の更新を観測していなかった。05s で、1 本目の適用を止めている間に 2 本目が適用に入らないことを assert させた。鎖を外すミューテーションで `the second delivery must not enter its apply while the first is held` の red。(e) には表示の更新の数（0）を足させた。
+   - C11: ARCHITECTURE.md の ConflictResolver の説明が、timestamp で決めるという古い記述のままだった。コードは #17 から version を先に比べている。コードの通りに直させ、grep の全件を報告に載せさせた。
+   - C13: 2 本目のデッドロックのテスト（停止が並行の公開を待つ）は、区間全体のミューテーションでも緑だった。待ちの条件（適用の終了と `stop`）はデッドロックの前に満たされ、テストは配信の鎖も並行の公開も待っていなかった。1 本目も mocha の 30 秒のタイムアウトでしか red にならなかった。2 回目の報告の「どちらもテスト自身の期限で失敗」は誤りだった。05t で、両方のテストに配信の鎖（2 本目は並行の公開も）を 5 秒の自前の期限で待たせた。それぞれを単独で走らせ、`deadlock: the delivery chain did not settle within 5000 ms` で red になることを記録させた。2 本目の red は私も再現した。
+   - C17: コミットメッセージは、リモート適用のテストの fake がすべて実契約の `commitState` を持つと書いていた。LocalCredentialResolution と、RemoteApplyDedupe の refusedWriter は、常に commit する定数の fake だった。05s で実契約の CAS にさせた。ゲートの書き込みを素の `saveState` にするミューテーションで `the newer state survives the gate write` の red を記録させた。コミットメッセージは grep で全件を確かめ、`applyRemoteSyncState` を呼ぶ 6 つのテストファイルを列挙する文に直した。
+
+### Verification
+
+- Devin（2 回目と F1〜F4）: lint exit 0（646 件を走査）、unit 1177 + 74 passing・0 failing、smoke 4/4、host 605 passing・1 pending・8 failing（基準の 7 件と Property 3）。
+- ミューテーション（すべて red）: 採用を delivery chain に戻す → テスト 11。version の確認を外す → テスト 5（`a superseded delivery saves nothing` 1 !== 0）。配信全体を transition の区間で実行する → デッドロックのテストがテスト自身の期限で失敗。ゲートを `commitUnlessStale` に戻す → テスト 12b。1 回目: 受け手の revision の比較を戻す → (a)(b) がタイムアウト。送り手のディスクの revision の比較を戻す → (b)。fence を「最後の公開だけ」にする → (d)。`sameAppliedPlan` を URL と論理 identity の比較にする → scheme ごとの URL と bypass のケース。記録を state のフィールドの述語にする → 試行が何も書かなかった 3 ケース。in-flight の数を真偽値にする → 重なりの 2 ケース。「reassert が watermark を上げる」は、採用が発行時になったので red にできない（理由を報告に残した）。
+- Devin（05s）: lint exit 0（648 件を走査）、unit 0 failing（報告は 2 本目の lane の 74 passing だけを書いた）、host 606 passing・1 pending・7 failing（基準の 7 件）、smoke 4/4。05t: lint exit 0、unit 1186 passing・1 pending と 74 passing・0 failing。host は対象のファイルを読み込まないので再実行していない。
+- 私の再現（05t の後）: 区間全体のミューテーションで、2 本目のデッドロックのテストを単独で走らせて `deadlock: the delivery chain did not settle within 5000 ms` の red。元に戻して対象のファイルが 12 passing。runner のプロセスは残っていない。
+- 05p: 古い assertion に戻し `examples` を残すと、`MOCHA_GREP='ProxyStateManager Property Tests' npm test` は最初の 1 回（反例）で 4 passing・1 failing（`'#:#@'` と `'<credentials>@'` の不一致）。直した後は 5 passing・0 failing、`OTAK_PROXY_PROPERTY_RUNS=1000` でも 5 passing・0 failing。テストのコミットは `src/core/` のファイルを変えていない。
+- 独立検証（rubric-verifier、sonnet）: 1 回目（rubric-r3）は C5、C11、C13、C17 が fail（上の「レビューで直させた点」7）。2 回目（rubric-r4。C13 の Expect を「鎖全体を自前の期限で待つ」に更新）は C1〜C19 がすべて pass。検証者は lint（648 件、検出 0）、unit 1186 passing・1 pending と 74 passing、host 606 passing・1 pending・7 failing（基準の 7 件）、smoke 4/4 を自分で走らせ、ミューテーション（version の確認を外す、収束を直接実行する、採用を delivery chain に戻す、区間全体を transition の区間で実行する）をコンパイル済みのコピーで再現した。非ブロッキングの指摘 1 件（reassert のテストのコメント「D waits behind it, not yet adopted」が発行時の採用と合わない）は私が直した。
+- コメントの修正の後（私）: compile exit 0、`CrossWindowSyncOrdering.test.js` 12 passing、lint exit 0（648 件）、runner のプロセスは残っていない。
+- main（154fe2f）: origin の main は動いていないので、main への rebase は要らなかった。05s と 05t の差分は `fixup -C` の rebase で同期の修正のコミットにまとめた。まとめる前と後でツリーの差分は無く、メッセージは grep で照合した版に差し替えた。2 回目の検証の後、コメントの修正を fixup で同期の修正のコミットに畳み、同じ rebase でメッセージの論理 identity の記述を直した（「mode、proxy URL、bypass」→「mode か、自動・手動・fallback の proxy URL」）。畳む前と後のツリーは同一（607bfaa）。
+
+### Learning
+
+1. 届いたものの記録（採用）を順番待ちにしない。記録は届いた時点で行い、遅い副作用（適用、監視、表示）だけを直列にする。世代フェンスは記録されたものしか守れないので、記録を遅らせると、その間の race が広がる。→ rules.md「ウィンドウ間の同期」
+2. ウィンドウをまたぐ順序は共有ファイルの version で決める。writer ごとのカウンタ（revision）を、別の writer のものと比べない。→ rules.md「ウィンドウ間の同期」
+3. 読んだ後に書く記帳は、論理 identity をガードにした `commitDecidedPatch` で書く。「stale なら何もせずに返す」と指示するときは、間に入りうるコミットの種類ごとに、後の手順（監視、表示、失敗の報告）を誰が引き受けるかを確かめる。revision だけのコミットでは、引き受ける者がいない。→ rules.md「世代フェンス」
+4. 本番の型が保証するメソッドを、テストの stub のために `TypeError` の catch で迂回しない。既存の「本番が通らない fallback 分岐は消す」と同じ。→ rules.md の該当項目に追記した。基準の失敗の数と名前も rules.md で直した（9 件 → 7 件）。
+5. property test の期待値は、コードがどちらの値（加工前か、保存用に加工した値か）を返すかを、設計のコメントで確かめてから書く。まれな入力でだけ落ちる失敗は、見つけた反例を `examples` に入れて毎回走らせる。→ rules.md「検証・回帰」
+6. 自分の作業ミス: 報告書の主張を、コードや実測と照合せずに指示とドキュメントに流した（F4。T10 の rubric-r3 C5 と同じ型で、2 回目）。追補 1 の順番待ちの設計も、採用に依存するフェンス（検出と接続テストの `commitUnlessStale`）を洗い出さずに受け入れた。→ rules.md「ドキュメント」に、報告書の主張は照合してから書く規則を足した。自分で書いたコミットメッセージの「すべての X」も、grep で全件を確かめずに書いていた（C17）。同じメッセージの「論理 identity は bypass を含む」も、`LogicalGeneration.ts` のコメントをそのまま書いたもので、比べている `noProxy` は常に空だった（task 13 の計画を確かめていて気づき、メッセージを直した）。どちらも同じ規則に追記した。
+7. 直列化やデッドロックを示すテストは、仕組みが無くても同じになる結果を assert しない。順序のテストは、1 本目を止めている間に 2 本目が入らないことを見る。デッドロックのテストは、途中の進み具合ではなく、鎖全体の完了を自前の期限で待つ。1 つのミューテーションで複数のテストが red になると書くときは、1 本ずつ走らせて記録する（`--bail` で 2 本目は走らない）。→ rules.md「検証・回帰」
+
+### 残留リスク
+
+- (a) 受け手: このウィンドウのトグルや Configure の適用中に別のウィンドウの背景の公開が届くと、それが採用され、公開前の変更を置き換える（トグルが戻る）。送り手: 別のウィンドウのトグルから watcher の 100 ms の debounce の間に、このウィンドウが背景の結果を公開しうる。
+- (b) watermark は memory にだけあり、リロードしたウィンドウは 0 から始める。前の extension host が発行して収束していない配信は再送されず、起動時の共有ファイルの state の適用がその代わりになる。
+- (c) `skippedUnavailable` は書いたものとして数える（後から入れたツールは、次の計画の変更かローカルの適用で設定される）。最後の適用の後の手での編集は、次の実際の変更かローカルの適用まで残る。
+- `deactivate()` は配信の鎖を待たない。
+- host lane の基準の失敗 7 件は残る。host lane の全体は CI で走らない。

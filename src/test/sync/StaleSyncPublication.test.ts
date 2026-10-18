@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, stateRevision } from '../../core/types';
 import { applyRemoteSyncState } from '../../sync/RemoteSyncStateApplier';
 import { ConflictResolver } from '../../sync/ConflictResolver';
 import { SharedStateFile } from '../../sync/SharedStateFile';
@@ -93,6 +93,13 @@ suite('Stale sync publication (#17 P1-6)', () => {
         }, {
             saveState: async next => { state = { ...next }; },
             getState: async () => ({ ...state }),
+            commitState: async (expectedRevision, next) => {
+                if (stateRevision(state) !== expectedRevision) {
+                    return { kind: 'superseded', current: { ...state } };
+                }
+                state = { ...next, revision: expectedRevision + 1 };
+                return { kind: 'committed', revision: expectedRevision + 1, state: { ...state } };
+            },
             getActiveProxyUrl: current => current.autoProxyUrl || '',
             applyProxy: async () => true,
             startMonitoring: async () => undefined,
@@ -104,29 +111,73 @@ suite('Stale sync publication (#17 P1-6)', () => {
         assert.strictEqual(state.autoProxyUrl, 'http://pending.example:8080');
     });
 
-    test('a stale remote snapshot with a lower revision does not roll local state back', async () => {
+    // #108: the cross-window revision drop this test used to assert is gone —
+    // per-window revisions are unrelated numbers. The equivalent protection
+    // is the shared-file version watermark in SyncManager.absorbRemoteChange:
+    // a delivery whose version is not above the highest version this window
+    // published or adopted is skipped without saving or applying.
+    test('a delivery at or below the adopted version watermark is skipped entirely', async () => {
+        const manager = createManager();
+        await manager.start();
+
         let state: ProxyState = {
             mode: ProxyMode.Auto,
             autoProxyUrl: 'http://current.example:8080',
             revision: 5
         };
+        let saves = 0;
+        let applies = 0;
+        let monitoring = 0;
+        const saveRemoteState = async (next: ProxyState) => {
+            saves++;
+            state = { ...next, revision: stateRevision(state) + 1 };
+            return stateRevision(state);
+        };
+        const absorbFor = (remote: ProxyState) =>
+            (adopted: () => Promise<boolean>) =>
+                applyRemoteSyncState(remote, {
+                    saveState: async next => { state = { ...next }; },
+                    getState: async () => ({ ...state }),
+                    commitState: async (expectedRevision, next) => {
+                        if (stateRevision(state) !== expectedRevision) {
+                            return { kind: 'superseded', current: { ...state } };
+                        }
+                        state = { ...next, revision: expectedRevision + 1 };
+                        return { kind: 'committed', revision: expectedRevision + 1, state: { ...state } };
+                    },
+                    getActiveProxyUrl: () => '',
+                    applyProxy: async () => { applies++; return true; },
+                    startMonitoring: async () => { monitoring++; },
+                    stopMonitoring: async () => { monitoring++; },
+                    updateStatus: () => undefined,
+                    onApplyFailure: () => { applies++; },
+                    adoptRemoteState: adopted
+                });
 
-        const applied = await applyRemoteSyncState({
-            mode: ProxyMode.Off,
-            revision: 2
-        }, {
-            saveState: async next => { state = { ...next }; },
-            getState: async () => ({ ...state }),
-            getActiveProxyUrl: () => '',
-            applyProxy: async () => true,
-            startMonitoring: async () => undefined,
-            stopMonitoring: async () => undefined,
-            updateStatus: () => undefined
-        });
+        // Adopt one remote state at version 1 through the production owner.
+        const adopted = { mode: ProxyMode.Auto, autoProxyUrl: 'http://other.example:8080' };
+        await manager.absorbRemoteChange(
+            { state: adopted, version: 1 },
+            saveRemoteState,
+            absorbFor(adopted)
+        );
+        assert.strictEqual(saves, 1);
+        assert.strictEqual(applies, 1);
 
-        assert.strictEqual(applied, false);
-        assert.strictEqual(state.mode, ProxyMode.Auto);
-        assert.strictEqual(state.autoProxyUrl, 'http://current.example:8080');
+        // A delivery carrying the same shared version is superseded: nothing
+        // is saved, applied, or monitored.
+        const superseded = { mode: ProxyMode.Off, revision: 2 };
+        await manager.absorbRemoteChange(
+            { state: superseded, version: 1 },
+            saveRemoteState,
+            absorbFor(superseded)
+        );
+
+        assert.strictEqual(saves, 1);
+        assert.strictEqual(applies, 1);
+        assert.strictEqual(monitoring, 1);
+        assert.strictEqual(state.autoProxyUrl, 'http://other.example:8080');
+        await manager.stop();
     });
 
     test('shared persistence never writes proxy passwords', async () => {

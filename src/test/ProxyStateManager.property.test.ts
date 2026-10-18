@@ -9,7 +9,6 @@ import * as fc from 'fast-check';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../core/types';
-import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
 import { canonicalizeValidProxyUrl } from '../utils/ProxyUrlUtils';
 import { getPropertyTestRuns } from './helpers';
 import { proxyUrlArb } from './generators';
@@ -106,13 +105,26 @@ suite('ProxyStateManager Property Tests', () => {
                     assert.strictEqual(retrievedState.npmConfigured, state.npmConfigured);
                     assert.strictEqual(retrievedState.pipConfigured, state.pipConfigured);
                     assert.strictEqual(retrievedState.systemProxyDetected, state.systemProxyDetected);
-                    assert.strictEqual(
-                        retrievedState.lastError,
-                        sanitizeProxyStateForPersistence(state).lastError
-                    );
+                    // The in-memory fallback returns the state as saved; only the persisted copy is sanitized.
+                    assert.strictEqual(retrievedState.lastError, state.lastError);
                 }
             ),
-            { numRuns }
+            {
+                numRuns,
+                // A lastError that the persistence sanitizer rewrites ('#:#@' becomes '<credentials>@'): the in-memory fallback still returns it unchanged.
+                examples: [[{
+                    mode: ProxyMode.Auto,
+                    manualProxyUrl: 'http://manual.example:8080',
+                    autoProxyUrl: 'http://auto.example:8080',
+                    lastSystemProxyCheck: 1,
+                    gitConfigured: true,
+                    vscodeConfigured: false,
+                    npmConfigured: true,
+                    pipConfigured: false,
+                    systemProxyDetected: true,
+                    lastError: '#:#@'
+                }]]
+            }
         );
     });
 

@@ -10,7 +10,7 @@ import {
     shouldSkipUnauthenticatedApply,
     UNRESOLVED_LOCAL_CREDENTIAL_ERROR
 } from '../../utils/ProxyStateSanitizer';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, stateRevision } from '../../core/types';
 
 interface SecretStorageLike {
     get(key: string): Promise<string | undefined>;
@@ -106,13 +106,25 @@ suite('Local credential resolution', () => {
         assert.strictEqual(reconstructed, authenticatedUrl);
 
         const calls: Array<{ url: string; enabled: boolean }> = [];
+        // A stored state with the real commit contract: the CAS compares
+        // revisions; saveState stands in for the credential-hydrating persist.
+        let stored: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: reconstructed,
+            requiresAuth: true
+        };
         const applied = await applyRemoteSyncState(syncPayload, {
-            saveState: async () => undefined,
-            getState: async () => ({
-                mode: ProxyMode.Auto,
-                autoProxyUrl: reconstructed,
-                requiresAuth: true
-            }),
+            saveState: async (next: ProxyState) => {
+                stored = { ...next, autoProxyUrl: next.requiresAuth ? reconstructed : next.autoProxyUrl };
+            },
+            getState: async () => ({ ...stored }),
+            commitState: async (expectedRevision: number, next: ProxyState) => {
+                if (stateRevision(stored) !== expectedRevision) {
+                    return { kind: 'superseded', current: { ...stored } };
+                }
+                stored = { ...next, revision: expectedRevision + 1 };
+                return { kind: 'committed', revision: expectedRevision + 1, state: { ...stored } };
+            },
             getActiveProxyUrl: (state: ProxyState) => state.autoProxyUrl || '',
             applyProxy: async (url, enabled) => {
                 calls.push({ url, enabled });

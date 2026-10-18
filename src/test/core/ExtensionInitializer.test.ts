@@ -10,7 +10,7 @@ import * as vscode from 'vscode';
 import { ExtensionInitializer, InitializerContext } from '../../core/ExtensionInitializer';
 import { ProxyStateManager } from '../../core/ProxyStateManager';
 import { ProxyApplier } from '../../core/ProxyApplier';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, stateRevision } from '../../core/types';
 import { SystemProxyDetector } from '../../config/SystemProxyDetector';
 import { UserNotifier } from '../../errors/UserNotifier';
 import { InputSanitizer } from '../../validation/InputSanitizer';
@@ -69,6 +69,20 @@ suite('ExtensionInitializer Connection Testing Integration', function() {
         // Default stub behavior
         mockDetector.updateDetectionPriority.returns();
         mockApplier.applyProxy.resolves(true);
+        // The stubbed commitState gets the real contract (#108): compare the
+        // expected revision against the stored state, commit `next` at
+        // revision + 1 (through saveState, the stub's only write channel), or
+        // report superseded. Tests that need a different race install their
+        // own callsFake, which wins over this default.
+        mockStateManager.commitState.callsFake(async (expectedRevision: number, next: ProxyState) => {
+            const current = await mockStateManager.getState();
+            if (stateRevision(current) !== expectedRevision) {
+                return { kind: 'superseded' as const, current };
+            }
+            const committed = { ...next, revision: expectedRevision + 1 };
+            await mockStateManager.saveState(committed);
+            return { kind: 'committed' as const, revision: expectedRevision + 1, state: committed };
+        });
     });
 
     teardown(() => {
