@@ -1814,3 +1814,72 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - `maskPassword`（表示用）でマスクしない: 文中の、空白と `@` を両方含むパスワードの最初の `@` より後ろ（`err http://user:pa ss@w@host x` の `w`）、scheme の無い、空白を含むパスワード（`user:pa ss@host`）、パーサーが authority を後ろの `?` や `#` で切るときの、パスワードの生の `@` より後ろ（`https://u:SEC@k?RET@host:8080` の `RET`。`redactString` はマスクする）。どれも main と同じ。
 - 前回の残留リスク「文中の、空白をそのまま含むパスワード」は、この修正で取り下げた。
 - 二乗になる走査（フォローアップ）: スキームの部分の `a.a.a…`（main と同じ）、共有の scheme の無いパターンの `'=a:b'` の繰り返し（14 万文字で約 6 秒。main の `maskPassword` は同じ入力で 2.4 秒）。
+
+## 2026-10-19 — #108 項目 14 と低のビルド: 不可視文字のスキャンの穴を塞ぎ、公開を main 上の tag だけにし、PR で CI を動かす
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 14、低のビルド）
+**PR**: [#114](https://github.com/tsuyoshi-otake/otak-proxy/pull/114)
+**コミット**: `b970895`（fix/108-release-gates）
+**分担**: 実装は Devin（tmux の隣のペイン。下書き 10a〜10e、ブランチへの適用と検証 10f）。事前確認（actions の SHA と公開日、`@vscode/test-cli` が設定ファイルを評価するプロセス、`npm audit`）、レビュー、`src/test/README.md` の追記、コミット、PR は Claude Code。
+
+### 症状
+
+1. `scripts/check-invisible-unicode.mjs` は、先頭 8000 バイトに NUL を含むファイルを binary として飛ばした。不可視文字と NUL を 1 バイトずつ含むファイルは `0 scanned, 1 skipped as binary` で exit 0 になった。
+2. 検出表は U+3164（HANGUL FILLER）など Default_Ignorable の一部と、U+2800（点字の空白）を検出しなかった。
+3. publish workflow の `lint:unicode:dist` は `vsce package` より前にあった。`vsce package` は `vscode:prepublish`（`npm run compile`）で `out/` を作り直すので、出荷される `out/` はスキャンの後に作られていた。
+4. 公開物と tag が一致しなかった。v3.2.1 は `workflow_dispatch`（main の 767b736）で公開され、後で tag `v3.2.1`（b198755）から走った run は `--skip-duplicate` で "already published. Skipping" になり success になった。actions は tag（`@v4`）で参照し、job に `timeout-minutes` が無かった。
+5. PR で動く CI が無く、Dependabot と `npm audit` も無かった。`.vscode-test.mjs` が作るプロファイル（`otak-proxy-vscode-test-*`）は実行後に残った（この端末で 226 個、約 3.2 GB）。
+
+### 原因
+
+1. binary の判定を「NUL を含むか」で行っていた。テキストの拡張子のファイルでも NUL 1 バイトで走査から外れ、走査が 0 件でも失敗にしていなかった。
+2. 検出表は、既知の攻撃で使われた範囲を手で並べたもので、Unicode の Default_Ignorable_Code_Point の集合を基準にしていなかった。
+3. dist スキャンを package の前に置いていた。package が compile をやり直すことを考えていなかった。
+4. publish workflow は `workflow_dispatch` でも動き、ref が tag か、tag が `package.json` の version と一致するか、main 上のコミットかを確かめていなかった。`--skip-duplicate` が公開済みを成功にした。
+5. CI は publish workflow の中にしかなかった。`.vscode-test.mjs` はプロファイルを作るだけで消していなかった。
+
+### 修正
+
+- 検出表（`scripts/lib/invisible-unicode.mjs`）: Unicode 16.0（17.0 でも同じ）の Default_Ignorable_Code_Point 全体と U+2800 を、範囲ごとにコメント付きで固定した。BOM（先頭）と、絵文字の後の異体字セレクタ 1 個の例外はそのまま。テストは実行中の Node の `\p{Default_Ignorable_Code_Point}` を列挙し、表に無いコードポイントがあれば名指しして失敗する。
+- スキャナ（`scripts/check-invisible-unicode.mjs`）: binary の判定を拡張子だけにした。NUL は `c0-control` の検出として報告し、ファイルは最後まで走査する。走査が 0 件ならどのモードでも exit 1。`--dir <path>` を足した（存在しない・ディレクトリでないパス、`--dist` や明示したパスとの併用は usage を出して exit 2）。拡張子で飛ばしたファイルと読めなかったファイルは別に数える。
+- publish workflow: トリガは `v*` の tag の push だけ。build job は `npm ci` の前に `scripts/release/check-release-ref.mjs` で、`GITHUB_REF` が `refs/tags/v` + `package.json` の version であること（`GITHUB_REF_TYPE` があれば `tag`）と、tag のコミットが `origin/main` の祖先であることを確かめる（履歴を全部取得し、main を明示して fetch する）。package の後に VSIX を `$RUNNER_TEMP` に展開して `--dir` で走査し、同じ VSIX を artifact にする。`check-tokens` job が 2 つの secret を先に確かめ、registry ごとの publish job（`needs: [build, check-tokens]`）が artifact を公開する。`--skip-duplicate` は workflow と `deploy` / `deploy:ovsx` から外した。`uses:` はすべて 40 桁の SHA と版のコメントで固定し（checkout v7.0.1、setup-node v7.1.0、upload-artifact v7.0.2、download-artifact v8.0.2。どれも公開から 3 日以上）、全 job に `timeout-minutes`、全 checkout に `persist-credentials: false`、`permissions: contents: read`。
+- CI（`.github/workflows/ci.yml`、新規）: PR と main への push で、`npm ci`、lint、unit（並列）、xvfb の smoke、package、VSIX の `--dir` 走査、`npm audit --audit-level=critical`。取り消すのは PR の古い実行だけ。
+- Dependabot（`.github/dependabot.yml`、新規）: npm と github-actions を毎週。`cooldown` は 3 日。cooldown はセキュリティ更新の PR には効かないことをファイルに書いた。自動 merge はしない。
+- `.vscode-test.mjs`: 同期の `process.on('exit')` でプロファイルを消す。`@vscode/test-cli` 0.0.11 はこのファイルを CLI のプロセスでだけ評価し（拡張ホストの runner は `VSCODE_TEST_OPTIONS` で設定を受け取る）、CLI は `process.exit` するので、非同期の削除は走らない。
+- テスト: 検出表の境界の行と Default_Ignorable の網羅テスト、スキャナの CLI テスト 8 件、`check-release-ref` のテスト 10 件（本物の一時リポジトリで祖先を判定する。コミットの署名は無効）、workflow のポリシーテスト 7 件（トリガ、SHA の固定、permissions、timeout、persist-credentials、publish job の needs、`--skip-duplicate`）。
+- Docs: CLAUDE.md（Supply-Chain Lint、Release Pipeline の節を新設、テストのプロファイルの削除）、`src/test/README.md`（プロファイルの削除）、CHANGELOG（Security）。
+
+### レビューで直させた点
+
+1. 10d の下書きは、Kaithi の記号（U+110BD〜U+110CD）と Egyptian の format controls（U+13430〜U+1343F）を Default_Ignorable として表に入れ、網羅テストがそれを確かめると書いていた。レビュアーが Node 26 で `\p{Default_Ignorable_Code_Point}` を全コードポイントについて評価し、どちらも含まれないことを確かめた（U+110BD と U+110CD は Prepended_Concatenation_Mark、U+110BE〜U+110C2 は見える文字、U+13430〜U+1343F は導出で除外される）。10e で外させ、両方向（Node の集合が表に含まれる: 漏れ 0、表の Default_Ignorable を名乗る 10 カテゴリが Node の集合に含まれる: 非該当 0）を確かめさせた。
+2. 10d の `check-release-ref.mjs` は `GITHUB_REF_NAME` で tag を判定していた。branch の名前でもあるので、`v3.2.17` という名前の branch が通る。`GITHUB_REF`（`refs/tags/v<semver>`）と `GITHUB_REF_TYPE` だけで判定させ、`run()` に version を注入できるようにしてテストを足させた。チェックは `actions/setup-node` の後（固定した Node）、`npm ci` の前に置かせた。
+3. 10d は token の確認を registry ごとの job に移していた。`OVSX_PAT` が無いと、Marketplace にだけ公開してから Open VSX の job が失敗する。公開の前に両方を確かめる `check-tokens` job に戻させた。
+4. 10d の checkout は `persist-credentials` が既定（true）のままで、CI の concurrency は main への push も取り消した。全 checkout を false に、取り消しを PR だけにさせた。Dependabot には、cooldown がセキュリティ更新の PR に効かないことを書かせた（GitHub のドキュメントの文を引用させた）。
+5. ポリシーテストを、読めない形で失敗する（fail closed）ように強めさせた: コメント行を除いてから読む、`jobs:` の後に top-level のキーがあれば失敗する、版のコメントも必須、`permissions:` は `contents: read` だけで `: write` が無い、publish の `on:` は tag の push だけ、全 checkout に `persist-credentials: false`、publish job は `build` と `check-tokens` の両方を needs にする。あわせて、スキャナの集計が読めなかったファイルを「拡張子で飛ばした」と数えていたのを分けさせ、`--dir` に存在しないパスを渡すとスタックトレースで落ちたのを usage と exit 2 にさせた。`releaseRef.test.ts` のコミットには `-c commit.gpgsign=false` を付けさせた（system の Git 設定が署名を強制しうる）。
+6. 10f（ブランチへの適用）で Devin が 2 件を直した: スキャナのテストの `!stderr.includes('at ')` が usage の英文（"that"）に一致した（スタックの行の正規表現 `/^\s*at\s/m` に変えた）。publish workflow のコメントに `--skip-duplicate` の文字列があり、ポリシーテストが失敗した（コメントを言い換えた）。
+7. `src/test/README.md` の hermetic の説明に、プロファイルの削除を足した（Claude Code。Devin は「説明はまだ正しい」として変えていなかった）。
+
+### Verification
+
+- Devin（10f、適用前の main 298b5bb の上）: テストだけを先に入れた fail-before は、`InvisibleUnicode.test.js` 2 failing（新しい境界の行と網羅テスト）、`InvisibleUnicodeScanner.test.js` 7 failing / 1 passing（`--dir` のテストは、古いスキャナがパスを明示したパスとして読んだので偶然 pass）、`releaseRef.test.js` はモジュールが無く suite ごと失敗、`releaseWorkflowPolicy.test.js` 6 failing / 1 passing（permissions は元から満たしていた）。ソースを入れた後は 16 / 8 / 10 / 7 passing。
+- Devin（10f）: lint（不可視 Unicode の走査 640 件、検出 0）、unit 1128 + 74 passing（1 回目は T04 のブランチの古いビルドで 1 件失敗。消して再実行）、smoke 4 passing（プロファイルの数は前後とも 226）、`npm test` 586 passing・1 pending・9 failing（既知の 9 件と同じ）、`lint:unicode:dist` 308 件で検出 0、`package:vsix` の VSIX（166 ファイル）を展開して `--dir` で 159 件、検出 0。`check-release-ref` を本物の tag で 4 通り: `refs/tags/v3.2.16` と `v3.2.16^{commit}` は exit 0、`refs/tags/v3.2.15` は version の不一致、`refs/heads/v3.2.16`（`GITHUB_REF_TYPE=branch`）は tag でない、main に無いコミットは祖先でない、でそれぞれ exit 1。
+- レビュアー: 下書き 13 ファイルとブランチのファイルが一致すること（`cmp`）、main（7cc4543）への rebase で衝突なし、変更した 15 ファイルの改行が一様（作業ツリーは CRLF、index は LF）、`out/` に対応するソースの無いビルドが 0 件。
+- 独立検証（rubric-verifier、sonnet、C1〜C13）: 1 回目は 11/13 が pass。C8（CHANGELOG の `### Security` の項目が `(#108)` で終わらず、`Release pipeline hardening (#108):` と先頭に置いていた）と C12（Devin の報告書の Docs 節が、私の足した `src/test/README.md` の 2 行を「変更なし」と書いていた）が fail。項目の末尾を `... cooldown (#108).` に直してコミットを差し替え（afe0ae3 → b970895、差分は CHANGELOG の 1 行だけ）、報告書を訂正した。2 回目（C0 = 差し替えの差分が CHANGELOG の 1 行だけであること、C8、C12 の縮小版）は全 pass。1 回目の実測: lint exit 0（642 件を走査、検出 0）、unit 1151 + 74 passing、smoke 4 passing、`npm test` 604 passing・1 pending・9 failing（既知の 9 件と同じ）、プロファイルの数は smoke と `npm test` の前後とも 226、変更した 15 ファイルはすべて作業ツリー CRLF・index LF・孤立 CR なし。検証用の fixture ディレクトリ（`%TEMP%\verify108-*`、2 KB）は権限で削除できず残った。
+- CI（この PR が最初の実行）: ci.yml の初回（Linux、run 39145311201、3 分 25 秒）は success。lint（不可視 Unicode の走査 626 件、検出 0。ローカルの 642 件との差 16 件は、この端末にだけある未追跡の PBT の evidence 16 件と同じ数）、unit 1151 + 73 passing・1 pending（`%OS%` を使うテストが Linux で skip。Devin の予想どおり）、smoke 4 passing、package、VSIX の `--dir` 走査 159 件・検出 0、`npm audit --audit-level=critical`（critical 0）。audit の件数は 21（moderate 3、high 18）で、ローカル（npm 11.16.0）の high 17 件より 1 件多い。差は `ovsx`（`@vscode/vsce` に依存）で、CI の Node 22.23.3 付属の npm だけがこれを数える。
+
+### Learning
+
+1. 外部仕様の表（Unicode のプロパティなど）は、実物で両方向に確かめる。表 ⊇ 実物（漏れ 0）と、表のうちその性質を名乗る行 ⊆ 実物（非該当 0）。Devin の 10d は 2 つの範囲を Default_Ignorable と書き、網羅テストは片方向（漏れ）しか見ないので通っていた。→ rules.md「検証・回帰」に追記した。
+2. ブランチを切り替えたら、対応するソースの無い `out/` のビルドを消してからテストを回す。`tsc` は消えたソースの出力を消さず、unit lane は `out/test/**/*.test.js` をすべて拾う。T04 のブランチのビルド（`CredentialDisplayMasking.test.js`、`realProxyStateManager.js`）が T10 のブランチで失敗した。→ rules.md に追記した。
+3. `.vscode-test.mjs` は `vscode-test` の CLI のプロセスでだけ評価され、CLI は `process.exit` する。後片付けは同期の `exit` リスナーで書く。→ rules.md「VS Code ホストの前提」に追記した。
+4. 「無いこと」を確かめるアサーションは、部分文字列ではなく形で書く。`includes('at ')` は usage の英文に一致した。
+5. 自分の作業ミス: T10 のブランチを作るとき、前のブランチの `out/` のビルドを消さなかった（Devin の 1 回目の unit が失敗した）。CHANGELOG の項目の issue 番号が先頭にあるのを受け入れ、Devin の報告書の Docs 節も私の追記に合わせて直さなかった（どちらも独立検証で fail）。rubric の文言は自分で書いたものでも、コミットの前に照合する。
+
+### 残留リスク
+
+- VS Code ホストの全件（`npm test`）は CI で走らない。既知の 9 件の失敗があるので、CI は unit と smoke（`@smoke` の 4 件）だけを走らせる。ホストのテストの大半は、今もローカルでしか走らない。
+- `npm audit` の high 17 件（ローカルの npm 11.16.0。CI の Node 22.23.3 付属の npm は `ovsx` も数えて 18 件。dev 依存。直すには `@vscode/test-cli@0.0.15` と `@vscode/vsce@4.0.0` の semver-major の更新が要る）。CI は critical だけで失敗する。
+- publish の environment の保護（required reviewers など）はリポジトリの設定で、このコミットでは付けていない。
+- registry ごとに job を分けたので、片方だけ失敗したらその job だけを re-run できる。`--skip-duplicate` が無いので、公開済みの registry の job をもう一度走らせると失敗する（まだ試していない）。
+- 低のビルドのうち、VS Code ホストのテストの同期状態が `out/test` に書かれること、PBT の evidence が追跡対象のディレクトリに溜まること、参照されないアセット、`clean` スクリプトと `--max-warnings 0` は、このコミットでは扱っていない（フォローアップ）。
+- 既存の 226 個のプロファイル（約 3.2 GB）は残っている。この変更の前に作られたもので、消すかはユーザーが決める。
