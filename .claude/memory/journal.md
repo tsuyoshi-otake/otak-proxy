@@ -1686,3 +1686,52 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - 無効な設定の警告は、起動時に 1 回だけ出る。起動後に設定を無効な値に変えた場合は、既存の無効 URL のエラーが出る。
 - `V3MigrationService` は、検証していない設定の値から資格情報を SecretStorage に移す（今回の範囲外、後続の課題）。
 - 確認したのはユニットテストと VS Code ホストのテストまで。実際の認証 proxy と、SecretStorage の書き込み失敗は試していない。
+
+## 2026-10-18 — #108 項目 5、6、11 PR #113 への Codex の指摘（「/」を含むパスワードがマスクされない）を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 5、6、11）
+**PR**: [#113](https://github.com/tsuyoshi-otake/otak-proxy/pull/113)（指摘は `979714a` へのレビュー）
+**コミット**: `2fd78c9`（fix/108-credential-redaction）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。過剰マスクの表の 1 行と、コメントと ARCHITECTURE.md の過剰マスクの記述は Claude Code が直した。
+
+### 症状（`979714a` への Codex の指摘、P1）
+
+- パスワードにエンコードされていない `/` を含む URL（`http://user:pa/ss@host:8080`）がマスクされなかった。`new URL()` が例外を投げるので、`showInvalidProxyUrl`（`src/commands/ConfigureUrlCommand.ts`）はエラー詳細に `maskPassword(value)` の結果、つまりパスワードそのものを出した。Logger と `ProxySecretRedactor` も同じパターンを使う。main の `maskPassword` のフォールバック `(\/\/[^:@]+):([^@]+)@` はこれをマスクしていた。
+
+### 原因
+
+- T04 で main の `maskPassword` のフォールバックを共有パターンに置き換えたとき、古い経路と新しい経路が何をマスクするかを同じ入力で比べなかった。共有パターンの userinfo（`[^/\s]+`）は整形式の URL だけを想定しており、パーサーが拒む形（`/`、`?`、`#` をそのまま含むパスワード）を落とした。
+
+### 修正
+
+- `URL_CREDENTIAL_PATTERN` に 2 つ目の選択肢 `[^/\s:@]+:(?:(?!:\/\/)\S)*` を足した。整形式の選択肢の後に試す。パスワードの並びは `/`、`?`、`#`、`\`、`@` を含んでよく、並びの最後の `@` で終わる。次の `://` はまたがないので、走査は線形のまま（`x://a:b` を 14 万文字: 約 1 ms。上限なしでは 1.6 s、main のフォールバックは 1.2 s）。
+- 受け入れた過剰マスク: ポートの後、同じ空白なしの並びに `@` がある形は、`/` を含むパスワードと区別できない。`http://user:12/ss@host:8080` と `http://localhost:3000/@vite/client` はどちらも正しい URL で、どちらもマスクする（`http://localhost:****@vite/client`）。main は後者の単独の URL をそのまま出し、文中の同じ形は過剰マスクしていた。
+- テスト: `maskPassword` と `redactString` の完全一致の表（`/`、`?`、`#` の行、今の出力を保つ行、過剰マスクの 2 行）、埋め込みパスワードの property に `urlSlash` の形、線形時間のテスト（`'x://a:b'.repeat(40000)` で 1 回 1000 ms 未満）、`showInvalidProxyUrl` のエラー詳細にパスワードが出ないことを確かめるホストのテスト。
+- Docs: ARCHITECTURE.md の Credential Masking、CHANGELOG。README のマスクの記述は端末の環境変数と `npm config list` だけで、この修正で誤りにならない（`git grep` で確認）。
+
+### レビューで直させた点
+
+1. Devin のコードとテストのコメントは、過剰マスクを「main のフォールバックと同じ」と書いていた。`new URL()` が通る単独の URL（`http://localhost:3000/@vite/client`）は、main ではそのまま、このブランチでは過剰マスクになる。T04 で、host のある URL も直列化した後に共有パターンを通すようにしたため（`DOMAIN\user` の対策）。レビュアーがこの行を表に足し、コメントと ARCHITECTURE.md の記述を直した。
+
+### Verification
+
+- `npm run lint`: exit 0（`lint:unicode` は 636 ファイルを走査、検出なし）
+- `npm run test:unit:parallel`: 1115 + 74 passing、0 failing（レビュアーの再実行）。実行後、テストのプロセスは残っていない
+- `npm test`: 602 passing / 9 failing。9 件は既知の失敗だけ。新しい `showInvalidProxyUrl` のテストは pass（Devin の実行）
+- `npm run test:smoke`: 4 passing（Devin の実行）
+- Fail-before: 表、property、`showInvalidProxyUrl` のテストが修正前のパターンで red（Devin の記録）
+- ミューテーション（レビュアーが `src` に当てて `tsc` し、unit lane で実行して戻した。property は 200 回）: 2 つ目の選択肢を外す → property が red（`urlSlash` の反例）。`://` の上限を外す → 線形時間のテストが red（約 10 s）。選択肢を入れ替える → scoped registry の行が red。Devin はホストの lane でも、2 つ目の選択肢を外すと `showInvalidProxyUrl` のテストが red になることを確かめた
+- 計算量: 14 万文字の入力 6 種で main と比べた。`a.a.a…` の並びは main もこのブランチも二乗（約 6 s）。原因はスキームの部分 `\b[a-z][a-z0-9+.-]*:\/\/` で、main の `usernameOnlyPattern` も同じ形を持つ
+- 改行: 変更した 5 ファイルはすべて CRLF で一様
+
+### Learning
+
+1. マスクやバリデーションの古い経路を共有の実装に置き換えるときは、同じ入力の表で古い経路と新しい経路の出力を比べる。→ rules.md「資格情報と URL」に追記した。
+2. 区切りまで戻る貪欲な並びは、次の開始点をまたがないように上限を付け、時間を測るテストで守る。→ rules.md「資格情報と URL」に追記した。
+3. 自分の作業ミス: T04 のレビューで、main の `maskPassword` のフォールバックを共有パターンに置き換えることを、マスクする入力を比べずに受け入れた。Codex が見つけた。
+
+### 残留リスク
+
+- main と同じくマスクしない: scheme の無い `user:pa/ss@host`、`/` を含むユーザー名だけのトークン（`http://to/ken@host`）、パスワードに `/` を含む `DOMAIN\user`（`maskPassword`。`redactString` は scheme 付きの形ならマスクする）、`http://user:p@s/s@host` の後半（`s/s`。`http://user:p@s/s@host` は host が `s` の正しい URL として読める）。
+- main と違ってマスクしない: 文中の、空白をそのまま含むパスワード（`err http://user:pa ss@host:8080 x`）と、単独の同じ URL の `redactString`。並びを空白で止めるのは、単語をまたいでマスクしないため。バリデーターは `/` も空白もそのまま含む URL を拒むので、そうした URL は保存されず、対象にも書かれない。出るのは、外部の値（環境変数、エラー文）を文に含めた場合だけ。
+- `a.a.a…` のような長い並びで、スキームの部分の走査が二乗になる（main と同じ）。14 万文字で約 6 s。フォローアップに回す。

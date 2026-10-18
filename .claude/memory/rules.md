@@ -381,6 +381,15 @@
 - **WHATWG の URL 解析は、special scheme の `\` を `/` として扱う。** `http://DOMAIN\user:pass@proxy:8080` は host が
   `domain`、パスが `/user:pass@proxy:8080` になり、`username` と `password` は空になる。`new URL()` の結果だけで資格情報が
   無いと判断せず、直列化した文字列にも文字列のマスクを当てる（node で確認、#108 項目 11）。
+- **マスクやバリデーションの古い経路を共有の実装に置き換えるときは、同じ入力の表で古い経路と新しい経路の出力を
+  比べる。** 表には、パーサーが拒む形（パスワードにそのままの `/`、`?`、`#`、空白）、文中の形、単独の形を入れる。古い
+  経路だけがマスクしていた行が回帰になる。T04 は main の `maskPassword` のフォールバックを、整形式の userinfo
+  （`[^/\s]+`）だけを想定した共有パターンに置き換え、`http://user:pa/ss@host:8080` を `showInvalidProxyUrl` のエラー詳細
+  に出した（PR #113 への Codex の指摘。node の表で main と比べて確認、#108）。
+- **区切りまで戻る貪欲な並び（`(?:…)*@`）は、次の開始点（`://`）をまたがないように上限を付ける。** 上限が無いと、
+  開始点ごとに残りの全文を読んで戻るので二乗になる（`x://a:b` を 14 万文字で 1.6 s、上限ありで約 1 ms）。上限は時間を
+  測るテストで守る（上限を外すミューテーションで `masking stays linear` が red、#108）。スキームの部分
+  `\b[a-z][a-z0-9+.-]*:\/\/` は、`a.a.a…` の並びで同じく二乗になる（main も同じ、未対応）。
 - **設定の `otakProxy.proxyUrl` が state に入る経路は、どれも同じ検証と正規化を通す。** 設定変更のハンドラ
   （`CommandRegistry.handleProxyUrlChange`）と、`getState()` の取り込み（`normalizeConfiguredManualProxyUrl`。
   `migrateOldSettings` も使う）。無効な値は state に入れず、SecretStorage にも設定にも書かない。取り込みは `getState()` の
