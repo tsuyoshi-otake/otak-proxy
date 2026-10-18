@@ -299,7 +299,7 @@ The diagnostics report keeps the recorded result and the fresh observation apart
 
 - `recordedRuntimeState` is what the last apply recorded. `runtimeState` also counts convergence-blocking issues found in this run, so a recorded success with a fresh residual is reported as `partial`, not `applied`.
 - `desired` is the selected mode, and `converged` says whether the tool settings actually match it. Selecting Off does not by itself mean the settings were cleared. `converged` is `true` only when `runtimeState` is `applied`, so a failed or blocked apply is never reported as converged.
-- `lastRemediation` is the outcome of the most recent proxy apply in this VS Code window: per-target results, whether the retry ran, the stop reason (`converged`, `unverified`, `retryExhausted`, `retryDisabled`, `notRetryable`, `flapSuppressed`, `lockSkipped`, `superseded`, or `consentRequired`), and the IDs of the remaining blockers. It never contains proxy URLs, credentials, or command output, and it is `null` until the first apply in the window finishes.
+- `lastRemediation` is the outcome of the most recent proxy apply in this VS Code window: per-target results, whether the retry ran, the stop reason (`converged`, `unverified`, `retryExhausted`, `retryDisabled`, `notRetryable`, `flapSuppressed`, `lockSkipped`, `lockIoError`, `superseded`, or `consentRequired`), and the IDs of the remaining blockers. It never contains proxy URLs, credentials, or command output, and it is `null` until the first apply in the window finishes.
 
 ## Language Support
 
@@ -361,6 +361,7 @@ Replace `<version>` with the `version` in `package.json`, then reload VS Code.
 - **Git is not detected**: make sure Git is installed and on `PATH` (`git --version`).
 - **Auto mode does not pick up changes**: check your system proxy settings and adjust `otakProxy.pollingInterval`.
 - **Remote, WSL, or container windows**: Windows registry and WinHTTP actions are available only when the extension host runs on local Windows. Remote hosts are diagnosed as remote targets, and Windows actions are skipped.
+- **Linux/BSD: proxy settings do not apply and `lastRemediation.stopReason` is `lockIoError`**: otak-proxy cannot use its lock directory, `<temp>/otak-proxy-<uid>`, where `<temp>` is `$TMPDIR` or `/tmp`. The directory must be a real directory that your user owns, with no group/other permissions. Correct its owner and mode, or remove it. If another account owns it, set `TMPDIR` to a private directory before starting VS Code, or ask an administrator to remove it. Git writes report a permission error in the same case.
 
 ## Related Extensions
 

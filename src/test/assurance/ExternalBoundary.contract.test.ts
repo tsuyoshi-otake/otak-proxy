@@ -561,9 +561,20 @@ suite('Assurance: external-boundary contracts', () => {
             assert.strictEqual(fs.readdirSync(shared.getSyncDir()).some(name => name.endsWith('.tmp')), false);
 
             fs.writeFileSync(shared.getFilePath(), '{ invalid json', 'utf8');
-            assert.strictEqual(await shared.read(), null);
-            assert.strictEqual(await shared.recover(), true);
-            assert.strictEqual(await shared.exists(), false);
+            assert.strictEqual(await shared.read(), null, 'a corrupt state file reads as no state');
+            await shared.write({
+                version: 2,
+                lastModified: 2,
+                lastModifiedBy: 'actor-b',
+                proxyState: { mode: ProxyMode.Manual, manualProxyUrl: 'safe://proxy/fs2' }
+            });
+            assert.deepStrictEqual(await shared.read(), {
+                version: 2,
+                lastModified: 2,
+                lastModifiedBy: 'actor-b',
+                proxyState: { mode: ProxyMode.Manual, manualProxyUrl: 'safe://proxy/fs2' },
+                testResult: undefined
+            }, 'the next write replaces the corrupt file');
         } finally {
             fs.rmSync(directory, { recursive: true, force: true });
         }

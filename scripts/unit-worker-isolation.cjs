@@ -1,10 +1,10 @@
 // Loaded by mocha (--require) in the main process and in every --parallel
 // worker, before any test module. Each process gets its own temporary
 // directory, Git global config, and npm user config under the root that
-// scripts/lib/unit-mocha.mjs creates. The Git config mutex
-// (os.tmpdir()/otak-proxy.gitconfig.mutex) and the config files are then
-// never shared with another worker, another test run, or an installed copy
-// of the extension (#103).
+// scripts/lib/unit-mocha.mjs creates. The Git config mutex (on POSIX under
+// the per-user directory os.tmpdir()/otak-proxy-<uid>, #108) and the config
+// files are then never shared with another worker, another test run, or an
+// installed copy of the extension (#103).
 //
 // The runner owns the root and removes it after mocha exits. A worker does
 // not clean up after itself: --bail force-terminates the pool, and a killed

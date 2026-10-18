@@ -85,7 +85,9 @@ function classifyGitLock(error: unknown, details: GitErrorDetails): GitErrorClas
 
 function classifyGitPermission(details: GitErrorDetails): GitErrorClassification | null {
     return details.code === 'EACCES' ||
+        details.code === 'EPERM' ||
         details.errorMessage.includes('EACCES') ||
+        details.errorMessage.includes('EPERM') ||
         details.stderr.includes('Permission denied') ||
         details.stderr.includes('permission')
         ? { errorType: 'NO_PERMISSION', error: 'Permission denied when accessing Git configuration' }

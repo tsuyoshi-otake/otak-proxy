@@ -159,7 +159,7 @@ suite('Remote apply dedupe (#108)', function() {
     });
 
     suite('a previous attempt that wrote nothing leaves no record', () => {
-        for (const stopReason of ['lockSkipped', 'consentRequired'] as const) {
+        for (const stopReason of ['lockSkipped', 'consentRequired', 'lockIoError'] as const) {
             test(`the last attempt was ${stopReason}`, async () => {
                 const harness = createRealStateManager();
                 const tracker = new AppliedPlanTracker();
@@ -171,6 +171,7 @@ suite('Remote apply dedupe (#108)', function() {
                         retryAttempted: false,
                         retrySuppressed: false,
                         lockSkipped: stopReason === 'lockSkipped',
+                        lockIoError: stopReason === 'lockIoError',
                         outcome: { stopReason }
                     })
                 };

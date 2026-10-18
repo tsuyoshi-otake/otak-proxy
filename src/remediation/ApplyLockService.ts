@@ -3,6 +3,13 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { TargetHost } from '../core/v3Types';
+import {
+    ensureLockDir,
+    ensurePerUserLockDir,
+    LockDirDeps,
+    LockDirUnusableWhy,
+    perUserLockDirPath
+} from '../utils/PerUserLockDir';
 
 export type ApplyLockScope = 'hostUser' | 'profile' | 'workspaceHost';
 
@@ -35,11 +42,21 @@ export interface ApplyLockAcquireResult {
     handle?: ApplyLockHandle;
     reason?: 'held' | 'ioError';
     holder?: Partial<ApplyLockRecord>;
+    /** When `reason` is 'ioError': the lock directory and why it could not be used (#108). */
+    ioError?: { dir: string; why: LockDirUnusableWhy };
 }
 
 export interface ApplyLockServiceOptions {
     baseDir?: string;
     now?: () => number;
+    platform?: NodeJS.Platform;
+    /**
+     * Absent or `undefined` uses `process.getuid`; `null` means "this platform
+     * has no uid" (test seam). A throwing function also resolves to no uid.
+     */
+    getuid?: (() => number) | null;
+    tmpdir?: () => string;
+    fileSystem?: LockDirDeps['fileSystem'];
 }
 
 export interface WithLocksOptions {
@@ -81,20 +98,58 @@ function isErrno(error: unknown, code: string): boolean {
 
 export class ApplyLockService {
     private readonly baseDir: string;
+    private readonly perUserDefaultDir: boolean;
+    private readonly lockDirDeps: LockDirDeps;
     private readonly now: () => number;
 
     constructor(options: ApplyLockServiceOptions = {}) {
         // OTAK_PROXY_LOCK_DIR lets tests point the shared apply lock at a hermetic
         // per-run directory (like GIT_CONFIG_GLOBAL / NPM_CONFIG_USERCONFIG do for
         // git/npm), so a lock left by one run cannot make another run's apply skip.
-        this.baseDir = options.baseDir
-            ?? process.env.OTAK_PROXY_LOCK_DIR
-            ?? path.join(os.tmpdir(), 'otak-proxy-v3-locks');
+        const overrideDir = options.baseDir ?? process.env.OTAK_PROXY_LOCK_DIR;
+        // Resolve the platform once so the default dir and its check agree.
+        const platform = options.platform ?? process.platform;
+        this.lockDirDeps = {
+            platform,
+            getuid: options.getuid,
+            tmpdir: options.tmpdir,
+            fileSystem: options.fileSystem
+        };
+        this.baseDir = overrideDir ?? this.defaultBaseDir();
+        // The POSIX default is the per-user directory itself (it already
+        // carries this user's uid in its name); overrides and the Windows
+        // default keep the historical name and get the lighter check.
+        this.perUserDefaultDir = overrideDir === undefined
+            && platform !== 'win32';
         this.now = options.now ?? (() => Date.now());
     }
 
+    private defaultBaseDir(): string {
+        const deps = this.lockDirDeps;
+        if ((deps.platform ?? process.platform) === 'win32') {
+            return path.join((deps.tmpdir ?? os.tmpdir)(), 'otak-proxy-v3-locks');
+        }
+        return perUserLockDirPath(deps);
+    }
+
     async tryAcquire(target: ApplyLockRequest, ttlMs: number): Promise<ApplyLockAcquireResult> {
-        await fs.mkdir(this.baseDir, { recursive: true });
+        try {
+            const dirStatus = this.perUserDefaultDir
+                ? ensurePerUserLockDir(this.lockDirDeps)
+                : ensureLockDir(this.baseDir, undefined, this.lockDirDeps);
+            if (!dirStatus.usable) {
+                return { acquired: false, reason: 'ioError', ioError: { dir: dirStatus.dir, why: dirStatus.why } };
+            }
+            return await this.tryAcquireLocked(target, ttlMs);
+        } catch (error) {
+            if (isErrno(error, 'EACCES') || isErrno(error, 'EPERM')) {
+                return { acquired: false, reason: 'ioError', ioError: { dir: this.baseDir, why: 'accessDenied' } };
+            }
+            throw error;
+        }
+    }
+
+    private async tryAcquireLocked(target: ApplyLockRequest, ttlMs: number): Promise<ApplyLockAcquireResult> {
         const lockPath = path.join(this.baseDir, `${hashLockName(target)}.lock.json`);
         const token = crypto.randomBytes(16).toString('hex');
         const acquiredAt = this.now();

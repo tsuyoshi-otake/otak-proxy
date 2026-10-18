@@ -317,8 +317,9 @@ suite('Assurance: deterministic failure injection and recovery', () => {
             await shared.write(sharedState(1));
             fs.writeFileSync(shared.getFilePath(), '{ interrupted', 'utf8');
             fs.writeFileSync(path.join(shared.getSyncDir(), 'sync-state.crash.tmp'), 'partial', 'utf8');
-            assert.strictEqual(await shared.recover(), true);
-            assert.strictEqual(await shared.exists(), false);
+            assert.strictEqual(await shared.read(), null, 'a corrupt state file reads as no state');
+            await shared.write(sharedState(2));
+            assert.deepStrictEqual(await shared.read(), { ...sharedState(2), testResult: undefined }, 'the next write replaces the corrupt file');
 
             const firstService = new ApplyLockService({ baseDir: directory, now: () => now });
             const first = await firstService.tryAcquire(lockTarget, 5);

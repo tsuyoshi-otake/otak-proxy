@@ -12,6 +12,7 @@ import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../core
 import { ProxyIssue } from '../core/v3Types';
 import { ProxyDiagnosticReport, ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { ErrorAggregator } from '../errors/ErrorAggregator';
+import { I18nManager } from '../i18n/I18nManager';
 import { ApplyLockRequest, ApplyLockService } from '../remediation/ApplyLockService';
 import { FlapTracker, FlapTrackerSettings } from '../remediation/FlapTracker';
 import { ProxyRemediationService } from '../remediation/ProxyRemediationService';
@@ -1099,6 +1100,144 @@ suite('v3 remediation foundation', () => {
             await lockService.release(held.handle);
             restoreConfig();
             await fs.rm(baseDir, { recursive: true, force: true });
+        }
+    });
+
+    /**
+     * #108 item 4: a lock directory the extension cannot use is an `ioError`
+     * lock outcome, not a throw and not a skip — nothing is written, the stop
+     * reason records it, and a non-silent apply shows the normal failure
+     * notification.
+     */
+    function ioErrorLockService(): ApplyLockService {
+        return {
+            withLocks: async () => ({
+                acquired: false as const,
+                failed: {
+                    acquired: false as const,
+                    reason: 'ioError' as const,
+                    ioError: { dir: '/tmp/otak-proxy-2000', why: 'wrongOwner' as const }
+                }
+            })
+        } as unknown as ApplyLockService;
+    }
+
+    test('a lock directory ioError writes nothing and records lockIoError (#108)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'off' });
+        const context = createContext(new Map());
+        let calls = 0;
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService: ioErrorLockService(),
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async () => {
+                    calls += 1;
+                    return detailedResult(true);
+                }
+            );
+
+            assert.strictEqual(result.success, false);
+            assert.strictEqual(result.lockSkipped, false);
+            assert.strictEqual(result.lockIoError, true);
+            assert.strictEqual(calls, 0, 'no target may be written without the lock');
+            assert.strictEqual(result.outcome.stopReason, 'lockIoError');
+            assert.strictEqual(result.diagnosticReport?.issueCount, 0, 'sanitized diagnostics are still recorded');
+            assert.strictEqual(service.getLastOutcome()?.stopReason, 'lockIoError');
+        } finally {
+            restoreConfig();
+        }
+    });
+
+    test('a lock directory ioError shows the applyFailed notification once (#108)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'warnings' });
+        const context = createContext(new Map());
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService: ioErrorLockService(),
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        const warnings: Array<{ message: unknown; items: unknown[] }> = [];
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = ((message: unknown, ...items: unknown[]) => {
+            warnings.push({ message, items });
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'manual' },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            const i18n = I18nManager.getInstance();
+            assert.strictEqual(warnings.length, 1, 'an unusable lock directory is a real apply failure');
+            assert.strictEqual(warnings[0].message, i18n.t('remediation.notification.applyFailed'));
+            assert.deepStrictEqual(warnings[0].items, [i18n.t('action.showDetails')]);
+        } finally {
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
+            restoreConfig();
+        }
+    });
+
+    test('a silent apply with a lock directory ioError shows no notification (#108)', async () => {
+        const restoreConfig = stubOtakProxyConfiguration({ notificationLevel: 'warnings' });
+        const context = createContext(new Map());
+        const service = new ProxyRemediationService(
+            context,
+            async () => ({ mode: ProxyMode.Manual }),
+            {
+                lockService: ioErrorLockService(),
+                diagnostics: { run: async () => diagnosticReport() } as unknown as ProxyRuntimeDiagnostics,
+                sleep: async () => {}
+            }
+        );
+        const originalShowWarningMessage = vscode.window.showWarningMessage;
+        let warningCount = 0;
+        (vscode.window as unknown as {
+            showWarningMessage: (...args: unknown[]) => Thenable<string | undefined>;
+        }).showWarningMessage = (() => {
+            warningCount++;
+            return Promise.resolve(undefined);
+        }) as (...args: unknown[]) => Thenable<string | undefined>;
+
+        try {
+            const result = await service.applyWithSafety(
+                'http://proxy.example.com:8080',
+                true,
+                { trigger: 'startup', silent: true },
+                async () => detailedResult(true)
+            );
+            await new Promise(resolve => setTimeout(resolve, 20));
+
+            assert.strictEqual(result.lockIoError, true);
+            assert.strictEqual(warningCount, 0, 'silent applies stay silent');
+        } finally {
+            (vscode.window as unknown as {
+                showWarningMessage: typeof vscode.window.showWarningMessage;
+            }).showWarningMessage = originalShowWarningMessage;
+            restoreConfig();
         }
     });
 

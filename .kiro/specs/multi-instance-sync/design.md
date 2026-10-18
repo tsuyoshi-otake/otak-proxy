@@ -446,11 +446,6 @@ interface ISharedStateFile {
    * ファイルが存在するか確認する
    */
   exists(): Promise<boolean>;
-
-  /**
-   * 破損したファイルを復旧または削除する
-   */
-  recover(): Promise<boolean>;
 }
 
 interface SharedState {
@@ -476,7 +471,7 @@ interface SharedState {
 
 **Implementation Notes**
 - Integration: SyncManager経由でのみアクセス
-- Validation: JSON.parse失敗時はrecover()を呼び出し
+- Validation: JSON.parse失敗時はread()がnullを返し、次のwrite()がファイルを置き換える（クラッシュで残った*.tmpは掃除しない）
 - Risks: ディスク容量不足（エラーハンドリングで対応）
 
 ---
@@ -720,7 +715,7 @@ interface InstancesLockFile {
 - ファイル監視失敗: ポーリングフォールバック（5秒間隔）
 
 **State Errors**:
-- JSON解析失敗: ファイル復旧（recover()）、失敗時は再作成
+- JSON解析失敗: read()がnullを返し、次のwrite()で再作成
 - スキーマ不一致: マイグレーション処理、失敗時はリセット
 
 **Network/Process Errors**:

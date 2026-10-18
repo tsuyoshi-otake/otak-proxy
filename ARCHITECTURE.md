@@ -597,6 +597,7 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - `unsetProxy()`: Remove Git proxy settings
   - `getProxy()`: Get current Git proxy
 - **Features**: Cross-process mutex (5s timeout, 30s stale detection), retry logic (5 attempts, exponential backoff)
+  - On POSIX the mutex and the apply locks live in a per-user directory `<tmpdir>/otak-proxy-<uid>`, created 0700 and accepted only when it is a real directory owned by the uid with no group/other permission bits (`src/utils/PerUserLockDir.ts`). Windows keeps the shared temp paths because its temp directory is already per-user, so all of a user's windows still share one lock directory while two users never do. A directory that fails the checks reports an `ioError` lock outcome (applies) or an EACCES write failure (Git) — no silent fallback to a shared path. Residual risks: the lstat check cannot pin the directory between the check and the lock create (lstat-then-open TOCTOU), the wrong-owner check is covered by stubbed-lstat tests only (a real test needs root), and during an upgrade an old and a new window of the same user do not exclude each other until every window has restarted (POSIX only; no dual locking).
 
 #### VscodeConfigManager
 - **Responsibility**: Managing VS Code global http.proxy setting
@@ -693,7 +694,7 @@ Two serialized sections keep the ordering consistent without deadlocking:
 - **Responsibility**: Atomic read/write of shared state JSON file
 - **Key features**:
   - Atomic writes via write-then-rename pattern
-  - Corrupted file recovery
+  - A corrupt or unreadable file reads as no state, and the next write replaces it; stray `*.tmp` files from a crashed write are not removed
   - Retry on Windows EPERM/EACCES errors
 
 #### FileWatcher

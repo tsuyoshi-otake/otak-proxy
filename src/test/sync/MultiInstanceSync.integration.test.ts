@@ -186,11 +186,7 @@ suite('Multi-Instance Sync Integration Tests', () => {
             const readState = await sharedStateFile.read();
             assert.strictEqual(readState, null, 'Should return null for corrupted file');
 
-            // Recovery should fix the issue
-            const recovered = await sharedStateFile.recover();
-            assert.strictEqual(recovered, true, 'Recovery should succeed');
-
-            // Should be able to write new state
+            // The next write replaces the corrupt file; no separate recovery step
             await sharedStateFile.write({
                 version: 2,
                 lastModified: Date.now(),
@@ -199,7 +195,7 @@ suite('Multi-Instance Sync Integration Tests', () => {
             });
 
             const newState = await sharedStateFile.read();
-            assert.ok(newState, 'Should be able to read after recovery');
+            assert.ok(newState, 'Should be able to read after the replacing write');
             assert.strictEqual(newState!.version, 2);
         });
 

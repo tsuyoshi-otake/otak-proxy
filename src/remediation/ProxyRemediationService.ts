@@ -48,6 +48,8 @@ export interface SafeProxyApplyResult {
     retryAttempted: boolean;
     retrySuppressed: boolean;
     lockSkipped: boolean;
+    /** The apply lock's directory could not be used; no target was written (#108). */
+    lockIoError: boolean;
     /** Secret-free terminal record of this request, including why it stopped (#78). */
     outcome: RemediationOutcome;
 }
@@ -141,7 +143,8 @@ export class ProxyRemediationService {
                 diagnosticReport,
                 retryAttempted: false,
                 retrySuppressed: false,
-                lockSkipped: false
+                lockSkipped: false,
+                lockIoError: false
             }, true);
         }
 
@@ -160,11 +163,32 @@ export class ProxyRemediationService {
             return this.recordOutcome(attempt, enabled, options, settings, lockResult.value);
         }
 
+        const diagnosticReport = await this.runDiagnosticsIfEnabled(settings, true);
+        if (lockResult.failed.reason === 'ioError') {
+            // The lock directory is unusable (another uid owns it, wrong mode,
+            // no permissions): waiting never heals it, and no target may be
+            // written without the lock. This is a real apply failure, not a
+            // skip — the user is told through the normal failure notification.
+            const detail = lockResult.failed.ioError;
+            Logger.warn(
+                `Skipped proxy apply because the lock directory is unusable` +
+                (detail ? ` (${detail.dir}: ${detail.why})` : '')
+            );
+            this.notifyAfterApply(() => this.notifyApplyIoErrorIfNeeded(detail, settings, options));
+            return this.recordOutcome(attempt, enabled, options, settings, {
+                success: false,
+                diagnosticReport,
+                retryAttempted: false,
+                retrySuppressed: false,
+                lockSkipped: false,
+                lockIoError: true
+            });
+        }
+
         // Fresh diagnostics AFTER the bounded wait: by now the winning window
         // has normally finished converging, so a cached pre-wait report would
         // report stale divergence and re-trigger the very notification #30
         // removes.
-        const diagnosticReport = await this.runDiagnosticsIfEnabled(settings, true);
         Logger.warn('Skipped proxy apply because another otak-proxy window still owns the apply lock after the bounded wait.');
         this.notifyAfterApply(() => this.notifyLockDivergenceIfNeeded(diagnosticReport, settings, options));
         return this.recordOutcome(attempt, enabled, options, settings, {
@@ -172,7 +196,8 @@ export class ProxyRemediationService {
             diagnosticReport,
             retryAttempted: false,
             retrySuppressed: false,
-            lockSkipped: true
+            lockSkipped: true,
+            lockIoError: false
         });
     }
 
@@ -201,6 +226,7 @@ export class ProxyRemediationService {
             retryAttempted: result.retryAttempted,
             retrySuppressed: result.retrySuppressed,
             lockSkipped: result.lockSkipped,
+            lockIoError: result.lockIoError,
             consentDenied,
             retryableFailure,
             retryEnabled: settings.automaticRemediationEnabled && settings.automaticRetryEnabled
@@ -300,7 +326,8 @@ export class ProxyRemediationService {
             diagnosticReport,
             retryAttempted,
             retrySuppressed,
-            lockSkipped: false
+            lockSkipped: false,
+            lockIoError: false
         };
     }
 
@@ -531,6 +558,40 @@ export class ProxyRemediationService {
         const showDetails = i18n.t('action.showDetails');
         const action = await vscode.window.showWarningMessage(
             i18n.t('remediation.notification.issueDetected'),
+            showDetails
+        );
+        if (action === showDetails) {
+            await vscode.commands.executeCommand('otak-proxy.diagnoseProxy');
+        }
+    }
+
+    /**
+     * A lock directory the extension cannot use is a real apply failure, so it
+     * reports through the same notification a failed apply uses: silent and
+     * 'off' stay quiet, the flap tracker dedupes repeats, and the message is
+     * the existing applyFailed string with the Show Details action (#108).
+     */
+    private async notifyApplyIoErrorIfNeeded(
+        detail: { dir: string; why: string } | undefined,
+        settings: V3Settings,
+        options: SafeProxyApplyOptions
+    ): Promise<void> {
+        if (options.silent || settings.notificationLevel === 'off') {
+            return;
+        }
+
+        const fingerprint = crypto
+            .createHash('sha256')
+            .update(`lockIoError\n${detail?.dir ?? ''}\n${detail?.why ?? ''}`)
+            .digest('hex');
+        if (!(await this.flapTracker.shouldNotify(fingerprint, flapSettings(settings)))) {
+            return;
+        }
+
+        const i18n = I18nManager.getInstance();
+        const showDetails = i18n.t('action.showDetails');
+        const action = await vscode.window.showWarningMessage(
+            i18n.t('remediation.notification.applyFailed'),
             showDetails
         );
         if (action === showDetails) {
