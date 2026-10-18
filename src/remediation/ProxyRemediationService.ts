@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { ProxyDiagnosticReport, ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../i18n/I18nManager';
 import { proxyApplyPlanCredentialUrls } from '../core/ProxyApplyPlan';
+import { LogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
 import { publicFingerprint } from '../core/TargetOwnershipStore';
 import { ProxyState } from '../core/types';
@@ -29,7 +30,8 @@ export interface SafeProxyApplyOptions extends ProxyApplyOptions {
 export type ProxyApplyDetailedDelegate = (
     proxyUrl: string,
     enabled: boolean,
-    options?: ProxyApplyOptions
+    options?: ProxyApplyOptions,
+    basis?: LogicalGeneration
 ) => Promise<ProxyApplyDetailedResult>;
 
 export interface ProxyRemediationServiceOptions {

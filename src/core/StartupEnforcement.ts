@@ -1,11 +1,13 @@
+import { splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { ProxyState } from './types';
 
 /**
  * A stable signature of every input applyStartupProxyState reads — no
  * bookkeeping. Used to detect whether the persisted state changed while the
  * (slow) startup enforcement ran, so we can reconcile on the latest instead
- * of a stale activation snapshot (#12). requiresAuth is an input (the
- * unauthenticated-apply skip reads it), so a change in it alone re-runs.
+ * of a stale activation snapshot (#12). requiresAuth, authRequiredProxyUrls
+ * and the split fields are inputs (the unauthenticated-apply skip and the
+ * write plan read them), so a change in them alone re-runs (#108).
  */
 function startupEnforcementTarget(
     state: ProxyState,
@@ -16,6 +18,8 @@ function startupEnforcementTarget(
         activeUrl: getActiveProxyUrl(state),
         autoModeOff: state.autoModeOff === true,
         requiresAuth: state.requiresAuth === true,
+        authRequiredProxyUrls: state.authRequiredProxyUrls ?? [],
+        splitRouting: splitRoutingIdentity(state),
         noProxy: state.noProxy ?? ''
     });
 }

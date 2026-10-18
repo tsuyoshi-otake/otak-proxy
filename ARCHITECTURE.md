@@ -427,7 +427,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 - **Responsibility**: ProxyState persistence and retrieval
 - **Key features**:
   - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto; URL credentials are split out to SecretStorage on save and re-hydrated on load, keyed by the credential-free public URL
-  - `requiresAuth` / `authRequiredProxyUrls` (non-secret, synced): `requiresAuth` records that a URL field carried credentials and `authRequiredProxyUrls` lists those addresses as credential-free public URLs; the startup and sync applies are skipped rather than writing an address without the credentials it requires on this machine (#108)
+  - `requiresAuth` / `authRequiredProxyUrls` (non-secret, synced): `requiresAuth` records that a URL field carried credentials and `authRequiredProxyUrls` lists those addresses as credential-free public URLs; every apply attempt is refused rather than writing an address without the credentials it requires on this machine — the per-address gate runs inside `runProxyApplyAttempt` before consent, so monitor, toggle, sync and startup applies are all covered (#108)
   - `saveState()`: State saving (with automatic fallback)
   - `getNextMode()`: Off ↔ Auto (a leftover Manual value also advances to Auto)
   - `migrateOldSettings()`: Migration from legacy settings
@@ -448,6 +448,16 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 - **Invariant**: one state read per attempt provides both the generation fence
   and the write plan; credential consent and `otakProxy.credentialTargetPolicy`
   judge every credential-bearing URL in that plan; retries reuse it (#108)
+- **Gate**: `planUrlsMissingRequiredCredentials` runs after the plan is resolved and
+  before consent or any write; a refused attempt records
+  `UNRESOLVED_LOCAL_CREDENTIAL_ERROR` through a generation-fenced commit (#108)
+- **Basis**: the fence's generation is handed to the applier, which records its
+  per-target results against that state — a result commit that lands after
+  another writer committed a newer desired state is discarded instead (#108)
+- The startup reconcile signature (`startupEnforcementTarget`) covers every
+  input `applyStartupProxyState` reads, including the split fields and
+  `authRequiredProxyUrls`, so a credential-only change re-runs the startup
+  apply on the latest state (#108)
 
 ### Command Modules
 

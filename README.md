@@ -263,7 +263,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
   - `ask` (default): asks once per proxy address on each machine before writing its credentials. One prompt covers every credential-bearing URL an apply writes, including the HTTPS URL of a per-scheme proxy. Background applies are skipped until you allow it.
   - `allowPlaintextTargets`: writes without asking.
   - `blockPlaintextTargets`: never applies a proxy URL with credentials. Use it when your organization forbids credentials in tool config files.
-- If a proxy URL's credentials cannot be restored on this machine — for example storing them in SecretStorage failed — otak-proxy skips the apply instead of writing the URL without its credentials. For a per-scheme proxy this applies per address: the apply is skipped when any address that needed credentials cannot restore them.
+- If a proxy URL's credentials cannot be restored on this machine — for example storing them in SecretStorage failed — otak-proxy skips the apply instead of writing the URL without its credentials. This covers every apply: the system-proxy monitor, the toggle, sync, and startup, not only the startup check. For a per-scheme proxy this applies per address: the apply is skipped when any address that needed credentials cannot restore them.
 - Passwords, authorization headers, npm tokens, Git extra headers, command output, copied diagnostics, control characters, and sync data are redacted before they are logged or displayed.
 
 ### Network Activity

@@ -22,6 +22,9 @@ import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import { splitApplyOptionsFromState } from '../config/DetectedProxyValue';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { appliedProxyInfoFromState } from '../core/AppliedProxyProvenance';
+import { handleProxyStateChanged } from '../core/ExtensionProxyEventHandlers';
+import { createFencedApply } from '../core/GenerationFence';
+import { captureLogicalGeneration, LogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplier } from '../core/ProxyApplier';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
 import { resolveProxyApplyOptions, proxyApplyPlanCredentialUrls, proxyApplyPlanUrls } from '../core/ProxyApplyPlan';
@@ -29,7 +32,7 @@ import { ProxyStateManager } from '../core/ProxyStateManager';
 import { SystemProxyUpdateService } from '../core/SystemProxyUpdateService';
 import { publicFingerprint } from '../core/TargetOwnershipStore';
 import { InitializerContext } from '../core/ExtensionInitializerTypes';
-import { ProxyMode, ProxyState } from '../core/types';
+import { ProxyMode, ProxyState, stateRevision } from '../core/types';
 import { ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../i18n/I18nManager';
 import { InputSanitizer } from '../validation/InputSanitizer';
@@ -42,6 +45,7 @@ import * as SystemProxyDetectionUtils from '../utils/SystemProxyDetectionUtils';
 import {
     deriveAuthRequiredProxyUrls,
     getProxyPublicUrl,
+    planUrlsMissingRequiredCredentials,
     removeProxyCredentials,
     sanitizeProxyStateForPersistence,
     setRequiresAuthFromLiveUrls,
@@ -116,6 +120,8 @@ interface Harness {
     globalState: Map<string, unknown>;
     secrets: Map<string, string>;
     stateManager: ProxyStateManager;
+    applier: ProxyApplier;
+    service: ProxyRemediationService;
     git: ReturnType<typeof createFakeGitConfig>;
     npm: ReturnType<typeof createFakeNpmConfig>;
     envVars: Map<string, string>;
@@ -182,7 +188,8 @@ function createHarness(): Harness {
     const applySafely: Harness['applySafely'] = (url, enabled, trigger, options) =>
         runProxyApplyAttempt(
             stateManager,
-            (proxyUrl, shouldEnable, applyOptions) => applier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions),
+            (proxyUrl, shouldEnable, applyOptions, basis) =>
+                applier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions, basis),
             service,
             url,
             enabled,
@@ -190,7 +197,7 @@ function createHarness(): Harness {
             options
         );
 
-    return { globalState, secrets, stateManager, git, npm, envVars, vscodeSetCalls, applySafely };
+    return { globalState, secrets, stateManager, applier, service, git, npm, envVars, vscodeSetCalls, applySafely };
 }
 
 function assertNothingWritten(harness: Harness): void {
@@ -904,5 +911,366 @@ suite('authRequiredProxyUrls lifecycle (#108)', () => {
         const sanitized = sanitizeProxyStateForPersistence(state);
         assert.deepStrictEqual(sanitized, state);
         assert.strictEqual(JSON.stringify(sanitized), JSON.stringify(state));
+    });
+});
+
+/**
+ * Finding A (#108): the unauthenticated-apply gate used to run only at
+ * startup and in the sync receiver, so the monitor's next apply wrote an
+ * address without the credentials it could not restore. The per-address
+ * check now runs inside runProxyApplyAttempt itself, before consent or any
+ * write, for every trigger.
+ */
+suite('The per-address gate covers every apply (#108)', () => {
+    let sandbox: sinon.SinonSandbox;
+    let showWarning: sinon.SinonStub;
+    let otakConfig: Record<string, unknown>;
+
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+        sandbox = sinon.createSandbox();
+        otakConfig = {
+            notificationLevel: 'off',
+            hostUserLockEnabled: false,
+            diagnosticsEnabled: false
+        };
+        sandbox.stub(vscode.workspace, 'getConfiguration').callsFake(((section?: string) => ({
+            get: (key: string, defaultValue?: unknown) =>
+                section === 'otakProxy' && key in otakConfig ? otakConfig[key] : defaultValue,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        })) as typeof vscode.workspace.getConfiguration);
+        showWarning = sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    /** The persisted two-address split on a machine holding only proxy-a's secret. */
+    async function partialReload(): Promise<Harness> {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        await new ProxyStateManager(fakeExtensionContext(originState, originSecrets))
+            .saveState(twoAddressCredSplitState());
+        return reloadHarness(originState, new Map(
+            [...originSecrets].filter(([key]) => key !== getCredentialKeyForPublicUrl(proxyBPublicUrl()))
+        ));
+    }
+
+    for (const trigger of ['autoDetection', 'manual'] as const) {
+        test(`${trigger}: the apply is refused when one split address cannot restore its credentials`, async () => {
+            const harness = await partialReload();
+            // proxy-a already has consent; without the gate the write would
+            // proceed and write proxy-b without its credentials.
+            harness.globalState.set(CONSENT_KEY, { [consentKeyFor(PROXY_A_CRED_URL)]: true });
+            const reloaded = await harness.stateManager.getState();
+
+            const result = await harness.applySafely(reloaded.autoProxyUrl!, true, trigger, { silent: true });
+
+            assert.strictEqual(result.success, false);
+            assert.strictEqual(showWarning.callCount, 0, 'the gate runs before consent, so no prompt');
+            assertNothingWritten(harness);
+            assert.strictEqual(
+                (await harness.stateManager.getState()).lastError,
+                UNRESOLVED_LOCAL_CREDENTIAL_ERROR
+            );
+        });
+    }
+
+    test('with both secrets restored the same call writes both credential-bearing URLs', async () => {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        await new ProxyStateManager(fakeExtensionContext(originState, originSecrets))
+            .saveState(twoAddressCredSplitState());
+        const harness = reloadHarness(originState, originSecrets);
+        harness.globalState.set(CONSENT_KEY, {
+            [consentKeyFor(PROXY_A_CRED_URL)]: true,
+            [consentKeyFor(PROXY_B_CRED_URL)]: true
+        });
+        const reloaded = await harness.stateManager.getState();
+
+        const result = await harness.applySafely(reloaded.autoProxyUrl!, true, 'autoDetection', { silent: true });
+
+        assert.strictEqual(result.success, true, JSON.stringify(result.applyResult?.errors));
+        assert.strictEqual(harness.npm.get('proxy'), PROXY_A_CRED_URL);
+        assert.strictEqual(harness.npm.get('https-proxy'), PROXY_B_CRED_URL);
+        assert.strictEqual(harness.envVars.get('HTTPS_PROXY'), PROXY_B_CRED_URL);
+    });
+
+    test('the monitor reachability path is refused the same way and keeps its verdict', async () => {
+        const harness = await partialReload();
+        harness.globalState.set(CONSENT_KEY, { [consentKeyFor(PROXY_A_CRED_URL)]: true });
+        const reloaded = await harness.stateManager.getState();
+        assert.strictEqual(reloaded.autoProxyUrl, PROXY_A_CRED_URL);
+
+        // The production wiring: the reachability handler's apply goes
+        // through applyProxySettings, which is runProxyApplyAttempt.
+        const context = {
+            extensionContext: {} as never,
+            proxyStateManager: harness.stateManager,
+            proxyApplier: {} as never,
+            applyProxySettings: async (url: string, enabled: boolean, options?: ProxyApplyOptions) =>
+                (await harness.applySafely(url, enabled, 'autoDetection', options)).success,
+            systemProxyDetector: {} as never,
+            userNotifier: { showSuccess: () => {}, showWarning: () => {} } as never,
+            sanitizer: new InputSanitizer(),
+            proxyChangeLogger: {} as never,
+            publishProxyState: async () => {}
+        } as unknown as InitializerContext;
+
+        await handleProxyStateChanged(context, {
+            proxyUrl: PROXY_A_CRED_URL,
+            reachable: true,
+            previousState: false
+        });
+
+        assertNothingWritten(harness);
+        const stored = await harness.stateManager.getState();
+        assert.strictEqual(stored.lastError, UNRESOLVED_LOCAL_CREDENTIAL_ERROR);
+        assert.strictEqual(stored.proxyReachable, true, "the handler's reachability verdict stands");
+    });
+});
+
+/** The two gate rules after the split (#108 finding A). */
+suite('The unauthenticated-apply gate rules (#108)', () => {
+    const sameHostPublicUrl = () => getProxyPublicUrl(SAME_HOST_URL)!;
+
+    test('live same-host split (credentials on HTTPS only): no skip', () => {
+        const state: ProxyState = {
+            ...sameHostSplitState(),
+            requiresAuth: true,
+            authRequiredProxyUrls: [sameHostPublicUrl()]
+        };
+        const planUrls = proxyApplyPlanUrls(SAME_HOST_URL, splitApplyOptionsFromState(state));
+
+        // The HTTPS URL carries the credentials for the shared address.
+        assert.deepStrictEqual(planUrls, [SAME_HOST_URL, SAME_HOST_CRED_URL]);
+        assert.deepStrictEqual(planUrlsMissingRequiredCredentials(state, planUrls), []);
+        assert.strictEqual(shouldSkipUnauthenticatedApply(state, planUrls), false);
+    });
+
+    test('reloaded same-host split without the secret: skip', async () => {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        await new ProxyStateManager(fakeExtensionContext(originState, originSecrets))
+            .saveState(sameHostSplitState());
+        const harness = reloadHarness(originState);
+        const reloaded = await harness.stateManager.getState();
+        assert.ok(reloaded.autoProxyUrl && !reloaded.autoProxyUrl.includes('secret'));
+
+        const plan = resolveProxyApplyOptions(reloaded.autoProxyUrl!, undefined, reloaded);
+        const planUrls = proxyApplyPlanUrls(reloaded.autoProxyUrl!, plan);
+        assert.deepStrictEqual(planUrlsMissingRequiredCredentials(reloaded, planUrls), [sameHostPublicUrl()]);
+        assert.strictEqual(shouldSkipUnauthenticatedApply(reloaded, planUrls), true);
+    });
+
+    test('credential-free system proxy with a credential-bearing manualProxyUrl, list present: no skip', () => {
+        // requiresAuth is derived from all six URL fields, so the aggregate
+        // rule alone would refuse this credential-free plan on the strength
+        // of the unrelated manual URL (#108 background 4).
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_A_PLAIN_URL,
+            manualProxyUrl: PROXY_B_CRED_URL,
+            requiresAuth: true,
+            authRequiredProxyUrls: [proxyBPublicUrl()]
+        };
+        const plan = resolveProxyApplyOptions(PROXY_A_PLAIN_URL, undefined, state);
+        const planUrls = proxyApplyPlanUrls(PROXY_A_PLAIN_URL, plan);
+
+        assert.deepStrictEqual(planUrlsMissingRequiredCredentials(state, planUrls), []);
+        assert.strictEqual(
+            shouldSkipUnauthenticatedApply(state, planUrls),
+            false,
+            'the per-address list decides; the aggregate rule must not refuse the credential-free plan'
+        );
+    });
+
+    test('the same state without a list: shouldSkipUnauthenticatedApply skips, the per-address rule finds nothing missing', () => {
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_A_PLAIN_URL,
+            manualProxyUrl: PROXY_B_CRED_URL,
+            requiresAuth: true
+        };
+        const planUrls = [PROXY_A_PLAIN_URL];
+
+        assert.deepStrictEqual(planUrlsMissingRequiredCredentials(state, planUrls), []);
+        assert.strictEqual(
+            shouldSkipUnauthenticatedApply(state, planUrls),
+            true,
+            'a state saved before the list existed keeps the aggregate rule'
+        );
+    });
+
+    test('two addresses with one missing: skip', async () => {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        await new ProxyStateManager(fakeExtensionContext(originState, originSecrets))
+            .saveState(twoAddressCredSplitState());
+        const harness = reloadHarness(originState, new Map(
+            [...originSecrets].filter(([key]) => key !== getCredentialKeyForPublicUrl(proxyBPublicUrl()))
+        ));
+        const reloaded = await harness.stateManager.getState();
+
+        const plan = resolveProxyApplyOptions(reloaded.autoProxyUrl!, undefined, reloaded);
+        const planUrls = proxyApplyPlanUrls(reloaded.autoProxyUrl!, plan);
+        assert.deepStrictEqual(planUrlsMissingRequiredCredentials(reloaded, planUrls), [proxyBPublicUrl()]);
+        assert.strictEqual(shouldSkipUnauthenticatedApply(reloaded, planUrls), true);
+    });
+});
+
+/**
+ * Finding C (#108): an apply result is recorded against the state it was
+ * planned for. When another window commits a new desired state between the
+ * fence check and the write, the result commit must be discarded instead of
+ * landing on the new state and displacing the new state's own apply.
+ */
+suite('Apply results are recorded against the planned generation (#108)', () => {
+    const OTHER_PLAIN_URL = 'http://proxy-other.example.com:3128';
+    const NEW_PLAIN_URL = 'http://proxy-new.example.com:3128';
+    let sandbox: sinon.SinonSandbox;
+    let otakConfig: Record<string, unknown>;
+
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+        sandbox = sinon.createSandbox();
+        otakConfig = {
+            notificationLevel: 'off',
+            hostUserLockEnabled: false,
+            diagnosticsEnabled: false
+        };
+        sandbox.stub(vscode.workspace, 'getConfiguration').callsFake(((section?: string) => ({
+            get: (key: string, defaultValue?: unknown) =>
+                section === 'otakProxy' && key in otakConfig ? otakConfig[key] : defaultValue,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        })) as typeof vscode.workspace.getConfiguration);
+        sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    test('applyProxyDetailed after another writer moved the state past the basis commits nothing', async () => {
+        const harness = createHarness();
+        await harness.stateManager.saveState({ mode: ProxyMode.Auto, autoProxyUrl: HTTP_URL });
+        const basis = captureLogicalGeneration(await harness.stateManager.getState());
+        await harness.stateManager.saveState({
+            ...(await harness.stateManager.getState()),
+            autoProxyUrl: OTHER_PLAIN_URL
+        });
+        const otherRevision = stateRevision(await harness.stateManager.getState());
+
+        const result = await harness.applier.applyProxyDetailed(HTTP_URL, true, { silent: true }, basis);
+
+        assert.strictEqual(
+            result.committedRevision,
+            undefined,
+            'the result commit must not land on the newer desired state'
+        );
+        const stored = await harness.stateManager.getState();
+        assert.strictEqual(stateRevision(stored), otherRevision, "the stored revision is still the other writer's");
+        assert.strictEqual(stored.autoProxyUrl, OTHER_PLAIN_URL);
+        assert.strictEqual(stored.gitConfigured, undefined, 'the old plan leaves no result fields behind');
+    });
+
+    test('through runProxyApplyAttempt: the result commit is discarded and the new state\'s apply is not superseded', async () => {
+        const harness = createHarness();
+        await harness.stateManager.saveState({ mode: ProxyMode.Auto, autoProxyUrl: HTTP_URL });
+        let otherWindowGeneration: LogicalGeneration | undefined;
+
+        // Another window commits its new desired state between our fence
+        // check and our write, then the real applier runs over the old plan.
+        const delegate = async (proxyUrl: string, enabled: boolean, options?: ProxyApplyOptions, basis?: LogicalGeneration) => {
+            await harness.stateManager.saveState({
+                ...(await harness.stateManager.getState()),
+                autoProxyUrl: NEW_PLAIN_URL
+            });
+            otherWindowGeneration = captureLogicalGeneration(await harness.stateManager.getState());
+            return harness.applier.applyProxyDetailed(proxyUrl, enabled, options, basis);
+        };
+
+        const first = await runProxyApplyAttempt(
+            harness.stateManager,
+            delegate,
+            harness.service,
+            HTTP_URL,
+            true,
+            'autoDetection'
+        );
+
+        assert.strictEqual(
+            first.applyResult?.committedRevision,
+            undefined,
+            'the old generation\'s result commit must be discarded'
+        );
+        const stored = await harness.stateManager.getState();
+        assert.strictEqual(
+            stateRevision(stored),
+            otherWindowGeneration!.revision,
+            "the stored revision is still the other window's"
+        );
+        assert.strictEqual(stored.gitConfigured, undefined, 'the old plan leaves no result fields behind');
+
+        // The other window's own apply of the new state is not superseded by
+        // our discarded result commit and writes the new URL.
+        const otherWindowApply = createFencedApply(
+            harness.stateManager,
+            otherWindowGeneration!,
+            'autoDetection',
+            (u, e, o, b) => harness.applier.applyProxyDetailed(u, e, o, b)
+        );
+        const second = await otherWindowApply(NEW_PLAIN_URL, true, { silent: true });
+
+        assert.notStrictEqual(second.superseded, true, 'the new state\'s apply must not be superseded');
+        assert.strictEqual(second.committedRevision, otherWindowGeneration!.revision + 1);
+        assert.strictEqual(harness.npm.get('proxy'), NEW_PLAIN_URL);
+    });
+
+    test('a disable through the enabled-to-disable delegation records against the basis too', async () => {
+        // Positive control first: a current basis commits.
+        {
+            const harness = createHarness();
+            await harness.stateManager.saveState({ mode: ProxyMode.Auto, autoProxyUrl: HTTP_URL });
+            const basis = captureLogicalGeneration(await harness.stateManager.getState());
+
+            const result = await harness.applier.applyProxyDetailed('', false, { silent: true }, basis);
+
+            assert.strictEqual(
+                result.committedRevision,
+                basis.revision + 1,
+                'a current basis must commit (proves "undefined" below is staleness, not a no-commit path)'
+            );
+        }
+
+        // The stale-basis case: another writer saves a newer state between
+        // the fence check and the disable's result commit.
+        {
+            const harness = createHarness();
+            await harness.stateManager.saveState({ mode: ProxyMode.Auto, autoProxyUrl: HTTP_URL });
+            const basis = captureLogicalGeneration(await harness.stateManager.getState());
+            await harness.stateManager.saveState({
+                ...(await harness.stateManager.getState()),
+                autoProxyUrl: OTHER_PLAIN_URL
+            });
+            const otherRevision = stateRevision(await harness.stateManager.getState());
+
+            const result = await harness.applier.applyProxyDetailed('', false, { silent: true }, basis);
+
+            assert.strictEqual(
+                result.committedRevision,
+                undefined,
+                'the disable\'s result commit must not land on the newer desired state'
+            );
+            const stored = await harness.stateManager.getState();
+            assert.strictEqual(stateRevision(stored), otherRevision, "the stored revision is still the other writer's");
+            assert.strictEqual(stored.autoProxyUrl, OTHER_PLAIN_URL);
+            assert.strictEqual(stored.gitConfigured, undefined, 'the disable leaves no result fields behind');
+        }
     });
 });

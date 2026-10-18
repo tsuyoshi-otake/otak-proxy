@@ -200,7 +200,8 @@ async function applyProxySafely(
 ): Promise<boolean> {
     const result = await runProxyApplyAttempt(
         proxyStateManager,
-        (proxyUrl, shouldEnable, applyOptions) => proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions),
+        (proxyUrl, shouldEnable, applyOptions, basis) =>
+            proxyApplier.applyProxyDetailed(proxyUrl, shouldEnable, applyOptions, basis),
         proxyRemediationService,
         url,
         enabled,

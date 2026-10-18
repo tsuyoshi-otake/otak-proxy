@@ -1,8 +1,12 @@
-import { createFencedApply } from '../core/GenerationFence';
+import { commitUnlessStale, createFencedApply, StateWriter } from '../core/GenerationFence';
 import { captureLogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
-import { resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
-import { IProxyStateManager } from '../core/types';
+import { proxyApplyPlanUrls, resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
+import { Logger } from '../utils/Logger';
+import {
+    planUrlsMissingRequiredCredentials,
+    UNRESOLVED_LOCAL_CREDENTIAL_ERROR
+} from '../utils/ProxyStateSanitizer';
 import { RemediationStopReason } from './RemediationOutcome';
 import {
     ProxyApplyDetailedDelegate,
@@ -33,7 +37,7 @@ export interface ProxyApplyAttemptResult {
  * fenced apply directly, both over the same resolved plan.
  */
 export async function runProxyApplyAttempt(
-    stateReader: Pick<IProxyStateManager, 'getState'>,
+    stateWriter: StateWriter,
     applyDetailed: ProxyApplyDetailedDelegate,
     remediationService: Pick<ProxyRemediationService, 'applyWithSafety'> | undefined,
     url: string,
@@ -41,13 +45,35 @@ export async function runProxyApplyAttempt(
     trigger: ProxyApplyTrigger,
     options?: ProxyApplyOptions
 ): Promise<ProxyApplyAttemptResult> {
-    const state = await stateReader.getState();
+    const state = await stateWriter.getState();
+    const generation = captureLogicalGeneration(state);
     const plan = enabled && url
         ? resolveProxyApplyOptions(url, options, state)
         : options;
+
+    if (enabled && url) {
+        // The per-address rule only. The aggregate `requiresAuth` check must
+        // not run here: it is derived from all six URL fields, so it would
+        // also refuse a credential-free plan merely because an unrelated
+        // field (the manual fallback, say) carries credentials (#108).
+        const missing = planUrlsMissingRequiredCredentials(state, proxyApplyPlanUrls(url, plan));
+        if (missing.length > 0) {
+            Logger.warn(
+                `Skipping proxy apply: credentials for ${missing.join(', ')} are unavailable on this machine.`
+            );
+            // Reachability stays as the connection test's verdict: the
+            // address is reachable, it only lacks its credentials.
+            await commitUnlessStale(stateWriter, generation, 'applyResults', current => ({
+                ...current,
+                lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR
+            }));
+            return { success: false };
+        }
+    }
+
     const fencedApply = createFencedApply(
-        stateReader,
-        captureLogicalGeneration(state),
+        stateWriter,
+        generation,
         trigger,
         applyDetailed
     );

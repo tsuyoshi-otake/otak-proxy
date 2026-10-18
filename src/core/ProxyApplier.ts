@@ -212,20 +212,29 @@ export class ProxyApplier {
         return result.success;
     }
 
-    async applyProxyDetailed(proxyUrl: string, enabled: boolean, options?: ProxyApplyOptions): Promise<ProxyApplyDetailedResult> {
-        const applyGeneration = this.stateManager
+    async applyProxyDetailed(
+        proxyUrl: string,
+        enabled: boolean,
+        options?: ProxyApplyOptions,
+        basis?: LogicalGeneration
+    ): Promise<ProxyApplyDetailedResult> {
+        // `basis` is the generation the plan was resolved against; the result
+        // commit must land on that state or be discarded, never on a newer
+        // desired state another window committed meanwhile (#108). Direct
+        // callers without a basis keep the fresh read.
+        const applyGeneration = basis ?? (this.stateManager
             ? captureLogicalGeneration(await this.stateManager.getState())
-            : undefined;
+            : undefined);
         const errorAggregator = new ErrorAggregator();
-        
+
         // Edge Case 1: Handle empty URL as disable proxy (Requirement 4.1)
         if (!proxyUrl || proxyUrl.trim() === '') {
             enabled = false;
         }
-        
+
         // If disabling, use the dedicated disable function
         if (!enabled) {
-            return await this.disableProxyDetailed(options);
+            return await this.disableProxyDetailed(options, applyGeneration);
         }
 
         if (this.blockIfUntrustedWorkspace(options)) {
@@ -317,10 +326,10 @@ export class ProxyApplier {
         return result.success;
     }
 
-    async disableProxyDetailed(options?: ProxyApplyOptions): Promise<ProxyApplyDetailedResult> {
-        const applyGeneration = this.stateManager
+    async disableProxyDetailed(options?: ProxyApplyOptions, basis?: LogicalGeneration): Promise<ProxyApplyDetailedResult> {
+        const applyGeneration = basis ?? (this.stateManager
             ? captureLogicalGeneration(await this.stateManager.getState())
-            : undefined;
+            : undefined);
         const errorAggregator = new ErrorAggregator();
 
         if (this.blockIfUntrustedWorkspace(options)) {

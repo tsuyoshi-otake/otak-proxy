@@ -147,14 +147,49 @@ export function setRequiresAuthFromLiveUrls(state: ProxyState): void {
 }
 
 /**
+ * The public URLs (`getProxyPublicUrl` form) a write plan would write without
+ * the credentials `authRequiredProxyUrls` recorded for them (#108). A
+ * credential-bearing plan URL for the same public URL covers the address: the
+ * live same-host split carries the shared credentials on its HTTPS URL only,
+ * and hydration fills every field that shares an address. Sorted, so callers
+ * can name the missing addresses in a deterministic log line.
+ */
+export function planUrlsMissingRequiredCredentials(
+    state: ProxyState,
+    planUrls: string | readonly string[]
+): string[] {
+    const urls = (typeof planUrls === 'string' ? [planUrls] : planUrls).filter(url => Boolean(url));
+    const requiredUrls = state.authRequiredProxyUrls;
+    if (urls.length === 0 || !requiredUrls || requiredUrls.length === 0) {
+        return [];
+    }
+
+    const required = new Set(requiredUrls);
+    const covered = new Set(
+        urls.filter(url => hasProxyCredentials(url)).map(url => getProxyPublicUrl(url))
+    );
+    const missing = new Set<string>();
+    for (const url of urls) {
+        if (hasProxyCredentials(url)) {
+            continue;
+        }
+        const publicUrl = getProxyPublicUrl(url);
+        if (publicUrl && required.has(publicUrl) && !covered.has(publicUrl)) {
+            missing.add(publicUrl);
+        }
+    }
+    return [...missing].sort();
+}
+
+/**
  * Skip when applying would write a proxy address without the credentials it
- * requires on this machine (#108): either the state says credentials are
- * required but no URL in the write plan carries one after hydration (the
- * pre-list rule, kept for states persisted before `authRequiredProxyUrls`
- * existed), or a plan URL without credentials names an address the state
- * recorded as credential-bearing. A per-scheme plan is skipped when ANY of
- * its addresses is missing its credentials; an address that never carried
- * credentials does not trip the gate.
+ * requires on this machine (#108). When the state carries the per-address
+ * `authRequiredProxyUrls` list, that list alone decides
+ * ({@link planUrlsMissingRequiredCredentials}): `requiresAuth` is derived from all
+ * six URL fields, so the aggregate rule would also refuse a credential-free
+ * plan merely because an unrelated field (the manual fallback, say) carries
+ * credentials. The aggregate rule — credentials required but no plan URL
+ * carries one — remains only for states persisted before the list existed.
  */
 export function shouldSkipUnauthenticatedApply(
     state: ProxyState,
@@ -164,21 +199,11 @@ export function shouldSkipUnauthenticatedApply(
     if (urls.length === 0) {
         return false;
     }
-    if (state.requiresAuth === true && !urls.some(url => hasProxyCredentials(url))) {
-        return true;
-    }
     const requiredUrls = state.authRequiredProxyUrls;
-    if (!requiredUrls || requiredUrls.length === 0) {
-        return false;
+    if (requiredUrls && requiredUrls.length > 0) {
+        return planUrlsMissingRequiredCredentials(state, urls).length > 0;
     }
-    const required = new Set(requiredUrls);
-    return urls.some(url => {
-        if (hasProxyCredentials(url)) {
-            return false;
-        }
-        const publicUrl = getProxyPublicUrl(url);
-        return Boolean(publicUrl && required.has(publicUrl));
-    });
+    return state.requiresAuth === true && !urls.some(url => hasProxyCredentials(url));
 }
 
 export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState {
