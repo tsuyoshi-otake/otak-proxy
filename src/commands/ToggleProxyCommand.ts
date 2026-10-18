@@ -9,8 +9,15 @@
  */
 
 import * as vscode from 'vscode';
-import { clearPendingThenPublish, ApplyConvergenceContext } from '../core/ApplyConvergence';
-import { ProxyMode, stateRevision, type ProxyState, type ProxyTestResult } from '../core/types';
+import {
+    clearPendingThenPublish,
+    commitDecidedPatch,
+    diffProxyState,
+    ApplyConvergenceContext,
+    DecidedPatchWriter
+} from '../core/ApplyConvergence';
+import { captureLogicalGeneration, sameLogicalIdentity } from '../core/LogicalGeneration';
+import { ProxyMode, type ProxyState, type ProxyTestResult } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import {
@@ -41,21 +48,6 @@ function notifyAfterApply(task: () => Promise<void>): void {
     void task().catch(error => {
         Logger.warn('Toggle proxy notification failed:', error);
     });
-}
-
-function copyDetectedProxyState(target: ProxyState, source: ProxyState): void {
-    target.autoProxyUrl = source.autoProxyUrl;
-    target.lastSystemProxyCheck = source.lastSystemProxyCheck;
-    target.systemProxyDetected = source.systemProxyDetected;
-    target.lastSystemProxyUrl = source.lastSystemProxyUrl;
-    target.lastTestResult = source.lastTestResult;
-    target.proxyReachable = source.proxyReachable;
-    target.lastTestTimestamp = source.lastTestTimestamp;
-    target.usingFallbackProxy = source.usingFallbackProxy;
-    target.fallbackProxyUrl = source.fallbackProxyUrl;
-    target.autoModeOff = source.autoModeOff;
-    target.lastDetectionSource = source.lastDetectionSource;
-    target.requiresAuth = source.requiresAuth;
 }
 
 function setAutoModeOff(state: ProxyState): void {
@@ -96,6 +88,14 @@ async function promptForManualProxy(i18n: I18nManager): Promise<'configure' | 's
 }
 
 /**
+ * User-visible effects a decided state wants after the transition commits.
+ * Collected during the decision and run only for the round whose commit
+ * landed: a superseded or failed round must not leave a "using manual proxy"
+ * toast or a setup prompt behind.
+ */
+type ToggleFollowUp = () => void;
+
+/**
  * No manual proxy URL is configured. There's nothing to switch into, so
  * redirect to Auto OFF immediately (releasing the toggle queue) and show the
  * "configure now?" prompt as a detached follow-up notification.
@@ -104,29 +104,36 @@ async function promptForManualProxy(i18n: I18nManager): Promise<'configure' | 's
  * (ProxyStateManager.getNextMode never returns ProxyMode.Manual). Kept fixed
  * defensively for any future caller that targets Manual mode directly.
  */
-function handleManualProxyMissing(state: ProxyState, i18n: I18nManager): void {
+function handleManualProxyMissing(state: ProxyState, i18n: I18nManager, followUps: ToggleFollowUp[]): void {
     state.mode = ProxyMode.Auto;
     state.autoModeOff = true;
 
-    if (manualProxyMissingPromptInFlight) {
-        return;
-    }
-    manualProxyMissingPromptInFlight = true;
-
-    notifyAfterApply(async () => {
-        try {
-            const answer = await promptForManualProxy(i18n);
-            if (answer === 'configure') {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
-            }
-            // 'skipToAuto' / 'cancel': already redirected to Auto above; no-op.
-        } finally {
-            manualProxyMissingPromptInFlight = false;
+    followUps.push(() => {
+        if (manualProxyMissingPromptInFlight) {
+            return;
         }
+        manualProxyMissingPromptInFlight = true;
+
+        notifyAfterApply(async () => {
+            try {
+                const answer = await promptForManualProxy(i18n);
+                if (answer === 'configure') {
+                    await vscode.commands.executeCommand('otak-proxy.configureUrl');
+                }
+                // 'skipToAuto' / 'cancel': already redirected to Auto above; no-op.
+            } finally {
+                manualProxyMissingPromptInFlight = false;
+            }
+        });
     });
 }
 
-async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyState, manualProxyUrl: string): Promise<void> {
+function applyReachableFallbackProxy(
+    ctx: CommandContext,
+    state: ProxyState,
+    manualProxyUrl: string,
+    followUps: ToggleFollowUp[]
+): void {
     state.mode = ProxyMode.Auto;
     state.autoModeOff = false;
     state.usingFallbackProxy = true;
@@ -137,10 +144,16 @@ async function applyReachableFallbackProxy(ctx: CommandContext, state: ProxyStat
 
     const sanitizedManualProxyUrl = ctx.sanitizer.maskPassword(manualProxyUrl);
     Logger.log(`Fallback to Manual Proxy: ${sanitizedManualProxyUrl}`);
-    ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: sanitizedManualProxyUrl });
+    followUps.push(() => {
+        ctx.userNotifier.showSuccess('fallback.usingManualProxy', { url: sanitizedManualProxyUrl });
+    });
 }
 
-async function tryApplyManualFallback(ctx: CommandContext, state: ProxyState): Promise<boolean> {
+async function tryApplyManualFallback(
+    ctx: CommandContext,
+    state: ProxyState,
+    followUps: ToggleFollowUp[]
+): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('otakProxy');
     const fallbackEnabled = config.get<boolean>('enableFallback', true);
     const manualProxyUrl = state.manualProxyUrl;
@@ -155,7 +168,7 @@ async function tryApplyManualFallback(ctx: CommandContext, state: ProxyState): P
     state.lastTestTimestamp = Date.now();
 
     if (isProxyEndpointReachable(testResult)) {
-        await applyReachableFallbackProxy(ctx, state, manualProxyUrl);
+        applyReachableFallbackProxy(ctx, state, manualProxyUrl, followUps);
         return true;
     }
 
@@ -190,26 +203,28 @@ async function promptForSystemProxySetup(i18n: I18nManager): Promise<'configure'
  * themselves, so this is safe even if further toggles happen before the
  * user answers.
  */
-function handleSystemProxySetupPrompt(state: ProxyState, i18n: I18nManager): void {
+function handleSystemProxySetupPrompt(state: ProxyState, i18n: I18nManager, followUps: ToggleFollowUp[]): void {
     setAutoModeOff(state);
 
-    if (systemProxySetupPromptInFlight) {
-        return;
-    }
-    systemProxySetupPromptInFlight = true;
-
-    notifyAfterApply(async () => {
-        try {
-            const action = await promptForSystemProxySetup(i18n);
-            if (action === 'configure') {
-                await vscode.commands.executeCommand('otak-proxy.configureUrl');
-            } else if (action === 'import') {
-                await vscode.commands.executeCommand('otak-proxy.importProxy');
-            }
-            // 'cancel'/dismissed: Auto OFF already applied above; nothing more to do.
-        } finally {
-            systemProxySetupPromptInFlight = false;
+    followUps.push(() => {
+        if (systemProxySetupPromptInFlight) {
+            return;
         }
+        systemProxySetupPromptInFlight = true;
+
+        notifyAfterApply(async () => {
+            try {
+                const action = await promptForSystemProxySetup(i18n);
+                if (action === 'configure') {
+                    await vscode.commands.executeCommand('otak-proxy.configureUrl');
+                } else if (action === 'import') {
+                    await vscode.commands.executeCommand('otak-proxy.importProxy');
+                }
+                // 'cancel'/dismissed: Auto OFF already applied above; nothing more to do.
+            } finally {
+                systemProxySetupPromptInFlight = false;
+            }
+        });
     });
 }
 
@@ -220,102 +235,56 @@ function useDetectedAutoProxy(state: ProxyState, nextMode: ProxyMode): void {
     state.fallbackProxyUrl = undefined;
 }
 
-async function handleAutoModeTransition(
+/**
+ * Decides the desired state on a copy of the basis the round re-read. The
+ * toggle's own detection already ran (and committed) before this, so the
+ * basis is post-detection: nothing here writes to the store, the decision is
+ * folded onto the latest state by the CAS commit.
+ */
+async function decideNextState(
     ctx: CommandContext,
-    state: ProxyState,
+    decided: ProxyState,
     nextMode: ProxyMode,
-    i18n: I18nManager
+    detectionRan: boolean,
+    i18n: I18nManager,
+    followUps: ToggleFollowUp[]
 ): Promise<void> {
-    await ctx.checkAndUpdateSystemProxy();
-    const updatedState = await ctx.getProxyState();
-    copyDetectedProxyState(state, updatedState);
-
-    if (state.autoProxyUrl) {
-        useDetectedAutoProxy(state, nextMode);
+    if (nextMode === ProxyMode.Manual && !decided.manualProxyUrl) {
+        handleManualProxyMissing(decided, i18n, followUps);
         return;
     }
 
-    if (await tryApplyManualFallback(ctx, state)) {
+    if (nextMode === ProxyMode.Auto && detectionRan) {
+        if (decided.autoProxyUrl) {
+            useDetectedAutoProxy(decided, nextMode);
+            return;
+        }
+
+        if (await tryApplyManualFallback(ctx, decided, followUps)) {
+            return;
+        }
+
+        handleSystemProxySetupPrompt(decided, i18n, followUps);
         return;
     }
 
-    handleSystemProxySetupPrompt(state, i18n);
-}
-
-async function prepareNextMode(
-    ctx: CommandContext,
-    state: ProxyState,
-    nextMode: ProxyMode,
-    i18n: I18nManager
-): Promise<void> {
-    if (nextMode === ProxyMode.Manual && !state.manualProxyUrl) {
-        handleManualProxyMissing(state, i18n);
-        return;
-    }
-
-    if (nextMode === ProxyMode.Auto && !state.autoProxyUrl) {
-        await handleAutoModeTransition(ctx, state, nextMode, i18n);
-        return;
-    }
-
-    state.mode = nextMode;
+    decided.mode = nextMode;
 }
 
 /**
- * Bound on desired-state commit retries. A same-mode writer that only moves
- * the revision or detection/test fields (monitor test results, apply results,
- * the startup apply) makes the compare-and-set fail; refolding onto the new
- * latest and retrying a few times absorbs that without dropping the toggle.
+ * Bound on decide-and-commit rounds. A same-mode identity change (a newer
+ * detection or a manual URL edit) moves the basis the decision was made on,
+ * so the toggle decides again on the fresh state; a mode change supersedes
+ * instead. Bounded so a constantly moving state fails the toggle instead of
+ * spinning.
  */
-const TOGGLE_COMMIT_MAX_ATTEMPTS = 3;
+const TOGGLE_MAX_ROUNDS = 3;
 
-/**
- * Fields `prepareNextMode` changed between the pre-toggle snapshot and the
- * desired state. Only these are folded onto the latest state on each CAS
- * attempt: folding the whole snapshot would roll back fields other writers
- * own (fresh detection results, monitor test results, apply-result commits)
- * that landed between the snapshot and the commit (#78).
- */
-function changedToggleFields(before: ProxyState, after: ProxyState): Partial<ProxyState> {
-    const changed: Partial<ProxyState> = {};
-    for (const key of Object.keys(after) as (keyof ProxyState)[]) {
-        if (before[key] !== after[key]) {
-            (changed as Record<keyof ProxyState, unknown>)[key] = after[key];
-        }
-    }
-    return changed;
-}
-
-/**
- * Commits the desired mode with `convergencePending: true` before the apply,
- * without publishing. The toggle is superseded only when another writer
- * changed the saved mode (a sync toggle, another command): the fold then
- * returns undefined and the caller does not apply. Detection/test churn under
- * the same mode is folded onto the latest state and retried (#78).
- */
-async function commitToggleDesiredState(
-    ctx: CommandContext,
-    desiredFields: Partial<ProxyState>,
-    fromMode: ProxyMode
-): Promise<ProxyState | undefined> {
-    for (let attempt = 0; attempt < TOGGLE_COMMIT_MAX_ATTEMPTS; attempt++) {
-        const latest = await ctx.getProxyState();
-        if (latest.mode !== fromMode) {
-            return undefined;
-        }
-        const next: ProxyState = {
-            ...latest,
-            ...desiredFields,
-            revision: latest.revision,
-            convergencePending: true
-        };
-        const result = await ctx.commitProxyState(stateRevision(latest), next);
-        if (result.kind === 'committed') {
-            return result.state;
-        }
-    }
-    Logger.warn('Toggle proxy superseded: proxy state kept changing under the commit window.');
-    return undefined;
+function toggleWriter(ctx: CommandContext): DecidedPatchWriter {
+    return {
+        getState: ctx.getProxyState,
+        commitState: ctx.commitProxyState
+    };
 }
 
 function toggleConvergenceContext(ctx: CommandContext): ApplyConvergenceContext {
@@ -329,24 +298,31 @@ function toggleConvergenceContext(ctx: CommandContext): ApplyConvergenceContext 
     };
 }
 
-async function applyPreparedState(
-    ctx: CommandContext,
-    desiredFields: Partial<ProxyState>,
-    fromMode: ProxyMode
-): Promise<boolean> {
-    const committed = await commitToggleDesiredState(ctx, desiredFields, fromMode);
-    if (!committed) {
-        // Another writer owns the state now; nothing is owed, like a
-        // superseded fenced apply. Refresh the status bar from what they saved.
-        ctx.updateStatusBar(await ctx.getProxyState());
-        return true;
-    }
+/**
+ * The toggle could not land its decision: every CAS attempt lost the race or
+ * the basis kept moving under it. Nothing was saved or applied, so report the
+ * failure instead of silently returning success (#78).
+ */
+async function failToggle(ctx: CommandContext): Promise<CommandResult> {
+    Logger.warn('Toggle proxy failed: proxy state kept changing under the commit window.');
+    ctx.userNotifier.showError(
+        'error.toggleFailed',
+        ['suggestion.checkOutputLog', 'suggestion.reloadWindow']
+    );
+    ctx.updateStatusBar(await ctx.getProxyState());
+    return { success: false };
+}
 
+/**
+ * Applies a committed desired state. Off stops the monitor before the removal
+ * so a queued check cannot race the unset; Auto starts it after the pending
+ * flag is cleared and published, so the immediate check inside
+ * startSystemProxyMonitoring cannot publish a still-pending state to other
+ * windows (#78).
+ */
+async function applyCommittedToggle(ctx: CommandContext, committed: ProxyState): Promise<boolean> {
     const newActiveUrl = ctx.getActiveProxyUrl(committed);
 
-    // Off stops the monitor before the removal so a queued check cannot race
-    // the unset. Auto starts it only after the apply; both read the committed
-    // mode, which now is the desired one.
     if (committed.mode === ProxyMode.Off) {
         await ctx.stopSystemProxyMonitoring();
     }
@@ -356,16 +332,89 @@ async function applyPreparedState(
         committed.mode !== ProxyMode.Off && Boolean(newActiveUrl)
     );
 
+    await clearPendingThenPublish(toggleConvergenceContext(ctx), 'toggle', committed);
+
     if (committed.mode === ProxyMode.Auto) {
         await ctx.startSystemProxyMonitoring();
     }
-
-    await clearPendingThenPublish(toggleConvergenceContext(ctx), 'toggle', committed);
 
     // ProxyApplier records per-target success/failure in state. Refresh from that
     // authoritative result instead of presenting the pre-apply desired snapshot.
     ctx.updateStatusBar(await ctx.getProxyState());
     return applied;
+}
+
+/**
+ * The user asked for `nextMode` from `fromMode`; both were fixed by the first
+ * read. A later round whose basis shows a different mode means another writer
+ * moved the state — the toggle is superseded and owes nothing but the status
+ * bar, exactly like `moved` with a different mode.
+ */
+async function supersedeToggle(ctx: CommandContext, latest: ProxyState): Promise<CommandResult> {
+    ctx.updateStatusBar(latest);
+    return { success: true };
+}
+
+/** `false` asks the caller for another round; a CommandResult ends the toggle. */
+async function runToggleRound(
+    ctx: CommandContext,
+    i18n: I18nManager,
+    fromMode: ProxyMode,
+    nextMode: ProxyMode
+): Promise<CommandResult | false> {
+    let basis = await ctx.getProxyState();
+    if (basis.mode !== fromMode) {
+        return supersedeToggle(ctx, basis);
+    }
+
+    // The toggle's own detection commits its results to the store; decide on
+    // the state as it stands afterwards, not on a snapshot taken before.
+    const detectionRan = nextMode === ProxyMode.Auto && !basis.autoProxyUrl;
+    if (detectionRan) {
+        await ctx.checkAndUpdateSystemProxy();
+        basis = await ctx.getProxyState();
+        if (basis.mode !== fromMode) {
+            return supersedeToggle(ctx, basis);
+        }
+    }
+
+    const decided = { ...basis };
+    const followUps: ToggleFollowUp[] = [];
+    await decideNextState(ctx, decided, nextMode, detectionRan, i18n, followUps);
+
+    const patch: Partial<ProxyState> = {
+        ...diffProxyState(basis, decided),
+        convergencePending: true
+    };
+    const basisGeneration = captureLogicalGeneration(basis);
+    const outcome = await commitDecidedPatch(
+        toggleWriter(ctx),
+        patch,
+        latest => latest.mode === fromMode &&
+            sameLogicalIdentity(basisGeneration, captureLogicalGeneration(latest))
+    );
+
+    if (outcome.kind === 'committed') {
+        const applied = await applyCommittedToggle(ctx, outcome.state);
+        // Only the round whose commit landed runs its follow-ups; a moved or
+        // failed round's prompts and toasts are dropped with its decision.
+        for (const followUp of followUps) {
+            followUp();
+        }
+        return { success: applied };
+    }
+
+    if (outcome.kind === 'moved') {
+        if (outcome.state.mode !== fromMode) {
+            // Another writer owns the state now; nothing is owed, like a
+            // superseded fenced apply. Refresh the status bar from what they saved.
+            return supersedeToggle(ctx, outcome.state);
+        }
+        // Same mode, different identity: decide again on the fresh basis.
+        return false;
+    }
+
+    return failToggle(ctx);
 }
 
 /**
@@ -378,20 +427,20 @@ async function applyPreparedState(
  */
 async function executeToggleProxyOnce(ctx: CommandContext): Promise<CommandResult> {
     try {
-        const currentState = await ctx.getProxyState();
-        const fromMode = currentState.mode;
-        const nextMode = ctx.getNextMode(currentState.mode);
         const i18n = I18nManager.getInstance();
-
-        const preToggleSnapshot = { ...currentState };
-        await prepareNextMode(ctx, currentState, nextMode, i18n);
-        const applied = await applyPreparedState(
-            ctx,
-            changedToggleFields(preToggleSnapshot, currentState),
-            fromMode
-        );
-
-        return { success: applied };
+        // The toggle's intent is fixed by the first read: a re-decide round
+        // may fold onto newer same-mode state, but it must never retarget the
+        // mode another writer chose in the meantime.
+        const first = await ctx.getProxyState();
+        const fromMode = first.mode;
+        const nextMode = ctx.getNextMode(fromMode);
+        for (let round = 0; round < TOGGLE_MAX_ROUNDS; round++) {
+            const result = await runToggleRound(ctx, i18n, fromMode, nextMode);
+            if (result !== false) {
+                return result;
+            }
+        }
+        return failToggle(ctx);
     } catch (error) {
         Logger.error('Toggle proxy command failed:', error);
         

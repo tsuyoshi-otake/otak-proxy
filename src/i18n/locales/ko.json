@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "프록시 연결 테스트 실패: {url}",
     "error.proxyDoesNotWork": "감지된 프록시가 동작하지 않습니다",
     "error.toggleFailed": "프록시 모드 전환에 실패했습니다",
+    "error.initialSetupNotSaved": "프록시 상태가 계속 변경되어 초기 프록시 설정을 저장하지 못했습니다. 다음에 창이 시작될 때 다시 제공됩니다.",
     "error.configureUrlFailed": "프록시 URL 설정에 실패했습니다",
     "error.testProxyFailed": "프록시 연결 테스트에 실패했습니다",
     "error.importProxyFailed": "시스템 프록시 가져오기에 실패했습니다",

@@ -456,7 +456,13 @@ export async function performInitialSetup(context: vscode.ExtensionContext): Pro
         if (!hasSetup) {
             // If initializer is not initialized (e.g., in tests), skip setup
             if (initializer) {
-                await initializer.askForInitialSetup();
+                const finished = await initializer.askForInitialSetup();
+                if (!finished) {
+                    // The answer could not be saved; the setup is offered
+                    // again on the next start (hasInitialSetup stays unset).
+                    Logger.warn('Initial setup did not finish; it will be offered again on the next start.');
+                    return false;
+                }
             }
             await context.globalState.update('hasInitialSetup', true);
             return true;

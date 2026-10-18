@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "代理連線測試失敗：{url}",
     "error.proxyDoesNotWork": "偵測到的代理不可用",
     "error.toggleFailed": "切換代理模式失敗",
+    "error.initialSetupNotSaved": "由於代理狀態持續變更，無法儲存初始代理設定。下次視窗啟動時將再次提供此設定。",
     "error.configureUrlFailed": "設定代理 URL 失敗",
     "error.testProxyFailed": "測試代理連線失敗",
     "error.importProxyFailed": "匯入系統代理失敗",

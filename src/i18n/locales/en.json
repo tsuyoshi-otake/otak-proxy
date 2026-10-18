@@ -71,6 +71,7 @@
     "error.proxyTestFailed": "Proxy connection test failed for: {url}",
     "error.proxyDoesNotWork": "Detected proxy doesn't work",
     "error.toggleFailed": "Failed to toggle proxy mode",
+    "error.initialSetupNotSaved": "The initial proxy setup could not be saved because the proxy state kept changing. It will be offered again the next time the window starts.",
     "error.configureUrlFailed": "Failed to configure proxy URL",
     "error.testProxyFailed": "Failed to test proxy connection",
     "error.importProxyFailed": "Failed to import system proxy",

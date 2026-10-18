@@ -336,6 +336,8 @@ Replace `<version>` with the `version` in `package.json`, then reload VS Code.
 
 - **The proxy does not work**: make sure the URL starts with `http://` or `https://`, then run `otak: Test Proxy`.
 - **Settings look correct, but tools still use the old proxy**: run `otak: Diagnose Proxy State`. Existing terminals and some VS Code process-level proxy settings need a new terminal, a window reload, or a full VS Code restart.
+- **"Failed to toggle proxy mode"**: the saved proxy state kept changing while the toggle was saving it — for example another VS Code window or the background check saved at the same time — so the toggle changed nothing. Click the status bar again. If it keeps failing, reload the window and check the otak-proxy output log.
+- **"The initial proxy setup could not be saved..."**: the saved proxy state kept changing while your first-run answer was being saved, so the answer was not stored. The setup prompt is offered again the next time the window starts; answer it then. If it keeps failing, check the otak-proxy output log.
 - **A warning says saved Windows proxy environment settings differ from this VS Code process**: quit every VS Code window, start VS Code again, and open new terminals (see [Windows Environment Variable Check](#windows-environment-variable-check)).
 - **Proxy settings remain after switching Off or uninstalling**: switch otak-proxy Off first, then run `otak: Diagnose Proxy State`. If settings still remain, check them and remove only the entries you no longer want:
 

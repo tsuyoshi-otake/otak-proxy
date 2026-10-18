@@ -70,6 +70,7 @@
     "error.proxyTestFailed": "فشل اختبار اتصال الوكيل لـ: {url}",
     "error.proxyDoesNotWork": "الوكيل المُكتشف لا يعمل",
     "error.toggleFailed": "فشل تبديل وضع الوكيل",
+    "error.initialSetupNotSaved": "تعذّر حفظ الإعداد الأولي للوكيل لأن حالة الوكيل استمرت في التغيّر. سيُعرض الإعداد مرة أخرى عند بدء تشغيل النافذة في المرة القادمة.",
     "error.configureUrlFailed": "فشل تكوين عنوان الوكيل",
     "error.testProxyFailed": "فشل اختبار اتصال الوكيل",
     "error.importProxyFailed": "فشل استيراد وكيل النظام",

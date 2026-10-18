@@ -71,6 +71,7 @@
     "error.proxyTestFailed": "Proxy接続テストが失敗しました: {url}",
     "error.proxyDoesNotWork": "検出されたProxyは動作しません",
     "error.toggleFailed": "Proxyモードの切り替えに失敗しました",
+    "error.initialSetupNotSaved": "プロキシ状態が変わり続けたため、初期プロキシ設定を保存できませんでした。次回ウィンドウ起動時に再度提示されます。",
     "error.configureUrlFailed": "Proxy URLの設定に失敗しました",
     "error.testProxyFailed": "Proxy接続のテストに失敗しました",
     "error.importProxyFailed": "システムProxyのインポートに失敗しました",

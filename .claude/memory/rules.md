@@ -56,6 +56,15 @@
   `String.prototype.trim()` は末尾の `\n` も消すので、拒否していた `http://proxy.com/\n` が
   `http://proxy.com/` になり、受理された（property test の反例、#108）。proxy URL の正規化で除くのは ASCII の空白だけ。
 
+- **本番が通らない fallback 分岐は消し、fake には本番と同じ契約を持たせる。** 初回セットアップの
+  「`commitState` が無ければ `saveState`」は、テストの fake だけが通った。`calledOnce(saveStateStub)` を見る
+  3 件のテストは本番が通らない経路を検査し、分岐は直した欠陥（#109 への指摘 F2）を黙って戻せた。fake に
+  revision 付きの `commitState` を持たせ、「何も書かない」の検査は `saveState` と `commitState` の両方を見る（#78）。
+
+- **ミューテーションが単独で green なら、別の層が吸収していないか調べる。** 「トグル前のスナップショットとの差分」は、
+  identity のガードが `moved` にして吸収した。ガードが守らない範囲（同じ proxy の新しい bookkeeping）でテストを
+  書くと、単独で red になった（#78、テスト「same-identity bookkeeping committed inside the CAS window is kept」）。
+
 ## 外部ツールのスタブ
 
 - **`{stdout:'', stderr:''}` を返すだけのコマンドスタブは書かない。**
@@ -72,6 +81,11 @@
   `createFakeNpmConfig` がこれを模倣していなかったので、認証情報付き URL の npm 書き込み検証と
   Off の削除が実機で必ず失敗することがテストで見えなかった（CFG-1）。#85 で fake も拒否するようにし、
   user config ファイルの中身は `readUserConfigFile` で返す。
+
+- **再エクスポートした関数は、定義したモジュールで stub する。** tsc は `export { x } from './y'` を getter に
+  コンパイルする。`sinon.stub(ProxyUtils, 'testProxyConnectionParallel')` は例外を出さずに成功するが、
+  `ProxyUtils.testProxyConnectionParallel` は本物の関数を返し続ける。定義元の `utils/ProxyConnectionTest` を
+  stub すると、ProxyUtils 経由の呼び出しにも効く（sinon 21.1.2 と `out/utils/ProxyUtils.js` で確認、#78）。
 
 ## npm
 
@@ -112,11 +126,34 @@
   本物の `ProxyStateManager` と revision を進める applier を通す。stub context は revision を進めないので、
   toggle が mode を保存しない欠陥（#78 の症状をコードで再現した原因、2026-10-18 監査）は全テスト pass のまま
   v3.2.7〜v3.2.16 に出荷された。初回セットアップの署名と起動ループの署名にも同じ取り違えがあった。
-- **目的の状態は apply の前にコミットし、最新の保存値には自分が変えたフィールドだけを重ねる。**
+- **目的の状態は apply の前にコミットし、最新の保存値には自分が決めたフィールドの差分だけを重ねる。**
+  持ち主は `commitDecidedPatch`（`src/core/ApplyConvergence.ts`）で、トグルと初回セットアップが使う。
   トグルは `convergencePending: true` でコミットしてから apply する（apply 中の診断が新しい mode を読む）。
-  スナップショット全体を重ねると、スナップショットから CAS までに他 writer が書いた検出・テスト結果を消す。
-  CAS の失敗で superseded にするのは、決定のフィールド（mode）が変わったときだけ。revision だけが進んだ
-  ときは重ね直して再試行する（#78、どちらもミューテーションで回帰テストが red になることを確認）。
+  差分は、検出の後に読み直した state と決定の差（`diffProxyState`、キーの和集合。決定で消したフィールドは消す）。
+  スナップショット全体や、検出のときに読んだ値のコピーを重ねると、その後に他 writer が書いた検出・テスト結果を
+  消す（#109 への Codex の指摘 F5、F2）。CAS の結果は分けて扱う: revision だけが進んだら重ね直す、mode が
+  変わったら superseded、同じ mode で identity が変わったら決め直す、上限まで負けて最後の読み直し（次の項目）
+  でもガードを通ったら失敗としてエラーを出す（success を返すと、何も起きないトグルになる、F4）。（#78、各分岐は
+  ミューテーションで回帰テストが red になることを確認）
+- **CAS を使い切ったら、最新の state をもう一度ガードにかけてから `exhausted`（失敗）と決める。**
+  3 回目の負けで勝ったのが別のウィンドウのトグルや新しい検出なら、失敗ではなく `moved`（superseded か決め直し）。
+  この読み直しが無かったので、他 writer の正当な変更で「トグル失敗」が出た（#111 への Codex の指摘 F6）。
+  読むのは `writer.getState()` で、`superseded` の結果の `current` ではない。`commitState` が返す保存値は
+  資格情報を持たないことがあり、`proxyUrlIdentity` は資格情報を含むので、identity が変わったと誤判定する
+  （テスト「the moved/exhausted check reads through getState, not the superseded payload」がミューテーションで
+  red になることを確認、#78）。
+- **初回セットアップの完了の印（`hasInitialSetup`）は、回答を保存できたときだけ書く。** セットアップは
+  `exhausted` を `moved` と同じ「終わった」に畳み、`performInitialSetup` が印を書いて、保存されなかった回答は
+  二度と聞かれなかった（F7）。`askForInitialSetup()` は `exhausted` のときだけ false を返し、セットアップは
+  `error.initialSetupNotSaved` を出す。次の起動で再び聞く（#78、ミューテーションで red を確認）。
+- **再試行のラウンドで、ユーザーの意図を読み直した state から計算し直さない。** トグルの次の mode は今の mode
+  から決まる。ラウンド 2 で計算し直すと、別のウィンドウが先に Auto を保存したときに Off をコミットし、相手の
+  選択を打ち消した（テスト「a mode change before a re-decide round supersedes instead of undoing it」、修正前は `false !== true`）。`fromMode` / `nextMode` は最初の読み取りで固定し、
+  mode が変わっていたら superseded にする（#78）。
+- **やり直しうる決定の中で、ユーザーに見える副作用を実行しない。** トーストやプロンプトは集めておき、コミットが
+  通ったラウンドの apply の後だけ実行する。決定の中で出すと、決め直すたびに出て（2 回）、失敗した
+  トグルでも「トグル失敗」と並んで出た（テスト「the fallback toast fires once, only for the committed round」と
+  「a failing toggle shows no fallback toast alongside the error」、#78）。
 
 ## 診断レポート
 
@@ -257,6 +294,10 @@
   #108 の URL 正規化の下書きは、`HTTP://` を「拒否されていた」と書いた。main の scheme 判定は大文字小文字を
   区別していたので、`HTTP://` は authority の検査を素通りして受理されていた。
 
+- **処理の順序や分岐を変えたら、ARCHITECTURE.md の該当フローも同じ変更で直す。** #109 はトグルのコミットと
+  apply の順を入れ替えたが、ARCHITECTURE.md の 2 か所は「apply → 保存」のまま残った（#78 の追補で直した）。
+  `git grep -n -i "<機能の語>" -- README.md ARCHITECTURE.md CLAUDE.md src/test/README.md` で探す。
+
 ## VS Code ホストの前提
 
 - **`http.proxy` は local window で APPLICATION scope。Settings Sync で他の端末へ同期される。**
@@ -278,8 +319,16 @@
   `<<'PY'` の中の `\n` / `\\` が壊れ、パッチスクリプトが無言で不一致になる。
   バックスラッシュを含むスクリプトは Write ツールでファイルに書いてから実行する。
 
-- **Write ツールは LF で書く。** 作業ツリーは CRLF（core.autocrlf=true、.gitattributes なし）なので、
-  Write で丸ごと書いたファイルは CRLF に戻し、CRLF 数と LF 数が一致することを確かめる（README 更新）。
+- **Devin のシェル経由のヒアドキュメント（`node <<'EOF'`）は非 ASCII を壊す。** 文字がコンソールの
+  コードページ 932 を通り、16 ロケールのうち 15 個の翻訳が `?`、U+FFFD、ダイアクリティカルマークの欠落に
+  なった（テストは全部 pass、レビューで発見、#78）。非 ASCII はファイルツールで UTF-8 のファイルに書かせるか、
+  ASCII だけのソースに `\u` エスケープで書かせる。確かめるときはコンソールの表示を信じず、node で
+  コードポイントを読むか、UTF-8 のファイルに書き出して Read で読む。
+
+- **Write ツールは LF で書く。作業ツリーの改行コードはファイルごとに違う。** core.autocrlf=true、
+  .gitattributes なしで、2026-10-18 の `git ls-files --eol` は w/crlf 397、w/lf 191、w/mixed 25。
+  編集の前に node で数え、そのファイルの改行コードを保つ（CRLF のファイルは CRLF 数と LF 数が一致する、
+  LF のファイルは CR が 0）。「README は LF」「作業ツリーは CRLF」と一般化して、2 回とも間違えた（#78）。
 
 - **Write ツールは行末空白を削る。** 空白だけの行を含むパッチのアンカーは一致しなくなる。
   アンカーに空白行を入れない（#78）。
