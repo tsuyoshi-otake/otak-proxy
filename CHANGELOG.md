@@ -7,6 +7,7 @@
 - During a toggle, diagnostics now see the new mode, so Off → Auto no longer reports the proxy it just wrote as a leftover and no longer runs a needless convergence retry (#78).
 - The first-run setup answer is no longer discarded when the startup apply finishes while the prompt is open (#78).
 - The startup proxy enforcement no longer applies the same proxy up to three times: it now re-runs only when the proxy state actually changed during the apply (#78).
+- Proxy URLs that a browser URL parser accepts but the extension rejected are now picked up: a trailing `/` (for example `HTTP_PROXY=http://proxy.corp.com:8080/`), underscores in host names such as Docker service names (`http://squid_proxy:3128`), and a literal `%` in credentials (`http://user:100%@proxy:8080`) no longer make detection report "no proxy", and a saved per-scheme proxy URL with credentials no longer fails validation after a window reload. Entered and detected URLs are converted to one canonical form (lower-case scheme, no trailing `/`), and an upper-case scheme such as `HTTP://` now gets the same host and credential checks as a lower-case one. A `%` in a password is no longer corrupted when the password is read back from secret storage (#108).
 
 ## [3.2.16] - 2026-10-03
 

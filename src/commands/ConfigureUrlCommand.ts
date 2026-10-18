@@ -9,7 +9,7 @@
 
 import * as vscode from 'vscode';
 import { ProxyMode } from '../core/types';
-import { validateProxyUrl } from '../utils/ProxyUtils';
+import { canonicalizeValidProxyUrl } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
 import { OutputChannelManager } from '../errors/OutputChannelManager';
@@ -70,13 +70,21 @@ async function handleProxyUrlInput(
     proxyUrl: string,
     i18n: I18nManager
 ): Promise<CommandResult> {
-    if (proxyUrl && !validateProxyUrl(proxyUrl)) {
-        await showInvalidProxyUrl(ctx, proxyUrl, i18n);
-        return { success: false };
+    // Store and apply the canonical form (#108): a URL the validator accepts
+    // in a non-canonical spelling (trailing slash, upper-case scheme, literal
+    // `%` in credentials) must reach every downstream consumer canonicalized.
+    let canonicalUrl = '';
+    if (proxyUrl) {
+        const canonical = canonicalizeValidProxyUrl(proxyUrl);
+        if (!canonical) {
+            await showInvalidProxyUrl(ctx, proxyUrl, i18n);
+            return { success: false };
+        }
+        canonicalUrl = canonical;
     }
 
-    await saveManualProxyUrl(ctx, state, proxyUrl);
-    await applyManualModeChange(ctx, state, proxyUrl);
+    await saveManualProxyUrl(ctx, state, canonicalUrl);
+    await applyManualModeChange(ctx, state, canonicalUrl);
     return { success: true };
 }
 

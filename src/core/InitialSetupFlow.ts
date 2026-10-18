@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { I18nManager } from '../i18n/I18nManager';
 import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
-import { detectSystemProxySettingsWithSource, validateProxyUrl } from '../utils/ProxyUtils';
+import { canonicalizeValidProxyUrl, detectSystemProxySettingsWithSource, validateProxyUrl } from '../utils/ProxyUtils';
 import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
@@ -158,7 +158,8 @@ export class InitialSetupFlow {
             return;
         }
 
-        if (!validateProxyUrl(manualProxyUrl)) {
+        const canonicalUrl = canonicalizeValidProxyUrl(manualProxyUrl);
+        if (!canonicalUrl) {
             this.context.userNotifier.showError(
                 'error.invalidProxyUrl',
                 [
@@ -174,22 +175,22 @@ export class InitialSetupFlow {
             return;
         }
 
-        state.manualProxyUrl = manualProxyUrl;
-        this.useAutoProxy(state, manualProxyUrl, true);
+        state.manualProxyUrl = canonicalUrl;
+        this.useAutoProxy(state, canonicalUrl, true);
         await this.context.proxyStateManager.saveState(state);
 
         await vscode.workspace.getConfiguration('otakProxy').update(
             'proxyUrl',
-            removeProxyCredentials(manualProxyUrl) || manualProxyUrl,
+            removeProxyCredentials(canonicalUrl) || canonicalUrl,
             vscode.ConfigurationTarget.Global
         );
 
-        const applied = await applyProxyThroughContext(this.context, manualProxyUrl, true);
+        const applied = await applyProxyThroughContext(this.context, canonicalUrl, true);
         this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
         if (applied) {
             this.context.userNotifier.showSuccess(
                 'message.manualProxyConfigured',
-                { url: this.context.sanitizer.maskPassword(manualProxyUrl) }
+                { url: this.context.sanitizer.maskPassword(canonicalUrl) }
             );
         }
     }

@@ -110,13 +110,21 @@ function hasUsableCredentials(credentials: ProxyCredentials | undefined): boolea
     return Boolean(credentials?.username || credentials?.password);
 }
 
+// The WHATWG username/password setters percent-encode reserved characters but
+// leave a literal `%` untouched, so a decoded `%` would corrupt the rebuilt URL
+// on the next split (or break parsing) (#108). Escape it to `%25` first; for
+// credentials without `%` this is a no-op and the output stays byte-identical.
+function encodeCredentialPart(value: string): string {
+    return value.replace(/%/g, '%25');
+}
+
 export function buildProxyUrlWithCredentials(publicUrl: string, credentials: ProxyCredentials): string {
     const parsed = new URL(publicUrl);
     if (credentials.username) {
-        parsed.username = credentials.username;
+        parsed.username = encodeCredentialPart(credentials.username);
     }
     if (credentials.password) {
-        parsed.password = credentials.password;
+        parsed.password = encodeCredentialPart(credentials.password);
     }
     const reconstructed = parsed.toString();
     if (parsed.pathname === '/' && !parsed.search && !parsed.hash) {

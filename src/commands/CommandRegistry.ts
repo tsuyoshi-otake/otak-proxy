@@ -22,6 +22,7 @@ import type { RemediationOutcome } from '../remediation/RemediationOutcome';
 import { executeResetWinHttpProxy } from '../remediation/WindowsProxyActionService';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
 import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { canonicalizeValidProxyUrl } from '../utils/ProxyUrlUtils';
 
 /**
  * Configuration for CommandRegistry
@@ -250,7 +251,12 @@ export class CommandRegistry {
      */
     private async handleProxyUrlChange(): Promise<void> {
         const state = await this.commandContext.getProxyState();
-        const newUrl = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
+        const configuredUrl = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
+        // Store and apply the canonical form (#108); invalid values keep the
+        // raw spelling so the apply path reports them unchanged.
+        const newUrl = configuredUrl
+            ? canonicalizeValidProxyUrl(configuredUrl) ?? configuredUrl
+            : configuredUrl;
         const newPublicUrl = removeProxyCredentials(newUrl) || newUrl;
         const newComparableUrl = getProxyPublicUrl(newUrl) || newUrl;
         const currentPublicUrl = getProxyPublicUrl(state.manualProxyUrl) || state.manualProxyUrl || '';
