@@ -18,6 +18,10 @@
 - **unit lane は worker ごとに tmpdir と Git / npm 設定を分けている（#103）。** `scripts/lib/unit-mocha.mjs` と
   `scripts/unit-worker-isolation.cjs` が持つ。runner を変えたら `npm run test:unit:isolation` を通す。後片付けは
   runner の `finally` で行い、worker の exit handler には置かない（`--bail` が worker を強制終了する）。
+- **テストが作る一時ディレクトリは、suite の後片付けが消す場所に作る。** unit lane は TEMP / TMP / TMPDIR を
+  実行ごとのディレクトリに向けて最後に消すので、`os.tmpdir()` に直接作って消さないテストも unit lane では漏れが
+  見えない。mocha を直接動かすと残る（PR #114 の repository モードのテストが `otak-iuc-repo-*` を 2 個残した。
+  `makeDir` で suite の `workDir` の下に移し、mocha を直接動かす前後で数が変わらないことを確かめた）。
 - **mocha を直接叩くときは `GIT_CONFIG_GLOBAL` / `NPM_CONFIG_USERCONFIG` を自分で設定する。**
   分離を用意しているのは `scripts/run-unit-tests.mjs` と `.vscode-test.mjs` の側であって
   mocha ではない。`npx mocha ...` を直に実行すると `GitConfigManager.test.ts` の
@@ -304,6 +308,14 @@
   `npm run test:smoke` / `npm run lint:unicode:dist`、package と VSIX の走査）は PR の CI
   （`.github/workflows/ci.yml`、Linux）でも走る。タグを打つ前にローカルでも通す。VS Code host の全件
   (`npm test`) は gate ではない。
+
+- **公開のゲートは、確かめなかったものを通さない。** 中身を見ずに飛ばす判定は、攻撃者が選べない性質で行う。
+  拡張子は選べるうえ、`require()` は `.json` / `.node` 以外の拡張子を JavaScript として読む。不可視文字のスキャナは
+  中身のシグネチャで binary を判定し、飛ばしたものが `require()` で `SyntaxError` になることをテストで確かめる
+  （`src/test/security/BinarySignature.test.ts`）。読めないファイルと通常ファイルでないエントリは失敗にし、
+  想定内の欠落（repository モードの ENOENT）だけを名前を付けて数える。「数えるだけ」のカウンタを通過の根拠に
+  しない（PR #114 で Codex が指摘。元のスキャナで payload 入りの `.png` が `0 scanned, 3 skipped by extension`、
+  symlink が `2 scanned` で通ることを確かめた、#108）。
 
 - **実物の外部ツールを叩くテストは、タグを打つ前に CI と同じ版でもローカルで回す。** CI は ubuntu-latest +
   Node 22（npm 10.9.9）で、ローカルの npm 11 だけでは版差の不具合を見逃す（#88）。npm は `~/tmp` の一時 dir に

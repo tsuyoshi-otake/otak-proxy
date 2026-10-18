@@ -1883,3 +1883,57 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - registry ごとに job を分けたので、片方だけ失敗したらその job だけを re-run できる。`--skip-duplicate` が無いので、公開済みの registry の job をもう一度走らせると失敗する（まだ試していない）。
 - 低のビルドのうち、VS Code ホストのテストの同期状態が `out/test` に書かれること、PBT の evidence が追跡対象のディレクトリに溜まること、参照されないアセット、`clean` スクリプトと `--max-warnings 0` は、このコミットでは扱っていない（フォローアップ）。
 - 既存の 226 個のプロファイル（約 3.2 GB）は残っている。この変更の前に作られたもので、消すかはユーザーが決める。
+
+## 2026-10-19 — #108 PR #114 のレビュー 1 回目: 不可視文字のスキャナは拡張子を信用せず、読めないファイルで失敗する
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 14）
+**PR**: [#114](https://github.com/tsuyoshi-otake/otak-proxy/pull/114)
+**コミット**: `9ae1d80`（fix/108-release-gates）
+**分担**: 実装は Devin（10g、レビューと独立検証の指摘の修正 10h、10i）。Codex の指摘の確認、レビュー、コミット、Codex への返信は Claude Code。
+
+### 症状
+
+Codex のレビュー（b87d06b に対する P2 が 2 件）:
+
+1. `scripts/check-invisible-unicode.mjs:169`: `BINARY_EXTENSIONS` に載った拡張子（`.png`、`.mp3` など 21 種）のファイルを、中身を読まずに飛ばした。Node の `require()` は `.json` と `.node` 以外の拡張子をすべて JavaScript として読む。VSIX は `images/**` と `sounds/**` を出荷するので、`images/payload.png` に UTF-8 の payload を入れれば、ゲートが一度も読まないまま `require()` で実行できた。
+2. `:178`: 読めないファイルは `unreadable` を数えるだけだった。ほかのファイルを 1 件でも走査できれば exit 0 になった。`walkDirectory` は通常ファイルでないエントリ（symlink など）を黙って落とした。
+
+### 原因
+
+1. b970895 で「binary の判定を拡張子だけにした」とき、拡張子を「中身がコードでない」証拠として扱った。拡張子は攻撃者が選べるファイル名の一部で、読み込む側（`require()`）は拡張子で読み方を変えない。
+2. 読めないファイルを、repository モードで想定している「tracked だが作業ツリーに無いファイル」と同じ扱いにしていた。ゲートは読まなかったものを通してはいけない。
+
+### 修正
+
+- `scripts/lib/binary-signature.mjs`（新規）: `isVerifiedBinary(fileName, buffer)`。拡張子が表にあり、かつ中身がその形式のシグネチャを持つときだけ binary として飛ばす。表は VSIX が実際に持つ 2 形式だけ: `.png`（8 バイトのシグネチャ）、`.mp3`（先頭の 0x00 の並びの後に、ID3v2 のヘッダ（major 2〜4、revision 0）か MPEG のフレーム同期）。受け入れるシグネチャはどれも、検査するバイトの中で JavaScript として不正になる（コメントや文字列を開けるものより先に、0x80 以上のバイトか、文字列とコメントの中でしか許されない C0 制御文字が来る）。だから飛ばしたファイルは `require()` でコードとして読めない。シグネチャが印字可能な ASCII の形式（GIF `GIF89a`、BMP `BM`、RIFF、`wOFF`/`OTTO`/`true`、PE `MZ`）は JavaScript との polyglot を作れる（`GIF89a=1;`）ので表に入れず、テキストとして走査する。
+- スキャナ: すべてのファイルを先に読む。表の拡張子でもシグネチャが合わなければテキストとして走査し、制御バイトで失敗する。読めないファイル、明示したパスの `stat` の失敗、ディレクトリの中の通常ファイルでないエントリ（symlink、FIFO、socket、device）は、ラベルとエラーコードを出して失敗にする。失敗、検出、走査 0 件の判定をすべて出してから exit 1 にする。例外は repository モードの ENOENT だけで、`missing` に数える。集計は `N scanned, B binary (signature verified)[, M missing][, F failed]`。
+- テスト: `BinarySignature.test.ts`（新規）は表、境界、受け入れるプレフィックスすべてで `require()` が `SyntaxError` を投げることを確かめる。`InvisibleUnicodeScanner.test.ts` に CLI のテストを 6 件足した（JavaScript のテキストを入れた `.png`/`.mp3`/`.gif`、本物のシグネチャの 3 ファイルが `3 binary`、シグネチャの合わない `.png`、読めないファイル（win32 と root では skip）、symlink、repository モードの ENOENT）。
+- Docs: CLAUDE.md の Scanning rules（シグネチャの規則、形式を足すときの条件、失敗の規則、ENOENT の例外）、CHANGELOG の Security の項目（末尾は `(#108)` のまま）。README.md、ARCHITECTURE.md、`src/test/README.md` に拡張子で飛ばす説明は無かった（grep で確認）。
+
+### レビューで直させた点
+
+1. 10h: repository モードのテストが `fs.mkdtempSync(path.join(os.tmpdir(), 'otak-iuc-repo-'))` で作った git リポジトリを消していなかった。unit lane は TEMP を実行ごとのディレクトリに向け、最後にそのディレクトリを消す。そのため unit lane では漏れが見えない。mocha を直接動かすと漏れが残る（この端末に、今日の実行で残った 2 個があった）。suite の `workDir` の下に `makeDir('repo-mode')` で作らせ、`suiteTeardown` で消えるようにした。Devin の確認では、mocha を直接動かす前と後で `otak-iuc-repo-*` は 2 個のまま増えなかった。
+2. 10i（独立検証の 1 回目で fail した 2 件）: symlink のテストは `EPERM`、`EACCES`、`ENOTSUP` で skip し、理由のコメントが無かった。`EPERM`（Windows で Developer Mode か管理者権限が無いと symlink を作れない）だけで skip し、理由を書かせた。payload のテストのディレクトリは payload の 3 ファイルだけだった。元のスキャナでも走査 0 件のガードで exit 1 になり、テストは stderr のアサーションでしか失敗していなかった。本物の VSIX にはほかのファイルがあり、元のスキャナは exit 0 で通す。これが実際の穴なので、`clean.js` を足させた。元のスキャナ（HEAD から取り出したもの）はこのディレクトリで `1 scanned, 3 skipped by extension` と出し、exit 0 になった。
+3. 判断して残した点: `--dist` は今も `out/` を拡張子（`.js .json .md .mjs .cjs`）で選ぶ。`out/` には `.map` 278 件と `.lock` 1 件もあるが、出荷されない。package.json の `files` が出荷するのは `out/**/*.js` と `out/i18n/locales/*.json` だけで、出荷物は VSIX の `--dir` の走査が全ファイルを読む。ここは選択であって、出荷物を飛ばす判定ではない。
+
+### Verification
+
+- Devin（10g）の fail-before（テストだけを元のスキャナに入れた）: テスト 1 は `expected an images/payload.png finding: No files were scanned (… 0 scanned, 3 skipped by extension, 0 unreadable)`（payload を一度も読まない）。symlink のテストは `2 scanned, 0 skipped by extension, 0 unreadable). 0 !== 1`（`isFile()` の絞り込みで落ちた）。読めないファイルのテストは Windows で skip するので、元の `catch` が `unreadable` を数えて続けるだけだったことをコードから示した。テスト 2、3、7 は新しい集計を確かめるので元のスキャナでは失敗した。
+- Devin（10g、10h）: lint exit 0（644 件を走査、7 binary、0 missing）、unit 1160 + 74 passing・1 pending（読めないファイルのテストが win32 で skip）、smoke 4 passing、`lint:unicode:dist` 311 件、VSIX の `--dir` 159 件・7 binary・検出 0。対応するソースの無い `out/` のビルド 4 件を消してから走らせた。
+- 独立検証 1 回目（rubric-verifier、sonnet、rubric-r3 の C1〜C9）: 7/9 が pass。C4 は symlink のテストの skip が広すぎた（`EACCES`、`ENOTSUP` も skip し、理由のコメントが無い）。C5 は rubric の前提が誤りだった。私は「元のスキャナで payload のテストは exit 0」と書いたが、3 ファイルだけのディレクトリでは走査 0 件のガードで exit 1 になる（検証者が HEAD のスキャナを取り出して確かめた。clean.js を足すと exit 0）。どちらも 10i で直した。1 回目の実測: lint exit 0（644 件を走査、7 binary、0 missing）、unit 1160 + 74 passing・1 pending、smoke 4 passing、`lint:unicode:dist` 311 件、VSIX 159 件・7 binary・検出 0、`require()` は受け入れる 6 通りのプレフィックスすべてで `SyntaxError`、ACL で読めなくしたファイルは `EPERM` で exit 1、ディレクトリの symlink と junction も exit 1、変更した 6 ファイルは CRLF で孤立 CR なし、mocha を直接動かす前後で `otak-iuc-repo-*` は 2 個のまま。
+- 独立検証 2 回目（rubric-r3b: C0 = テストのファイル以外は 1 回目と同じハッシュ、C4、C5、lint と unit、C8、C9）: 全 pass。テストのファイル以外の 5 ファイルは 1 回目と同じハッシュ。HEAD から取り出した元のスキャナは、テストと同じ 4 ファイルのディレクトリで `1 scanned, 3 skipped by extension` と出し、exit 0（今のスキャナは exit 1 で 3 つの payload を報告）。symlink のディレクトリは元のスキャナで exit 0（`2 scanned`）、今のスキャナで exit 1（`link.js: not a regular file`）。排他ロックで読めなくしたファイルは、元のスキャナで exit 0（`1 unreadable`）、今のスキャナで exit 1（`locked.js: EBUSY`）。Windows で読めないファイルのテストを走らせる代わりの観測になった。lint exit 0（644 件、7 binary）、unit 1160 + 74 passing・1 pending、テストのファイルは CRLF で孤立 CR なし、mocha を直接動かす前後で `otak-iuc-repo-*` は 2 個のまま。
+
+### Learning
+
+1. 中身を見ずに飛ばす判定は、攻撃者が選べない性質（中身のシグネチャ）で行う。そのうえで、飛ばしたものが読み込む側でコードにならないことを、読み込む側の規則でテストする（`require()` → `SyntaxError`）。b970895 の時点で私は「拡張子だけにした」を NUL の穴を塞いだ改善としてしか見ず、拡張子が攻撃者の選べるものだと気づかなかった。→ rules.md「リリース」に追記した。
+2. ゲートの「数えるだけ」のカウンタ（unreadable、skipped）は、通過の根拠にしない。読めなかったものと、通常ファイルでないものは失敗にする。想定内の欠落（repository モードの ENOENT）だけを名前を付けて数える。→ 同じ規則にまとめた。
+3. 一時ディレクトリを作るテストは、suite の後片付けが消す場所に作る。unit lane は TEMP を消すので、unit lane だけを回していると漏れが見えない。→ rules.md「検証・回帰」に追記した。
+4. fail-before のテストは、実際の攻撃の形で書く。payload だけのディレクトリは、走査 0 件のガードという別の理由で元のスキャナを失敗させ、穴（ほかのファイルがあれば exit 0）を再現していなかった。
+5. 自分の作業ミス: rubric の C5 に「元のスキャナで exit 0」と書いたが、Devin の報告書は `0 scanned, 3 skipped by extension`（exit 1）と書いていた。報告書の実測と照合せずに Expect を書いた。rubric の Expect に書く観測は、根拠の実測と照合してから書く。
+
+### 残留リスク
+
+- 本物の PNG や MP3 の中に隠した payload（steganography）は、このスキャナの対象外。読み出すには別のコードが要り、そのコードは走査される。
+- 読めないファイルのテストは Windows で skip する（chmod で読み取りを拒めない）。CI（ubuntu、root でない）では走る。symlink のテストは、Windows で Developer Mode が無いと skip する。
+- `--dist` は `out/` を拡張子で選ぶ（上の 3）。出荷物の全件は VSIX の `--dir` の走査が見る。
+- 新しい binary 形式を出荷するときは、`binary-signature.mjs` に形式を足すまで、そのファイルは制御バイトでスキャンに失敗する（意図した fail closed）。
