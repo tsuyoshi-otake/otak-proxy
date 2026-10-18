@@ -226,10 +226,18 @@ export class ProxyStateManager implements IProxyStateManager {
         const withManual = await this.hydrateManualProxyUrl(state);
         const next = { ...withManual };
         const hydratedAuto = await this.hydrateProxyUrl(withManual.autoProxyUrl);
+        const hydratedAutoHttp = await this.hydrateProxyUrl(withManual.autoHttpProxyUrl);
+        const hydratedAutoHttps = await this.hydrateProxyUrl(withManual.autoHttpsProxyUrl);
         const hydratedFallback = await this.hydrateProxyUrl(withManual.fallbackProxyUrl);
         const hydratedLastSystem = await this.hydrateProxyUrl(withManual.lastSystemProxyUrl);
         if (hydratedAuto !== withManual.autoProxyUrl) {
             next.autoProxyUrl = hydratedAuto;
+        }
+        if (hydratedAutoHttp !== withManual.autoHttpProxyUrl) {
+            next.autoHttpProxyUrl = hydratedAutoHttp;
+        }
+        if (hydratedAutoHttps !== withManual.autoHttpsProxyUrl) {
+            next.autoHttpsProxyUrl = hydratedAutoHttps;
         }
         if (hydratedFallback !== withManual.fallbackProxyUrl) {
             next.fallbackProxyUrl = hydratedFallback;
@@ -307,7 +315,13 @@ export class ProxyStateManager implements IProxyStateManager {
 
     private async persistProxySecrets(state: ProxyState): Promise<void> {
         await this.persistManualProxySecret(state.manualProxyUrl);
-        for (const url of [state.autoProxyUrl, state.fallbackProxyUrl, state.lastSystemProxyUrl]) {
+        for (const url of [
+            state.autoProxyUrl,
+            state.autoHttpProxyUrl,
+            state.autoHttpsProxyUrl,
+            state.fallbackProxyUrl,
+            state.lastSystemProxyUrl
+        ]) {
             if (!url || !hasProxyCredentials(url)) {
                 continue;
             }

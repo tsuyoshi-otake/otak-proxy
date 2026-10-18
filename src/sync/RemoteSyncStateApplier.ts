@@ -1,3 +1,4 @@
+import { proxyApplyPlanUrls, resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
 import { ProxyMode, ProxyState, stateRevision } from '../core/types';
 import {
     shouldSkipUnauthenticatedApply,
@@ -33,7 +34,8 @@ export async function applyRemoteSyncState(
     const localState = await context.getState();
     const activeUrl = context.getActiveProxyUrl(localState);
 
-    if (shouldSkipUnauthenticatedApply(localState, activeUrl)) {
+    const planOptions = activeUrl ? resolveProxyApplyOptions(activeUrl, undefined, localState) : undefined;
+    if (shouldSkipUnauthenticatedApply(localState, proxyApplyPlanUrls(activeUrl, planOptions))) {
         await context.saveState({
             ...localState,
             lastError: UNRESOLVED_LOCAL_CREDENTIAL_ERROR,

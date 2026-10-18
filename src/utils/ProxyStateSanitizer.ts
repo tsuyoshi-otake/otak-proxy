@@ -68,10 +68,13 @@ export const UNRESOLVED_LOCAL_CREDENTIAL_ERROR =
     'Proxy credentials are required but unavailable on this machine';
 
 export function proxyUrlsHaveCredentials(state: Pick<ProxyState,
-    'autoProxyUrl' | 'fallbackProxyUrl' | 'lastSystemProxyUrl' | 'manualProxyUrl'
+    'autoProxyUrl' | 'autoHttpProxyUrl' | 'autoHttpsProxyUrl' |
+    'fallbackProxyUrl' | 'lastSystemProxyUrl' | 'manualProxyUrl'
 >): boolean {
     return [
         state.autoProxyUrl,
+        state.autoHttpProxyUrl,
+        state.autoHttpsProxyUrl,
         state.fallbackProxyUrl,
         state.lastSystemProxyUrl,
         state.manualProxyUrl
@@ -90,8 +93,18 @@ export function setRequiresAuthFromLiveUrls(state: ProxyState): void {
     delete state.requiresAuth;
 }
 
-export function shouldSkipUnauthenticatedApply(state: ProxyState, activeUrl: string): boolean {
-    return Boolean(activeUrl) && state.requiresAuth === true && !hasProxyCredentials(activeUrl);
+/**
+ * Skip when the state says credentials are required but no URL in the write
+ * plan carries one after hydration — applying would overwrite the target with
+ * credential-less URLs. A single URL is exactly the pre-#108 rule; a
+ * per-scheme plan is skipped only when none of its URLs is credentialed.
+ */
+export function shouldSkipUnauthenticatedApply(
+    state: ProxyState,
+    activeUrl: string | readonly string[]
+): boolean {
+    const urls = (typeof activeUrl === 'string' ? [activeUrl] : activeUrl).filter(url => Boolean(url));
+    return urls.length > 0 && state.requiresAuth === true && !urls.some(url => hasProxyCredentials(url));
 }
 
 export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState {

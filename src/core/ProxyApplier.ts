@@ -239,7 +239,9 @@ export class ProxyApplier {
             return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
         }
         
-        const applyOptions = await this.resolveApplyOptions(proxyUrl, options);
+        // The write plan was resolved once upstream (consent and policy judged
+        // exactly these URLs). The applier never resolves it again (#108).
+        const applyOptions = options ?? {};
 
         // Requirement 1.1, 1.3, 1.4, 3.1: Validate proxy URL before any configuration
         if (this.isSplitApply(applyOptions)) {
@@ -387,42 +389,6 @@ export class ProxyApplier {
             })),
             issues: issues.length > 0 ? [...issues] : undefined
         };
-    }
-
-    private async resolveApplyOptions(proxyUrl: string, options?: ProxyApplyOptions): Promise<ProxyApplyOptions> {
-        if (this.isSplitApply(options) || options?.bypass) {
-            return options ?? {};
-        }
-        if (!this.stateManager) {
-            return options ?? {};
-        }
-
-        try {
-            const state = await this.stateManager.getState();
-            if (!isPerSchemeProxy(state.autoProxyKind, state.autoHttpProxyUrl, state.autoHttpsProxyUrl)) {
-                return {
-                    ...options,
-                    bypass: options?.bypass ?? state.detectedBypass
-                };
-            }
-
-            const primary = state.autoHttpProxyUrl || state.autoProxyUrl;
-            const publicPrimary = primary ? (removeProxyCredentials(primary) || primary) : undefined;
-            const publicApplied = removeProxyCredentials(proxyUrl) || proxyUrl;
-            if (publicPrimary && publicPrimary !== publicApplied) {
-                return options ?? {};
-            }
-
-            return {
-                ...options,
-                kind: 'perSchemeProxy',
-                httpUrl: state.autoHttpProxyUrl,
-                httpsUrl: state.autoHttpsProxyUrl,
-                bypass: options?.bypass ?? state.detectedBypass
-            };
-        } catch {
-            return options ?? {};
-        }
     }
 
     private isSplitApply(options?: ProxyApplyOptions): boolean {

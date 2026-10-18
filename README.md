@@ -212,7 +212,7 @@ For stricter corporate environments, use:
 | `otakProxy.syncEnabled` | `true` | Synchronize proxy settings across VS Code/Cursor windows |
 | `otakProxy.syncInterval` | `1000` | Sync check interval in milliseconds (range `100`–`5000`) |
 | `otakProxy.detectionSourcePriority` | `["environment", "vscode", "platform"]` | Order in which proxy detection sources are tried |
-| `otakProxy.ignoreSelfWrittenVSCodeProxy` | `true` | Ignore VS Code's `http.proxy` when it holds the value otak-proxy wrote, so that value is not detected again as a system proxy |
+| `otakProxy.ignoreSelfWrittenVSCodeProxy` | `true` | Ignore VS Code's `http.proxy` when it holds the value otak-proxy wrote, so that value is not detected again as a system proxy. A value for the same proxy with different or added credentials is not ignored |
 | `otakProxy.maxRetries` | `3` | Maximum retries when proxy detection fails (range `0`–`10`) |
 | `otakProxy.diagnosticsEnabled` | `true` | Run read-only, sanitized diagnostics automatically after each proxy apply; `otak: Diagnose Proxy State` works regardless of this setting |
 | `otakProxy.automaticRemediationEnabled` | `true` | Enable safe automatic remediation, such as one delayed retry and loop suppression |
@@ -260,7 +260,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
 - Use a proxy URL with credentials only when your proxy requires them. otak-proxy stores the credential part in VS Code SecretStorage where available and keeps global state and sync data free of credentials.
 - VS Code, Git, npm, and pip read their own configuration files, so applying a proxy URL with credentials writes those credentials in plaintext to files such as `settings.json`, `.gitconfig`, `.npmrc`, and the pip user config file.
 - `otakProxy.credentialTargetPolicy` controls this:
-  - `ask` (default): asks once per proxy on each machine before writing. Background applies are skipped until you allow it.
+  - `ask` (default): asks once per proxy address on each machine before writing its credentials. One prompt covers every credential-bearing URL an apply writes, including the HTTPS URL of a per-scheme proxy. Background applies are skipped until you allow it.
   - `allowPlaintextTargets`: writes without asking.
   - `blockPlaintextTargets`: never applies a proxy URL with credentials. Use it when your organization forbids credentials in tool config files.
 - Passwords, authorization headers, npm tokens, Git extra headers, command output, copied diagnostics, control characters, and sync data are redacted before they are logged or displayed.

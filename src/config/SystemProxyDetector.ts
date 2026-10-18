@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
+import { canonicalizeProxyUrl, ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { Logger } from '../utils/Logger';
 import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
 import { buildDetectedProxyValue } from './DetectedProxyValue';
-import { getProxyPublicUrl } from '../utils/ProxyStateSanitizer';
+import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
 import type { ProxyCapability, ProxyIssue, ProxyValueKind } from '../core/v3Types';
 
 const execFileAsync = promisify(execFile);
@@ -232,7 +232,14 @@ export class SystemProxyDetector {
      * - a registered provider reports a currently applied proxy,
      * - its provenance is known and is NOT 'vscode' (undefined provenance may be a
      *   hand-set `http.proxy` that predates this extension — never suppress those),
-     * - the candidate equals the applied URL in credential-stripped public form.
+     * - the candidate is the applied URL, where "is" means either:
+     *   (a) equal in canonical form, userinfo included, or
+     *   (b) credential-free and naming the same proxy address — the detection
+     *       path writes the URL as detected (credential-free for a platform
+     *       proxy), while the provider's URL is hydrated with the credentials
+     *       SecretStorage holds for that address.
+     *   A candidate carrying different credentials, or credentials the
+     *   applied URL does not have, is a value someone else set (#108).
      */
     private async isSelfWrittenVSCodeValue(candidate: string): Promise<boolean> {
         if (!this.appliedProxyProvider || !this.isEchoSuppressionEnabled()) {
@@ -245,9 +252,13 @@ export class SystemProxyDetector {
                 return false;
             }
 
-            const candidatePublic = getProxyPublicUrl(candidate) ?? candidate;
-            const appliedPublic = getProxyPublicUrl(applied.url) ?? applied.url;
-            return candidatePublic === appliedPublic;
+            const canonicalCandidate = canonicalizeProxyUrl(candidate);
+            const canonicalApplied = canonicalizeProxyUrl(applied.url);
+            if (canonicalCandidate === canonicalApplied) {
+                return true;
+            }
+            return !hasProxyCredentials(canonicalCandidate)
+                && getProxyPublicUrl(canonicalCandidate) === getProxyPublicUrl(canonicalApplied);
         } catch (error) {
             Logger.warn('Applied proxy provider failed; skipping echo suppression:', error);
             return false;

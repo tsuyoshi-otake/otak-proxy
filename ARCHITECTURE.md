@@ -30,6 +30,8 @@ src/
 │   ├── types.ts         # Common type definitions (ProxyMode: Off/Auto; Manual is a legacy value migrated to Auto)
 │   ├── ProxyStateManager.ts    # State persistence
 │   ├── ProxyApplier.ts         # Proxy configuration orchestration
+│   ├── ProxyApplyPlan.ts       # Write plan resolution for one apply attempt (#108)
+│   ├── AppliedProxyProvenance.ts # State -> applied proxy + provenance (echo suppression)
 │   └── ExtensionInitializer.ts # Initialization logic
 │
 ├── commands/            # Command implementations
@@ -57,6 +59,10 @@ src/
 │   ├── ProxyChangeLogger.ts    # Change event logging
 │   ├── ProxyConnectionTester.ts # Proxy connection testing (Auto/Manual modes)
 │   └── ProxyTestScheduler.ts    # Periodic connection test scheduler
+│
+├── remediation/         # Safe apply orchestration
+│   ├── ProxyApplyAttempt.ts    # One apply attempt: one state read, one shared write plan
+│   └── ProxyRemediationService.ts  # Credential consent, target policy, retries
 │
 ├── sync/                # Multi-instance synchronization
 │   ├── SyncManager.ts          # Sync orchestrator
@@ -370,7 +376,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
    └─→ Log the change
    ↓
 6. ProxyConnectionTester.testProxyAuto() (when connection testing is enabled)
-   ├─→ Success: ProxyApplier.applyProxy()
+   ├─→ Success: apply attempt (ends in ProxyApplier.applyProxyDetailed())
    └─→ Failure: SystemProxyUpdateService falls back to the configured
                 manual proxy (when enableFallback is on) or direct
                 connection
@@ -394,7 +400,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
    └─→ Resolve conflicts via ConflictResolver (timestamp-based, latest wins)
    ↓
 5. Instance B: Apply remote change
-   ├─→ ProxyApplier.applyProxy()
+   ├─→ applyProxySafely → apply attempt → ProxyApplier.applyProxyDetailed()
    └─→ StatusBarManager.update()
 ```
 
@@ -432,7 +438,15 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
   - `applyProxy()`: Enable proxy (Git, VS Code, npm, terminal environment variables)
   - `disableProxy()`: Disable proxy
   - Error aggregation and user notification
+  - Writes exactly the plan it is handed: the per-scheme URLs and bypass are
+    resolved upstream, and the applier never reads the state to resolve them (#108)
 - **Tests**: ProxyApplier.test.ts, ProxyApplier.property.test.ts
+
+#### ProxyApplyAttempt (`src/remediation/ProxyApplyAttempt.ts`)
+- **Responsibility**: The composition every apply path (`applyProxySafely`) runs
+- **Invariant**: one state read per attempt provides both the generation fence
+  and the write plan; credential consent and `otakProxy.credentialTargetPolicy`
+  judge every credential-bearing URL in that plan; retries reuse it (#108)
 
 ### Command Modules
 
