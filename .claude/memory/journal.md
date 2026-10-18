@@ -1541,3 +1541,67 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す。`requiresAuth` と同じ扱いで、そのマシンの検出結果を正とする。
 - 診断（`ProxyRuntimeDiagnostics.collectCredentialIssues`）は主 URL しか見ないので、片方だけ復元された場合を報告しない。apply はスキップされ、`lastError` は記録される。
 - 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の SecretStorage の書き込み失敗は試していない。
+
+
+## 2026-10-18 — #108 項目 1 PR #112 への Codex の再レビューの指摘 3 件を直す
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 1）
+**PR**: [#112](https://github.com/tsuyoshi-otake/otak-proxy/pull/112)（指摘は `1330af5` へのレビュー）
+**コミット**: `f6e28d1`（fix/108-credential-consent-all-urls）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状（`1330af5` への Codex の指摘、3 件とも P2）
+
+- A: アドレスごとのスキップ判定（`shouldSkipUnauthenticatedApply`）は、起動と同期の受信側でしか呼ばれていなかった。監視の到達性の経路（false → true）とトグルは `runProxyApplyAttempt` を直接通るので、split の片方の資格情報だけが復元され、その片方に同意がある場合、もう片方のアドレスを資格情報なしで書いた。
+- B: 起動の reconcile の署名（`startupEnforcementTarget`）は主 URL と `requiresAuth` しか比べていなかった。起動のゲートと書き込み計画が読む `authRequiredProxyUrls` と split の URL だけが最初の apply 中に変わると、最新の state でゲートを通し直さずに終わった。
+- C: `ProxyApplier.applyProxyDetailed` / `disableProxyDetailed` は、結果をコミットする世代を apply の始めに `getState()` から読み直していた。fence の確認とこの読み取りの間に別のウィンドウが新しい状態をコミットすると、古い計画の結果が新しい状態に対してコミットされ、その revision の前進で新しい状態自身の fenced apply が superseded になった。
+
+### 原因
+
+- A: 「資格情報が要るアドレスを資格情報なしで書かない」という書き込みの不変条件を、すべての書き込みが通る関数ではなく、呼び出し元の一部（起動、同期）に置いた。
+- B: ゲートに入力（一覧、split の URL）を足したとき、そのゲートを再実行するかを決める署名を更新しなかった。
+- C: 計画（とその世代）を 1 回の読み取りから作る設計にしたが、結果コミットの世代だけが applier の中の 2 回目の読み取りに残っていた。
+
+### 修正
+
+- A1: `planUrlsMissingRequiredCredentials(state, planUrls)`（`src/utils/ProxyStateSanitizer.ts`）を追加した。資格情報の無い計画 URL のうち、公開 URL が `authRequiredProxyUrls` にあり、同じ公開 URL の資格情報付き計画 URL も無いものを、並べ替えて返す。後半の条件は、同じホストの split（資格情報が HTTPS 側にだけある、再読み込み前の state）を拒まないため。`shouldSkipUnauthenticatedApply` は、一覧がある state ではこの規則だけを使い、`requiresAuth` の集約規則は一覧の無い state（一覧の導入前に保存されたもの）にだけ残した。集約規則は 6 つの URL フィールドから導くので、手動の fallback の資格情報だけで、資格情報の無い system proxy まで拒んでいた（3.2.16 も起動と同期で拒んでいた）。
+- A2: `runProxyApplyAttempt` は、計画を解決した後、同意と書き込みの前に `planUrlsMissingRequiredCredentials` を呼ぶ。足りないアドレスがあれば、警告を 1 行出し、`UNRESOLVED_LOCAL_CREDENTIAL_ERROR` を `commitUnlessStale`（読み取りの世代）で `lastError` に記録し、`proxyReachable` は変えずに `success: false` を返す。無効化は判定しない。state の引数は `StateWriter` に広げた。
+- B: `startupEnforcementTarget` に `authRequiredProxyUrls` と `splitRoutingIdentity(state)` を足した。
+- C: `createFencedApply` は今の fence を 4 つ目の引数 `basis` として applier に渡す。`applyProxyDetailed` / `disableProxyDetailed` は basis があればそれで `saveProxyConfigResults` / `recordApplyBlocked` をコミットし、無い直接の呼び出しだけ読み直す。有効化から無効化への委譲も basis を渡す。`DetailedApply` と `ProxyApplyDetailedDelegate` が引数を宣言し、`applyProxySafely` のラムダが渡す。`ProxyApplyOptions` に世代のフィールドは足していない（計画のまま）。
+- Docs: README（スキップは監視、トグル、同期、起動のすべての apply に効く）、ARCHITECTURE.md（ProxyStateManager の記述、ProxyApplyAttempt の Gate / Basis / 起動の署名）、CHANGELOG（同意の項目を修正、結果コミットの項目を追加）。
+
+### レビューで直させた点
+
+1. 自分のミューテーション 7 種のうち、無効化で basis を無視するものだけが、新しいテスト 11 件と unit lane をすべて green のまま通った。有効化から無効化への委譲で basis を落とすミューテーションは、その部分集合（委譲の経路だけ読み直しになる）なので、同じく通るはずだった。`applyProxyDetailed('', false, …, basis)` で、古い basis ならコミットしない、今の basis なら `basis.revision + 1` でコミットする（陽性対照）テストを足させた。足した後は、無効化で basis を無視するミューテーションと委譲で落とすミューテーションの両方で、このテストが red になった。
+2. `planMissesRequiredCredentials`（一覧の関数を真偽値にするだけの包み）を消させた。本番の呼び出しは同じモジュールの 1 か所だけで、ARCHITECTURE.md は包みの名前を書いていたが、attempt が呼ぶのは一覧の関数だった。テストは返る一覧そのものを確かめる形にした。
+3. 03i の検証中、Devin の unit lane が task 04 の古いビルド出力（`out/test/security/CredentialDisplayMasking.test.js`）を拾った。このブランチにソースが無い出力なので、その 2 ファイルだけを消させた。
+
+### Verification
+
+- `npm run lint`: exit 0（`lint:unicode` は 634 ファイルを走査、検出なし）
+- `npm run test:unit:parallel`: 1101 + 74 passing、0 failing
+- `npm test`: 586 passing / 1 pending / 9 failing。9 件は既知の失敗だけ。#108 のスイートはすべて pass
+- `npm run test:smoke`: 4 passing。実行後、テストのプロセスは残っていない
+- ミューテーション（`npm run compile` の後、`out/` に当てて戻した。すべて red になった）:
+  - attempt のゲートを外す → 3 件 red（`autoDetection`、`manual`、監視の到達性の経路）
+  - 集約規則を一覧より先に置く → ゲート表の一覧ありの行が red
+  - 署名から一覧を外す、split を外す → それぞれのテストが red
+  - 有効化で basis を無視する → 3 件 red。無効化で無視する → 1 件 red。委譲で basis を落とす → 1 件 red。fence を渡さない → ホスト 1 件と unit 1 件が red
+- 独立 verifier（sonnet、ルーブリック 14 項目 = これまでの 11 項目 + attempt のゲート、起動の署名、結果の basis）: この修正への 1 回目（通算 5 回目）で全項目 pass。新しい 3 項目のミューテーションは verifier も自分で当て、レビュアーと同じ結果だった
+- 改行: main からの変更 24 ファイルはすべて CRLF で一様、index は `i/lf`
+
+### Learning
+
+1. 書き込みの不変条件は、すべての書き込みが通る 1 か所で守る。呼び出し元ごとのゲートは経路を漏らす。→ rules.md「資格情報と URL」に追記した。
+2. 集約フラグで計画の一部についての判定をしない。→ rules.md「資格情報と URL」に追記した。
+3. 結果コミットの世代は計画を作った読み取りの世代を渡して使い、applier の中で読み直さない。引数を有効化と無効化の両方の分岐に通す変更は、分岐ごとにミューテーションを当てる。→ rules.md「世代フェンス」に追記した。
+4. 再実行を決める署名には、守る判断が読む入力をすべて入れる。→ rules.md「世代フェンス」に追記した。
+5. 自分の作業ミス: T03 のブリーフは、ゲートを既存の置き場所（起動と同期）のまま広げ、監視とトグルの経路、起動の署名、結果コミットの世代を見落とした。3 つとも Codex が見つけた。ガードや判断の入力を足すブリーフは、守る操作への経路を `git grep` で表にしてから書く。→ rules.md「検証・回帰」に追記した。
+
+### 残留リスク
+
+- attempt でのスキップは `lastError` だけを記録し、`proxyReachable` は接続テストの結果のまま残す。起動と同期のスキップは従来どおり `proxyReachable: false` も記録する。
+- 一覧の無い state（3.2.16 までに保存されたもの）では、集約規則は起動と同期でだけ効き、監視とトグルの apply は 3.2.16 と同じく判定しない。
+- ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す（前回の記録と同じ）。同じアドレスの資格情報の無い観測を「資格情報を外した」と読むかは仕様の判断で、最終報告でユーザーに聞く。
+- 結果コミットが捨てられても、古い計画の書き込みは対象に残る。別のウィンドウの apply が後から書けば上書きされるが、書き込みの順序が逆になると、対象は古い計画の値のまま残りうる。fence の確認と書き込みは原子的でない（従来から）。
+- 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の認証 proxy と SecretStorage の書き込み失敗は試していない。
