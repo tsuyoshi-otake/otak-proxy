@@ -39,21 +39,25 @@ suite('LogicalGeneration (#17)', () => {
         );
     });
 
-    test('different bypass is a new generation at the same URL and revision', () => {
+    test('different manual or fallback URL is a new generation at the same revision', () => {
         const started = captureLogicalGeneration({
             mode: ProxyMode.Auto,
             autoProxyUrl: 'http://proxy.example:8080',
-            revision: 4,
-            noProxy: 'localhost'
+            revision: 4
         });
-        const changedBypass = {
+
+        assert.strictEqual(isStaleGeneration(started, {
             mode: ProxyMode.Auto,
             autoProxyUrl: 'http://proxy.example:8080',
-            revision: 4,
-            noProxy: 'localhost,.corp.example'
-        };
-
-        assert.strictEqual(isStaleGeneration(started, changedBypass), true);
+            manualProxyUrl: 'http://manual.example:3128',
+            revision: 4
+        }), true);
+        assert.strictEqual(isStaleGeneration(started, {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            fallbackProxyUrl: 'http://fallback.example:3128',
+            revision: 4
+        }), true);
     });
 
     test('same URL after restart is a new generation once revision is bumped', () => {

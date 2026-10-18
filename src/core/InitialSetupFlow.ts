@@ -68,8 +68,7 @@ export class InitialSetupFlow {
             autoProxyUrl: state.autoProxyUrl || '',
             autoModeOff: state.autoModeOff === true,
             usingFallbackProxy: state.usingFallbackProxy === true,
-            fallbackProxyUrl: state.fallbackProxyUrl || '',
-            noProxy: state.noProxy || ''
+            fallbackProxyUrl: state.fallbackProxyUrl || ''
         });
     }
 

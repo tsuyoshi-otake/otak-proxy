@@ -385,6 +385,11 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
    └─→ Update UI
 ```
 
+The startup check and the switch to Auto decide "unchanged" the same way as
+the monitor: the same primary URL and the same `splitRoutingIdentity`
+(per-scheme URLs and bypass list); fields that the apply does not use do not
+count.
+
 ### Multi-Instance Sync Flow
 
 Ordering between windows uses the shared file's `version` (a compare-and-set

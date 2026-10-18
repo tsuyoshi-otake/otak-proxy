@@ -3,10 +3,12 @@ import { ProxyMode, ProxyState, stateRevision } from './types';
 /**
  * In-memory identity of a logical proxy generation.
  *
- * Revision is the primary fence. URL identity includes username and password
- * so credential rotation and a different user are not treated as "the same
- * URL". Bypass is included so a NO_PROXY change is a new generation.
- * This object is never persisted.
+ * The identity covers the revision, the mode, and the identities of the
+ * auto, manual and fallback proxy URLs — credentials included, so credential
+ * rotation and a different user are not treated as "the same URL".
+ * Per-scheme URLs and the bypass list are not part of it: the detection
+ * paths compare them through `splitRoutingIdentity` (`handleProxyChanged`,
+ * and `updateAutoProxyState`). This object is never persisted.
  */
 export interface LogicalGeneration {
     revision: number;
@@ -14,11 +16,6 @@ export interface LogicalGeneration {
     autoProxyIdentity: string;
     manualProxyIdentity: string;
     fallbackProxyIdentity: string;
-    noProxy: string;
-}
-
-export interface GenerationExtras {
-    noProxy?: string;
 }
 
 /**
@@ -45,14 +42,13 @@ export function proxyUrlIdentity(url: string | undefined): string {
     }
 }
 
-export function captureLogicalGeneration(state: ProxyState, extras?: GenerationExtras): LogicalGeneration {
+export function captureLogicalGeneration(state: ProxyState): LogicalGeneration {
     return {
         revision: stateRevision(state),
         mode: state.mode,
         autoProxyIdentity: proxyUrlIdentity(state.autoProxyUrl),
         manualProxyIdentity: proxyUrlIdentity(state.manualProxyUrl),
-        fallbackProxyIdentity: proxyUrlIdentity(state.fallbackProxyUrl),
-        noProxy: extras?.noProxy ?? state.noProxy ?? ''
+        fallbackProxyIdentity: proxyUrlIdentity(state.fallbackProxyUrl)
     };
 }
 
@@ -67,12 +63,11 @@ export function sameLogicalIdentity(left: LogicalGeneration, right: LogicalGener
     return left.mode === right.mode
         && left.autoProxyIdentity === right.autoProxyIdentity
         && left.manualProxyIdentity === right.manualProxyIdentity
-        && left.fallbackProxyIdentity === right.fallbackProxyIdentity
-        && left.noProxy === right.noProxy;
+        && left.fallbackProxyIdentity === right.fallbackProxyIdentity;
 }
 
-export function isStaleGeneration(started: LogicalGeneration, current: ProxyState, extras?: GenerationExtras): boolean {
-    const now = captureLogicalGeneration(current, extras);
+export function isStaleGeneration(started: LogicalGeneration, current: ProxyState): boolean {
+    const now = captureLogicalGeneration(current);
     if (now.revision !== started.revision) {
         return true;
     }
