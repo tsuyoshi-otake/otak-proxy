@@ -21,6 +21,7 @@ import { appliedProxyInfoFromState } from '../core/AppliedProxyProvenance';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
+import { sameProxyUrlWithCredentials } from '../utils/ProxyUrlIdentity';
 
 suite('SystemProxyDetector echo suppression (issue #29)', () => {
     let sandbox: sinon.SinonSandbox;
@@ -256,4 +257,35 @@ suite('SystemProxyDetector echo suppression (issue #29)', () => {
         assert.strictEqual(manualResult.proxyUrl, 'http://other:pw@corp.example.com:8080');
         assert.strictEqual(manualResult.source, 'vscode');
     });
+});
+
+suite('sameProxyUrlWithCredentials (#108)', () => {
+    const cases: Array<{ left: string; right: string; equal: boolean; label: string }> = [
+        // Same proxy, same credentials: spelling differences must still match.
+        { left: 'http://u:p@PROXY.EXAMPLE.COM:8080', right: 'http://u:p@proxy.example.com:8080', equal: true, label: 'host case' },
+        { left: 'HTTP://u:p@proxy.example.com:8080', right: 'http://u:p@proxy.example.com:8080', equal: true, label: 'scheme case' },
+        { left: 'http://u:p@proxy.example.com:80', right: 'http://u:p@proxy.example.com', equal: true, label: 'default http port' },
+        { left: 'https://u:p@proxy.example.com:443', right: 'https://u:p@proxy.example.com', equal: true, label: 'default https port' },
+        { left: 'http://u:p@proxy.example.com:8080/', right: 'http://u:p@proxy.example.com:8080', equal: true, label: 'trailing slash' },
+        { left: 'http://u:p%40ss@proxy.example.com', right: 'http://u:p@ss@proxy.example.com', equal: true, label: 'percent-encoded vs plain userinfo' },
+        { left: 'http://u:p%ss@proxy.example.com', right: 'http://u:p%25ss@proxy.example.com', equal: true, label: 'stray % vs %25' },
+        { left: 'not a url', right: 'not a url', equal: true, label: 'unparsable identical text' },
+
+        // Not the same value: different credentials or a different address.
+        { left: 'http://u:p@proxy.example.com', right: 'http://u:p2@proxy.example.com', equal: false, label: 'another password' },
+        { left: 'http://u:p@proxy.example.com', right: 'http://u2:p@proxy.example.com', equal: false, label: 'another username' },
+        { left: 'http://u:p@proxy.example.com', right: 'http://proxy.example.com', equal: false, label: 'credentials vs none' },
+        { left: 'http://u:p@proxy.example.com:8080', right: 'http://u:p@proxy.example.com:8081', equal: false, label: 'another port' },
+        { left: 'http://u:p@proxy.example.com', right: 'http://u:p@other.example.com', equal: false, label: 'another host' },
+        { left: 'http://u:p@[::1]:8080', right: 'http://u:p@[::1]:8081', equal: false, label: 'bracketed IPv6, another port' },
+        { left: 'http://u:p@proxy.example.com', right: 'https://u:p@proxy.example.com', equal: false, label: 'another scheme' },
+        { left: 'not a url', right: 'other text', equal: false, label: 'unparsable different text' }
+    ];
+
+    for (const { left, right, equal, label } of cases) {
+        test(`${label}: ${left} vs ${right}`, () => {
+            assert.strictEqual(sameProxyUrlWithCredentials(left, right), equal);
+            assert.strictEqual(sameProxyUrlWithCredentials(right, left), equal, 'identity must be symmetric');
+        });
+    }
 });

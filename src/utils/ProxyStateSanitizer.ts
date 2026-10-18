@@ -67,18 +67,69 @@ export function sanitizeProxyTestResultForPersistence(result: ProxyTestResult | 
 export const UNRESOLVED_LOCAL_CREDENTIAL_ERROR =
     'Proxy credentials are required but unavailable on this machine';
 
-export function proxyUrlsHaveCredentials(state: Pick<ProxyState,
-    'autoProxyUrl' | 'autoHttpProxyUrl' | 'autoHttpsProxyUrl' |
-    'fallbackProxyUrl' | 'lastSystemProxyUrl' | 'manualProxyUrl'
->): boolean {
-    return [
-        state.autoProxyUrl,
-        state.autoHttpProxyUrl,
-        state.autoHttpsProxyUrl,
-        state.fallbackProxyUrl,
-        state.lastSystemProxyUrl,
-        state.manualProxyUrl
-    ].some(url => Boolean(url && hasProxyCredentials(url)));
+/**
+ * The ProxyState fields that can hold a proxy URL. `proxyUrlsHaveCredentials`,
+ * the `authRequiredProxyUrls` derivation and the unauthenticated-apply gate all
+ * read this one list so they can never disagree about which fields count.
+ */
+const STATE_URL_FIELDS = [
+    'autoProxyUrl',
+    'autoHttpProxyUrl',
+    'autoHttpsProxyUrl',
+    'fallbackProxyUrl',
+    'lastSystemProxyUrl',
+    'manualProxyUrl'
+] as const;
+
+type StateUrlField = typeof STATE_URL_FIELDS[number];
+
+export function proxyUrlsHaveCredentials(state: Pick<ProxyState, StateUrlField>): boolean {
+    return STATE_URL_FIELDS.some(field => {
+        const url = state[field];
+        return Boolean(url && hasProxyCredentials(url));
+    });
+}
+
+/**
+ * The public URLs of the state's URL fields that carry credentials right now
+ * (`getProxyPublicUrl` form — never userinfo), sorted and deduplicated.
+ */
+function liveCredentialBearingPublicUrls(state: Pick<ProxyState, StateUrlField>): string[] {
+    const urls = new Set<string>();
+    for (const field of STATE_URL_FIELDS) {
+        const url = state[field];
+        if (url && hasProxyCredentials(url)) {
+            const publicUrl = getProxyPublicUrl(url);
+            if (publicUrl) {
+                urls.add(publicUrl);
+            }
+        }
+    }
+    return [...urls].sort();
+}
+
+/**
+ * Sticky `authRequiredProxyUrls` derivation (#108): the union of the live
+ * credential-bearing public URLs and the existing list, restricted to public
+ * URLs that still appear in one of the state's URL fields. Returns undefined
+ * when empty so a state persisted before the field existed stays byte-identical.
+ */
+export function deriveAuthRequiredProxyUrls(state: ProxyState): string[] | undefined {
+    const present = new Set<string>();
+    for (const field of STATE_URL_FIELDS) {
+        const publicUrl = getProxyPublicUrl(state[field]);
+        if (publicUrl) {
+            present.add(publicUrl);
+        }
+    }
+
+    const merged = new Set(liveCredentialBearingPublicUrls(state));
+    for (const url of state.authRequiredProxyUrls ?? []) {
+        if (present.has(url)) {
+            merged.add(url);
+        }
+    }
+    return merged.size > 0 ? [...merged].sort() : undefined;
 }
 
 export function deriveRequiresAuth(state: ProxyState): boolean {
@@ -88,23 +139,46 @@ export function deriveRequiresAuth(state: ProxyState): boolean {
 export function setRequiresAuthFromLiveUrls(state: ProxyState): void {
     if (proxyUrlsHaveCredentials(state)) {
         state.requiresAuth = true;
+        state.authRequiredProxyUrls = liveCredentialBearingPublicUrls(state);
         return;
     }
     delete state.requiresAuth;
+    delete state.authRequiredProxyUrls;
 }
 
 /**
- * Skip when the state says credentials are required but no URL in the write
- * plan carries one after hydration — applying would overwrite the target with
- * credential-less URLs. A single URL is exactly the pre-#108 rule; a
- * per-scheme plan is skipped only when none of its URLs is credentialed.
+ * Skip when applying would write a proxy address without the credentials it
+ * requires on this machine (#108): either the state says credentials are
+ * required but no URL in the write plan carries one after hydration (the
+ * pre-list rule, kept for states persisted before `authRequiredProxyUrls`
+ * existed), or a plan URL without credentials names an address the state
+ * recorded as credential-bearing. A per-scheme plan is skipped when ANY of
+ * its addresses is missing its credentials; an address that never carried
+ * credentials does not trip the gate.
  */
 export function shouldSkipUnauthenticatedApply(
     state: ProxyState,
     activeUrl: string | readonly string[]
 ): boolean {
     const urls = (typeof activeUrl === 'string' ? [activeUrl] : activeUrl).filter(url => Boolean(url));
-    return urls.length > 0 && state.requiresAuth === true && !urls.some(url => hasProxyCredentials(url));
+    if (urls.length === 0) {
+        return false;
+    }
+    if (state.requiresAuth === true && !urls.some(url => hasProxyCredentials(url))) {
+        return true;
+    }
+    const requiredUrls = state.authRequiredProxyUrls;
+    if (!requiredUrls || requiredUrls.length === 0) {
+        return false;
+    }
+    const required = new Set(requiredUrls);
+    return urls.some(url => {
+        if (hasProxyCredentials(url)) {
+            return false;
+        }
+        const publicUrl = getProxyPublicUrl(url);
+        return Boolean(publicUrl && required.has(publicUrl));
+    });
 }
 
 export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState {
@@ -139,6 +213,13 @@ export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState 
         sanitized.requiresAuth = true;
     } else {
         delete sanitized.requiresAuth;
+    }
+
+    const authRequiredProxyUrls = deriveAuthRequiredProxyUrls(state);
+    if (authRequiredProxyUrls) {
+        sanitized.authRequiredProxyUrls = authRequiredProxyUrls;
+    } else {
+        delete sanitized.authRequiredProxyUrls;
     }
 
     return sanitized;

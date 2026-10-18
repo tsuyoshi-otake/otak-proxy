@@ -14,6 +14,7 @@ import { ProxyMode, ProxyState, IProxyStateManager, StateCommitResult, stateRevi
 import { Logger } from '../utils/Logger';
 import { I18nManager } from '../i18n/I18nManager';
 import {
+    deriveAuthRequiredProxyUrls,
     deriveRequiresAuth,
     getProxyPublicUrl,
     hasProxyCredentials,
@@ -309,6 +310,12 @@ export class ProxyStateManager implements IProxyStateManager {
             next.requiresAuth = true;
         } else {
             delete next.requiresAuth;
+        }
+        const authRequiredProxyUrls = deriveAuthRequiredProxyUrls(state);
+        if (authRequiredProxyUrls) {
+            next.authRequiredProxyUrls = authRequiredProxyUrls;
+        } else {
+            delete next.authRequiredProxyUrls;
         }
         return next;
     }

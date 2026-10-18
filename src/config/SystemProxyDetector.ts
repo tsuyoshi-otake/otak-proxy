@@ -6,6 +6,7 @@ import { Logger } from '../utils/Logger';
 import { detectPlatformProxyWithSource } from './PlatformProxyDetection';
 import { buildDetectedProxyValue } from './DetectedProxyValue';
 import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { sameProxyUrlWithCredentials } from '../utils/ProxyUrlIdentity';
 import type { ProxyCapability, ProxyIssue, ProxyValueKind } from '../core/v3Types';
 
 const execFileAsync = promisify(execFile);
@@ -233,7 +234,9 @@ export class SystemProxyDetector {
      * - its provenance is known and is NOT 'vscode' (undefined provenance may be a
      *   hand-set `http.proxy` that predates this extension — never suppress those),
      * - the candidate is the applied URL, where "is" means either:
-     *   (a) equal in canonical form, userinfo included, or
+     *   (a) the same proxy and the same credentials in WHATWG-normalized
+     *       form — a persisted-and-hydrated applied URL spells the same
+     *       proxy differently (host case, default port), or
      *   (b) credential-free and naming the same proxy address — the detection
      *       path writes the URL as detected (credential-free for a platform
      *       proxy), while the provider's URL is hydrated with the credentials
@@ -254,7 +257,7 @@ export class SystemProxyDetector {
 
             const canonicalCandidate = canonicalizeProxyUrl(candidate);
             const canonicalApplied = canonicalizeProxyUrl(applied.url);
-            if (canonicalCandidate === canonicalApplied) {
+            if (sameProxyUrlWithCredentials(canonicalCandidate, canonicalApplied)) {
                 return true;
             }
             return !hasProxyCredentials(canonicalCandidate)

@@ -20,6 +20,8 @@ import { GitConfigManager } from '../config/GitConfigManager';
 import { NpmConfigManager } from '../config/NpmConfigManager';
 import { TerminalEnvConfigManager } from '../config/TerminalEnvConfigManager';
 import { splitApplyOptionsFromState } from '../config/DetectedProxyValue';
+import { SystemProxyDetector } from '../config/SystemProxyDetector';
+import { appliedProxyInfoFromState } from '../core/AppliedProxyProvenance';
 import { ProxyApplier } from '../core/ProxyApplier';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
 import { resolveProxyApplyOptions, proxyApplyPlanCredentialUrls, proxyApplyPlanUrls } from '../core/ProxyApplyPlan';
@@ -35,9 +37,14 @@ import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { ProxyRemediationService, ProxyApplyTrigger } from '../remediation/ProxyRemediationService';
 import { runProxyApplyAttempt } from '../remediation/ProxyApplyAttempt';
 import { applyRemoteSyncState, RemoteSyncApplyContext } from '../sync/RemoteSyncStateApplier';
+import { getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
 import * as SystemProxyDetectionUtils from '../utils/SystemProxyDetectionUtils';
 import {
+    deriveAuthRequiredProxyUrls,
+    getProxyPublicUrl,
     removeProxyCredentials,
+    sanitizeProxyStateForPersistence,
+    setRequiresAuthFromLiveUrls,
     shouldSkipUnauthenticatedApply,
     UNRESOLVED_LOCAL_CREDENTIAL_ERROR
 } from '../utils/ProxyStateSanitizer';
@@ -50,6 +57,10 @@ const OTHER_CRED_URL = 'http://other:pw@other.example.com:9999';
 // HTTPS only (HTTP_PROXY=http://proxy:3128, HTTPS_PROXY=http://user:secret@proxy:3128).
 const SAME_HOST_URL = 'http://proxy.example.com:3128';
 const SAME_HOST_CRED_URL = 'http://user:secret@proxy.example.com:3128';
+// Two different proxy addresses, both credential-bearing (finding 2).
+const PROXY_A_CRED_URL = 'http://u1:p1@proxy-a.example.com:3128';
+const PROXY_B_CRED_URL = 'http://u2:p2@proxy-b.example.com:3128';
+const PROXY_A_PLAIN_URL = 'http://proxy-a.example.com:3128';
 const CONSENT_KEY = 'otakProxy.v3.credentialTargetConsent';
 
 // The key format earlier versions stored, so the test also checks that
@@ -536,5 +547,362 @@ suite('Split credentials survive a reload (#108)', () => {
                 assert.ok(judged.has(value), `written URL was not judged by consent: ${value}`);
             }
         }
+    });
+});
+
+// Credentials on two different proxy addresses (finding 2, #108).
+function twoAddressCredSplitState(overrides: Partial<ProxyState> = {}): ProxyState {
+    return {
+        mode: ProxyMode.Auto,
+        revision: 1,
+        autoProxyUrl: PROXY_A_CRED_URL,
+        autoProxyKind: 'perSchemeProxy',
+        autoHttpProxyUrl: PROXY_A_CRED_URL,
+        autoHttpsProxyUrl: PROXY_B_CRED_URL,
+        lastDetectionSource: 'environment',
+        ...overrides
+    };
+}
+
+function proxyAPublicUrl(): string {
+    return getProxyPublicUrl(PROXY_A_CRED_URL)!;
+}
+
+function proxyBPublicUrl(): string {
+    return getProxyPublicUrl(PROXY_B_CRED_URL)!;
+}
+
+function remoteSyncContext(harness: Harness, applyCalls: Array<{ url: string; enabled: boolean }>): RemoteSyncApplyContext {
+    return {
+        saveState: async next => { await harness.stateManager.saveState(next); },
+        getState: () => harness.stateManager.getState(),
+        getActiveProxyUrl: state => harness.stateManager.getActiveProxyUrl(state),
+        applyProxy: async (url, enabled) => {
+            applyCalls.push({ url, enabled });
+            return true;
+        },
+        startMonitoring: async () => {},
+        stopMonitoring: async () => {},
+        updateStatus: () => {}
+    };
+}
+
+function reloadHarness(globalState: Map<string, unknown>, secrets?: Map<string, string>): Harness {
+    const harness = createHarness();
+    for (const [key, value] of globalState) {
+        harness.globalState.set(key, value);
+    }
+    for (const [key, value] of secrets ?? []) {
+        harness.secrets.set(key, value);
+    }
+    return harness;
+}
+
+suite('Echo identity survives a reload (#108)', () => {
+    let sandbox: sinon.SinonSandbox;
+    let otakConfig: Record<string, unknown>;
+    let httpProxyValue: string | undefined;
+
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+        sandbox = sinon.createSandbox();
+        otakConfig = { notificationLevel: 'off', diagnosticsEnabled: false };
+        httpProxyValue = undefined;
+        sandbox.stub(vscode.workspace, 'getConfiguration').callsFake(((section?: string) => {
+            if (section === 'http') {
+                return {
+                    get: (key: string) => (key === 'proxy' ? httpProxyValue : undefined),
+                    has: () => true,
+                    inspect: () => undefined,
+                    update: async () => {}
+                };
+            }
+            return {
+                get: (key: string, defaultValue?: unknown) =>
+                    section === 'otakProxy' && key in otakConfig ? otakConfig[key] : defaultValue,
+                update: async () => {},
+                has: () => true,
+                inspect: () => undefined
+            };
+        }) as typeof vscode.workspace.getConfiguration);
+        sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    // A reloaded (persisted + hydrated) applied URL spells the same proxy
+    // differently from the value VS Code still holds: host is lower-cased and
+    // a default port is dropped. Echo suppression must still recognize it.
+    for (const original of ['http://user:pass@PROXY.EXAMPLE.COM:80', 'https://user:pass@PROXY.EXAMPLE.COM:443']) {
+        test(`a re-spelled credential-bearing applied URL is still the echo (${original})`, async () => {
+            const globalState = new Map<string, unknown>();
+            const secrets = new Map<string, string>();
+            await new ProxyStateManager(fakeExtensionContext(globalState, secrets)).saveState({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: original,
+                lastDetectionSource: 'environment'
+            });
+
+            const harness = reloadHarness(globalState, secrets);
+            const applied = appliedProxyInfoFromState(await harness.stateManager.getState());
+            assert.ok(applied, 'provider must report an applied proxy');
+            assert.notStrictEqual(
+                applied.url,
+                original,
+                'premise: hydration must re-spell the URL (host case, default port)'
+            );
+            assert.ok(applied.url.includes('user:pass'), 'credentials must be restored');
+
+            httpProxyValue = original;
+            const detector = new SystemProxyDetector(['vscode']);
+            detector.setAppliedProxyProvider(async () => applied);
+
+            const result = await detector.detectSystemProxyWithSource();
+
+            assert.strictEqual(result.proxyUrl, null, 'the re-spelled own write must be suppressed');
+            assert.strictEqual(result.source, null);
+        });
+    }
+});
+
+suite('Per-address credential requirement (#108)', () => {
+    let sandbox: sinon.SinonSandbox;
+    let otakConfig: Record<string, unknown>;
+
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+        sandbox = sinon.createSandbox();
+        otakConfig = {
+            notificationLevel: 'off',
+            hostUserLockEnabled: false,
+            diagnosticsEnabled: false
+        };
+        sandbox.stub(vscode.workspace, 'getConfiguration').callsFake(((section?: string) => ({
+            get: (key: string, defaultValue?: unknown) =>
+                section === 'otakProxy' && key in otakConfig ? otakConfig[key] : defaultValue,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        })) as typeof vscode.workspace.getConfiguration);
+        sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    test('only one of two credentialed addresses restored: the startup gate and the sync apply both skip', async () => {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        await new ProxyStateManager(fakeExtensionContext(originState, originSecrets))
+            .saveState(twoAddressCredSplitState());
+        const persisted = originState.get('proxyState') as ProxyState;
+        assert.deepStrictEqual(
+            persisted.authRequiredProxyUrls,
+            [proxyAPublicUrl(), proxyBPublicUrl()],
+            'the persisted state must record both credential-bearing addresses'
+        );
+
+        // A machine whose SecretStorage holds only proxy-a's secret.
+        const harness = reloadHarness(originState, new Map(
+            [...originSecrets].filter(([key]) => key !== getCredentialKeyForPublicUrl(proxyBPublicUrl()))
+        ));
+        const reloaded = await harness.stateManager.getState();
+        assert.strictEqual(reloaded.autoHttpProxyUrl, PROXY_A_CRED_URL, 'proxy-a credentials must be restored');
+        assert.ok(
+            reloaded.autoHttpsProxyUrl && !reloaded.autoHttpsProxyUrl.includes('u2'),
+            'premise: proxy-b must hydrate without credentials'
+        );
+        assert.strictEqual(reloaded.requiresAuth, true);
+
+        const activeUrl = reloaded.autoProxyUrl || '';
+        const planOptions = resolveProxyApplyOptions(activeUrl, undefined, reloaded);
+        assert.strictEqual(
+            shouldSkipUnauthenticatedApply(reloaded, proxyApplyPlanUrls(activeUrl, planOptions)),
+            true,
+            'the apply must skip: proxy-b would be written without its credentials'
+        );
+
+        const applyCalls: Array<{ url: string; enabled: boolean }> = [];
+        const applied = await applyRemoteSyncState({ ...persisted }, remoteSyncContext(harness, applyCalls));
+
+        assert.strictEqual(applied, false);
+        assert.deepStrictEqual(applyCalls, []);
+        assert.strictEqual((await harness.stateManager.getState()).lastError, UNRESOLVED_LOCAL_CREDENTIAL_ERROR);
+        assertNothingWritten(harness);
+    });
+
+    test('a SecretStorage write that failed for one split address: the startup gate and the sync apply both skip', async () => {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        const originContext = fakeExtensionContext(originState, originSecrets);
+        const proxyBKey = getCredentialKeyForPublicUrl(proxyBPublicUrl());
+        originContext.secrets.store = async (key: string, value: string) => {
+            if (key === proxyBKey) {
+                throw new Error('SecretStorage write failed');
+            }
+            originSecrets.set(key, value);
+        };
+        await new ProxyStateManager(originContext).saveState(twoAddressCredSplitState());
+        const persisted = originState.get('proxyState') as ProxyState;
+        assert.deepStrictEqual(
+            persisted.authRequiredProxyUrls,
+            [proxyAPublicUrl(), proxyBPublicUrl()],
+            'the persisted state must record both credential-bearing addresses even when one secret write failed'
+        );
+        assert.ok(originSecrets.has(getCredentialKeyForPublicUrl(proxyAPublicUrl())), 'proxy-a secret must be stored');
+        assert.ok(!originSecrets.has(proxyBKey), 'premise: proxy-b secret must be missing');
+
+        const harness = reloadHarness(originState, originSecrets);
+        const reloaded = await harness.stateManager.getState();
+        assert.strictEqual(reloaded.autoHttpProxyUrl, PROXY_A_CRED_URL);
+        assert.ok(reloaded.autoHttpsProxyUrl && !reloaded.autoHttpsProxyUrl.includes('u2'));
+
+        const activeUrl = reloaded.autoProxyUrl || '';
+        const planOptions = resolveProxyApplyOptions(activeUrl, undefined, reloaded);
+        assert.strictEqual(
+            shouldSkipUnauthenticatedApply(reloaded, proxyApplyPlanUrls(activeUrl, planOptions)),
+            true,
+            'the apply must skip: proxy-b was recorded as credential-bearing but cannot hydrate'
+        );
+
+        const applyCalls: Array<{ url: string; enabled: boolean }> = [];
+        const applied = await applyRemoteSyncState({ ...persisted }, remoteSyncContext(harness, applyCalls));
+
+        assert.strictEqual(applied, false);
+        assert.deepStrictEqual(applyCalls, []);
+        assert.strictEqual((await harness.stateManager.getState()).lastError, UNRESOLVED_LOCAL_CREDENTIAL_ERROR);
+        assertNothingWritten(harness);
+    });
+
+    test('an address that never carried credentials does not trip the gate', async () => {
+        const originState = new Map<string, unknown>();
+        const originSecrets = new Map<string, string>();
+        await new ProxyStateManager(fakeExtensionContext(originState, originSecrets))
+            .saveState(twoAddressCredSplitState({
+                autoProxyUrl: PROXY_A_PLAIN_URL,
+                autoHttpProxyUrl: PROXY_A_PLAIN_URL
+            }));
+        const persisted = originState.get('proxyState') as ProxyState;
+        assert.deepStrictEqual(
+            persisted.authRequiredProxyUrls,
+            [proxyBPublicUrl()],
+            'only the credentialed address is recorded'
+        );
+
+        // With proxy-b's secret the gate does not skip and the apply writes
+        // proxy-b with its credentials; proxy-a is written credential-free.
+        {
+            const harness = reloadHarness(originState, originSecrets);
+            const reloaded = await harness.stateManager.getState();
+            assert.strictEqual(reloaded.autoHttpsProxyUrl, PROXY_B_CRED_URL, 'proxy-b credentials must be restored');
+            assert.strictEqual(reloaded.autoHttpProxyUrl, PROXY_A_PLAIN_URL);
+
+            const activeUrl = reloaded.autoProxyUrl || '';
+            const planOptions = resolveProxyApplyOptions(activeUrl, undefined, reloaded);
+            assert.strictEqual(
+                shouldSkipUnauthenticatedApply(reloaded, proxyApplyPlanUrls(activeUrl, planOptions)),
+                false,
+                'a credential-free address that never needed credentials must not trip the gate'
+            );
+
+            harness.globalState.set(CONSENT_KEY, { [consentKeyFor(PROXY_B_CRED_URL)]: true });
+            const result = await harness.applySafely(activeUrl, true, 'startup');
+            assert.strictEqual(result.success, true, JSON.stringify(result.applyResult?.errors));
+            assert.strictEqual(harness.npm.get('https-proxy'), PROXY_B_CRED_URL);
+            assert.strictEqual(harness.npm.get('proxy'), PROXY_A_PLAIN_URL);
+        }
+
+        // Without proxy-b's secret the gate skips: proxy-b cannot be written
+        // without its credentials.
+        {
+            const harness = reloadHarness(originState);
+            const reloaded = await harness.stateManager.getState();
+            assert.ok(reloaded.autoHttpsProxyUrl && !reloaded.autoHttpsProxyUrl.includes('u2'));
+
+            const activeUrl = reloaded.autoProxyUrl || '';
+            const planOptions = resolveProxyApplyOptions(activeUrl, undefined, reloaded);
+            assert.strictEqual(
+                shouldSkipUnauthenticatedApply(reloaded, proxyApplyPlanUrls(activeUrl, planOptions)),
+                true,
+                'the apply must skip when proxy-b credentials are unavailable on this machine'
+            );
+        }
+    });
+});
+
+suite('authRequiredProxyUrls lifecycle (#108)', () => {
+    test('setRequiresAuthFromLiveUrls replaces the list from the live fields', () => {
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_A_CRED_URL,
+            requiresAuth: true,
+            authRequiredProxyUrls: ['http://stale.example.com:1/']
+        };
+        setRequiresAuthFromLiveUrls(state);
+        assert.strictEqual(state.requiresAuth, true);
+        assert.deepStrictEqual(state.authRequiredProxyUrls, [proxyAPublicUrl()]);
+    });
+
+    test('a credential-free live state clears the list together with requiresAuth', () => {
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_A_PLAIN_URL,
+            requiresAuth: true,
+            authRequiredProxyUrls: [proxyBPublicUrl()]
+        };
+        setRequiresAuthFromLiveUrls(state);
+        assert.ok(!('requiresAuth' in state), 'requiresAuth must be cleared');
+        assert.ok(!('authRequiredProxyUrls' in state), 'the list must be cleared');
+    });
+
+    test('persistence keeps the list for a partially hydrated state', () => {
+        const sanitized = sanitizeProxyStateForPersistence({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_A_PLAIN_URL,
+            autoHttpProxyUrl: PROXY_A_PLAIN_URL,
+            autoHttpsProxyUrl: proxyBPublicUrl(),
+            requiresAuth: true,
+            authRequiredProxyUrls: [proxyAPublicUrl(), proxyBPublicUrl()]
+        });
+        // proxy-a is still in a field so its entry survives even though it no
+        // longer carries credentials; both entries stay because they still
+        // appear in the state.
+        assert.deepStrictEqual(sanitized.authRequiredProxyUrls, [proxyAPublicUrl(), proxyBPublicUrl()]);
+    });
+
+    test('a URL that leaves every field leaves the list', () => {
+        const sanitized = sanitizeProxyStateForPersistence({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_A_CRED_URL,
+            authRequiredProxyUrls: [proxyAPublicUrl(), proxyBPublicUrl()]
+        });
+        assert.deepStrictEqual(sanitized.authRequiredProxyUrls, [proxyAPublicUrl()]);
+    });
+
+    test('no entry contains userinfo and the list is sorted', () => {
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: PROXY_B_CRED_URL,
+            fallbackProxyUrl: PROXY_A_CRED_URL
+        };
+        const derived = deriveAuthRequiredProxyUrls(state);
+        assert.deepStrictEqual(derived, [...derived!].sort());
+        for (const url of derived!) {
+            assert.ok(!url.includes('@'), `list entry must not carry userinfo: ${url}`);
+        }
+    });
+
+    test('a state persisted before the list existed comes out byte-identical', () => {
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: proxyAPublicUrl(),
+            requiresAuth: true
+        };
+        const sanitized = sanitizeProxyStateForPersistence(state);
+        assert.deepStrictEqual(sanitized, state);
+        assert.strictEqual(JSON.stringify(sanitized), JSON.stringify(state));
     });
 });

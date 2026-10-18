@@ -426,7 +426,8 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ProxyStateManager
 - **Responsibility**: ProxyState persistence and retrieval
 - **Key features**:
-  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto
+  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto; URL credentials are split out to SecretStorage on save and re-hydrated on load, keyed by the credential-free public URL
+  - `requiresAuth` / `authRequiredProxyUrls` (non-secret, synced): `requiresAuth` records that a URL field carried credentials and `authRequiredProxyUrls` lists those addresses as credential-free public URLs; the startup and sync applies are skipped rather than writing an address without the credentials it requires on this machine (#108)
   - `saveState()`: State saving (with automatic fallback)
   - `getNextMode()`: Off ↔ Auto (a leftover Manual value also advances to Auto)
   - `migrateOldSettings()`: Migration from legacy settings
