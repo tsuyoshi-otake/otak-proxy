@@ -229,6 +229,11 @@
   チェックのテスト結果と反転に `ReportedProxyChange`（開始時の世代と新しい routing）を付け、先の handler は
   「印の世代がまだ新しく、routing が保存値と違う」ときだけ proxyChanged に任せる。世代の条件を外すと、
   proxyChanged が stale で捨てられたときに判定が両方から消える。印は保存しない（`stripGeneration`）。
+- **検出が「変わったか」は、どの経路でも主 URL と `splitRoutingIdentity` で決める。** モニタ
+  （`handleProxyChanged`）と起動時・Auto への切り替え（`updateAutoProxyState`）が別の比べ方をしていたため、
+  bypass だけの変更が起動時に適用されず、apply が使わない HTTPS のコピーのずれで毎回 apply し直していた（#108）。
+  経路を足したら、`SystemProxyUpdateService.test.ts` の parity 表に両方の経路を同じ初期状態から動かす行を足す
+  — verified by: 修正前の比較で parity の行が red。
 
 - **revision を含む署名やガードは、自分の apply の結果コミット（revision +1）で必ず stale になる。**
   比べるのは apply が返す `committedRevision`、または mode と URL の identity。コマンドの flow テストは

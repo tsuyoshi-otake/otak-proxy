@@ -2094,3 +2094,18 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - 修正（`b903353`）: `ensurePerUserLockDir` が、呼び出し側が実際にロックを置くディレクトリを任意の引数で受け取り、同じ uid・0700 の規則で確かめる。`ApplyLockService` はキャッシュした `baseDir`、`withGitConfigWriteMutex` は `path.dirname(GIT_CONFIG_MUTEX_PATH)` を渡す。
 - Verification: 新しい 3 行（明示したディレクトリだけを mkdir / lstat する、構築後に tmpdir が変わってもキャッシュしたディレクトリで確認して取得し新しい方には何も作らない、Git の mutex の確認が mutex 自身のディレクトリを受け取る）。後ろ 2 行はコンパイル済みの修正前のロジックで red（ENOENT、引数なし）。lint は検出 0、unit 1218 + 74 passing・5 pending、smoke 4、CI success。Codex の再レビューは指摘なし。
 - Learning: 場所を 1 回だけ決めてキャッシュするなら、使う前の確認もそのキャッシュした値に対して行う。確認の側で場所を計算し直すと、確認とロックが別のディレクトリを見る。
+
+## 2026-10-19 — #108 項目 2 の 1 つ目と 5 つ目: 起動時と Auto への切り替えも `splitRoutingIdentity` で「変わったか」を決め、使われていない `ProxyState.noProxy` を消す
+
+**Issue**: #108（項目 2 の 1 つ目と 5 つ目）
+**PR**: #122
+**コミット**: `1e3e8d3`
+**分担**: Devin が最初の実装を途中まで書いた（報告を書く前に Devin が使えなくなった）。Claude Code が実装を仕上げ、テストの行を足し、検証した。
+
+- 症状: モニタ（`handleProxyChanged`）は主 URL と `splitRoutingIdentity`（スキームごとの URL と bypass）で「変わった」を決めるが、起動時の確認と Auto への切り替え（`updateAutoProxyState`）は主 URL と保存した HTTPS のコピーだけで比べていた。bypass だけの変更や、スキームごとのプロキシの HTTP 側だけの変更は、モニタが気づくまで適用されなかった。逆に、単一プロキシの HTTPS のコピー（apply は使わない）がずれていると、起動のたびに apply し直していた。`ProxyState.noProxy` は誰も書いておらず、世代の identity に入っていたが常に空だった。
+- 原因: 同じ「変わったか」の判定が 2 か所にあり、片方だけが `splitRoutingIdentity` に移っていた（#102）。
+- 修正: `updateAutoProxyState` は検出を状態に重ねる前と後の `splitRoutingIdentity` を比べる（`previousHttps` を削除）。Auto OFF、既知の収束失敗、`shouldEnsureDisabledProxy` の条件はそのまま。`ProxyState.noProxy`、`GenerationExtras`、`extras` 引数を消し、世代の identity が何を含み、bypass とスキームごとの URL をどこで比べるかを doc comment に書いた。
+- レビューで直させた点: Devin の版は parity 表に「bypass なしで HTTPS のコピーだけずれる」行がなかった。Claude Code が足し、その行が 0/0（修正前の起動経路は 1）になることを確かめた。
+- Verification: 新しい suite（bypass だけの変更 3 通り、HTTP 側だけの変更、同じ検出を bypass あり・なしで、Auto OFF のガード、`handleProxyChanged` と `checkAndUpdateSystemProxy` を同じ初期状態で動かす parity 表）。修正前の比較で 3 件 red（bypass だけ、HTTP 側だけ、parity の「bypass-only change: startup apply count」）。独立した verifier が 13 基準すべて合格（lint 0、unit 1218 + 74 passing・5 pending、host 616 passing・既知の 7 件だけ失敗、smoke 4）。
+- Learning: 「変わったか」の判定が複数の経路にあるなら、同じ関数で決め、parity 表で両方の経路を同じ入力から動かして比べる。片方だけ直すと、もう片方が古い規則のまま残る。
+- 残留リスク: 起動時と Auto への切り替えで、bypass だけの変更とスキームごとの変更に「system proxy changed」の通知が出るようになった（モニタと同じ）。`hasKnownConvergenceFailure` と `hasKnownEnableFailure` は、プロキシが検出されず対象が設定済みのときに食い違う（follow-up）。
