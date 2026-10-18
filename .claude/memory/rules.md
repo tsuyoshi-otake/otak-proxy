@@ -60,10 +60,19 @@
   「`commitState` が無ければ `saveState`」は、テストの fake だけが通った。`calledOnce(saveStateStub)` を見る
   3 件のテストは本番が通らない経路を検査し、分岐は直した欠陥（#109 への指摘 F2）を黙って戻せた。fake に
   revision 付きの `commitState` を持たせ、「何も書かない」の検査は `saveState` と `commitState` の両方を見る（#78）。
+  fake の globalState は、本番と同じくすべてのキーを残す。`proxyState` だけを残す fake では v3 の移行が完了を
+  記録できず `getState()` のたびに走り、資格情報付きの設定を移行が代わりに処理するので、`getState()` の取り込みの
+  分岐をテストが見ていなかった（#108、`src/test/realProxyStateManager.ts`）。すべてのキーを残す fake にすると、
+  取り込みが SecretStorage に資格情報を入れる呼び出しを外すミューテーションで「a credential-bearing setting stores the
+  secret and rewrites the setting without credentials」が red になった（#108）。
 
 - **ミューテーションが単独で green なら、別の層が吸収していないか調べる。** 「トグル前のスナップショットとの差分」は、
   identity のガードが `moved` にして吸収した。ガードが守らない範囲（同じ proxy の新しい bookkeeping）でテストを
   書くと、単独で red になった（#78、テスト「same-identity bookkeeping committed inside the CAS window is kept」）。
+  吸収する層は、上流の処理や再読み込みのこともある。#108 で `ErrorAggregator.addError` のマスクを外しても、Git の
+  テストは manager がマスク済みの文を渡すので green だった。Configure で保存済みの URL を残す分岐を外しても、
+  再読み込みが SecretStorage から資格情報を引き直し `requiresAuth` も導き直すので green だった。取り込み口のテストには
+  未マスクの文を直接渡し、「残す」分岐はコマンド直後に永続化された state で確かめると、どちらも red になった（#108）。
 
 - **テストは本番の合成そのものを呼ぶ。手順の写しを持たない。** #108 の初稿のテストは `applyProxySafely` の手順
   （state を読む → 計画 → フェンス → `applyWithSafety`）を写していて、本番が未解決の options を渡すように壊しても
@@ -97,6 +106,16 @@
   結果コミットの世代を見落とした。3 つとも Codex が見つけた。書き込み関数の呼び出し元を `git grep` で列挙し、
   各行で「ガードを通るか」「判断の入力が再実行の署名に入っているか」「コミットの世代は計画と同じ読み取りか」を
   確かめてからブリーフに書く（#108）。
+  表の各行は、本番でその経路が実際に走るかも確かめる。#108 項目 5、6、11 の 1 回目のレビューのブリーフは起動時の移行
+  （`migrateManualUrlFromConfig`）に検証を足させたが、`activate()` が先に `getState()` を呼び、その取り込みが手動 URL を
+  埋めるので、移行の本体は本番で走らなかった。実際の `ProxyStateManager` を `out/` の probe で通すと、無効な値が
+  state に入り、後の保存で永続化されるのが見えた（#108）。
+- **ブリーフで既存の関数を使わせるときは、その関数の副作用を読み、呼ばれる頻度と合わせて書く。** #108 項目 5、6、11 の 2 回目の
+  レビューのブリーフは、`getState()` のたびに走る取り込みに `canonicalizeValidProxyUrl` を指定しつつ「ここではログを出さない」と
+  書いた。この関数は無効な値で `Logger.error` を出すので、無効な設定のままだと `getState()` のたびに
+  エラーが出た（検出の経路の `SystemProxyUpdateService.ts` だけで `getState()` の呼び出しが 6 か所ある）。ログを出さない
+  `tryCanonicalizeProxyUrl` に分け、取り込み、起動時の確認、Configure の初期値をログを出す形に戻すミューテーションは、
+  `Logger.error` を stub したテストでどれも red になった（#108）。
 
 ## 外部ツールのスタブ
 
@@ -354,6 +373,19 @@
   fallback の資格情報だけで、資格情報の無い system proxy の apply まで拒む（3.2.16 も起動と同期で拒んでいた）。
   一覧がある state ではアドレスごとの規則だけを使い、集約規則は一覧の導入前に保存された state にだけ残す
   （集約規則を先に戻すミューテーションで「list present: no skip」が red、#108）。
+- **任意の文字列から資格情報を消す規則は、`maskCredentialOccurrences`（`src/security/ProxySecretRedactor.ts`）1 か所が
+  持つ。** URL の資格情報と scheme の無い資格情報の正規表現（どちらも `/g`）は非公開で、置き換える文字列は呼び出し元が
+  渡す（表示とログは `user:****@`、診断と永続化は `<credentials>@`）。エラー文は `ErrorAggregator.addError` で取り込む
+  ときにマスクし、`lastError` へのコミットで redaction を重ねない（`redactString` は改行を `\n` の文字列に変え、tooltip に
+  そのまま出る）。正規表現を 2 か所に持っていたときは、片方だけが直されて境界がずれた（#108 項目 5、11）。
+- **WHATWG の URL 解析は、special scheme の `\` を `/` として扱う。** `http://DOMAIN\user:pass@proxy:8080` は host が
+  `domain`、パスが `/user:pass@proxy:8080` になり、`username` と `password` は空になる。`new URL()` の結果だけで資格情報が
+  無いと判断せず、直列化した文字列にも文字列のマスクを当てる（node で確認、#108 項目 11）。
+- **設定の `otakProxy.proxyUrl` が state に入る経路は、どれも同じ検証と正規化を通す。** 設定変更のハンドラ
+  （`CommandRegistry.handleProxyUrlChange`）と、`getState()` の取り込み（`normalizeConfiguredManualProxyUrl`。
+  `migrateOldSettings` も使う）。無効な値は state に入れず、SecretStorage にも設定にも書かない。取り込みは `getState()` の
+  たびに走るので、ログを出さない形（`tryCanonicalizeProxyUrl`、`src/utils/ProxyUrlUtils.ts`）を使い、無効な設定の
+  警告は起動時に 1 回だけ出す（#108）。
 
 ## ドキュメント
 

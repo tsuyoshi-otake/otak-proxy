@@ -1605,3 +1605,84 @@ extension-host lane は #104 で #102 のコードに対して実行済み（502
 - ライブの URL から一覧を作り直す経路（検出、トグルの fallback、Auto Off）は、hydrate できなかったアドレスを一覧から外す（前回の記録と同じ）。同じアドレスの資格情報の無い観測を「資格情報を外した」と読むかは仕様の判断で、最終報告でユーザーに聞く。
 - 結果コミットが捨てられても、古い計画の書き込みは対象に残る。別のウィンドウの apply が後から書けば上書きされるが、書き込みの順序が逆になると、対象は古い計画の値のまま残りうる。fence の確認と書き込みは原子的でない（従来から）。
 - 確認したのはユニットテストと VS Code ホストのテスト（Git / npm の fake）まで。実際の認証 proxy と SecretStorage の書き込み失敗は試していない。
+
+## 2026-10-18 — #108 項目 5、6、11 と低の 2 件: パスワードを通知、tooltip、ログ、入力ボックスに出さない
+
+**Issue**: [#108](https://github.com/tsuyoshi-otake/otak-proxy/issues/108)（項目 5、6、11、低の「Configure の入力ボックスの初期値」と「settings.json の `otakProxy.proxyUrl` の検証」）
+**PR**: [#113](https://github.com/tsuyoshi-otake/otak-proxy/pull/113)
+**コミット**: `baddb39`（fix/108-credential-redaction）
+**分担**: 実装は Devin（tmux の隣のペイン）。レビュー、検証、コミット、PR は Claude Code。
+
+### 症状
+
+- 項目 5: `InputSanitizer` の資格情報の正規表現に `/g` が無く、1 つの文字列の 2 個目以降の `//user:pass@` が残った。scheme の無い資格情報の境界は `[\s=]` だけで、`/`、`:`、`@` の直後に空白なしで続く裸の資格情報が Output channel に出た。正規表現は `ProxySecretRedactor` にも別に定義され、境界がずれていた。
+- 項目 6: `SystemProxyUpdateService` の `Using fallback proxy` と `Testing fallback proxy` のログは、マスクしていない URL を Logger に渡していた（Logger の中のマスク頼み）。
+- 項目 11: git の書き込みが失敗すると、分類器が Node のエラー文（`Command failed: git config --global --replace-all http.proxy http://user:pass@…`）をそのまま返し、エラー通知、`lastError`、ステータスバーの tooltip に平文のパスワードが出た。`maskPassword` は `http://DOMAIN\user:pass@proxy:8080` を `http://domain/user:pass@…` に変え、パスワードを残した。
+- 低: `otak: Configure Manual Proxy` の入力ボックスの初期値が `state.manualProxyUrl`（資格情報付き）だった。settings.json の `otakProxy.proxyUrl` の変更は検証を通らずに state に入り、同期で他のウィンドウに伝わった。
+- レビュー中に見つけたもの: `ProxyStateManager.getState()` は、state に手動 URL が無いと、設定の `otakProxy.proxyUrl` を検証も正規化もせずに取り込み（`hydrateManualProxyUrl` → `normalizeConfiguredManualProxyUrl`。`migrateOldSettings` も同じ関数）、後の保存でそのまま永続化した。`extension.ts` の `migrateManualUrlFromConfig` は `getState()` の後に呼ばれるので、本番では本体が走らない。
+
+### 原因
+
+- 任意の文字列から資格情報を消す規則（正規表現と境界）が 2 か所（`InputSanitizer`、`ProxySecretRedactor`）にあり、片方だけが直されていた。
+- エラー文が通知、`lastError`、tooltip に入る口（`ErrorAggregator`）でマスクしておらず、呼び出し元ごとのマスクに頼っていた。
+- `maskPassword` は `new URL()` で解析してから userinfo を置き換える。WHATWG の解析は special scheme の `\` を `/` として扱うので、`DOMAIN\user:pass@` はパスの一部になり、userinfo として扱われなかった。
+- 設定の値が state に入る経路が 3 つ（設定変更のハンドラ、`getState()` の取り込み、起動時の移行）あり、どこにも検証が無かった。
+
+### 修正
+
+- `ProxySecretRedactor.ts` の `maskCredentialOccurrences(text, maskUserinfo)` に、URL の資格情報と scheme の無い資格情報の正規表現（どちらも `/g`、非公開）をまとめた。置き換える文字列は呼び出し元が渡す（表示とログは `user:****@`、診断と永続化は `<credentials>@`）。scheme の無い資格情報の境界に `/`、`:`、`@`、`\` を足した。`InputSanitizer.maskPassword` と `ProxySecretRedactor.redactString` はこの関数を使う。1 つの URL の表示形式（`http://user:****@proxy:8080/`）は main と同じ。
+- `ErrorAggregator.addError` が取り込むときにマスクする。Git / npm / pip の manager も返すエラーをマスクする。`ProxyConfigStateTracker` は集約した文をそのまま `lastError` にコミットし、コミット時の 2 回目の redaction（改行を `\n` の文字列に変えていた）をやめた。
+- fallback の 2 つのログは、マスクした URL を渡す。
+- Configure の入力ボックスの初期値は、保存された URL の資格情報の無い正規形（`tryCanonicalizeProxyUrl(publicUrl) ?? ''`）。同じ公開 URL をそのまま確定すると、保存された資格情報を残す。資格情報付きの URL は資格情報を置き換え、資格情報の無い別の URL は資格情報を持たない。保存の前に `setRequiresAuthFromLiveUrls` で `requiresAuth` と `authRequiredProxyUrls` を作り直す。
+- 設定変更のハンドラは、無効な値を保存も同期もせず、既存の無効 URL のエラーを 1 回出す。有効な値は正規形で保存し、`requiresAuth` と一覧を作り直す。
+- `normalizeConfiguredManualProxyUrl` は最初に `tryCanonicalizeProxyUrl` で検証、正規化する。無効な値は `''` を返し、SecretStorage にも設定にも書かない。`extension.ts` の移行は、無効な設定を起動時に 1 回、マスクした値で `Logger.warn` するだけにした（`warnOnInvalidConfiguredProxyUrl`）。検証は、ログを出さない `tryCanonicalizeProxyUrl`（`src/utils/ProxyUrlUtils.ts`）に置き、`canonicalizeValidProxyUrl` はそれに委ねてから失敗をログに出す。取り込み、起動時の警告、Configure の入力ボックスの初期値はログを出さない形を使う。
+- Docs: `README.md`（Configure の入力の段落と、`otakProxy.proxyUrl` の設定の行。初期値に資格情報を出さないこと、無効な設定を拒否または無視すること）、`ARCHITECTURE.md`（起動時の確認、`getState()` の検証、設定変更のハンドラ、Configure の流れ、`***:***` をやめて実際のマスクの形式、資格情報の正規表現の持ち主が 1 か所、集約に入るときのマスク）、`CHANGELOG.md`（`[Unreleased]` の項目）。
+
+### レビューで直させた点
+
+1. 1 回目のレビュー（7 点）:
+   - コミット時の `redactString` が改行を `\n` の文字列に変え、tooltip に `\n` がそのまま出た。取り込み時のマスクだけにし、tooltip のテストは `state.lastError` から `getStatusBarDisplay` と `buildStatusBarTooltip` を通す形にした。
+   - `/g` の正規表現を export していた（`lastIndex` の状態が呼び出しをまたぐ）。関数 1 つの export にした。
+   - 初期値の到達しない分岐が、資格情報付きの文字列を返す形だった。無効な値は `''` にした。
+   - 設定変更のハンドラが `requiresAuth` を作り直さず、資格情報付きの URL を資格情報の無い別の URL に置き換えても `requiresAuth: true` が残った。
+   - ほかに、テストの一時ディレクトリの削除漏れ、property test の実行回数の固定、起動時の移行の検証（下の 3 で誤りと分かった）。
+2. 2 回目のレビュー（5 点）:
+   - ミューテーションが 12 種中 2 種生き残った。取り込み時のマスクを外しても（`aggNoMask`）関連の 150 件が green だった（Git のテストは manager がマスク済みの文を渡していた）。`ErrorAggregator.addError` に未マスクの複数行の文を直接渡すテストを足させた。再確定で保存された URL を残す分岐を外しても（`keepCredsOff`）28 件が green だった（再読み込みが SecretStorage から資格情報を引き直し、`requiresAuth` も導き直す）。コマンドの直後に永続化された state の印を確かめさせた。
+   - 1 回目のレビューの「起動時の移行を検証する」は、本番で到達しない分岐を直させていた（自分の作業ミス）。`out/` の probe で、`getState()` の取り込みが無効な値（`"not a proxy url"`）と非正規形（`HTTP://PROXY.EXAMPLE:3128/`）を state に入れ、後の保存で永続化することを確かめ、取り込みの関数を直させた。移行の分岐は消させた。
+   - 設定の置き換えのテストが stub の `saveProxyState` に渡った値を見ていた。実際の `ProxyStateManager` の再読み込みを通す形にし、in-memory の context を作る部品を Configure のテストと共有させた。
+   - ARCHITECTURE.md の「資格情報は `***:***` に置き換える」は、どのマスクも出さない形式だった。実際の形式に直させた。
+3. 3 回目のレビュー（5 点）:
+   - 取り込みの検証に使った `canonicalizeValidProxyUrl` は、無効な値で `Logger.error` を出す。取り込みは `getState()` のたびに走る（検出の経路の `SystemProxyUpdateService.ts` だけで呼び出しが 6 か所ある）ので、無効な設定のままだと Output channel にエラーが出続けた。2 回目のレビューのブリーフは「ここではログを出さない」と書きながら、ログを出す関数を指定していた（自分の作業ミス）。ログを出さない `tryCanonicalizeProxyUrl` を `ProxyUrlUtils` に置き、`canonicalizeValidProxyUrl` はそれに委ねてログを残す形にさせた。
+   - 共有の部品の globalState が `proxyState` 以外のキーを捨てていた。v3 の移行が完了を記録できず `getState()` のたびに走り、資格情報付きの設定を移行が処理するので、取り込みの資格情報の分岐をテストが見ていなかった。本番と同じくすべてのキーを残す形にさせた。
+   - 移行の経路のテストの mode の assert は、旧版の有効フラグが無いと値に関係なく成り立っていた（Property 4 がフラグ付きで両方の値を引くので、そちらに任せた）。非正規形の行は、本番の経路（手動 URL の無い保存済みの state）でも走らせた。
+   - 取り込みのテストが改行の保持を確かめていなかった。入力の行の区切りが本当の改行のまま残ることを assert させた。
+   - Configure の入力ボックスの初期値の計算も、ログを出さない形にした（開くたびに検証の失敗を記録していた）。
+4. 4 回目のレビュー（1 点）: ミューテーション 18 種のうち、初期値の計算をログを出す形に戻すもの（`prefillLoud`）だけが生き残り、Configure のテスト 36 件が green だった。保存された値が無効なまま Configure を開いても `Logger.error` と `Logger.warn` が呼ばれないこと（`notCalled`）を assert させた。最初の版は「Proxy URL validation failed」で始まる呼び出しだけを見ていたので、ブリーフどおり厳密な形に直させた。
+
+### Verification
+
+- `npm run lint`: exit 0。`No invisible Unicode characters found (repository files: 636 scanned)`。
+- `npm run test:unit:parallel`: exit 0。1113 passing と 74 passing、失敗 0。
+- `npm test`: 601 passing、1 pending、9 failing。失敗は既知の 9 件と完全に一致（ExtensionInitializer 3、SystemProxyUpdateService 1、ProxyOwnership.integration 3、FailureInjection.integration 1、ProxyRuntimeDiagnostics 1）。
+- `npm run test:smoke`: exit 0。4 passing。
+- ミューテーション（`npm run compile` の後、`out/` に当てて戻した）: 18 種すべて red。unit レーン 9 種（取り込みのマスクを外す、Git の manager のマスクを外す、コミット時の 2 回目の redaction、直列化した URL をそのまま返す、scheme の無い資格情報の境界を狭める、取り込みで制御文字をエスケープ、起動時の確認がログを出す、警告をマスクしない、警告を消す）。host レーン 9 種（初期値をそのまま返す、初期値の計算がログを出す、再確定で保存された資格情報を捨てる、Configure と設定変更のハンドラが印を作り直さない、ハンドラと取り込みが検証しない、取り込みがログを出す、取り込みが SecretStorage に入れない）。初期値の計算がログを出すものは 1 回目に生き残り、4 回目のレビューで足したテストで red になった。
+- 独立 verifier（sonnet、ルーブリック 11 項目）: 11 項目すべて pass。verifier は 4 つのスイートを自分で流し直し、fail-before のミューテーションも `out/` の複製で再現した。上の 4 行の数字は verifier が観測した値。
+- 改行: 変更した 23 ファイルすべてで行末が揃っている（単独の CR 0、U+FFFD 0）。`git ls-files --eol` では変更した追跡ファイルすべてが `i/lf`。
+
+### Learning
+
+1. ガードや検証を足す前に、守る経路が本番で到達するかを確かめる。今回は `activate()` が `getState()` を先に呼ぶので、移行の本体は走らなかった。→ rules.md「検証・回帰」に追記した。
+2. 再読み込みで効果が隠れる分岐（保存された値を「残す」分岐など）は、ミューテーションで確かめる。assert は再読み込みの後でなく、永続化された state か、秘密を返さない SecretStorage での再読み込みで行う。→ rules.md「検証・回帰」に追記した。
+3. 任意の文字列の資格情報のマスクは、`maskCredentialOccurrences` 1 か所が持つ。エラー文は `ErrorAggregator` に入るときにマスクし、表示の直前にもう一度 redaction しない。→ rules.md「資格情報と URL」に追記した。
+4. WHATWG の URL 解析は special scheme の `\` を `/` に変えるので、`DOMAIN\user:pass@host` は userinfo にならない。`new URL()` の結果だけでマスクを判断しない。→ rules.md「資格情報と URL」に追記した。
+5. 設定の `otakProxy.proxyUrl` が state に入る経路（設定変更のハンドラ、`getState()` の取り込み）は、どれも同じ検証と正規化を通す。`getState()` のたびに走る取り込みは、ログを出さない形を使う。→ rules.md「資格情報と URL」に追記した。
+6. ブリーフで既存の関数を使わせるときは、その関数の副作用（ログ、通知、書き込み）を読んでから、呼ばれる頻度と合わせて書く。→ rules.md「検証・回帰」に追記した。
+7. テストの fake の globalState は、本番と同じくすべてのキーを残す。`proxyState` だけを残す fake では v3 の移行が毎回走り、移行が代わりに処理するので、取り込みの分岐をテストが見なくなる。→ rules.md「検証・回帰」の既存の規則（fake には本番と同じ契約を持たせる）に追記した。
+
+### 残留リスク
+
+- `setRequiresAuthFromLiveUrls` は、資格情報を hydrate できなかったアドレスの印を落とす（検出の経路と同じ、既存の方針）。
+- `maskPassword` は、全体が URL として解析できる文字列（パス付きの URL で始まり空白を含むもの）をパーセントエンコードした形で返す（main から同じ）。`ErrorAggregator` がすべてのエラー文を `maskPassword` に通すようになったので、そうした文で始まるエラーは通知でパーセントエンコードされて見える。秘密は残らない。
+- 無効な設定の警告は、起動時に 1 回だけ出る。起動後に設定を無効な値に変えた場合は、既存の無効 URL のエラーが出る。
+- `V3MigrationService` は、検証していない設定の値から資格情報を SecretStorage に移す（今回の範囲外、後続の課題）。
+- 確認したのはユニットテストと VS Code ホストのテストまで。実際の認証 proxy と、SecretStorage の書き込み失敗は試していない。
