@@ -26,6 +26,7 @@ import {
     ProxyCredentialStore
 } from '../security/ProxyCredentialStore';
 import { V3MigrationService, LEGACY_MANUAL_PROXY_SECRET_KEY } from './V3MigrationService';
+import { tryCanonicalizeProxyUrl } from '../utils/ProxyUrlUtils';
 
 /**
  * ProxyStateManager handles all proxy state operations
@@ -354,17 +355,31 @@ export class ProxyStateManager implements IProxyStateManager {
         }
     }
 
+    /**
+     * Bring a configured `otakProxy.proxyUrl` value into the state (#108). The
+     * setting goes through the same validation and canonicalization as every
+     * other URL entry point: an invalid value is ignored (returns '', nothing
+     * is written), a valid value continues in canonical form, and a
+     * credential-bearing one is stored in SecretStorage with the settings
+     * rewritten without credentials. No logging here: this runs on every
+     * getState(); activation logs an invalid setting once.
+     */
     private async normalizeConfiguredManualProxyUrl(configuredManualUrl: string): Promise<string> {
         if (!configuredManualUrl) {
             return '';
         }
 
-        if (!hasProxyCredentials(configuredManualUrl)) {
-            return configuredManualUrl;
+        const canonicalUrl = tryCanonicalizeProxyUrl(configuredManualUrl);
+        if (!canonicalUrl) {
+            return '';
         }
 
-        await this.storeManualProxySecret(configuredManualUrl);
-        const publicUrl = getProxyPublicUrl(configuredManualUrl) || configuredManualUrl;
+        if (!hasProxyCredentials(canonicalUrl)) {
+            return canonicalUrl;
+        }
+
+        await this.storeManualProxySecret(canonicalUrl);
+        const publicUrl = getProxyPublicUrl(canonicalUrl) || canonicalUrl;
 
         try {
             await vscode.workspace.getConfiguration('otakProxy').update(
@@ -376,7 +391,7 @@ export class ProxyStateManager implements IProxyStateManager {
             Logger.warn('Failed to remove proxy credentials from configuration:', error);
         }
 
-        return configuredManualUrl;
+        return canonicalUrl;
     }
 
     private async persistManualProxySecret(manualProxyUrl: string | undefined): Promise<void> {

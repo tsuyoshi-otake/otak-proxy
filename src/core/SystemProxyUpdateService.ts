@@ -345,7 +345,7 @@ export class SystemProxyUpdateService {
             state.lastDetectionSource = 'fallback';
             clearDetectedSplitFields(state);
             setRequiresAuthFromLiveUrls(state);
-            Logger.log(`Using fallback proxy: ${manualProxyUrl}`);
+            Logger.log(`Using fallback proxy: ${this.context.sanitizer.maskPassword(manualProxyUrl)}`);
             return 'engaged';
         }
 
@@ -380,7 +380,7 @@ export class SystemProxyUpdateService {
             return false;
         }
 
-        Logger.log(`Testing fallback proxy: ${proxyUrl}`);
+        Logger.log(`Testing fallback proxy: ${this.context.sanitizer.maskPassword(proxyUrl)}`);
         const testResult = await connectionTester.testProxyAuto(proxyUrl);
         return isProxyEndpointReachable(testResult);
     }

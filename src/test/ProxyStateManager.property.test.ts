@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../core/types';
 import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
+import { canonicalizeValidProxyUrl } from '../utils/ProxyUrlUtils';
 import { getPropertyTestRuns } from './helpers';
 import { proxyUrlArb } from './generators';
 
@@ -175,13 +176,16 @@ suite('ProxyStateManager Property Tests', () => {
                         // Get state (should trigger migration)
                         const migratedState = await migrationStateManager.getState();
 
-                        // Verify migration
-                        if (oldEnabled && manualUrl) {
+                        // Verify migration. The configured value is validated
+                        // and canonicalized on every read (#108): a valid URL
+                        // migrates in canonical form, an invalid one is ignored.
+                        const canonical = canonicalizeValidProxyUrl(manualUrl);
+                        if (oldEnabled && canonical) {
                             assert.strictEqual(migratedState.mode, ProxyMode.Auto);
-                            assert.strictEqual(migratedState.manualProxyUrl, manualUrl);
                         } else {
                             assert.strictEqual(migratedState.mode, ProxyMode.Off);
                         }
+                        assert.strictEqual(migratedState.manualProxyUrl, canonical ?? '');
 
                         // Verify other fields are initialized
                         assert.strictEqual(migratedState.autoProxyUrl, undefined);

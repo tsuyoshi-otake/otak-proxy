@@ -5,10 +5,13 @@
  */
 
 import * as assert from 'assert';
+import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState, ProxyTestResult } from '../core/types';
 import { getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
+import { Logger } from '../utils/Logger';
+import { createRealStateManager, RealStateManagerHarness } from './realProxyStateManager';
 
 suite('ProxyStateManager Unit Tests', () => {
     let context: vscode.ExtensionContext;
@@ -672,6 +675,140 @@ suite('ProxyStateManager Unit Tests', () => {
             assert.strictEqual(retrievedState.usingFallbackProxy, false);
             assert.strictEqual(retrievedState.autoProxyUrl, 'http://system.example.com:8080');
             assert.strictEqual(retrievedState.fallbackProxyUrl, undefined);
+        });
+    });
+
+    suite('configured otakProxy.proxyUrl hydration (#108)', () => {
+        let originalGetConfiguration: typeof vscode.workspace.getConfiguration;
+        let sandbox: sinon.SinonSandbox;
+        let loggerErrorStub: sinon.SinonStub;
+        let loggerWarnStub: sinon.SinonStub;
+
+        setup(() => {
+            originalGetConfiguration = vscode.workspace.getConfiguration;
+            sandbox = sinon.createSandbox();
+            loggerErrorStub = sandbox.stub(Logger, 'error');
+            loggerWarnStub = sandbox.stub(Logger, 'warn');
+        });
+
+        teardown(() => {
+            (vscode.workspace as any).getConfiguration = originalGetConfiguration;
+            sandbox.restore();
+        });
+
+        function configuredManager(): RealStateManagerHarness {
+            return createRealStateManager(config => {
+                (vscode.workspace as any).getConfiguration = () => config;
+            });
+        }
+
+        test('an invalid setting is ignored when a stored state has no manual URL', async () => {
+            const harness = configuredManager();
+            await harness.manager.saveState({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://auto.example.com:8080'
+            } as ProxyState);
+            harness.settings.set('proxyUrl', 'not a proxy url');
+
+            const state = await harness.manager.getState();
+
+            assert.ok(!state.manualProxyUrl,
+                `an invalid setting must not enter the state, got: ${state.manualProxyUrl}`);
+            assert.strictEqual(harness.secrets.size, 0,
+                'an invalid setting must not write to SecretStorage');
+            assert.strictEqual(harness.settings.get('proxyUrl'), 'not a proxy url',
+                'an invalid setting must not be rewritten');
+
+            await harness.manager.saveState(state);
+            assert.ok(!harness.persistedState()?.manualProxyUrl,
+                'a later save must persist no manual URL');
+        });
+
+        test('an invalid setting is not logged on repeated getState() — stored state without a manual URL', async () => {
+            const harness = configuredManager();
+            await harness.manager.saveState({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://auto.example.com:8080'
+            } as ProxyState);
+            harness.settings.set('proxyUrl', 'not a proxy url');
+
+            // One detection cycle reads the state several times; an invalid
+            // setting must stay silent (activation warns once) (#108).
+            for (let i = 0; i < 3; i++) {
+                await harness.manager.getState();
+            }
+
+            sinon.assert.notCalled(loggerErrorStub);
+            sinon.assert.notCalled(loggerWarnStub);
+        });
+
+        test('an invalid setting is not logged on repeated getState() — stored state with a manual URL', async () => {
+            const harness = configuredManager();
+            await harness.manager.saveState({
+                mode: ProxyMode.Auto,
+                manualProxyUrl: 'http://manual.example.com:8080'
+            } as ProxyState);
+            harness.settings.set('proxyUrl', 'not a proxy url');
+
+            for (let i = 0; i < 3; i++) {
+                await harness.manager.getState();
+            }
+
+            sinon.assert.notCalled(loggerErrorStub);
+            sinon.assert.notCalled(loggerWarnStub);
+        });
+
+        // The migrated mode (Off when the legacy proxyEnabled flag is unset)
+        // is pinned by Property 4 in ProxyStateManager.property.test.ts, which
+        // seeds the flag and draws valid and invalid values; this example pins
+        // the rest of the no-stored-state path.
+        test('an invalid setting on the no-stored-state path writes no manual URL, no secret, and no settings rewrite', async () => {
+            const harness = configuredManager();
+            harness.settings.set('proxyUrl', 'not a proxy url');
+
+            const state = await harness.manager.getState();
+
+            assert.ok(!state.manualProxyUrl,
+                `an invalid setting must not seed the fallback, got: ${state.manualProxyUrl}`);
+            assert.strictEqual(harness.secrets.size, 0,
+                'an invalid setting must not write to SecretStorage');
+            assert.strictEqual(harness.settings.get('proxyUrl'), 'not a proxy url',
+                'an invalid setting must not be rewritten');
+        });
+
+        for (const storedState of [false, true]) {
+            const path = storedState
+                ? 'hydration path (stored state without a manual URL)'
+                : 'no-stored-state path';
+            test(`a valid non-canonical setting enters the state in canonical form (${path})`, async () => {
+                const harness = configuredManager();
+                if (storedState) {
+                    await harness.manager.saveState({ mode: ProxyMode.Auto } as ProxyState);
+                }
+                harness.settings.set('proxyUrl', 'HTTP://PROXY.EXAMPLE:3128/');
+
+                const state = await harness.manager.getState();
+
+                assert.strictEqual(state.manualProxyUrl, 'http://PROXY.EXAMPLE:3128');
+            });
+        }
+
+        test('a credential-bearing setting stores the secret and rewrites the setting without credentials', async () => {
+            const harness = configuredManager();
+            // Let the v3 migration complete first (it would otherwise consume
+            // the credential-bearing setting itself); the second getState()
+            // exercises the hydration branch like production (#108).
+            await harness.manager.saveState({ mode: ProxyMode.Auto } as ProxyState);
+            await harness.manager.getState();
+            harness.settings.set('proxyUrl', 'http://user:sekret@proxy.example:8080');
+
+            const state = await harness.manager.getState();
+
+            assert.strictEqual(state.manualProxyUrl, 'http://user:sekret@proxy.example:8080');
+            assert.strictEqual(harness.settings.get('proxyUrl'), 'http://proxy.example:8080/',
+                'the settings value must be rewritten to the credential-free URL');
+            const secret = harness.secrets.get(getCredentialKeyForPublicUrl('http://proxy.example:8080/'));
+            assert.ok(secret?.includes('sekret'), 'the credentials must be stored in SecretStorage');
         });
     });
 });

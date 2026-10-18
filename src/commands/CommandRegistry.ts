@@ -13,7 +13,7 @@ import { ProxyMode, ProxyState, StateCommitResult } from '../core/types';
 import { Logger } from '../utils/Logger';
 import { CommandContext } from './types';
 import { executeToggleProxy } from './ToggleProxyCommand';
-import { executeConfigureUrl } from './ConfigureUrlCommand';
+import { executeConfigureUrl, showInvalidProxyUrl } from './ConfigureUrlCommand';
 import { executeTestProxy } from './TestProxyCommand';
 import { executeImportProxy } from './ImportProxyCommand';
 import { executeToggleShowProxyUrl } from './ToggleShowProxyUrlCommand';
@@ -21,8 +21,9 @@ import { executeDiagnoseProxy } from './DiagnoseProxyCommand';
 import type { RemediationOutcome } from '../remediation/RemediationOutcome';
 import { executeResetWinHttpProxy } from '../remediation/WindowsProxyActionService';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
-import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
+import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { canonicalizeValidProxyUrl } from '../utils/ProxyUrlUtils';
+import { I18nManager } from '../i18n/I18nManager';
 
 /**
  * Configuration for CommandRegistry
@@ -250,19 +251,28 @@ export class CommandRegistry {
      * Handle proxy URL configuration change
      */
     private async handleProxyUrlChange(): Promise<void> {
-        const state = await this.commandContext.getProxyState();
         const configuredUrl = vscode.workspace.getConfiguration('otakProxy').get<string>('proxyUrl', '');
-        // Store and apply the canonical form (#108); invalid values keep the
-        // raw spelling so the apply path reports them unchanged.
-        const newUrl = configuredUrl
-            ? canonicalizeValidProxyUrl(configuredUrl) ?? configuredUrl
-            : configuredUrl;
+        // Store and apply the canonical form (#108). An invalid settings value
+        // is rejected before save/publish with the same invalid-URL error the
+        // Configure command shows.
+        const canonicalUrl = configuredUrl ? canonicalizeValidProxyUrl(configuredUrl) : '';
+        if (configuredUrl && canonicalUrl === undefined) {
+            await showInvalidProxyUrl(this.commandContext, configuredUrl, I18nManager.getInstance());
+            return;
+        }
+        const state = await this.commandContext.getProxyState();
+        const newUrl = canonicalUrl ?? '';
         const newPublicUrl = removeProxyCredentials(newUrl) || newUrl;
         const newComparableUrl = getProxyPublicUrl(newUrl) || newUrl;
         const currentPublicUrl = getProxyPublicUrl(state.manualProxyUrl) || state.manualProxyUrl || '';
 
         if (newComparableUrl !== currentPublicUrl || (newUrl && hasProxyCredentials(newUrl))) {
             state.manualProxyUrl = newUrl;
+            // Recompute the credential bookkeeping like the Configure command:
+            // replacing a credential-bearing URL with a credential-free one
+            // must not leave a sticky requiresAuth that makes every later
+            // apply skip the credential-free fallback (#108).
+            setRequiresAuthFromLiveUrls(state);
             await this.commandContext.saveProxyState(state);
 
             if (newUrl !== newPublicUrl) {

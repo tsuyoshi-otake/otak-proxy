@@ -7,26 +7,29 @@
  * - Error messages
  * - Any other display contexts
  *
- * Redaction overlap (#16): this is the URL-shaped masker for the Logger/UI hot
- * path. It emits `user:****@host` when a distinct password exists, and masks the
- * username itself when userinfo contains only one component because that value
- * is commonly an API token. The
- * broader, stricter masker for arbitrary diagnostics/remediation text is
- * {@link ../security/ProxySecretRedactor.ProxySecretRedactor}, which fully masks
- * credentials (`<credentials>@`) plus headers, tokens, and known secrets. The two
- * are deliberately separate (different placeholders and username policy); if you
- * change credential-masking behavior here, mirror it there so they cannot drift.
- * Unifying them is tracked as follow-up work, not done inline, because this masker
- * feeds ~two dozen UI/log call sites whose output format would otherwise change.
+ * Redaction overlap (#16, #108): this is the URL-shaped masker for the
+ * Logger/UI hot path. It emits `user:****@host` when a distinct password
+ * exists, and masks the username itself when userinfo contains only one
+ * component because that value is commonly an API token. The broader, stricter
+ * masker for arbitrary diagnostics/remediation text is
+ * {@link ../security/ProxySecretRedactor.ProxySecretRedactor}, which fully
+ * masks credentials (`<credentials>@`) plus headers, tokens, and known
+ * secrets. Both apply credentials through the shared
+ * {@link ../security/ProxySecretRedactor.maskCredentialOccurrences} so they
+ * find the same occurrences; only the replacement text differs. This masker
+ * keeps the `user:****@` format because it feeds ~two dozen UI/log call
+ * sites; callers that need the stricter output use the redactor directly.
  */
+import { maskCredentialOccurrences } from '../security/ProxySecretRedactor';
+
 export class InputSanitizer {
     /**
      * Masks password in proxy URL for display
      * Replaces the password portion with asterisks while preserving URL structure
-     * 
+     *
      * @param url - The proxy URL with potential credentials
      * @returns URL with password replaced by asterisks (****)
-     * 
+     *
      * Examples:
      * - "http://user:pass@proxy.com:8080" -> "http://user:****@proxy.com:8080"
      * - "http://proxy.com:8080" -> "http://proxy.com:8080" (no change)
@@ -40,7 +43,7 @@ export class InputSanitizer {
             // username for the established UI format.
             if (parsed.password) {
                 parsed.password = '****';
-                return parsed.toString();
+                return this.maskCredentialOccurrences(parsed.toString());
             }
 
             // A username-only userinfo component is frequently a bearer/API token
@@ -48,46 +51,43 @@ export class InputSanitizer {
             // from a human username, so mask it completely.
             if (parsed.username) {
                 parsed.username = '****';
-                return parsed.toString();
+                return this.maskCredentialOccurrences(parsed.toString());
             }
 
             if (parsed.host) {
-                return parsed.toString();
+                // Re-serialization can hide credentials in the path: WHATWG
+                // treats "\" as "/" for special schemes, so an authority like
+                // "DOMAIN\user:pass@proxy" parses as host "domain" with
+                // "/user:pass@proxy" left in the path. Mask the serialized
+                // result instead of returning it raw.
+                return this.maskCredentialOccurrences(parsed.toString());
             }
 
             // Scheme-less "user:secret@host" parses as an opaque URL ("user:" is
             // taken as the scheme, the rest as the path) with no host and no
-            // credentials — fall through to the regex fallbacks below.
+            // credentials — fall through to the text masker below.
         } catch {
-            // Fall through to the regex fallbacks.
+            // Fall through to the text masker below.
         }
 
-        // URL parsing failed or found no authority; try to mask credentials with
-        // regexes so malformed or scheme-less values still get masked.
-        // Look for pattern: //username:password@ or ://username:password@
-        const credentialPattern = /(\/\/[^:@]+):([^@]+)@/;
-        if (credentialPattern.test(url)) {
-            // Replace the password (everything after : and before @)
-            // Keep the username part (match[1] includes //username)
-            return url.replace(credentialPattern, '$1:****@');
-        }
+        return this.maskCredentialOccurrences(url);
+    }
 
-        // Scheme-less "user:password@host" (e.g. raw git/npm config values).
-        const bareCredentialPattern = /(^|[\s=])([^\s@:/]+):([^\s@/]+)@/g;
-        if (bareCredentialPattern.test(url)) {
-            return url.replace(bareCredentialPattern, '$1$2:****@');
-        }
-
-        // Absolute URLs embedded in arbitrary log/error text can also carry a
-        // username-only token. Require an explicit scheme to avoid treating plain
-        // email addresses as credentials.
-        const usernameOnlyPattern = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+)@/gi;
-        if (usernameOnlyPattern.test(url)) {
-            return url.replace(usernameOnlyPattern, '$1****@');
-        }
-
-        // If no credentials found, return the original URL
-        return url;
+    /**
+     * Masks every credential occurrence in arbitrary text (#108) through the
+     * shared ProxySecretRedactor patterns: absolute URLs keep the
+     * `user:****@` display format (userinfo without a password is masked
+     * completely because it is commonly an API token) and scheme-less
+     * `user:pass@host` sequences become `user:****@`. Plain email addresses
+     * never match because the bare pattern requires a password part.
+     */
+    private maskCredentialOccurrences(text: string): string {
+        return maskCredentialOccurrences(text, userinfo => {
+            const separator = userinfo.indexOf(':');
+            return separator === -1
+                ? '****'
+                : `${userinfo.slice(0, separator)}:****`;
+        });
     }
 
     /**

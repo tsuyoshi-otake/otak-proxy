@@ -540,7 +540,10 @@ export class NpmConfigManager {
 
         return {
             success: false,
-            error: classification.error,
+            // Raw execFile errors echo the full command line, including any
+            // credential-bearing URL (#108). Mask here so the error is safe to
+            // return to every caller (notifications, state, tooltip).
+            error: resultSanitizer.maskPassword(classification.error),
             errorType: classification.errorType
         };
     }

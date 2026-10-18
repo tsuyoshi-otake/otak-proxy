@@ -51,6 +51,8 @@ Working behind a corporate proxy usually means editing several configuration fil
 
 Auto mode uses this URL when no system proxy is detected, including when the system proxy disappears while VS Code is running. When you switch to Auto from the status bar and no system proxy is found, or when Auto notices that the system proxy has disappeared, otak-proxy first tests the fallback proxy and uses it only if it is reachable. A URL entered during first-run setup is applied without this test. If the URL includes credentials, read [Security & Privacy](#security--privacy) before allowing otak-proxy to write it to VS Code, Git, npm, or pip configuration files.
 
+When the stored fallback already has credentials, the prompt prefills the URL without them. Submitting it unchanged keeps the stored credentials, entering different credentials replaces them, and entering a different URL without credentials stores none. Setting an invalid value for `otakProxy.proxyUrl` in settings.json is rejected with an error and is not saved or synced; an invalid value already saved there is ignored wherever the setting is read (it never reaches the fallback or SecretStorage) and is logged once per activation.
+
 ## Capabilities
 
 - **Two-state toggle**: switch between Off and Auto from the status bar.
@@ -202,7 +204,7 @@ For stricter corporate environments, use:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `otakProxy.proxyUrl` | unset | Optional fallback proxy URL, used when no system proxy is detected |
+| `otakProxy.proxyUrl` | unset | Optional fallback proxy URL, used when no system proxy is detected; an invalid value is rejected with an error and is not saved (an invalid value already saved is ignored on every read and logged once per activation) |
 | `otakProxy.pollingInterval` | `30` | System proxy check interval in seconds (range `10`–`300`) |
 | `otakProxy.enableFallback` | `true` | Use the fallback proxy URL when no system proxy is detected |
 | `otakProxy.showProxyUrl` | `true` | Show the proxy URL in the status bar; when `false`, `Configured` is shown instead |

@@ -12,6 +12,19 @@ export function validateProxyUrl(url: string): boolean {
 }
 
 /**
+ * Validates a proxy URL and returns its canonical form without logging
+ * (#108). For read paths that run on every state load — an invalid value is
+ * ignored quietly because activation reports it once.
+ *
+ * @param url - The proxy URL to validate
+ * @returns The canonical URL, or undefined when invalid
+ */
+export function tryCanonicalizeProxyUrl(url: string): string | undefined {
+    const result = getValidator().validate(url);
+    return result.isValid ? result.normalizedUrl : undefined;
+}
+
+/**
  * Validates a proxy URL and returns its canonical form (#108). Entry points
  * that bring a URL into the system store and apply this value.
  *
@@ -19,14 +32,15 @@ export function validateProxyUrl(url: string): boolean {
  * @returns The canonical URL, or undefined when invalid
  */
 export function canonicalizeValidProxyUrl(url: string): string | undefined {
-    const result = getValidator().validate(url);
-    if (!result.isValid) {
-        if (result.errors.length > 0) {
-            Logger.error('Proxy URL validation failed:', result.errors.join(', '));
-        }
-        return undefined;
+    const canonical = tryCanonicalizeProxyUrl(url);
+    if (canonical !== undefined) {
+        return canonical;
     }
-    return result.normalizedUrl;
+    const { errors } = getValidator().validate(url);
+    if (errors.length > 0) {
+        Logger.error('Proxy URL validation failed:', errors.join(', '));
+    }
+    return undefined;
 }
 
 /**

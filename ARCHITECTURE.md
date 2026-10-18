@@ -414,6 +414,11 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 - **Key features**:
   - `activate()`: Extension initialization (12 phases)
   - `deactivate()`: SyncManager shutdown, resource disposal, monitoring stop
+  - `warnOnInvalidConfiguredProxyUrl()`: a non-empty but invalid
+    `otakProxy.proxyUrl` setting is logged once per activation with its
+    credentials masked (no notification); every read of the setting validates
+    and canonicalizes it inside ProxyStateManager, so an invalid value is
+    ignored there without logging (#108)
   - Event listener setup (sync events, configuration changes)
 
 #### ExtensionInitializer
@@ -426,7 +431,7 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ProxyStateManager
 - **Responsibility**: ProxyState persistence and retrieval
 - **Key features**:
-  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto; URL credentials are split out to SecretStorage on save and re-hydrated on load, keyed by the credential-free public URL
+  - `getState()`: State loading (with automatic fallback); persisted Manual is migrated to Auto; URL credentials are split out to SecretStorage on save and re-hydrated on load, keyed by the credential-free public URL; a configured `otakProxy.proxyUrl` is validated and canonicalized on every read — an invalid value is ignored (no SecretStorage write, no settings rewrite, no log line)
   - `requiresAuth` / `authRequiredProxyUrls` (non-secret, synced): `requiresAuth` records that a URL field carried credentials and `authRequiredProxyUrls` lists those addresses as credential-free public URLs; every apply attempt is refused rather than writing an address without the credentials it requires on this machine — the per-address gate runs inside `runProxyApplyAttempt` before consent, so monitor, toggle, sync and startup applies are all covered (#108)
   - `saveState()`: State saving (with automatic fallback)
   - `getNextMode()`: Off ↔ Auto (a leftover Manual value also advances to Auto)
@@ -465,7 +470,12 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 - **Responsibility**: Registration of all commands and event listeners
 - **Key features**:
   - `registerAll()`: Register all commands
-  - Configuration change listeners
+  - Configuration change listeners; an `otakProxy.proxyUrl` change is validated
+    to the canonical form before it is saved and published — an invalid value
+    is rejected with the invalid-URL error and touches neither — and saving
+    recomputes `requiresAuth` / `authRequiredProxyUrls` from the live URLs like
+    the Configure command, so a credential-free URL cannot inherit a sticky
+    `requiresAuth` (#108)
   - Window focus listeners
 
 #### ToggleProxyCommand
@@ -481,9 +491,14 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
 #### ConfigureUrlCommand
 - **Responsibility**: Configure the Auto fallback proxy URL (`otak: Configure Manual Proxy`)
 - **Flow**:
-  1. Prompt user for URL input
-  2. Validate URL
+  1. Prompt user for URL input; the prefill is the credential-free public URL,
+     so a stored password is never shown in clear (#108)
+  2. Validate URL; an input without credentials that names the same address as
+     the stored credential-bearing URL keeps the stored credentials, a URL
+     with credentials replaces them, and a different credential-free URL
+     stores none
   3. Store the URL as the Auto fallback (`manualProxyUrl` / `otakProxy.proxyUrl`)
+     and recompute `requiresAuth` / `authRequiredProxyUrls` from the live URLs
   4. Apply only if a leftover Manual mode is still current (hydrate migrates Manual → Auto)
 
 #### TestProxyCommand
@@ -807,7 +822,19 @@ export function getTestIterations(): number {
 ### 2. Credential Masking
 
 - Automatic masking in Logger, OutputChannelManager, and ProxyChangeLogger
-- Credentials (username:password) in logs and UI are replaced with `***:***`
+- Credentials (username:password) in display text and logs are masked as
+  `user:****@host` (a username-only userinfo becomes `****@host`); diagnostics
+  and persisted state text use the strict `<credentials>@host` form
+- `InputSanitizer` (single-URL `user:****@` display) and `ProxySecretRedactor`
+  (strict `<credentials>@` for diagnostics/state text) share one set of
+  credential patterns, so every occurrence in a message is masked — including
+  credentials after `/`, `:`, `@` and `DOMAIN\user` authorities that URL
+  parsing moves into the path (#108)
+- Git, npm, and pip config managers mask their own error results before
+  returning them (execFile errors echo the command line), and `ErrorAggregator`
+  masks every error at ingestion, so `lastError`, the tooltip, and
+  notifications never hold a password; persistence keeps its own redaction
+  (#108)
 
 ### 3. URL Validation
 

@@ -52,7 +52,15 @@ export async function saveProxyConfigResults(
             pip: results.pipOutcome,
             terminalEnv: results.terminalEnvOutcome
         };
-            next.lastError = errorAggregator.hasErrors() ? errorAggregator.formatErrors() : undefined;
+            // Errors are masked when they enter the aggregator
+            // (ErrorAggregator.addError), so formatErrors() output — and
+            // therefore lastError, the tooltip, and notifications — never
+            // holds a password. Persistence keeps its own redaction layer;
+            // the in-memory copy must keep real line breaks for the tooltip
+            // (#108).
+            next.lastError = errorAggregator.hasErrors()
+                ? errorAggregator.formatErrors()
+                : undefined;
             next.applyBlocked = applyBlocked;
             return next;
         });
