@@ -131,6 +131,28 @@ suite('ProxyMonitor failed detection (#108)', () => {
             assert.strictEqual(monitor.getState().consecutiveFailures, 2);
         });
 
+        test('a capture that rejects after stop() and a new start() does not count against the new lifecycle', async () => {
+            const detect = sandbox.stub().resolves('http://proxy.example.com:8080');
+            let rejectCapture: (error: Error) => void = () => undefined;
+            monitor = new ProxyMonitor({ detectSystemProxy: detect }, logger, {
+                pollingInterval: 60_000,
+                debounceDelay: 1000,
+                maxRetries: 0,
+                enableConnectionTest: false
+            });
+            monitor.setGenerationCapture(() => new Promise((_resolve, reject) => { rejectCapture = reject; }));
+            monitor.start();
+
+            const pending = executeCheckOf(monitor)('network');
+            monitor.stop();
+            monitor.start();
+            rejectCapture(new Error('state store unavailable'));
+            const result = await pending;
+
+            assert.strictEqual(result.success, false);
+            assert.strictEqual(monitor.getState().consecutiveFailures, 0, 'the ended lifecycle records no failure');
+        });
+
         test('through triggerCheck and the debounce timer: no unhandled rejection, flag released', async () => {
             const realSetImmediate = setImmediate;
             const detect = sandbox.stub().resolves('http://proxy.example.com:8080');

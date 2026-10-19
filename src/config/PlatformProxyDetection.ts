@@ -29,7 +29,12 @@ const FALLBACK_MACOS_SERVICES = ['Wi-Fi', 'Ethernet', 'Thunderbolt Ethernet'];
  * LANGUAGE support. LC_CTYPE is left alone so value output does not change.
  */
 const GSETTINGS_OPTIONS: CommandOptions = { env: { LANGUAGE: 'C', LC_MESSAGES: 'C' } };
-const GSETTINGS_NO_SCHEMA_PATTERN = /No such schema/i;
+/**
+ * "No such schema": the GNOME proxy schema is not installed. "No schemas
+ * installed": the schema registry itself is empty (no compiled schemas at
+ * all). Both mean there is no GNOME proxy setting to read, not a failed query.
+ */
+const GSETTINGS_NO_SCHEMA_PATTERN = /No such schema|No schemas installed/i;
 
 function noneDetection(source: ProxyDetectionWithSource['source'] = null): ProxyDetectionWithSource {
     return { proxyUrl: null, source, kind: 'direct', capability: 'supported' };

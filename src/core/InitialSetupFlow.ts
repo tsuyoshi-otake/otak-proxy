@@ -19,10 +19,12 @@ export class InitialSetupFlow {
     /**
      * Ask for initial setup.
      *
-     * Returns `false` only when the user's answer could not be stored (the
-     * commit was exhausted): the error is reported and the setup must be
-     * offered again on the next start. Every other end — stored, skipped,
-     * dismissed, invalid URL, or superseded by another writer — is `true`.
+     * Returns `false` when the setup must be offered again on the next start:
+     * the user's answer could not be stored (the commit was exhausted, and the
+     * error is reported), or Auto detection failed (kind `unknown`) and the
+     * user neither configured a proxy nor re-detected. Every other end —
+     * stored, skipped, dismissed, invalid URL, or superseded by another
+     * writer — is `true`.
      */
     async askForInitialSetup(): Promise<boolean> {
         const state = await this.context.proxyStateManager.getState();
@@ -185,6 +187,25 @@ export class InitialSetupFlow {
             return true;
         }
 
+        if (detected.kind === 'unknown') {
+            // The OS query failed: that is not a confirmed absence of a proxy, so
+            // the setup is not finished on it and is offered again on the next
+            // start unless the user configures a proxy or re-detects (#108).
+            const action = await vscode.window.showWarningMessage(
+                i18n.t('warning.detectionFailed'),
+                i18n.t('action.configureManual'),
+                i18n.t('action.redetect')
+            );
+            if (action === i18n.t('action.redetect')) {
+                return await this.handleAutoSetup(state, i18n, initialStateSignature);
+            }
+            if (action === i18n.t('action.configureManual')) {
+                await this.configureFallbackProxy(initialStateSignature);
+                return true;
+            }
+            return false;
+        }
+
         const fallback = await vscode.window.showInformationMessage(
             i18n.t('prompt.couldNotDetect'),
             i18n.t('action.yes'),
@@ -192,19 +213,23 @@ export class InitialSetupFlow {
         );
 
         if (fallback === i18n.t('action.yes')) {
-            if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
-                return true;
-            }
-            await vscode.commands.executeCommand('otak-proxy.configureUrl');
-            const updatedState = await this.context.proxyStateManager.getState();
-            if (updatedState.manualProxyUrl) {
-                this.useAutoProxy(updatedState, updatedState.manualProxyUrl, true);
-                await this.context.proxyStateManager.saveState(updatedState);
-                await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
-                this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
-            }
+            await this.configureFallbackProxy(initialStateSignature);
         }
         return true;
+    }
+
+    private async configureFallbackProxy(initialStateSignature: string): Promise<void> {
+        if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
+            return;
+        }
+        await vscode.commands.executeCommand('otak-proxy.configureUrl');
+        const updatedState = await this.context.proxyStateManager.getState();
+        if (updatedState.manualProxyUrl) {
+            this.useAutoProxy(updatedState, updatedState.manualProxyUrl, true);
+            await this.context.proxyStateManager.saveState(updatedState);
+            await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
+            this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
+        }
     }
 
     private async handleManualSetup(

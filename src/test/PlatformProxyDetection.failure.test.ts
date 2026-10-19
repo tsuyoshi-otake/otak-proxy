@@ -116,6 +116,16 @@ suite('Failed platform query is not "no proxy" (#108)', () => {
             assert.strictEqual((await detectLinuxProxy(exec)).kind, 'direct');
         });
 
+        test('an empty schema registry ("No schemas installed") is not applicable: none', async () => {
+            const exec: CommandExecutor = async () => {
+                throw commandError('Command failed: gsettings get org.gnome.system.proxy mode', {
+                    stderr: 'No schemas installed\n'
+                });
+            };
+
+            assert.strictEqual((await detectLinuxProxy(exec)).kind, 'direct');
+        });
+
         test('a translated "no such schema" message is still none because every call asks for the C locale', async () => {
             const seenEnvironments: Array<Record<string, string> | undefined> = [];
             const exec: CommandExecutor = async (_command, _args, options) => {

@@ -225,7 +225,11 @@ export class ProxyMonitor extends EventEmitter {
                 // detection, publishes nothing, and releases the in-progress flag below.
                 const message = error instanceof Error ? error.message : String(error);
                 Logger.warn(`Proxy check aborted: capturing the state generation failed: ${message}`);
-                this.state.recordCheckFailure();
+                // A capture that rejects after stop() or a newer start() belongs to
+                // an ended lifecycle: it must not count against the current one.
+                if (this.isCurrentLifecycle(epoch)) {
+                    this.state.recordCheckFailure();
+                }
                 return {
                     proxyUrl: this.lastProxyUrl,
                     source: null,

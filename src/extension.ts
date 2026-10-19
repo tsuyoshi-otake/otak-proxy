@@ -469,8 +469,9 @@ export async function performInitialSetup(context: vscode.ExtensionContext): Pro
             if (initializer) {
                 const finished = await initializer.askForInitialSetup();
                 if (!finished) {
-                    // The answer could not be saved; the setup is offered
-                    // again on the next start (hasInitialSetup stays unset).
+                    // The answer could not be saved, or Auto detection failed
+                    // and was left unresolved; the setup is offered again on
+                    // the next start (hasInitialSetup stays unset).
                     Logger.warn('Initial setup did not finish; it will be offered again on the next start.');
                     return false;
                 }
