@@ -162,6 +162,13 @@ suite('Proxy connection test in the VS Code host (#108 item 9)', () => {
                 `errors: ${JSON.stringify(result.errors)}, connections to http.proxy: ${recorder.connections()}`
             );
             assert.strictEqual(recorder.connections(), 0, 'the test must not go through http.proxy');
+            // Zero connections proves nothing if something (the extension in
+            // any mode) moved http.proxy away from the recorder meanwhile.
+            assert.strictEqual(
+                vscode.workspace.getConfiguration('http').inspect<string>('proxy')?.globalValue,
+                `http://127.0.0.1:${recorder.port}`,
+                'http.proxy still points at the recorder after the test'
+            );
         } finally {
             await httpConfig.update('proxy', previous, vscode.ConfigurationTarget.Global);
             await recorder.close();
