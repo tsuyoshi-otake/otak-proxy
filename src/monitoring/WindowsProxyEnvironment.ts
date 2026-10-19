@@ -121,7 +121,7 @@ export class WindowsProxyEnvironmentMonitor {
             const processValues = new Map(Object.entries(environment).map(([name, value]) => [name.toUpperCase(), value]));
             const mismatches: Array<[ProxyEnvironmentName, string | null, string | null]> = [];
             for (const name of PROXY_ENVIRONMENT_NAMES) {
-                const saved = snapshot.user[name] ?? snapshot.machine[name];
+                const saved = snapshot.user[name] || snapshot.machine[name];
                 if (saved !== null) {
                     this.observed.add(name);
                 }

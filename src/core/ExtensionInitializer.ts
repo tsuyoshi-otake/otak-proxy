@@ -15,7 +15,7 @@
 import * as vscode from 'vscode';
 import { commitDecidedPatch } from './ApplyConvergence';
 import { captureLogicalGeneration } from './LogicalGeneration';
-import { ProxyMode, ProxyState } from './types';
+import { ProxyMode, ProxyState, SystemProxyCheckOutcome } from './types';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import type { ReachabilityChange } from '../monitoring/ProxyMonitorConnection';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
@@ -263,8 +263,8 @@ export class ExtensionInitializer {
     /**
      * Check and update system proxy
      */
-    async checkAndUpdateSystemProxy(): Promise<void> {
-        await this.systemProxyUpdateService.checkAndUpdateSystemProxy();
+    async checkAndUpdateSystemProxy(): Promise<SystemProxyCheckOutcome> {
+        return this.systemProxyUpdateService.checkAndUpdateSystemProxy();
     }
 
     /**

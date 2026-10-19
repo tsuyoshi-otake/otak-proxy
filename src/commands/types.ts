@@ -9,7 +9,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState, StateCommitResult } from '../core/types';
+import { ProxyMode, ProxyState, StateCommitResult, SystemProxyCheckOutcome } from '../core/types';
 
 /**
  * Command execution context providing all dependencies needed by commands
@@ -40,7 +40,7 @@ export interface CommandContext {
     // Proxy operations
     applyProxySettings: (url: string, enabled: boolean) => Promise<boolean>;
     updateStatusBar: (state: ProxyState) => void;
-    checkAndUpdateSystemProxy: () => Promise<void>;
+    checkAndUpdateSystemProxy: () => Promise<SystemProxyCheckOutcome>;
     startSystemProxyMonitoring: () => Promise<void>;
     stopSystemProxyMonitoring: () => Promise<void>;
 

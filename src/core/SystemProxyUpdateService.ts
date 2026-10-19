@@ -9,7 +9,7 @@ import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
 import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration, sameLogicalIdentity } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
-import { AppliedProxySource, ProxyMode, ProxyState } from './types';
+import { AppliedProxySource, ProxyMode, ProxyState, SystemProxyCheckOutcome } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 
 export type ManualFallbackOutcome = 'engaged' | 'unreachable' | 'notConfigured';
@@ -23,16 +23,23 @@ export class SystemProxyUpdateService {
     /**
      * Check and update system proxy.
      */
-    async checkAndUpdateSystemProxy(): Promise<void> {
+    async checkAndUpdateSystemProxy(): Promise<SystemProxyCheckOutcome> {
         const stateBeforeDetection = await this.context.proxyStateManager.getState();
 
         const now = Date.now();
         if (this.shouldSkipRecentNonAutoCheck(stateBeforeDetection, now)) {
-            return;
+            return 'completed';
         }
 
         const started = captureLogicalGeneration(stateBeforeDetection);
         const detected = await detectSystemProxySettingsWithSource();
+        if (detected.kind === 'unknown') {
+            // The query failed, so nothing is known: keep the stored proxy, the
+            // fallback flags and the targets as they are, and do not stamp the
+            // check time (the next trigger asks the OS again).
+            Logger.warn('System proxy detection failed; keeping the last known proxy state');
+            return 'detectionFailed';
+        }
         const detectedProxy = detected.proxyUrl;
         const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
         // Detection can wait on several external sources. Re-read after it so a
@@ -48,17 +55,18 @@ export class SystemProxyUpdateService {
                     detectedSource
                 );
             }
-            return;
+            return 'completed';
         }
         state.lastSystemProxyCheck = now;
         state.systemProxyDetected = !!detectedProxy || isUnsupportedAutoConfig(detected);
 
         if (state.mode === ProxyMode.Auto) {
             await this.updateAutoProxyState(started, state, detected, detectedSource);
-            return;
+            return 'completed';
         }
 
         await this.saveDetectedProxyForNonAutoMode(started, state, detected, detectedSource);
+        return 'completed';
     }
 
     private shouldSkipRecentNonAutoCheck(state: ProxyState, now: number): boolean {

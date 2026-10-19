@@ -77,15 +77,15 @@ suite('WindowsProxyEnvironment', () => {
         assert.deepStrictEqual(notices, [['HTTP_PROXY']]);
     });
 
-    test('empty user values mask machine values without reporting empty process values', async () => {
+    test('an empty user value does not hide the machine value (#108)', async () => {
         saved.user.HTTP_PROXY = '';
         saved.machine.HTTP_PROXY = 'http://machine.example:80';
-        environment.HTTP_PROXY = '';
-        await monitor.check();
-        assert.deepStrictEqual(notices, []);
         environment.HTTP_PROXY = saved.machine.HTTP_PROXY;
         await monitor.check();
-        assert.deepStrictEqual(notices, [['HTTP_PROXY']]);
+        assert.deepStrictEqual(notices, [], 'the process already carries the machine value');
+        environment.HTTP_PROXY = '';
+        await monitor.check();
+        assert.deepStrictEqual(notices, [['HTTP_PROXY']], 'an empty process value differs from the machine value');
     });
 
     test('does not repeat unchanged notices and eventually reports changes after cooldown', async () => {

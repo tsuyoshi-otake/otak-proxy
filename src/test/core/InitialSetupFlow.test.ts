@@ -281,6 +281,83 @@ suite('InitialSetupFlow Tests', () => {
         assert.strictEqual(state.mode, ProxyMode.Off);
     });
 
+    suite('Auto + detection failed (kind unknown, #108)', () => {
+        let showWarningMessageStub: sinon.SinonStub;
+
+        setup(() => {
+            showWarningMessageStub = sandbox.stub(vscode.window, 'showWarningMessage');
+            (DetectUtils.detectSystemProxySettingsWithSource as sinon.SinonStub).callsFake(async () => {
+                const url = await detectStub();
+                return url === 'unknown'
+                    ? { proxyUrl: null, source: null, kind: 'unknown' }
+                    : { proxyUrl: url ?? null, source: url ? 'windows' : null };
+            });
+        });
+
+        test('dismissed: the setup is not finished, nothing is written, no "could not detect" prompt', async () => {
+            showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
+            showWarningMessageStub.resolves(undefined);
+            detectStub.resolves('unknown');
+
+            const finished = await flow.askForInitialSetup();
+
+            assert.strictEqual(finished, false, 'offered again on the next start');
+            sinon.assert.calledOnceWithExactly(
+                showWarningMessageStub,
+                i18n.t('warning.detectionFailed'),
+                i18n.t('action.configureManual'),
+                i18n.t('action.redetect')
+            );
+            sinon.assert.calledOnce(showInformationMessageStub);
+            sinon.assert.notCalled(saveStateStub);
+            sinon.assert.notCalled(commitStateStub);
+            sinon.assert.notCalled(applyProxyStub);
+            sinon.assert.notCalled(startSystemProxyMonitoringStub);
+            assert.strictEqual(state.mode, ProxyMode.Off);
+        });
+
+        test('re-detect that finds a proxy finishes the setup with that proxy', async () => {
+            showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
+            showWarningMessageStub.resolves(i18n.t('action.redetect'));
+            detectStub.onFirstCall().resolves('unknown');
+            detectStub.onSecondCall().resolves('http://proxy.example:8080');
+
+            const finished = await flow.askForInitialSetup();
+
+            assert.strictEqual(finished, true);
+            assert.deepStrictEqual(recordedApplyCalls, [{ url: 'http://proxy.example:8080', enabled: true }]);
+            assert.strictEqual(state.mode, ProxyMode.Auto);
+        });
+
+        test('configure manually runs the Configure command and finishes the setup once a URL is set', async () => {
+            showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
+            showWarningMessageStub.resolves(i18n.t('action.configureManual'));
+            detectStub.resolves('unknown');
+            executeCommandStub.withArgs('otak-proxy.configureUrl').callsFake(async () => {
+                state = { ...state, manualProxyUrl: 'http://manual.example:8080' };
+            });
+
+            const finished = await flow.askForInitialSetup();
+
+            assert.strictEqual(finished, true);
+            sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
+            assert.deepStrictEqual(recordedApplyCalls, [{ url: 'http://manual.example:8080', enabled: true }]);
+        });
+
+        test('configure manually, then cancelling the URL prompt, leaves the setup unfinished', async () => {
+            showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
+            showWarningMessageStub.resolves(i18n.t('action.configureManual'));
+            detectStub.resolves('unknown');
+
+            const finished = await flow.askForInitialSetup();
+
+            assert.strictEqual(finished, false, 'nothing configured: offered again on the next start');
+            sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
+            sinon.assert.notCalled(applyProxyStub);
+            assert.strictEqual(state.mode, ProxyMode.Off);
+        });
+    });
+
     test('Auto + detected URL invalid: triggers the "could not detect" fallback prompt (treated as no detection)', async () => {
         showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
         showInformationMessageStub.onSecondCall().resolves(i18n.t('action.no'));

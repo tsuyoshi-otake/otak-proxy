@@ -49,7 +49,7 @@ suite('CommandRegistry Smoke Tests', () => {
             getNextMode: () => ProxyMode.Off,
             applyProxySettings: async () => true,
             updateStatusBar: () => {},
-            checkAndUpdateSystemProxy: async () => {},
+            checkAndUpdateSystemProxy: async () => 'completed' as const,
             startSystemProxyMonitoring: async () => {},
             stopSystemProxyMonitoring: async () => {},
             userNotifier: {

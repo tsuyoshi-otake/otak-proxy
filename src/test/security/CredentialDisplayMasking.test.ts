@@ -151,6 +151,27 @@ suite('Credential display masking (#108)', () => {
             );
         });
 
+        test('an all-digit password ended by a removed TAB or a raw "/" is not shown as the port', () => {
+            // Found by the property below in CI (seed -1572607213): the parser
+            // drops the TAB, reads "usra0a:80" as host and port, and the
+            // serialized URL showed the password as the port.
+            const redactor = new ProxySecretRedactor();
+            const rows: Array<{ input: string; masked: string }> = [
+                { input: 'http://usra0a:80\t#@haa.example', masked: 'http://usra0a:****@haa.example' },
+                { input: 'http://user:8080\t#@host.example', masked: 'http://user:****@host.example' },
+                { input: 'failed http://user:8080\t?@host.example', masked: 'failed http://user:****@host.example' },
+                { input: 'http://user:8080/x@host.example', masked: 'http://user:****@host.example' }
+            ];
+            for (const { input, masked } of rows) {
+                const shown = sanitizer.maskPassword(input);
+                assert.strictEqual(shown, masked, JSON.stringify(input));
+                assert.ok(!shown.includes('8080') && !/:80[^0-9]/.test(shown), `password leaked: ${shown}`);
+                assert.ok(!redactor.redactString(input).includes('8080'), JSON.stringify(input));
+            }
+            // A plain proxy URL with a port and no "@" keeps its parsed form.
+            assert.strictEqual(sanitizer.maskPassword('http://proxy.example:8080/'), 'http://proxy.example:8080/');
+        });
+
         test('whitespace-containing passwords never survive masking', () => {
             // A raw space or tab in a password makes the validator reject the
             // URL, but the rejected value still reaches logs and messages.

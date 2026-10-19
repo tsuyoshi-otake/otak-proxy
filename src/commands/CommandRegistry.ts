@@ -9,7 +9,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode, ProxyState, StateCommitResult } from '../core/types';
+import { ProxyMode, ProxyState, StateCommitResult, SystemProxyCheckOutcome } from '../core/types';
 import { Logger } from '../utils/Logger';
 import { CommandContext } from './types';
 import { executeToggleProxy } from './ToggleProxyCommand';
@@ -47,7 +47,7 @@ export interface CommandRegistryConfig {
     // Proxy operations
     applyProxySettings: (url: string, enabled: boolean, context?: vscode.ExtensionContext) => Promise<boolean>;
     updateStatusBar: (state: ProxyState) => void;
-    checkAndUpdateSystemProxy: (context: vscode.ExtensionContext) => Promise<void>;
+    checkAndUpdateSystemProxy: (context: vscode.ExtensionContext) => Promise<SystemProxyCheckOutcome>;
     startSystemProxyMonitoring: (context: vscode.ExtensionContext) => Promise<void>;
     stopSystemProxyMonitoring: (context: vscode.ExtensionContext) => Promise<void>;
 

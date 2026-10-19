@@ -249,7 +249,7 @@ function recordScheduledTestResult(
     testResult: TestResult
 ): void {
     state.events.onTestComplete(testResult);
-    state.lastConnectionTestAt = testResult.timestamp ?? Date.now();
+    state.lastConnectionTestAt = testStartedAt(testResult);
 
     const effectiveProxyUrl = testResult.proxyUrl ?? proxyUrl;
     updateReachabilityState(state, effectiveProxyUrl, isProxyEndpointReachable(testResult));
@@ -324,6 +324,16 @@ function isConnectionTestDue(state: ProxyMonitorConnectionState, config: ProxyMo
         (Date.now() - state.lastConnectionTestAt) >= config.connectionTestInterval;
 }
 
+/**
+ * When the test began. The due check compares against this, not the end time:
+ * a test that takes a few seconds would otherwise make a 60 s interval fall
+ * just short on the second 30 s poll and run every ~90 s.
+ */
+function testStartedAt(testResult: TestResult): number {
+    const finishedAt = testResult.timestamp ?? Date.now();
+    return finishedAt - (testResult.duration ?? 0);
+}
+
 function isConnectionTesterBusy(state: ProxyMonitorConnectionState): boolean {
     return typeof state.tester?.isTestInProgress === 'function'
         ? state.tester.isTestInProgress()
@@ -335,7 +345,7 @@ function recordConnectionTestResult(
     result: ProxyDetectionResult,
     testResult: TestResult
 ): void {
-    state.lastConnectionTestAt = testResult.timestamp ?? Date.now();
+    state.lastConnectionTestAt = testStartedAt(testResult);
     result.testResult = testResult;
     result.proxyReachable = isProxyEndpointReachable(testResult);
     state.events.onTestComplete(testResult);

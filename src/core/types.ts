@@ -42,6 +42,12 @@ export type ProxyTestResult = TestResult;
 export type AppliedProxySource = 'environment' | 'vscode' | 'windows' | 'macos' | 'linux' | 'fallback';
 
 /**
+ * What a system proxy check learned. `detectionFailed`: the OS query failed,
+ * so nothing was learned and nothing was saved — it is not "no proxy" (#108).
+ */
+export type SystemProxyCheckOutcome = 'completed' | 'detectionFailed';
+
+/**
  * Proxy state interface representing the current proxy configuration
  *
  * @interface ProxyState

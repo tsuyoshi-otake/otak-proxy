@@ -51,6 +51,15 @@ export function buildDetectedProxyValue(input: {
     };
 }
 
+/**
+ * The query itself failed, so nothing is known about the system proxy. Distinct
+ * from a successful "no proxy" (kind `direct`): consumers keep the last known
+ * value on `unknown` instead of clearing it.
+ */
+export function unknownDetection(): ProxyDetectionWithSource {
+    return { proxyUrl: null, source: null, kind: 'unknown' };
+}
+
 export function isPerSchemeProxy(kind: ProxyValueKind | undefined, httpUrl?: string, httpsUrl?: string): boolean {
     return kind === 'perSchemeProxy' && Boolean(httpUrl && httpsUrl && httpUrl !== httpsUrl);
 }

@@ -93,7 +93,7 @@ suite('ConfigureUrlCommand Unit Tests', () => {
             updateStatusBar: () => {
                 counters.statusBarUpdates++;
             },
-            checkAndUpdateSystemProxy: async () => {},
+            checkAndUpdateSystemProxy: async () => 'completed' as const,
             startSystemProxyMonitoring: async () => {},
             stopSystemProxyMonitoring: async () => {},
             userNotifier: {

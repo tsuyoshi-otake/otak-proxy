@@ -255,5 +255,117 @@ suite('PlatformProxyDetection Auto-config (#58)', () => {
             assert.ok(queried.includes('Ethernet'));
             assert.ok(queried.includes('Thunderbolt Ethernet'));
         });
+
+        suite('failed queries (#108)', () => {
+            type Answer = string | Error;
+            const none = macWebProxy(false);
+            const rejection = () => new Error('Command failed: networksetup');
+
+            function macExecutor(
+                list: string[] | Error,
+                answer: (flag: string, service: string) => Answer
+            ): CommandExecutor {
+                return async (_command, args) => {
+                    if (args.includes('-listallnetworkservices')) {
+                        if (list instanceof Error) {
+                            throw list;
+                        }
+                        return { stdout: ['An asterisk (*) denotes that a network service is disabled.', ...list].join('\n'), stderr: '' };
+                    }
+                    const result = answer(args[0], args[1]);
+                    if (result instanceof Error) {
+                        throw result;
+                    }
+                    return { stdout: result, stderr: '' };
+                };
+            }
+
+            test('a. a failed query on a listed service with no proxy anywhere is unknown', async () => {
+                const exec = macExecutor(['A', 'B'], (flag, service) =>
+                    service === 'A' && flag === '-getwebproxy' ? rejection() : none);
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.deepStrictEqual(
+                    { proxyUrl: result.proxyUrl, kind: result.kind },
+                    { proxyUrl: null, kind: 'unknown' }
+                );
+            });
+
+            test('b. a failed query does not hide a manual proxy on a later service', async () => {
+                const exec = macExecutor(['A', 'B'], (flag, service) => {
+                    if (service === 'A' && flag === '-getwebproxy') {
+                        return rejection();
+                    }
+                    return service === 'B' && flag === '-getwebproxy' ? macWebProxy(true, 'proxy-b.example.com', '3128') : none;
+                });
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.strictEqual(result.proxyUrl, 'http://proxy-b.example.com:3128');
+                assert.strictEqual(result.kind, 'singleProxy');
+            });
+
+            test('c. fallback names: names that do not exist are ignored when one answers', async () => {
+                const exec = macExecutor(rejection(), (_flag, service) => (service === 'Wi-Fi' ? none : rejection()));
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.strictEqual(result.kind, 'direct');
+            });
+
+            test('d. fallback names: every query failing is unknown', async () => {
+                const exec = macExecutor(rejection(), () => rejection());
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.strictEqual(result.kind, 'unknown');
+            });
+
+            test('e. a failed PAC query on a listed service is unknown', async () => {
+                const exec = macExecutor(['A', 'B'], (flag, service) => {
+                    if (flag === '-getautoproxyurl') {
+                        return service === 'B' ? rejection() : macAutoProxy(false);
+                    }
+                    return none;
+                });
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.strictEqual(result.kind, 'unknown');
+            });
+
+            test('f. unknown outranks a PAC found on another service', async () => {
+                const exec = macExecutor(['A', 'B'], (flag, service) => {
+                    if (service === 'A' && flag === '-getsecurewebproxy') {
+                        return rejection();
+                    }
+                    if (flag === '-getautoproxyurl') {
+                        return service === 'B' ? macAutoProxy(true) : macAutoProxy(false);
+                    }
+                    return none;
+                });
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.strictEqual(result.kind, 'unknown');
+            });
+
+            test('PAC is read only until the first PAC is found', async () => {
+                const pacQueries: string[] = [];
+                const exec = macExecutor(['A', 'B'], (flag, service) => {
+                    if (flag === '-getautoproxyurl') {
+                        pacQueries.push(service);
+                        return macAutoProxy(true);
+                    }
+                    return none;
+                });
+
+                const result = await detectMacOSProxy(exec);
+
+                assert.strictEqual(result.kind, 'pac');
+                assert.deepStrictEqual(pacQueries, ['A']);
+            });
+        });
     });
 });
