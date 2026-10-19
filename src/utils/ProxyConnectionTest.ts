@@ -1,6 +1,3 @@
-import * as http from 'http';
-import * as net from 'net';
-import * as tls from 'tls';
 import { Logger } from './Logger';
 import {
     classifyConnectError,
@@ -15,10 +12,12 @@ import {
 } from './ProxyConnectionDefaults';
 import {
     buildConnectRequestOptions,
-    createProxyConnectRequest,
+    ConnectRequestOptions,
+    connectThroughProxy,
     formatConnectDestination,
     formatConnectFailure,
-    isConnectResponseSuccessful
+    isConnectResponseSuccessful,
+    ProxyConnectHandle
 } from './ProxyConnectRequest';
 
 /**
@@ -96,7 +95,6 @@ async function testSingleProxyUrl(
         const testParsed = new URL(testUrl);
         const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
         return await createProxyConnectionAttempt(
-            proxyParsed,
             testUrl,
             timeout,
             errors,
@@ -115,16 +113,14 @@ async function testSingleProxyUrl(
 }
 
 function createProxyConnectionAttempt(
-    proxyParsed: URL,
     testUrl: string,
     timeout: number,
     errors: TestUrlError[],
-    requestOptions: http.RequestOptions,
+    requestOptions: ConnectRequestOptions,
     onProxyConnected: () => void
 ): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-        const req = createProxyConnectRequest(proxyParsed, requestOptions);
-        trackProxyConnect(req, onProxyConnected);
+        const connection = connectThroughProxy(requestOptions, onProxyConnected);
         let requestSettled = false;
 
         const finish = (success: boolean, error?: string, failureKind?: ProxyTestFailureKind) => {
@@ -144,58 +140,24 @@ function createProxyConnectionAttempt(
         };
 
         const watchdog = setTimeout(() => {
-            try {
-                req.destroy();
-            } catch {
-                // Ignore destroy errors
-            }
+            connection.cancel();
             finish(false, `Connection timeout (${timeout}ms)`, 'timeout');
         }, timeout);
-        req.setTimeout(timeout);
-        req.on('connect', (response, socket) => {
-            destroySocket(socket);
-            req.destroy();
 
-            const connected = isConnectResponseSuccessful(response);
-            finish(
-                connected,
-                connected ? undefined : formatConnectFailure(response),
-                connected ? undefined : classifyConnectStatus(response.statusCode ?? 0)
-            );
-        });
-
-        req.on('error', (error: Error) => {
-            finish(false, error.message || 'Connection failed', classifyConnectError(error));
-        });
-
-        req.on('timeout', () => {
-            req.destroy();
-            finish(false, `Connection timeout (${timeout}ms)`, 'timeout');
-        });
-
-        req.end();
+        connection.result.then(
+            response => {
+                const connected = isConnectResponseSuccessful(response);
+                finish(
+                    connected,
+                    connected ? undefined : formatConnectFailure(response),
+                    connected ? undefined : classifyConnectStatus(response.statusCode)
+                );
+            },
+            (error: Error) => {
+                finish(false, error.message || 'Connection failed', classifyConnectError(error));
+            }
+        );
     });
-}
-
-/**
- * Reports when the request's socket opens a connection to the proxy itself.
- * That proves the endpoint is up even when CONNECT then times out (#97). An
- * https proxy proves it only with a finished TLS handshake: its socket reports
- * 'connect' before the handshake, which can still fail. A reused socket
- * reports nothing, which only loses that proof.
- */
-function trackProxyConnect(req: http.ClientRequest, onConnect: () => void): void {
-    req.once('socket', (socket: net.Socket) => {
-        socket.once(socket instanceof tls.TLSSocket ? 'secureConnect' : 'connect', onConnect);
-    });
-}
-
-function destroySocket(socket: net.Socket): void {
-    try {
-        socket.destroy();
-    } catch {
-        // Ignore destroy errors
-    }
 }
 
 /**
@@ -239,7 +201,7 @@ export async function testProxyConnectionParallel(
     try {
         const proxyParsed = new URL(proxyUrl);
 
-        const requests: http.ClientRequest[] = [];
+        const connections: ProxyConnectHandle[] = [];
         let settled = false;
         let completedCount = 0;
         let overallTimer: ReturnType<typeof setTimeout> | null = null;
@@ -263,12 +225,8 @@ export async function testProxyConnectionParallel(
         };
 
         const destroyOutstanding = () => {
-            for (const req of requests) {
-                try {
-                    req.destroy();
-                } catch {
-                    // Ignore destroy errors
-                }
+            for (const connection of connections) {
+                connection.cancel();
             }
         };
 
@@ -303,7 +261,7 @@ export async function testProxyConnectionParallel(
                 testUrl: string,
                 success: boolean,
                 error?: string,
-                requestOptions?: http.RequestOptions,
+                requestOptions?: ConnectRequestOptions,
                 failureKind?: ProxyTestFailureKind
             ) => {
                 if (settled) {
@@ -339,52 +297,33 @@ export async function testProxyConnectionParallel(
                     const testParsed = new URL(testUrl);
                     const requestOptions = buildConnectRequestOptions(proxyParsed, testParsed, timeout);
 
-                    const req = createProxyConnectRequest(proxyParsed, requestOptions);
-                    trackProxyConnect(req, markProxyConnected);
-                    requests.push(req);
-                    req.setTimeout(timeout);
+                    const connection = connectThroughProxy(requestOptions, markProxyConnected);
+                    connections.push(connection);
 
-                    req.on('connect', (response, socket) => {
-                        try {
-                            socket.destroy();
-                            req.destroy();
-                        } catch {
-                            // Ignore destroy errors
-                        }
-
-                        if (isConnectResponseSuccessful(response)) {
-                            onTestResult(testUrl, true);
-                        } else {
+                    connection.result.then(
+                        response => {
+                            if (isConnectResponseSuccessful(response)) {
+                                onTestResult(testUrl, true);
+                            } else {
+                                onTestResult(
+                                    testUrl,
+                                    false,
+                                    formatConnectFailure(response),
+                                    requestOptions,
+                                    classifyConnectStatus(response.statusCode)
+                                );
+                            }
+                        },
+                        (error: Error) => {
                             onTestResult(
                                 testUrl,
                                 false,
-                                formatConnectFailure(response),
+                                error.message || 'Connection failed',
                                 requestOptions,
-                                classifyConnectStatus(response.statusCode ?? 0)
+                                classifyConnectError(error)
                             );
                         }
-                    });
-
-                    req.on('error', (error: Error) => {
-                        onTestResult(
-                            testUrl,
-                            false,
-                            error.message || 'Connection failed',
-                            requestOptions,
-                            classifyConnectError(error)
-                        );
-                    });
-
-                    req.on('timeout', () => {
-                        try {
-                            req.destroy();
-                        } catch {
-                            // Ignore destroy errors
-                        }
-                        onTestResult(testUrl, false, `Connection timeout (${timeout}ms)`, requestOptions, 'timeout');
-                    });
-
-                    req.end();
+                    );
                 } catch (error) {
                     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
                     onTestResult(

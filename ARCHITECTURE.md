@@ -376,6 +376,9 @@ syncManager.on('syncStateChanged', (status) => { /* Update sync state */ });
    └─→ Log the change
    ↓
 6. ProxyConnectionTester.testProxyAuto() (when connection testing is enabled)
+   │   Each attempt is a direct TCP (`http:` proxy) or TLS (`https:` proxy)
+   │   CONNECT to the proxy under test (connectThroughProxy), never an
+   │   `http.request`, which VS Code patches to route through `http.proxy`
    ├─→ Success: apply attempt (ends in ProxyApplier.applyProxyDetailed())
    └─→ Failure: SystemProxyUpdateService falls back to the configured
                 manual proxy (when enableFallback is on) or direct
@@ -671,6 +674,8 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - `testProxyAuto()`: 3s timeout, parallel execution, brief notifications
   - `testProxyManual()`: 5s timeout, detailed notifications
   - Result caching
+  - Each attempt is a direct CONNECT written to its own `net.connect` / `tls.connect` socket (`utils/ProxyConnectRequest.ts`), not `http.request`: VS Code patches `http`/`https` to resolve a proxy per request, which could send the test of proxy P through the proxy in `http.proxy` and hide a refused P. The response head is read by hand (status line only, 16 KiB cap); a malformed head is `protocol`, a close before a complete head is `unknown`, a refused connection keeps its `ECONNREFUSED` code (`endpointUnreachable`)
+  - No `ca` is passed to `tls.connect`, so an `https:` proxy certificate is checked against Node's CA list, `NODE_EXTRA_CA_CERTS` and, only in VS Code's certificate mode V2, the OS store
 
 #### ProxyTestScheduler
 - **Responsibility**: Scheduling periodic proxy connection tests
