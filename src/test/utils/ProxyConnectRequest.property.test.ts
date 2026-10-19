@@ -29,7 +29,7 @@ suite('ProxyConnectRequest port properties', function() {
                     const options = buildConnectRequestOptions(proxy, target, 1000);
 
                     assert.strictEqual(options.port, proxyPort);
-                    assert.strictEqual(options.path, `example.com:${targetPort}`);
+                    assert.strictEqual(options.authority, `example.com:${targetPort}`);
                 }
             ),
             { numRuns }
@@ -60,7 +60,7 @@ suite('ProxyConnectRequest port properties', function() {
 
                     const options = buildConnectRequestOptions(proxy, target, 1000);
                     assert.strictEqual(options.port, proxyDefault);
-                    assert.strictEqual(options.path, `example.com:${targetDefault}`);
+                    assert.strictEqual(options.authority, `example.com:${targetDefault}`);
                 }
             ),
             { numRuns }

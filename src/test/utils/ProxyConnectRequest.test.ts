@@ -9,7 +9,7 @@ import * as http from 'http';
 import * as net from 'net';
 import {
     buildConnectRequestOptions,
-    createProxyConnectRequest,
+    connectThroughProxy,
     formatConnectDestination
 } from '../../utils/ProxyConnectRequest';
 import { stripIpv6Brackets } from '../../validation/ProxyHost';
@@ -150,9 +150,9 @@ suite('ProxyConnectRequest default ports', () => {
             const options = buildConnectRequestOptions(proxy, target, 1000);
 
             assert.strictEqual(options.port, connectCase.expectedRequestPort, 'request.port');
-            assert.strictEqual(options.path, connectCase.expectedConnectPath, 'CONNECT path');
-            assert.strictEqual(options.method, 'CONNECT');
-            assert.strictEqual(options.hostname, stripIpv6Brackets(proxy.hostname));
+            assert.strictEqual(options.authority, connectCase.expectedConnectPath, 'CONNECT authority');
+            assert.strictEqual(options.host, stripIpv6Brackets(proxy.hostname));
+            assert.strictEqual(options.tls, proxy.protocol === 'https:');
         });
     }
 
@@ -164,7 +164,7 @@ suite('ProxyConnectRequest default ports', () => {
         );
 
         assert.strictEqual(options.port, 8080);
-        assert.strictEqual(options.path, 'example.com:8443');
+        assert.strictEqual(options.authority, 'example.com:8443');
     });
 
     test('formatConnectDestination never includes credentials or authorization', () => {
@@ -183,8 +183,7 @@ suite('ProxyConnectRequest default ports', () => {
         assert.ok(!destination.includes(secretPassword), destination);
         assert.ok(!destination.toLowerCase().includes('authorization'), destination);
         assert.ok(!destination.includes('Basic '), destination);
-        const authorization = options.headers?.['Proxy-Authorization'];
-        assert.ok(typeof authorization === 'string' && authorization.startsWith('Basic '));
+        assert.ok(options.proxyAuthorization?.startsWith('Basic '));
     });
 });
 
@@ -198,31 +197,22 @@ suite('ProxyConnectRequest hermetic CONNECT', () => {
         const options = buildConnectRequestOptions(proxy, new URL('https://example.com'), 500);
         assert.strictEqual(options.port, 80);
 
-        const attemptedPort = await new Promise<number>((resolve, reject) => {
-            const req = createProxyConnectRequest(proxy, options);
-            req.on('error', (error: NodeJS.ErrnoException & { port?: number }) => {
+        const attemptedPort = await connectThroughProxy(options).result.then(
+            () => options.port,
+            (error: NodeJS.ErrnoException & { port?: number }) => {
                 if (typeof error.port === 'number') {
-                    resolve(error.port);
-                    return;
+                    return error.port;
                 }
                 const match = /ECONNREFUSED\s+\S+:(\d+)/.exec(error.message);
                 if (match) {
-                    resolve(Number(match[1]));
-                    return;
+                    return Number(match[1]);
                 }
-                reject(error);
-            });
-            req.on('connect', (_response, socket) => {
-                socket.destroy();
-                req.destroy();
-                resolve(Number(options.port));
-            });
-            req.on('timeout', () => {
-                req.destroy();
-                resolve(Number(options.port));
-            });
-            req.end();
-        });
+                if (error.code === 'ETIMEDOUT') {
+                    return options.port;
+                }
+                throw error;
+            }
+        );
 
         assert.strictEqual(attemptedPort, 80, 'socket attempt must target 80, not 8080');
     });
@@ -249,21 +239,9 @@ suite('ProxyConnectRequest hermetic CONNECT', () => {
             ];
 
             for (const target of targets) {
-                await new Promise<void>((resolve, reject) => {
-                    const options = buildConnectRequestOptions(proxy, new URL(target), 1000);
-                    const req = createProxyConnectRequest(proxy, options);
-                    req.on('connect', (_response, socket) => {
-                        socket.destroy();
-                        req.destroy();
-                        resolve();
-                    });
-                    req.on('error', reject);
-                    req.on('timeout', () => {
-                        req.destroy();
-                        reject(new Error(`CONNECT timeout for ${target}`));
-                    });
-                    req.end();
-                });
+                const options = buildConnectRequestOptions(proxy, new URL(target), 1000);
+                const response = await connectThroughProxy(options).result;
+                assert.strictEqual(response.statusCode, 200, `CONNECT status for ${target}`);
             }
 
             assert.deepStrictEqual(capturedPaths, [
@@ -307,20 +285,7 @@ suite('ProxyConnectRequest hermetic CONNECT', () => {
             const options = buildConnectRequestOptions(proxy, new URL('https://example.com'), 500);
             assert.strictEqual(options.port, 80);
 
-            await new Promise<void>((resolve, reject) => {
-                const req = createProxyConnectRequest(proxy, options);
-                req.on('error', () => resolve());
-                req.on('connect', (_response, socket) => {
-                    socket.destroy();
-                    req.destroy();
-                    resolve();
-                });
-                req.on('timeout', () => {
-                    req.destroy();
-                    resolve();
-                });
-                req.end();
-            });
+            await connectThroughProxy(options).result.catch(() => undefined);
 
             assert.deepStrictEqual(hitsOn8080, [], 'decoy on 8080 must not receive the :80 attempt');
         } finally {

@@ -11,7 +11,7 @@ import { DNS_HOSTNAME_PATTERN } from '../../validation/ProxyHost';
 import { splitProxyUrl } from '../../security/ProxyCredentialStore';
 import { getProxyPublicUrl } from '../../utils/ProxyStateSanitizer';
 import { normalizeProxyForComparison } from '../../utils/ProxyUrlIdentity';
-import { buildConnectRequestOptions, createProxyConnectRequest } from '../../utils/ProxyConnectRequest';
+import { buildConnectRequestOptions, connectThroughProxy } from '../../utils/ProxyConnectRequest';
 import { InputSanitizer } from '../../validation/InputSanitizer';
 import { ProxySecretRedactor } from '../../security/ProxySecretRedactor';
 import { testProxyConnection } from '../../utils/ProxyConnectionTest';
@@ -148,10 +148,9 @@ suite('Issue #53 IPv6 proxy authority', () => {
                 1000
             );
 
-            assert.strictEqual(options.hostname, '::1');
+            assert.strictEqual(options.host, '::1');
             assert.strictEqual(options.port, 8080);
-            assert.strictEqual(options.method, 'CONNECT');
-            assert.strictEqual(options.path, 'example.com:443');
+            assert.strictEqual(options.authority, 'example.com:443');
         });
 
         test('CONNECT path keeps WHATWG target hostname (brackets stay on IPv6 targets)', () => {
@@ -161,9 +160,9 @@ suite('Issue #53 IPv6 proxy authority', () => {
                 1000
             );
 
-            assert.strictEqual(options.hostname, '2001:db8::1');
+            assert.strictEqual(options.host, '2001:db8::1');
             assert.strictEqual(options.port, 8080);
-            assert.strictEqual(options.path, `${new URL('https://[2001:db8::2]:8443').hostname}:8443`);
+            assert.strictEqual(options.authority, `${new URL('https://[2001:db8::2]:8443').hostname}:8443`);
         });
 
         test('hermetic CONNECT to a local ::1 proxy succeeds', async function() {
@@ -208,7 +207,7 @@ suite('Issue #53 IPv6 proxy authority', () => {
             }
         });
 
-        test('http.request CONNECT hostname is the unbracketed IPv6 literal', async function() {
+        test('CONNECT host is the unbracketed IPv6 literal', async function() {
             this.timeout(5000);
 
             let server: http.Server;
@@ -233,22 +232,10 @@ suite('Issue #53 IPv6 proxy authority', () => {
                     new URL('https://example.com:443'),
                     1000
                 );
-                assert.strictEqual(options.hostname, '::1');
+                assert.strictEqual(options.host, '::1');
 
-                await new Promise<void>((resolve, reject) => {
-                    const req = createProxyConnectRequest(new URL(`http://[::1]:${port}`), options);
-                    req.on('connect', (_response, socket) => {
-                        socket.destroy();
-                        req.destroy();
-                        resolve();
-                    });
-                    req.on('error', reject);
-                    req.on('timeout', () => {
-                        req.destroy();
-                        reject(new Error('CONNECT timeout'));
-                    });
-                    req.end();
-                });
+                const response = await connectThroughProxy(options).result;
+                assert.strictEqual(response.statusCode, 200);
             } finally {
                 await close(server);
             }

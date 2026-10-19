@@ -276,7 +276,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
 ### Network Activity
 
 - otak-proxy sends no telemetry and does not transmit usage data.
-- Connection tests check reachability by sending HTTP `CONNECT` requests through the configured proxy to the default test hosts `www.github.com`, `www.microsoft.com`, and `www.google.com`.
+- Connection tests check reachability by sending HTTP `CONNECT` requests through the configured proxy to the default test hosts `www.github.com`, `www.microsoft.com`, and `www.google.com`. The test opens its own TCP (or TLS) connection to the proxy under test, so it never goes through the proxy in `http.proxy` or VS Code's `http.proxySupport` handling. For an `https://` proxy, the test checks the proxy's certificate against Node's built-in CA list and `NODE_EXTRA_CA_CERTS`. It also trusts the operating system's certificate store only when VS Code's `http.experimental.systemCertificatesV2` is on (with `http.systemCertificates` on, the default).
 - If the proxy URL contains credentials, the test sends a `Proxy-Authorization` header to the configured proxy. Test results, logs, and diagnostics redact credentials and authorization headers.
 - For diagnostics and Auto detection, the extension reads local environment variables, VS Code settings, the Git config, the npm config (including the npm user config file when npm will not print a proxy URL with a password), and supported platform proxy settings.
 
