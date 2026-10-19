@@ -19,7 +19,7 @@ import { readV3Settings } from '../core/V3Settings';
 import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { normalizeProxyForComparison } from '../utils/ProxyUrlIdentity';
 import { isPerSchemeProxy } from '../config/DetectedProxyValue';
-import { splitCapabilityIssues } from '../core/ProxyTargetCapability';
+import { splitCapabilityIssues, vscodeRemoteNotWritableIssue } from '../core/ProxyTargetCapability';
 import { asProxyDisabledUnsupportedAutoConfig, createUnsupportedAutoConfigIssue } from './unsupportedAutoConfig';
 import { buildConnectionTestObservation } from '../utils/ProxyTestFailure';
 
@@ -206,7 +206,7 @@ export class ProxyRuntimeDiagnostics {
             git: slowDiagnostics.git?.observation,
             npm: slowDiagnostics.npm?.observation,
             vscode: vscodeDiagnostics.observation
-        }));
+        }, executionContext.canWriteVSCodeUserSettings));
         issues.push(...this.collectSplitProxyIssues(state));
         issues.push(...this.collectUnsupportedAutoConfigFromState(state, issues));
         // The Windows PAC/WPAD issues come from the state-independent slow
@@ -539,7 +539,8 @@ export class ProxyRuntimeDiagnostics {
 
     private collectManagedConvergenceIssues(
         state: ProxyState,
-        observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> }
+        observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> },
+        canWriteVSCodeUserSettings: boolean
     ): ProxyIssue[] {
         const issues: ProxyIssue[] = [];
         const gitReadFailed = this.observedFlag(observations.git, 'readFailed');
@@ -579,8 +580,14 @@ export class ProxyRuntimeDiagnostics {
         }
 
         if (this.expectsProxyDisabled(state)) {
-            issues.push(...this.collectManagedResidualIssues(state, observations));
+            issues.push(...this.collectManagedResidualIssues(state, observations, canWriteVSCodeUserSettings));
             return issues;
+        }
+
+        // A remote window writes no http.proxy, so its value is not judged below;
+        // the advisory says why, and only while the proxy is expected active (#108).
+        if (!canWriteVSCodeUserSettings) {
+            issues.push(vscodeRemoteNotWritableIssue('executionContext'));
         }
 
         const expectedProxy = this.expectedActiveProxyUrl(state);
@@ -636,7 +643,7 @@ export class ProxyRuntimeDiagnostics {
         }
 
         const vscodeProxy = this.observedString(observations.vscode, 'proxy');
-        if (state.vscodeConfigured && !this.proxyMatchesExpected(vscodeProxy, expectedProxy)) {
+        if (canWriteVSCodeUserSettings && state.vscodeConfigured && !this.proxyMatchesExpected(vscodeProxy, expectedProxy)) {
             issues.push(this.issue('vscode.managedProxyMismatch', 'applyFailed', 'blocksConvergence', 'vscode.http.proxy', 'workspaceHost', {
                 expectedSanitized: expectedProxy,
                 actualSanitized: vscodeProxy ?? 'unset',
@@ -667,7 +674,8 @@ export class ProxyRuntimeDiagnostics {
 
     private collectManagedResidualIssues(
         state: ProxyState,
-        observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> }
+        observations: { git?: Record<string, unknown>; npm?: Record<string, unknown>; vscode?: Record<string, unknown> },
+        canWriteVSCodeUserSettings: boolean
     ): ProxyIssue[] {
         const issues: ProxyIssue[] = [];
         const gitHttpProxy = this.observedString(observations.git, 'httpProxy');
@@ -710,7 +718,7 @@ export class ProxyRuntimeDiagnostics {
         }
 
         const vscodeProxy = this.observedString(observations.vscode, 'proxy');
-        if (vscodeProxy) {
+        if (canWriteVSCodeUserSettings && vscodeProxy) {
             const preserved = keptByOff(state.targetOutcomes?.vscode);
             issues.push(this.issue('vscode.managedProxyResidual', preserved ? 'externalOverride' : 'applyFailed', preserved ? 'advisoryResidualRisk' : 'blocksConvergence', 'vscode.http.proxy', 'workspaceHost', {
                 expectedSanitized: 'unset',

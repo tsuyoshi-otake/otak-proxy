@@ -86,6 +86,17 @@ suite('Locale files stay complete (#108)', () => {
         }
     });
 
+    test('the credential consent text names the Settings Sync setting in every locale (#108)', () => {
+        const key = 'remediation.notification.credentialConsentRequired';
+        for (const locale of LOCALES) {
+            const text = load(locale)[key];
+            assert.ok(text.includes('settingsSync.ignoredSettings'), `${locale}.json ${key} lacks settingsSync.ignoredSettings`);
+            assert.ok(text.includes('http.proxy'), `${locale}.json ${key} lacks http.proxy`);
+            assert.ok(text.includes('settings.json'), `${locale}.json ${key} lost the settings.json example`);
+        }
+        assert.ok(PREVIOUSLY_ENGLISH_KEYS.includes(key), 'the translated-key rule covers the consent text');
+    });
+
     test('the new Off warning is translated in every locale and keeps its target list placeholder', () => {
         for (const locale of LOCALES.filter(l => l !== 'en')) {
             const messages = load(locale);

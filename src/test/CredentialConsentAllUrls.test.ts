@@ -56,6 +56,10 @@ import {
 } from '../utils/ProxyStateSanitizer';
 import { createFakeGitConfig, createFakeNpmConfig } from './fakeConfigStores';
 
+// `import * as` would stub a copy of the module; the code under test calls the
+// real one (the same form as ProxyConnectDirect.test.ts).
+import osModule = require('os');
+
 const HTTP_URL = 'http://proxy-http.example.com:3128';
 const HTTPS_CRED_URL = 'http://user:secret@proxy-https.example.com:3128';
 const OTHER_CRED_URL = 'http://other:pw@other.example.com:9999';
@@ -136,8 +140,7 @@ interface Harness {
     ): Promise<{ success: boolean; applyResult?: ProxyApplyDetailedResult; stopReason?: string }>;
 }
 
-function createHarness(): Harness {
-    const globalState = new Map<string, unknown>();
+function createHarness(globalState: Map<string, unknown> = new Map<string, unknown>()): Harness {
     const secrets = new Map<string, string>();
     const context = fakeExtensionContext(globalState, secrets);
     const stateManager = new ProxyStateManager(context);
@@ -497,6 +500,140 @@ suite('Credential consent judges every URL in the plan (#108)', () => {
         assert.strictEqual(result.success, false);
         assert.strictEqual(result.stopReason, 'consentRequired');
         assertNothingWritten(harness);
+    });
+});
+
+/**
+ * The consent record lives in the globalState that a local window and every
+ * remote window of one profile share, so a key carries the host scope: a remote
+ * host is asked once for itself, and consent recorded before the scope existed
+ * keeps covering the local window (#108). The service reads the scope when it
+ * is constructed, so the identity is set before createHarness.
+ */
+suite('Credential consent is per host (#108)', () => {
+    let sandbox: sinon.SinonSandbox;
+    let showWarning: sinon.SinonStub;
+    let remoteName: sinon.SinonStub;
+    let hostname: sinon.SinonStub;
+    let homedir: sinon.SinonStub;
+    let savedDistro: string | undefined;
+    let answer: (choice: string | undefined) => void;
+
+    function connectTo(host: { remote?: string; hostname?: string; homedir?: string; distro?: string }): void {
+        remoteName.value(host.remote);
+        hostname.returns(host.hostname ?? 'unused-host');
+        homedir.returns(host.homedir ?? '/home/unused');
+        if (host.distro === undefined) {
+            delete process.env.WSL_DISTRO_NAME;
+        } else {
+            process.env.WSL_DISTRO_NAME = host.distro;
+        }
+    }
+
+    setup(() => {
+        I18nManager.getInstance().initialize('en');
+        savedDistro = process.env.WSL_DISTRO_NAME;
+        sandbox = sinon.createSandbox();
+        remoteName = sandbox.stub(vscode.env, 'remoteName').value(undefined);
+        hostname = sandbox.stub(osModule, 'hostname').returns('unused-host');
+        homedir = sandbox.stub(osModule, 'homedir').returns('/home/unused');
+        sandbox.stub(vscode.workspace, 'getConfiguration').callsFake(((section?: string) => ({
+            get: (key: string, defaultValue?: unknown) =>
+                section === 'otakProxy' && ['notificationLevel', 'hostUserLockEnabled', 'diagnosticsEnabled'].includes(key)
+                    ? (key === 'notificationLevel' ? 'off' : false)
+                    : defaultValue,
+            update: async () => {},
+            has: () => true,
+            inspect: () => undefined
+        })) as typeof vscode.workspace.getConfiguration);
+        showWarning = sandbox.stub(vscode.window, 'showWarningMessage').callsFake(
+            () => new Promise(resolve => { answer = resolve as typeof answer; })
+        );
+    });
+
+    teardown(() => {
+        sandbox.restore();
+        if (savedDistro === undefined) {
+            delete process.env.WSL_DISTRO_NAME;
+        } else {
+            process.env.WSL_DISTRO_NAME = savedDistro;
+        }
+    });
+
+    async function planned(harness: Harness): Promise<void> {
+        await harness.stateManager.saveState(splitState());
+    }
+
+    test('consent stored under today\'s key still covers the local window', async () => {
+        const shared = new Map<string, unknown>([[CONSENT_KEY, { [consentKeyFor(HTTPS_CRED_URL)]: true }]]);
+        connectTo({});
+        const local = createHarness(shared);
+        await planned(local);
+
+        const result = await local.applySafely(HTTP_URL, true, 'autoDetection');
+
+        assert.strictEqual(result.success, true, JSON.stringify(result.applyResult?.errors));
+        assert.strictEqual(showWarning.callCount, 0, 'no prompt: the old key is honored locally');
+    });
+
+    test('an Allow recorded in the local scope does not cover a remote scope', async () => {
+        const shared = new Map<string, unknown>([[CONSENT_KEY, { [consentKeyFor(HTTPS_CRED_URL)]: true }]]);
+        connectTo({ remote: 'ssh-remote', hostname: 'host-a', homedir: '/home/a' });
+        const remote = createHarness(shared);
+        await planned(remote);
+
+        const result = await remote.applySafely(HTTP_URL, true, 'autoDetection');
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.stopReason, 'consentRequired', 'the remote host is asked for itself');
+        assert.strictEqual(showWarning.callCount, 1);
+        assertNothingWritten(remote);
+        answer(undefined);
+    });
+
+    test('an Allow in one remote scope covers that scope and no other', async () => {
+        const shared = new Map<string, unknown>();
+        const allowLabel = I18nManager.getInstance().t('action.allowPlaintextWrite');
+
+        connectTo({ remote: 'ssh-remote', hostname: 'host-a', homedir: '/home/a' });
+        const hostA = createHarness(shared);
+        wireConsentReapply(hostA);
+        await planned(hostA);
+        const first = await hostA.applySafely(HTTP_URL, true, 'autoDetection');
+        assert.strictEqual(first.stopReason, 'consentRequired');
+        answer(allowLabel);
+        await until(() => hostA.npm.get('https-proxy') === HTTPS_CRED_URL, 'the Allow to re-apply on host A');
+        assert.strictEqual(showWarning.callCount, 1);
+
+        // The same remote host again: the recorded consent covers it.
+        const hostAAgain = createHarness(shared);
+        await planned(hostAAgain);
+        const again = await hostAAgain.applySafely(HTTP_URL, true, 'autoDetection');
+        assert.strictEqual(again.success, true, JSON.stringify(again.applyResult?.errors));
+        assert.strictEqual(showWarning.callCount, 1, 'no second prompt on the same host');
+
+        // Another host of the same kind, another home directory, another WSL
+        // distribution, and the local window: each is asked for itself.
+        const others: Array<[string, Parameters<typeof connectTo>[0]]> = [
+            ['another host name', { remote: 'ssh-remote', hostname: 'host-b', homedir: '/home/a' }],
+            ['another home directory', { remote: 'ssh-remote', hostname: 'host-a', homedir: '/home/b' }],
+            ['another WSL distribution', { remote: 'ssh-remote', hostname: 'host-a', homedir: '/home/a', distro: 'Debian' }],
+            ['another remote kind', { remote: 'wsl', hostname: 'host-a', homedir: '/home/a' }],
+            ['the local window', {}]
+        ];
+        for (const [label, host] of others) {
+            connectTo(host);
+            const other = createHarness(shared);
+            await planned(other);
+            const prompts: number = showWarning.callCount;
+
+            const result = await other.applySafely(HTTP_URL, true, 'autoDetection');
+
+            assert.strictEqual(result.stopReason, 'consentRequired', `${label} must be asked for itself`);
+            assert.strictEqual(showWarning.callCount, prompts + 1, label);
+            assertNothingWritten(other);
+            answer(undefined);
+        }
     });
 });
 

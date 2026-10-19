@@ -5,7 +5,8 @@ import { I18nManager } from '../i18n/I18nManager';
 import { proxyApplyPlanCredentialUrls } from '../core/ProxyApplyPlan';
 import { LogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
-import { publicFingerprint } from '../core/TargetOwnershipStore';
+import { currentHostScope } from '../core/TargetOwnershipStore';
+import { credentialConsentKey } from './CredentialConsentKey';
 import { ProxyState } from '../core/types';
 import { getHighestPriorityIssue, ProxyIssue } from '../core/v3Types';
 import { readV3Settings, V3Settings } from '../core/V3Settings';
@@ -128,6 +129,8 @@ export class ProxyRemediationService {
     /** Consent prompts on screen, one per consent-key set. */
     private readonly pendingConsentPrompts = new Set<string>();
     private credentialConsentReapply: (() => Promise<void>) | undefined;
+    /** Host scope of this window, read once: consent keys are per host (#108). */
+    private readonly hostScope = currentHostScope();
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -720,8 +723,7 @@ export class ProxyRemediationService {
     }
 
     private consentKeyFor(url: string): string {
-        const publicUrl = removeProxyCredentials(url) || url;
-        return publicFingerprint(publicUrl);
+        return credentialConsentKey(url, this.hostScope);
     }
 
     private applyFailureFingerprint(

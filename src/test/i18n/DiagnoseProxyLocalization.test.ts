@@ -6,6 +6,7 @@ import { formatDiagnosticsNotification } from '../../commands/DiagnoseProxyComma
 import { TARGET_LABEL_KEYS, proxyTargetLabel } from '../../core/ProxyTargetLabels';
 import { createApplyBlockedIssue } from '../../core/v3Types';
 import type { ProxyIssue } from '../../core/v3Types';
+import { vscodeRemoteNotWritableIssue } from '../../core/ProxyTargetCapability';
 
 /**
  * Guards issue #13: the Diagnose Proxy command hard-coded English strings, so
@@ -71,7 +72,8 @@ const DIAGNOSE_KEYS = [
     'diagnose.reason.applyBlockedUntrustedWorkspace',
     'diagnose.reason.applyBlockedInvalidProxyUrl',
     'diagnose.reason.applyBlockedCredentialConsent',
-    'diagnose.reason.applyBlockedApplyFailed'
+    'diagnose.reason.applyBlockedApplyFailed',
+    'diagnose.reason.vscodeRemoteNotWritable'
 ];
 
 // The ids the ownership-aware target adapters in ProxyApplier observe: the Off
@@ -185,6 +187,33 @@ suite('Diagnose Proxy localization', () => {
             }
         } finally {
             i18n.initialize('en');
+        }
+    });
+
+    test('the remote-window http.proxy advisory is explained with both remedies, not shown as a raw issue id (#108)', () => {
+        const i18n = I18nManager.getInstance();
+        try {
+            i18n.initialize('en');
+            const issue = vscodeRemoteNotWritableIssue('apply');
+
+            const text = formatDiagnosticsNotification({ issueCount: 1, issues: [issue] });
+
+            assert.ok(!text.includes(issue.id), `the raw id leaked into: ${text}`);
+            assert.ok(text.includes('does not write or remove'), text);
+            assert.ok(text.includes('Preferences: Open Remote Settings'), 'names the command as VS Code titles it');
+            assert.ok(text.includes('http.useLocalProxyConfiguration'), text);
+            assert.ok(!/registration/i.test(text), 'no internal terms');
+        } finally {
+            i18n.initialize('en');
+        }
+    });
+
+    test('every locale keeps the setting names and the command in the remote-window advisory (#108)', () => {
+        for (const locale of SUPPORTED_LOCALES) {
+            const reason = loadLocale(locale)['diagnose.reason.vscodeRemoteNotWritable'] as string;
+            for (const token of ['http.proxy', 'http.useLocalProxyConfiguration', 'Preferences: Open Remote Settings']) {
+                assert.ok(reason.includes(token), `${locale}.json diagnose.reason.vscodeRemoteNotWritable lacks ${token}`);
+            }
         }
     });
 

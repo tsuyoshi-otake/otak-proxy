@@ -14,6 +14,7 @@ import { runProxyApplyAttempt } from './remediation/ProxyApplyAttempt';
 import { ProxyMode, ProxyState, stateRevision } from './core/types';
 import { ProxyStateManager } from './core/ProxyStateManager';
 import { ProxyApplier } from './core/ProxyApplier';
+import { ExecutionContextDetector } from './diagnostics/ExecutionContextDetector';
 import { ExtensionInitializer } from './core/ExtensionInitializer';
 import { ProxyUrlValidator } from './validation/ProxyUrlValidator';
 import { InputSanitizer } from './validation/InputSanitizer';
@@ -172,7 +173,8 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         proxyStateManager,
         services.terminalEnvManager,
         new PipConfigManager(),
-        new TargetOwnershipStore(context.globalState, new ProxyCredentialStore(context.secrets))
+        new TargetOwnershipStore(context.globalState, new ProxyCredentialStore(context.secrets)),
+        { canWriteVSCodeUserSettings: () => new ExecutionContextDetector(context).detect().canWriteVSCodeUserSettings }
     );
     proxyRemediationService = new ProxyRemediationService(
         context,
