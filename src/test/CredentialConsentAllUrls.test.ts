@@ -39,6 +39,8 @@ import { InputSanitizer } from '../validation/InputSanitizer';
 import { ProxyUrlValidator } from '../validation/ProxyUrlValidator';
 import { ProxyRemediationService, ProxyApplyTrigger } from '../remediation/ProxyRemediationService';
 import { runProxyApplyAttempt } from '../remediation/ProxyApplyAttempt';
+import { reapplyAfterCredentialConsent } from '../remediation/CredentialConsentReapply';
+import { getStatusBarDisplay } from '../ui/StatusBarDisplay';
 import { applyRemoteSyncState, RemoteSyncApplyContext } from '../sync/RemoteSyncStateApplier';
 import { getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
 import * as SystemProxyDetectionUtils from '../utils/SystemProxyDetectionUtils';
@@ -208,6 +210,40 @@ function assertNothingWritten(harness: Harness): void {
     assert.strictEqual(harness.envVars.size, 0, 'terminal environment must not be written');
 }
 
+/** Wires the re-apply the way extension.ts does, over the harness's own apply. */
+function wireConsentReapply(harness: Harness): void {
+    harness.service.setCredentialConsentReapply(() => reapplyAfterCredentialConsent({
+        getState: () => harness.stateManager.getState(),
+        getActiveProxyUrl: state => harness.stateManager.getActiveProxyUrl(state),
+        applyProxySafely: async (url, enabled, trigger) => (await harness.applySafely(url, enabled, trigger)).success,
+        updateStatusBar: () => {}
+    }));
+}
+
+/** Resolves once the condition holds; the prompt answer and the re-apply run detached. */
+async function until(condition: () => boolean | Promise<boolean>, what: string): Promise<void> {
+    const deadline = Date.now() + 5000;
+    while (!(await condition())) {
+        if (Date.now() > deadline) {
+            assert.fail(`timed out waiting for ${what}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+}
+
+/** Fails instead of hanging when the attempt does not settle within the bound. */
+async function settlesWithin<T>(attempt: Promise<T>, ms: number, what: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} did not settle within ${ms} ms`)), ms);
+    });
+    try {
+        return await Promise.race([attempt, timeout]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 suite('Credential consent judges every URL in the plan (#108)', () => {
     let sandbox: sinon.SinonSandbox;
     let showWarning: sinon.SinonStub;
@@ -283,37 +319,150 @@ suite('Credential consent judges every URL in the plan (#108)', () => {
         assert.strictEqual(harness.envVars.get('HTTPS_PROXY'), HTTPS_CRED_URL);
     });
 
-    test('the apply writes only the judged URLs even when state moves under the open prompt', async () => {
-        const harness = createHarness();
-        await harness.stateManager.saveState(splitState());
+    suite('the prompt is answered after the apply has returned', () => {
+        let answer: (choice: string | undefined) => void;
+        let allowLabel: string;
 
-        // While the consent prompt is open, later state reads return a
-        // different credential-bearing HTTPS URL at the same revision and
-        // logical identity — e.g. credentials re-hydrated from SecretStorage.
-        // The getState stub stands in for that (calling through to the real
-        // read, then swapping the field). A saveState here would bump the
-        // revision and the fence would drop the apply — a different
-        // invariant. The apply may still write, but only the URLs consent
-        // judged.
-        showWarning.callsFake(async (_message: unknown, ...items: unknown[]) => {
-            const original = harness.stateManager.getState.bind(harness.stateManager);
-            sandbox.stub(harness.stateManager, 'getState').callsFake(async () => ({
-                ...(await original()),
-                autoHttpsProxyUrl: OTHER_CRED_URL
-            }));
-            return items[0] as never;
+        setup(() => {
+            allowLabel = I18nManager.getInstance().t('action.allowPlaintextWrite');
+            showWarning.callsFake(() => new Promise(resolve => { answer = resolve as typeof answer; }));
         });
 
-        const result = await harness.applySafely(HTTP_URL, true, 'autoDetection');
+        test('a second attempt settles while the first prompt is still open, and shows no second prompt', async () => {
+            const harness = createHarness();
+            await harness.stateManager.saveState(splitState());
 
-        assert.strictEqual(result.success, true, JSON.stringify(result.applyResult?.errors));
-        assert.strictEqual(
-            harness.npm.get('https-proxy'),
-            HTTPS_CRED_URL,
-            'the judged URL is the only one consent approved; the new unjudged URL must not be written'
-        );
-        assert.notStrictEqual(harness.npm.get('https-proxy'), OTHER_CRED_URL);
-        assert.strictEqual(harness.envVars.get('HTTPS_PROXY'), HTTPS_CRED_URL);
+            const first = await settlesWithin(harness.applySafely(HTTP_URL, true, 'autoDetection'), 500, 'the first attempt');
+            const second = await settlesWithin(harness.applySafely(HTTP_URL, true, 'autoDetection'), 500, 'the second attempt');
+
+            assert.strictEqual(first.stopReason, 'consentRequired');
+            assert.strictEqual(second.stopReason, 'consentRequired');
+            assert.strictEqual(showWarning.callCount, 1, 'one prompt per consent-key set while it is open');
+            assertNothingWritten(harness);
+            answer(undefined);
+        });
+
+        test('a startup apply returns without waiting for the prompt', async () => {
+            const harness = createHarness();
+            await harness.stateManager.saveState(splitState());
+
+            const result = await settlesWithin(harness.applySafely(HTTP_URL, true, 'startup'), 500, 'the startup apply');
+
+            assert.strictEqual(result.success, false);
+            assert.strictEqual(showWarning.callCount, 1);
+            answer(undefined);
+        });
+
+        test('the blocked marker is committed before the prompt is shown', async () => {
+            const harness = createHarness();
+            await harness.stateManager.saveState(splitState());
+            let markerWhenShown: ProxyState['applyBlocked'] | 'not shown';
+            markerWhenShown = 'not shown';
+            showWarning.callsFake(() => {
+                void harness.stateManager.getState().then(state => { markerWhenShown = state.applyBlocked; });
+                return new Promise(resolve => { answer = resolve as typeof answer; });
+            });
+
+            await harness.applySafely(HTTP_URL, true, 'autoDetection');
+            await until(() => markerWhenShown !== 'not shown', 'the prompt');
+
+            assert.strictEqual(markerWhenShown, 'credentialConsent');
+            answer(undefined);
+        });
+
+        test('Allow records consent and one re-apply writes the plan and clears the marker', async () => {
+            const harness = createHarness();
+            wireConsentReapply(harness);
+            await harness.stateManager.saveState(splitState());
+
+            const first = await harness.applySafely(HTTP_URL, true, 'autoDetection');
+            assert.strictEqual(first.success, false);
+            answer(allowLabel);
+
+            await until(() => harness.npm.get('https-proxy') === HTTPS_CRED_URL, 'the re-apply to write npm');
+            assert.strictEqual(harness.envVars.get('HTTPS_PROXY'), HTTPS_CRED_URL);
+            assert.deepStrictEqual(harness.globalState.get(CONSENT_KEY), { [consentKeyFor(HTTPS_CRED_URL)]: true });
+            await until(async () => (await harness.stateManager.getState()).applyBlocked === undefined, 'the marker to clear');
+            assert.strictEqual(showWarning.callCount, 1, 'no second prompt for the re-apply');
+        });
+
+        test('Deny records nothing, keeps the marker and shows Auto (blocked)', async () => {
+            const harness = createHarness();
+            wireConsentReapply(harness);
+            await harness.stateManager.saveState(splitState());
+
+            await harness.applySafely(HTTP_URL, true, 'autoDetection');
+            answer(undefined);
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            const state = await harness.stateManager.getState();
+            assert.strictEqual(state.applyBlocked, 'credentialConsent');
+            assert.strictEqual(harness.globalState.get(CONSENT_KEY), undefined);
+            assertNothingWritten(harness);
+            const display = getStatusBarDisplay(state, true, I18nManager.getInstance(), new InputSanitizer());
+            assert.strictEqual(display.text, `$(warning) ${I18nManager.getInstance().t('statusbar.autoApplyBlocked')}`);
+        });
+
+        test('Off while the prompt is open clears the marker, and a later Allow applies nothing', async () => {
+            const harness = createHarness();
+            wireConsentReapply(harness);
+            await harness.stateManager.saveState(splitState());
+            await harness.applySafely(HTTP_URL, true, 'autoDetection');
+
+            await harness.stateManager.saveState({ ...(await harness.stateManager.getState()), mode: ProxyMode.Off });
+            await harness.applySafely('', false, 'manual');
+            assert.strictEqual((await harness.stateManager.getState()).applyBlocked, undefined);
+
+            answer(allowLabel);
+            await until(() => harness.globalState.get(CONSENT_KEY) !== undefined, 'consent to be recorded');
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            assertNothingWritten(harness);
+            assert.strictEqual((await harness.stateManager.getState()).mode, ProxyMode.Off);
+        });
+
+        test('a failing consent write is logged, nothing is re-applied and nothing throws', async () => {
+            const harness = createHarness();
+            wireConsentReapply(harness);
+            await harness.stateManager.saveState(splitState());
+            sandbox.stub(harness.service as unknown as { context: vscode.ExtensionContext }, 'context').value({
+                globalState: {
+                    get: () => ({}),
+                    update: async () => { throw new Error('disk full'); }
+                }
+            });
+
+            await harness.applySafely(HTTP_URL, true, 'autoDetection');
+            answer(allowLabel);
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            assertNothingWritten(harness);
+        });
+
+        test('a split with two credentialed addresses asks once for both, and a third address asks again', async () => {
+            const harness = createHarness();
+            wireConsentReapply(harness);
+            await harness.stateManager.saveState(twoAddressCredSplitState());
+
+            await harness.applySafely(PROXY_A_CRED_URL, true, 'autoDetection');
+            answer(allowLabel);
+            await until(() => harness.npm.get('https-proxy') === PROXY_B_CRED_URL, 'the re-apply to write npm');
+            assert.deepStrictEqual(
+                Object.keys(harness.globalState.get(CONSENT_KEY) as Record<string, boolean>).sort(),
+                [consentKeyFor(PROXY_A_CRED_URL), consentKeyFor(PROXY_B_CRED_URL)].sort()
+            );
+            assert.strictEqual(showWarning.callCount, 1);
+
+            const again = await harness.applySafely(PROXY_A_CRED_URL, true, 'autoDetection');
+            assert.strictEqual(again.success, true, 'both addresses were consented to together');
+            assert.strictEqual(showWarning.callCount, 1, 'no re-prompt');
+
+            await harness.stateManager.saveState(twoAddressCredSplitState({ autoHttpsProxyUrl: OTHER_CRED_URL }));
+            const third = await harness.applySafely(PROXY_A_CRED_URL, true, 'autoDetection');
+            assert.strictEqual(third.stopReason, 'consentRequired');
+            assert.strictEqual(showWarning.callCount, 2, 'a new credentialed address needs its own consent');
+            answer(undefined);
+        });
     });
 
     test('same-host split: the detection apply prompts before any write and denies write nothing', async () => {

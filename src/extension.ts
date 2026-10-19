@@ -36,6 +36,7 @@ import { StatusBarManager } from './ui/StatusBarManager';
 import { createCommandRegistry } from './commands/CommandRegistry';
 import { SyncManager, SyncConfigManager, SyncStatusProvider, registerSyncStatusCommand } from './sync';
 import { ProxyRemediationService, ProxyApplyTrigger } from './remediation/ProxyRemediationService';
+import { reapplyAfterCredentialConsent } from './remediation/CredentialConsentReapply';
 import { ProxyApplyOptions } from './core/ProxyApplierTypes';
 import { readV3Settings } from './core/V3Settings';
 import { TargetOwnershipStore } from './core/TargetOwnershipStore';
@@ -177,6 +178,12 @@ function initializeCoreManagers(context: vscode.ExtensionContext, services: Core
         context,
         () => proxyStateManager.getState()
     );
+    proxyRemediationService.setCredentialConsentReapply(() => reapplyAfterCredentialConsent({
+        getState: () => proxyStateManager.getState(),
+        getActiveProxyUrl: state => proxyStateManager.getActiveProxyUrl(state),
+        applyProxySafely: (url, enabled, trigger) => applyProxySafely(url, enabled, trigger),
+        updateStatusBar: state => statusBarManager.update(state)
+    }));
 
     // Let detection recognize the value this extension itself wrote into
     // VS Code's http.proxy so it is not re-detected as a system proxy (#29).

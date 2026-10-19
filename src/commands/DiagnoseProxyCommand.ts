@@ -4,6 +4,7 @@ import { getHighestPriorityIssue, type ProxyIssue } from '../core/v3Types';
 import { ProxyRuntimeDiagnostics, type ProxyDiagnosticReport } from '../diagnostics/ProxyRuntimeDiagnostics';
 import type { RemediationOutcome } from '../remediation/RemediationOutcome';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
+import { proxyTargetLabel } from '../core/ProxyTargetLabels';
 import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 
@@ -16,34 +17,6 @@ function getDiagnosticsChannel(): vscode.LogOutputChannel {
     return diagnosticsChannel;
 }
 
-// Maps a diagnostic targetId to its localized label key. Kept as data (not inline
-// strings) so every target is localized through the locale files (issue #13).
-const TARGET_LABEL_KEYS: Record<string, string> = {
-    'git.global.proxy': 'diagnose.target.gitGlobalProxy',
-    'git.global.https.proxy': 'diagnose.target.gitGlobalHttpsProxy',
-    'git.override': 'diagnose.target.gitOverride',
-    'npm.user.proxy': 'diagnose.target.npmUserProxy',
-    'npm.noproxy': 'diagnose.target.npmNoproxy',
-    'vscode.http.proxy': 'diagnose.target.vscodeHttpProxy',
-    'vscode.http.proxySupport': 'diagnose.target.vscodeHttpProxySupport',
-    'vscode.launch.argv': 'diagnose.target.vscodeLaunchArgv',
-    'terminal.env.inherited': 'diagnose.target.terminalEnvInherited',
-    'terminal.existing': 'diagnose.target.terminalExisting',
-    'diagnostics.childProcess': 'diagnose.target.diagnosticsChildProcess',
-    'windows': 'diagnose.target.windows',
-    'windows.winhttp': 'diagnose.target.windowsWinhttp',
-    'windows.wininet': 'diagnose.target.windowsWininet',
-    'system.bypass': 'diagnose.target.systemBypass',
-    'pip.user.global.proxy': 'diagnose.target.pipUserProxy',
-    'linux.gnome': 'diagnose.target.linuxGnome',
-    'macos.network': 'diagnose.target.macosNetwork'
-};
-
-function targetLabel(issue: ProxyIssue): string {
-    const key = TARGET_LABEL_KEYS[issue.targetId];
-    return key ? I18nManager.getInstance().t(key) : issue.targetId;
-}
-
 function issueReasonKey(issue: ProxyIssue): string | undefined {
     if (issue.id.endsWith('.managedProxyResidual')) {
         return 'diagnose.reason.managedProxyResidual';
@@ -52,6 +25,16 @@ function issueReasonKey(issue: ProxyIssue): string | undefined {
         return 'diagnose.reason.managedProxyMismatch';
     }
     switch (issue.id) {
+        case 'proxy.localCredential.unresolved':
+            return 'diagnose.reason.localCredentialUnresolved';
+        case 'apply.blocked.untrustedWorkspace':
+            return 'diagnose.reason.applyBlockedUntrustedWorkspace';
+        case 'apply.blocked.invalidProxyUrl':
+            return 'diagnose.reason.applyBlockedInvalidProxyUrl';
+        case 'apply.blocked.credentialConsent':
+            return 'diagnose.reason.applyBlockedCredentialConsent';
+        case 'apply.blocked.applyFailed':
+            return 'diagnose.reason.applyBlockedApplyFailed';
         case 'diagnostics.childProcess.unavailable':
             return 'diagnose.reason.childProcessUnavailable';
         case 'windows.diagnostics.unavailable':
@@ -139,7 +122,7 @@ export function formatDiagnosticsNotification(report: Pick<ProxyDiagnosticReport
     const extra = extraCount > 0 ? i18n.t('diagnose.extraMore', { count: String(extraCount) }) : '';
     return i18n.t('diagnose.summary', {
         issues: issuesLabel,
-        label: targetLabel(primaryIssue),
+        label: proxyTargetLabel(primaryIssue.targetId),
         reason: issueReason(primaryIssue),
         extra
     });

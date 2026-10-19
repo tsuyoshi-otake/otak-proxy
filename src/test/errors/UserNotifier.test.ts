@@ -90,6 +90,21 @@ suite('UserNotifier Tests', () => {
         assert.ok(message.includes('Include protocol (http:// or https://)'));
     });
 
+    test('showSuccess shows two messages that differ only in a parameter (#108)', () => {
+        userNotifier.showSuccess('message.proxyConfigured', { url: 'http://first:8080' });
+        userNotifier.showSuccess('message.proxyConfigured', { url: 'http://second:8080' });
+
+        assert.strictEqual(setStatusBarMessageStub.callCount, 2);
+        assert.ok((setStatusBarMessageStub.secondCall.args[0] as string).includes('http://second:8080'));
+    });
+
+    test('showSuccess still dedupes the same message with the same parameters (#108)', () => {
+        userNotifier.showSuccess('message.proxyConfigured', { url: 'http://same:8080' });
+        userNotifier.showSuccess('message.proxyConfigured', { url: 'http://same:8080' });
+
+        assert.strictEqual(setStatusBarMessageStub.callCount, 1);
+    });
+
     test('showSuccess should work with direct text for backward compatibility', () => {
         userNotifier.showSuccess('Direct success message');
 

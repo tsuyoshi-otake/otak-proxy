@@ -20,6 +20,8 @@ export function publicFingerprint(value: string): string {
     return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+export type TargetOwnershipVerdict = 'owned' | 'external' | 'unverifiable';
+
 export class TargetOwnershipStore {
     constructor(
         private readonly globalState: vscode.Memento,
@@ -90,20 +92,31 @@ export class TargetOwnershipStore {
         return bootstrapped;
     }
 
-    async isOwnedByOtakProxy(targetId: string, observedValue: string, secretBearing: boolean): Promise<boolean> {
+    /**
+     * Whether an observed target value is one otak-proxy wrote. `unverifiable`
+     * means a record naming otak-proxy exists but the secret-aware fingerprint
+     * or the HMAC key needed to compare a credential-bearing value is missing:
+     * the value may well be ours, so a caller must keep it and say so rather
+     * than treat it as someone else's.
+     */
+    async inspectOwnership(
+        targetId: string,
+        observedValue: string,
+        secretBearing: boolean
+    ): Promise<TargetOwnershipVerdict> {
         const ownership = this.get(targetId);
         if (!ownership || ownership.owner !== 'otakProxy') {
-            return false;
+            return 'external';
         }
 
         if (secretBearing) {
             if (!ownership.secretAwareFingerprint || !(await this.credentialStore.hasHmacKey())) {
-                return false;
+                return 'unverifiable';
             }
             const observedSecretFingerprint = await this.credentialStore.computeSecretAwareFingerprint(observedValue);
-            return observedSecretFingerprint === ownership.secretAwareFingerprint;
+            return observedSecretFingerprint === ownership.secretAwareFingerprint ? 'owned' : 'external';
         }
 
-        return ownership.publicFingerprint === publicFingerprint(observedValue);
+        return ownership.publicFingerprint === publicFingerprint(observedValue) ? 'owned' : 'external';
     }
 }

@@ -90,4 +90,45 @@ suite('StatusBarDisplay convergence states', () => {
         assert.ok(display.text.startsWith('$(warning)'), `expected warning Off, got: ${display.text}`);
         assert.ok(!display.text.startsWith('$(circle-slash)'), `must not show clean Off: ${display.text}`);
     });
+
+    test('Off with a kept unverifiable value shows a warning icon and says why', () => {
+        const display = getStatusBarDisplay({
+            mode: ProxyMode.Off,
+            targetOutcomes: { git: 'ownershipUnverified' }
+        }, true, i18n, sanitizer);
+
+        assert.strictEqual(display.text, `$(warning) ${i18n.t('statusbar.proxyOff')}`);
+        assert.strictEqual(display.statusText, i18n.t('statusbar.tooltip.proxyOffUnverified'));
+        assert.notStrictEqual(display.statusText, i18n.t('statusbar.tooltip.proxyDisabled'));
+    });
+
+    test('Off with a kept unverifiable value does not add the failure text', () => {
+        const display = getStatusBarDisplay({
+            mode: ProxyMode.Off,
+            targetOutcomes: { npm: 'ownershipUnverified', git: 'cleared' }
+        }, true, i18n, sanitizer);
+
+        assert.ok(!display.statusText.includes('\n'), display.statusText);
+    });
+
+    test('a leftover unverified outcome does not repaint Auto', () => {
+        const display = getStatusBarDisplay({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            targetOutcomes: { git: 'ownershipUnverified' }
+        }, true, i18n, sanitizer);
+
+        assert.ok(display.text.startsWith('$(sync)'), display.text);
+    });
+
+    test('Auto waiting for credential consent shows the blocked warning', () => {
+        const display = getStatusBarDisplay({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://alice:s3cret@proxy.example:8080',
+            applyBlocked: 'credentialConsent'
+        }, true, i18n, sanitizer);
+
+        assert.strictEqual(display.text, `$(warning) ${i18n.t('statusbar.autoApplyBlocked')}`);
+        assert.ok(!JSON.stringify(display).includes('s3cret'));
+    });
 });

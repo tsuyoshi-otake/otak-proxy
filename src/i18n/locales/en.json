@@ -79,7 +79,7 @@
     "error.attemptedUrls": "Attempted test URLs:",
     "validation.proxyUrl.empty": "Proxy URL cannot be empty",
     "validation.proxyUrl.shellMetacharacters": "Proxy URL contains dangerous shell metacharacters",
-    "validation.proxyUrl.hostnameInvalid": "Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)",
+    "validation.proxyUrl.hostnameInvalid": "Hostname contains invalid characters (only alphanumeric, dots, hyphens, and underscores allowed)",
     "validation.proxyUrl.invalidFormat": "Invalid URL format",
     "validation.proxyUrl.protocol": "Protocol must be http:// or https://",
     "validation.proxyUrl.hostnameRequired": "Hostname is required",
@@ -320,5 +320,16 @@
     "diagnose.reason.bypassNotApplied": "system proxy bypass was detected but was not applied",
     "warning.splitProxyPartial": "Detected separate HTTP and HTTPS proxies. npm and the terminal received both; Git and VS Code can only store one URL.",
     "statusbar.autoApplyBlocked": "Auto (blocked)",
-    "statusbar.tooltip.autoApplyBlocked": "Auto Mode - Desired proxy was not applied"
+    "statusbar.tooltip.autoApplyBlocked": "Auto Mode - Desired proxy was not applied",
+    "warning.proxyOffUnverified": "Proxy turned off, but some values were kept because otak-proxy could not verify that it wrote them: {targets}. Turn the proxy on and then off again to remove them, or delete them by hand.",
+    "statusbar.tooltip.proxyOffUnverified": "Proxy is off, but some values were kept because otak-proxy could not verify that it wrote them. Turn the proxy on and then off again, or delete them by hand.",
+    "diagnose.target.gitGlobalHttpProxy": "Git global http.proxy",
+    "diagnose.target.npmUserHttpsProxy": "npm user https-proxy",
+    "diagnose.target.proxyCredentials": "Proxy credentials",
+    "diagnose.target.workspaceApply": "Applying proxy settings",
+    "diagnose.reason.localCredentialUnresolved": "the proxy credentials are not available on this machine; enter them again with Configure Manual Proxy",
+    "diagnose.reason.applyBlockedUntrustedWorkspace": "proxy settings were not changed because the workspace is untrusted",
+    "diagnose.reason.applyBlockedInvalidProxyUrl": "proxy settings were not applied because the proxy URL is invalid",
+    "diagnose.reason.applyBlockedCredentialConsent": "the apply is blocked because writing credentials to plaintext config files has no consent yet or is blocked by the otakProxy.credentialTargetPolicy setting; answer the prompt by toggling the proxy or running Configure Manual Proxy, or change the setting",
+    "diagnose.reason.applyBlockedApplyFailed": "the last apply did not complete on every target"
 }

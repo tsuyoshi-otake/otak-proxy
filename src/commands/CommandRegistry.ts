@@ -21,6 +21,7 @@ import { executeDiagnoseProxy } from './DiagnoseProxyCommand';
 import type { RemediationOutcome } from '../remediation/RemediationOutcome';
 import { executeResetWinHttpProxy } from '../remediation/WindowsProxyActionService';
 import type { ProxyMonitorConfig } from '../monitoring/ProxyMonitor';
+import { settingSecondsToMs } from '../monitoring/ProxyMonitorConfig';
 import { getProxyPublicUrl, hasProxyCredentials, removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { canonicalizeValidProxyUrl } from '../utils/ProxyUrlUtils';
 import { I18nManager } from '../i18n/I18nManager';
@@ -296,11 +297,11 @@ export class CommandRegistry {
     private handlePollingIntervalChange(): void {
         const newInterval = vscode.workspace
             .getConfiguration('otakProxy')
-            .get<number>('pollingInterval', 30);
+            .get<unknown>('pollingInterval', 30);
         this.config.proxyMonitor.updateConfig({
-            pollingInterval: newInterval * 1000
+            pollingInterval: settingSecondsToMs(newInterval)
         });
-        Logger.info(`Polling interval updated to ${newInterval} seconds`);
+        Logger.info(`Polling interval setting changed to ${String(newInterval)}`);
     }
 
     /**
@@ -323,11 +324,11 @@ export class CommandRegistry {
     private handleMaxRetriesChange(): void {
         const newMaxRetries = vscode.workspace
             .getConfiguration('otakProxy')
-            .get<number>('maxRetries', 3);
+            .get<unknown>('maxRetries', 3);
         this.config.proxyMonitor.updateConfig({
-            maxRetries: newMaxRetries
+            maxRetries: newMaxRetries as number // raw setting value; the monitor normalizes it
         });
-        Logger.info(`Max retries updated to ${newMaxRetries}`);
+        Logger.info(`Max retries setting changed to ${String(newMaxRetries)}`);
     }
 
     /**

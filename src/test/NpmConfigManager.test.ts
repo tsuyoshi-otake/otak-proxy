@@ -498,8 +498,11 @@ suite('NpmConfigManager Test Suite', () => {
                 assert.strictEqual(inspection.status, 'error');
                 assert.strictEqual(inspection.errorType, 'CONFIG_ERROR', 'must not read as npm missing or a permission problem with npm itself');
 
+                // A missing file is an empty user layer for ownership (#108): there is
+                // nothing of ours to remove, and the credentialed value npm still loads
+                // belongs to another layer. Any other read failure stays closed.
                 const unset = await manager.unsetProxyKeys(['proxy'], { proxy: CREDENTIALED });
-                assert.strictEqual(unset.success, false);
+                assert.strictEqual(unset.success, name === 'missing');
                 assert.strictEqual(npm.get('proxy'), CREDENTIALED);
                 assert.ok(!calls.some(args => args.includes('delete')));
 
@@ -509,7 +512,7 @@ suite('NpmConfigManager Test Suite', () => {
             });
         }
 
-        test('a refused value the user config does not hold as a credentialed URL is unverifiable, not empty', async () => {
+        test('a refused value the user config does not hold as a credentialed URL is unverifiable for diagnostics and kept by Off', async () => {
             // npm refused, so the value it loads is one it redacts. A user file
             // without a matching credentialed URL means that value lives in
             // another npm config layer.
@@ -527,8 +530,11 @@ suite('NpmConfigManager Test Suite', () => {
                 assert.strictEqual(inspection.errorType, 'CONFIG_ERROR', fileText);
                 assert.strictEqual(await manager.getProxy(), null, fileText);
 
+                // Off reads the user layer alone (#108): a value that layer does not
+                // hold as a credentialed URL is not ours, so it is kept without an
+                // error and the caller learns it is still loaded.
                 const unset = await manager.unsetProxyKeys(['proxy'], { proxy: CREDENTIALED });
-                assert.strictEqual(unset.success, false, fileText);
+                assert.strictEqual(unset.success, true, fileText);
                 assert.strictEqual(npm.get('proxy'), CREDENTIALED, fileText);
                 assert.ok(!calls.some(args => args.includes('delete')), fileText);
             }
@@ -635,6 +641,134 @@ suite('NpmConfigManager Test Suite', () => {
                 proxy: external,
                 'https-proxy': external
             });
+        });
+    });
+
+    suite('Ownership reads only the user layer (#108)', () => {
+        const OWNED = 'http://proxy.example.com:8080';
+        const CREDENTIALED = 'http://alice:s3cret@proxy.example.com:8080';
+
+        function fakeBacked(npm: FakeNpmConfig, overrides: Partial<NpmConfigManagerOptions> = {}) {
+            const calls: string[][] = [];
+            const manager = new NpmConfigManager(undefined, {
+                isWindows: false,
+                env: {},
+                commandAvailable: () => true,
+                commandRunner: async (command, args, options) => {
+                    calls.push(args);
+                    return npm.runner(command, args, options);
+                },
+                readUserConfigFile: npm.readUserConfigFile,
+                ...overrides
+            });
+            return { manager, calls };
+        }
+
+        test('the same value in the user and the global layer: the user value is owned, nothing else is loaded', async () => {
+            const npm = createFakeNpmConfig({ proxy: OWNED, 'https-proxy': OWNED }, { global: { proxy: OWNED, 'https-proxy': OWNED } });
+            const { manager, calls } = fakeBacked(npm);
+
+            assert.deepStrictEqual(await manager.inspectOwnedProxy(), {
+                status: 'available',
+                values: { proxy: OWNED, 'https-proxy': OWNED },
+                externalValueLoaded: false
+            });
+            assert.ok(!calls.some(args => args.includes('get') && args.includes('proxy')), 'no merged read when the user layer holds the keys');
+        });
+
+        test('after Off deletes the user value, the global one is reported as loaded and is never touched', async () => {
+            const npm = createFakeNpmConfig({ proxy: OWNED }, { global: { proxy: OWNED } });
+            const { manager } = fakeBacked(npm);
+
+            assert.deepStrictEqual(await manager.unsetProxyKeys(['proxy'], { proxy: OWNED }), { success: true });
+            assert.strictEqual(npm.get('proxy'), null);
+            assert.strictEqual(npm.getGlobal('proxy'), OWNED, 'the global layer is not ours to delete');
+
+            const after = await manager.inspectOwnedProxy();
+            assert.deepStrictEqual(after.values, { proxy: null, 'https-proxy': null });
+            assert.strictEqual(after.externalValueLoaded, true);
+        });
+
+        test('a value only in the global layer is not returned as a value but is reported as loaded', async () => {
+            const npm = createFakeNpmConfig({}, { global: { 'https-proxy': OWNED } });
+            const { manager } = fakeBacked(npm);
+
+            const inspection = await manager.inspectOwnedProxy();
+            assert.deepStrictEqual(inspection.values, { proxy: null, 'https-proxy': null });
+            assert.strictEqual(inspection.externalValueLoaded, true);
+            assert.deepStrictEqual((await manager.inspectProxy()).values, { proxy: null, 'https-proxy': OWNED }, 'diagnostics keep the merged view');
+        });
+
+        test('a credentialed value only in the global layer is refused by npm and still counts as loaded', async () => {
+            const npm = createFakeNpmConfig({}, { global: { proxy: CREDENTIALED } });
+            const { manager } = fakeBacked(npm);
+
+            const inspection = await manager.inspectOwnedProxy();
+            assert.deepStrictEqual(inspection.values, { proxy: null, 'https-proxy': null });
+            assert.strictEqual(inspection.externalValueLoaded, true);
+            assert.ok(!JSON.stringify(inspection).includes('s3cret'));
+        });
+
+        test('nothing in any layer: not loaded', async () => {
+            const { manager } = fakeBacked(createFakeNpmConfig());
+            const inspection = await manager.inspectOwnedProxy();
+            assert.deepStrictEqual(inspection.values, { proxy: null, 'https-proxy': null });
+            assert.strictEqual(inspection.externalValueLoaded, false);
+        });
+
+        test('a missing user config file is an empty layer, not an error', async () => {
+            const npm = createFakeNpmConfig({}, { missingUserConfigFile: true });
+            const { manager } = fakeBacked(npm);
+
+            assert.deepStrictEqual(await manager.inspectOwnedProxy(), {
+                status: 'available',
+                values: { proxy: null, 'https-proxy': null },
+                externalValueLoaded: false
+            });
+            assert.deepStrictEqual(await manager.unsetProxyKeys(['proxy'], { proxy: OWNED }), { success: true });
+        });
+
+        test('a user config file that cannot be read stays an error', async () => {
+            const npm = createFakeNpmConfig({ proxy: OWNED });
+            const { manager } = fakeBacked(npm, {
+                readUserConfigFile: async () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); }
+            });
+
+            const inspection = await manager.inspectOwnedProxy();
+            assert.strictEqual(inspection.status, 'error');
+        });
+
+        test('a user config path npm will not name falls back to the merged read', async () => {
+            const npm = createFakeNpmConfig({ proxy: OWNED }, { emptyUserConfigPath: true });
+            const { manager } = fakeBacked(npm);
+
+            assert.deepStrictEqual(await manager.inspectOwnedProxy(), {
+                status: 'available',
+                values: { proxy: OWNED, 'https-proxy': null }
+            });
+        });
+
+        test('a user config path npm refuses to print falls back to the merged read', async () => {
+            const npm = createFakeNpmConfig({ proxy: OWNED, 'https-proxy': OWNED });
+            const { manager } = fakeBacked(npm, {
+                commandRunner: async (command, args, options) => {
+                    if (args.includes('userconfig')) {
+                        throw npmProtectedGetError('userconfig');
+                    }
+                    return npm.runner(command, args, options);
+                }
+            });
+
+            assert.deepStrictEqual(await manager.inspectOwnedProxy(), {
+                status: 'available',
+                values: { proxy: OWNED, 'https-proxy': OWNED }
+            });
+        });
+
+        test('npm not installed is unavailable', async () => {
+            const { manager } = fakeBacked(createFakeNpmConfig(), { commandAvailable: () => false });
+            const inspection = await manager.inspectOwnedProxy();
+            assert.strictEqual(inspection.status, 'unavailable');
         });
     });
 });

@@ -629,3 +629,17 @@
 
 - `package.nls*.json` は `npm run gen:nls` の生成物。手で編集しない。
   作業ツリーで modified に見えていても中身は改行コード差だけのことがある（`git diff` で確認）。
+
+- **OS や外部ツールへの問い合わせが失敗したら、「なし」ではなく 3 つ目の結果（unknown / detectionFailed）を返し、呼び出しの連鎖の最後まで運ぶ。**
+  途中で `void` や `null` に落とすと、上の層（toggle、初回 setup）は「プロキシなし」と読んで設定を外した（#108 項目 7、PR #123）。
+  所有権も同じで、確かめられない値は owned でも external でもない unverifiable として持つ（PR #126）。
+
+- **URL パーサは TAB・LF・CR を黙って落とす。** マスクの分岐を決める判定は、元の文字列ではなくこの前提で書く。
+  `http://usra0a:80<TAB>#@haa.example` で数字だけのパスワードが port として表示された（CI の property 反例、PR #123）。
+
+- **「何も届かなかった」を assert するテストは、宛先がテストの最後まで同じだったことも assert する。**
+  そうしないと、途中で宛先（`http.proxy` など）が書き換わったときに空振りで通る（PR #125）。
+
+- **旧ソースでの fail-before は npm script を使わない。** `npm run compile` は gen:nls を走らせて nls を書き換える。
+  `tsc -p .` は型エラーでも emit するので、旧ソースに戻して `tsc` のあと mocha / `npx vscode-test` を直接実行する。
+  out/ に新しいコードの .js が残ると「旧ソースで pass」は証拠にならないので、新規ファイルの出力は消す（PR #126）。

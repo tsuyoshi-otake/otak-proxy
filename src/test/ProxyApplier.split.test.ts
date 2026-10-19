@@ -29,6 +29,7 @@ function createApplier(overrides: {
     const npmKeyCalls: Array<{ proxy?: string | null; 'https-proxy'?: string | null }> = [];
     const terminalUrlCalls: string[] = [];
     const terminalSchemeCalls: Array<{ httpUrl: string; httpsUrl: string }> = [];
+    const warnings: string[] = [];
 
     const gitManager = overrides.git ?? {
         calls: gitCalls,
@@ -85,13 +86,13 @@ function createApplier(overrides: {
         {
             showSuccess: () => {},
             showError: () => {},
-            showWarning: () => {}
+            showWarning: (message: string) => { warnings.push(message); }
         } as never,
         undefined,
         terminalManager as never
     );
 
-    return { applier, gitCalls, vscodeCalls, npmUrlCalls, npmKeyCalls, terminalUrlCalls, terminalSchemeCalls };
+    return { applier, gitCalls, vscodeCalls, npmUrlCalls, npmKeyCalls, terminalUrlCalls, terminalSchemeCalls, warnings };
 }
 
 suite('ProxyApplier split contract #56', () => {
@@ -146,5 +147,40 @@ suite('ProxyApplier split contract #56', () => {
         assert.deepStrictEqual(npmKeyCalls, []);
         assert.deepStrictEqual(gitCalls, [HTTP_A]);
         assert.ok(!result.issues?.some(issue => issue.id === 'git.splitProxy.notRepresentable'));
+    });
+
+    suite('partial-split warning (#108)', () => {
+        test('a split the targets cannot store warns once', async () => {
+            const { applier, warnings } = createApplier({});
+
+            await applier.applyProxyDetailed(HTTP_A, true, { kind: 'perSchemeProxy', httpUrl: HTTP_A, httpsUrl: HTTPS_B });
+
+            assert.deepStrictEqual(warnings, ['warning.splitProxyPartial']);
+        });
+
+        test('a single URL with a bypass list does not claim a split', async () => {
+            const { applier, warnings } = createApplier({});
+
+            const result = await applier.applyProxyDetailed(HTTP_A, true, { bypass: 'localhost,.internal' });
+
+            assert.ok(
+                result.issues?.some(issue => issue.id === 'system.bypass.notApplied'),
+                'the bypass list is still reported as advisory'
+            );
+            assert.deepStrictEqual(warnings, [], 'only the split-not-representable issues raise the split warning');
+        });
+
+        test('a silent split apply shows no warning', async () => {
+            const { applier, warnings } = createApplier({});
+
+            await applier.applyProxyDetailed(HTTP_A, true, {
+                kind: 'perSchemeProxy',
+                httpUrl: HTTP_A,
+                httpsUrl: HTTPS_B,
+                silent: true
+            });
+
+            assert.deepStrictEqual(warnings, []);
+        });
     });
 });

@@ -1,6 +1,7 @@
 import { ErrorAggregator } from '../errors/ErrorAggregator';
 import { UserNotifier } from '../errors/UserNotifier';
 import { InputSanitizer } from '../validation/InputSanitizer';
+import { proxyTargetLabel } from './ProxyTargetLabels';
 
 export function showAggregatedErrors(
     errorAggregator: ErrorAggregator,
@@ -21,4 +22,17 @@ export function showProxyConfigured(
 
 export function showProxyDisabled(userNotifier: UserNotifier): void {
     userNotifier.showSuccess('message.proxyDisabled');
+}
+
+/**
+ * Off kept these values because their ownership could not be verified, so
+ * "Proxy disabled" would be untrue. Names them by label, never by raw id.
+ */
+export function showProxyDisableUnverified(
+    userNotifier: UserNotifier,
+    targetIds: readonly string[]
+): void {
+    userNotifier.showWarning('warning.proxyOffUnverified', {
+        targets: targetIds.map(proxyTargetLabel).join(', ')
+    });
 }

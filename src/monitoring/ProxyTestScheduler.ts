@@ -11,16 +11,14 @@ import { ProxyConnectionTester } from './ProxyConnectionTester';
 import { LogicalGeneration } from '../core/LogicalGeneration';
 import { TestResult } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
+import { MAX_CONNECTION_TEST_INTERVAL, MIN_CONNECTION_TEST_INTERVAL } from './ProxyMonitorConfig';
 
 /**
- * Minimum allowed test interval in milliseconds (30 seconds)
+ * Allowed test interval in milliseconds (30 seconds to 10 minutes); the bounds
+ * are defined once, with the setting's normalization.
  */
-const MIN_INTERVAL_MS = 30000;
-
-/**
- * Maximum allowed test interval in milliseconds (10 minutes)
- */
-const MAX_INTERVAL_MS = 600000;
+const MIN_INTERVAL_MS = MIN_CONNECTION_TEST_INTERVAL;
+const MAX_INTERVAL_MS = MAX_CONNECTION_TEST_INTERVAL;
 
 /**
  * ProxyTestScheduler manages periodic proxy connection testing
@@ -198,7 +196,10 @@ export class ProxyTestScheduler {
     }
 
     /**
-     * Clamp interval to valid range
+     * Clamp interval to valid range. This does not guard against bad settings
+     * (`normalizeProxyMonitorConfig` does); it bounds the interval of an
+     * unfocused window, which `deriveEffectiveProxyMonitorConfig` multiplies
+     * past the maximum.
      *
      * @param intervalMs - Input interval in milliseconds
      * @returns Clamped interval within MIN_INTERVAL_MS and MAX_INTERVAL_MS

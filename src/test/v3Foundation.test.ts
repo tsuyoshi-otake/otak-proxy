@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import { ProxyStateManager } from '../core/ProxyStateManager';
 import { ProxyMode, ProxyState } from '../core/types';
 import { deriveRuntimeApplyState, deriveRuntimeApplyStateFromProxyState, ProxyIssue, V3_SCHEMA_VERSION } from '../core/v3Types';
-import { publicFingerprint, TargetOwnershipStore } from '../core/TargetOwnershipStore';
 import { V3_MIGRATION_JOURNAL_KEY, V3_SCHEMA_VERSION_KEY, LEGACY_MANUAL_PROXY_SECRET_KEY } from '../core/V3MigrationService';
 import { ProxyCredentialStore, splitProxyUrl, getCredentialKeyForPublicUrl } from '../security/ProxyCredentialStore';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
@@ -404,25 +403,6 @@ suite('v3 Phase 1 diagnostics foundation', () => {
         } finally {
             restoreConfig();
         }
-    });
-
-    test('secret-bearing ownership is not trusted when HMAC fingerprint is missing', async () => {
-        const store: Store = new Map();
-        const secrets = new Map<string, string>();
-        const credentialStore = new ProxyCredentialStore(createContext(store, secrets).secrets);
-        const ownershipStore = new TargetOwnershipStore(createContext(store, secrets).globalState, credentialStore);
-
-        await ownershipStore.update({
-            targetId: 'git.global.http.proxy',
-            targetHost: 'workspaceHost',
-            owner: 'otakProxy',
-            publicFingerprint: publicFingerprint('http://proxy.example.com:8080/')
-        });
-
-        assert.strictEqual(
-            await ownershipStore.isOwnedByOtakProxy('git.global.http.proxy', 'http://proxy.example.com:8080/', true),
-            false
-        );
     });
 
     test('runtime state separates advisory issues from convergence blockers', () => {

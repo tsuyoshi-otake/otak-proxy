@@ -91,6 +91,8 @@ export interface FakeNpmConfig {
     runner: CommandRunner;
     get(key: FakeNpmProxyKey): string | null;
     set(key: FakeNpmProxyKey, value: string): void;
+    /** The value in the global layer, which `config set` and `config delete` never touch. */
+    getGlobal(key: FakeNpmProxyKey): string | null;
     /**
      * The user config file as npm would have written it. Pass it as
      * `NpmConfigManagerOptions.readUserConfigFile`; any path other than the one
@@ -124,6 +126,13 @@ export type FakeNpmRefusalWording = 'cannot' | 'can not';
 
 export interface FakeNpmConfigOptions {
     refusalWording?: FakeNpmRefusalWording;
+    /** Values in layers otak-proxy never writes; `config get` merges project over user over global. */
+    global?: Partial<Record<FakeNpmProxyKey, string>>;
+    project?: Partial<Record<FakeNpmProxyKey, string>>;
+    /** The user config file does not exist (npm still reports its path). */
+    missingUserConfigFile?: boolean;
+    /** `config get userconfig` prints nothing, as for a path npm will not reveal. */
+    emptyUserConfigPath?: boolean;
 }
 
 export function npmProtectedGetError(key: string, wording: FakeNpmRefusalWording = 'cannot'): Error {
@@ -145,7 +154,10 @@ export function npmIniSafe(value: string): string {
 }
 
 /**
- * An `npm config` store limited to the two proxy keys.
+ * An `npm config` store limited to the two proxy keys. The main store is the
+ * user layer; `options.global` and `options.project` add layers that
+ * `config get` merges (project over user over global) and `config set` and
+ * `config delete` leave alone.
  *
  * An unset key reads back as `null`, which is what npm itself prints. A
  * credentialed value cannot be read back with `config get`, as with npm 10.8
@@ -158,6 +170,8 @@ export function createFakeNpmConfig(
     const store = new Map<FakeNpmProxyKey, string>(
         Object.entries(initial).filter(([, value]) => typeof value === 'string') as Array<[FakeNpmProxyKey, string]>
     );
+    const globalLayer = new Map(Object.entries(options.global ?? {}) as Array<[FakeNpmProxyKey, string]>);
+    const projectLayer = new Map(Object.entries(options.project ?? {}) as Array<[FakeNpmProxyKey, string]>);
     let reportedUserConfig: string | undefined;
 
     const proxyKeyOf = (args: string[]): FakeNpmProxyKey | undefined =>
@@ -167,7 +181,7 @@ export function createFakeNpmConfig(
         if (args.includes('get') && args.includes('userconfig')) {
             const flag = args.indexOf('--userconfig');
             reportedUserConfig = flag >= 0 ? args[flag + 1] : FAKE_NPM_DEFAULT_USERCONFIG;
-            return { stdout: `${reportedUserConfig}\n`, stderr: '' };
+            return { stdout: options.emptyUserConfigPath ? '' : `${reportedUserConfig}\n`, stderr: '' };
         }
 
         const key = proxyKeyOf(args);
@@ -186,7 +200,7 @@ export function createFakeNpmConfig(
         }
 
         if (args.includes('get')) {
-            const value = store.get(key);
+            const value = projectLayer.get(key) ?? store.get(key) ?? globalLayer.get(key);
             if (value !== undefined && npmWouldRedact(value)) {
                 throw npmProtectedGetError(key, options.refusalWording);
             }
@@ -202,8 +216,9 @@ export function createFakeNpmConfig(
         set: (key, value) => {
             store.set(key, value);
         },
+        getGlobal: key => globalLayer.get(key) ?? null,
         readUserConfigFile: async path => {
-            if (reportedUserConfig === undefined || path !== reportedUserConfig) {
+            if (options.missingUserConfigFile || reportedUserConfig === undefined || path !== reportedUserConfig) {
                 throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
             }
             return [...store].map(([key, value]) => `${key}=${npmIniSafe(value)}\n`).join('');

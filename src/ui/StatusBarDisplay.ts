@@ -27,10 +27,7 @@ export function getStatusBarDisplay(
             break;
         case ProxyMode.Off:
         default:
-            display = {
-                text: `$(circle-slash) ${i18n.t('statusbar.proxyOff')}`,
-                statusText: i18n.t('statusbar.tooltip.proxyDisabled')
-            };
+            display = getOffDisplay(state, i18n);
             break;
     }
 
@@ -41,6 +38,25 @@ export function getStatusBarDisplay(
     return {
         text: display.text.replace(/^\$\([^)]+\)/, '$(warning)'),
         statusText: state.lastError ? `${display.statusText}\n${state.lastError}` : display.statusText
+    };
+}
+
+/**
+ * Off, unless the last Off kept a value it could not verify as its own: that
+ * is a warning (not the failure display) until the next apply or Off rewrites
+ * the outcomes. Only this branch reads the outcome; in Auto a leftover one
+ * belongs to a previous Off and must not repaint the icon.
+ */
+function getOffDisplay(state: ProxyState, i18n: I18nManager): StatusBarDisplay {
+    if (Object.values(state.targetOutcomes ?? {}).some(outcome => outcome === 'ownershipUnverified')) {
+        return {
+            text: `$(warning) ${i18n.t('statusbar.proxyOff')}`,
+            statusText: i18n.t('statusbar.tooltip.proxyOffUnverified')
+        };
+    }
+    return {
+        text: `$(circle-slash) ${i18n.t('statusbar.proxyOff')}`,
+        statusText: i18n.t('statusbar.tooltip.proxyDisabled')
     };
 }
 

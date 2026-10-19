@@ -1,11 +1,12 @@
 import { I18nManager } from '../i18n/I18nManager';
+import { INVALID_DNS_HOSTNAME_ERROR } from '../validation/ProxyHost';
 
 function translateProxyValidationError(error: string): string {
     const i18n = I18nManager.getInstance();
     const keyByMessage: Record<string, string> = {
         'Proxy URL cannot be empty': 'validation.proxyUrl.empty',
         'Proxy URL contains dangerous shell metacharacters': 'validation.proxyUrl.shellMetacharacters',
-        'Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)': 'validation.proxyUrl.hostnameInvalid',
+        [INVALID_DNS_HOSTNAME_ERROR]: 'validation.proxyUrl.hostnameInvalid',
         'Invalid URL format': 'validation.proxyUrl.invalidFormat',
         'Protocol must be http:// or https://': 'validation.proxyUrl.protocol',
         'Hostname is required': 'validation.proxyUrl.hostnameRequired',

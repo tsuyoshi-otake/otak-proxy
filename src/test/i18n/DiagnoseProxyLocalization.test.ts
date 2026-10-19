@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { I18nManager } from '../../i18n/I18nManager';
 import { formatDiagnosticsNotification } from '../../commands/DiagnoseProxyCommand';
+import { TARGET_LABEL_KEYS, proxyTargetLabel } from '../../core/ProxyTargetLabels';
+import { createApplyBlockedIssue } from '../../core/v3Types';
+import type { ProxyIssue } from '../../core/v3Types';
 
 /**
  * Guards issue #13: the Diagnose Proxy command hard-coded English strings, so
@@ -59,7 +62,27 @@ const DIAGNOSE_KEYS = [
     'diagnose.reason.gitSplitLossy',
     'diagnose.reason.vscodeSplitLossy',
     'diagnose.reason.pipSplitLossy',
-    'diagnose.reason.bypassNotApplied'
+    'diagnose.reason.bypassNotApplied',
+    'diagnose.target.gitGlobalHttpProxy',
+    'diagnose.target.npmUserHttpsProxy',
+    'diagnose.target.proxyCredentials',
+    'diagnose.target.workspaceApply',
+    'diagnose.reason.localCredentialUnresolved',
+    'diagnose.reason.applyBlockedUntrustedWorkspace',
+    'diagnose.reason.applyBlockedInvalidProxyUrl',
+    'diagnose.reason.applyBlockedCredentialConsent',
+    'diagnose.reason.applyBlockedApplyFailed'
+];
+
+// The ids the ownership-aware target adapters in ProxyApplier observe: the Off
+// warning names a kept value by one of these.
+const OWNERSHIP_TARGET_IDS = [
+    'git.global.http.proxy',
+    'git.global.https.proxy',
+    'npm.user.proxy',
+    'npm.user.https-proxy',
+    'vscode.http.proxy',
+    'pip.user.global.proxy'
 ];
 
 function localesDir(): string {
@@ -129,5 +152,55 @@ suite('Diagnose Proxy localization', () => {
             // Restore the default locale so we do not leak singleton state.
             i18n.initialize('en');
         }
+    });
+
+    test('every ownership target id has a label key that every locale defines (the Off warning never prints a raw id)', () => {
+        const i18n = I18nManager.getInstance();
+        i18n.initialize('en');
+        for (const id of OWNERSHIP_TARGET_IDS) {
+            const key = TARGET_LABEL_KEYS[id];
+            assert.ok(key, `${id} has no label key`);
+            for (const locale of SUPPORTED_LOCALES) {
+                assert.strictEqual(typeof loadLocale(locale)[key], 'string', `${locale}.json must define ${key}`);
+            }
+            assert.notStrictEqual(proxyTargetLabel(id), id, `${id} resolves to its label`);
+        }
+        assert.strictEqual(proxyTargetLabel('some.unknown.target'), 'some.unknown.target');
+    });
+
+    test('a credential-consent block is explained, not shown as a raw issue id', () => {
+        const i18n = I18nManager.getInstance();
+        try {
+            i18n.initialize('en');
+            const cases: Array<[ProxyIssue, RegExp]> = [
+                [createApplyBlockedIssue('credentialConsent'), /plaintext config files/],
+                [createApplyBlockedIssue('untrustedWorkspace'), /workspace is untrusted/],
+                [createApplyBlockedIssue('invalidProxyUrl'), /proxy URL is invalid/],
+                [createApplyBlockedIssue('applyFailed'), /did not complete/]
+            ];
+            for (const [issue, expected] of cases) {
+                const text = formatDiagnosticsNotification({ issueCount: 1, issues: [issue] });
+                assert.match(text, expected, issue.id);
+                assert.ok(!text.includes(issue.id), `the raw id leaked into: ${text}`);
+            }
+        } finally {
+            i18n.initialize('en');
+        }
+    });
+
+    test('a missing local credential is explained, not shown as a raw issue id', () => {
+        const i18n = I18nManager.getInstance();
+        i18n.initialize('en');
+        const issue: ProxyIssue = {
+            ...createApplyBlockedIssue('applyFailed'),
+            id: 'proxy.localCredential.unresolved',
+            fingerprint: 'proxy.localCredential.unresolved',
+            targetId: 'proxy.credentials'
+        };
+
+        const text = formatDiagnosticsNotification({ issueCount: 1, issues: [issue] });
+
+        assert.ok(text.includes('Configure Manual Proxy'), text);
+        assert.ok(!text.includes('proxy.localCredential.unresolved'), text);
     });
 });
