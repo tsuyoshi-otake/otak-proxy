@@ -34,22 +34,17 @@ suite('PlatformProxyDetection split #56', () => {
     test('GNOME keeps HTTP and HTTPS hosts distinct', async () => {
         restorePlatform = PlatformMocker.mockPlatform('linux');
         const detected = await detectPlatformProxyWithSource(async (_command, args) => {
-            const schema = args[1];
-            const key = args[2];
-            if (schema === 'org.gnome.system.proxy' && key === 'mode') {
-                return { stdout: "'manual'\n", stderr: '' };
-            }
-            if (schema === 'org.gnome.system.proxy.http' && key === 'host') {
-                return { stdout: "'proxy-a.example.com'\n", stderr: '' };
-            }
-            if (schema === 'org.gnome.system.proxy.http' && key === 'port') {
-                return { stdout: '8080\n', stderr: '' };
-            }
-            if (schema === 'org.gnome.system.proxy.https' && key === 'host') {
-                return { stdout: "'proxy-b.example.com'\n", stderr: '' };
-            }
-            if (schema === 'org.gnome.system.proxy.https' && key === 'port') {
-                return { stdout: '8443\n', stderr: '' };
+            if (args[0] === 'list-recursively' && args[1] === 'org.gnome.system.proxy') {
+                return {
+                    stdout: [
+                        "org.gnome.system.proxy mode 'manual'",
+                        "org.gnome.system.proxy.http host 'proxy-a.example.com'",
+                        'org.gnome.system.proxy.http port 8080',
+                        "org.gnome.system.proxy.https host 'proxy-b.example.com'",
+                        'org.gnome.system.proxy.https port 8443'
+                    ].join('\n') + '\n',
+                    stderr: ''
+                };
             }
             throw new Error(`unexpected ${args.join(' ')}`);
         });

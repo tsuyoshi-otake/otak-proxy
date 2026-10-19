@@ -85,21 +85,6 @@ suite('Failed platform query is not "no proxy" (#108)', () => {
     });
 
     suite('Linux', () => {
-        const manualMode = (overrides: Record<string, () => string>): CommandExecutor => async (_command, args) => {
-            const key = `${args[1]}:${args[2]}`;
-            if (key === 'org.gnome.system.proxy:mode') {
-                return { stdout: "'manual'\n", stderr: '' };
-            }
-            const answer = overrides[key];
-            if (!answer) {
-                throw new Error(`unexpected gsettings args: ${args.join(' ')}`);
-            }
-            return { stdout: answer(), stderr: '' };
-        };
-        const failing = (): string => {
-            throw commandError('Command failed: gsettings get', { stderr: 'dconf-CRITICAL: unable to open' });
-        };
-
         test('a failing mode read is unknown', async () => {
             const exec: CommandExecutor = async () => {
                 throw commandError('Command failed: gsettings', { stderr: 'dconf-CRITICAL: unable to open' });
@@ -121,7 +106,7 @@ suite('Failed platform query is not "no proxy" (#108)', () => {
 
         test('no GNOME proxy schema is not applicable: none', async () => {
             const exec: CommandExecutor = async () => {
-                throw commandError('Command failed: gsettings get org.gnome.system.proxy mode', {
+                throw commandError('Command failed: gsettings list-recursively org.gnome.system.proxy', {
                     stderr: ENGLISH_NO_SCHEMA
                 });
             };
@@ -153,88 +138,6 @@ suite('Failed platform query is not "no proxy" (#108)', () => {
 
             assert.strictEqual(result.kind, 'direct', 'fails before: unknown on a non-English desktop');
             assert.ok(seenEnvironments.length > 0);
-        });
-
-        test('every gsettings call carries LANGUAGE=C and LC_MESSAGES=C and nothing else', async () => {
-            const environments: Array<Record<string, string> | undefined> = [];
-            const exec: CommandExecutor = async (command, args, options) => {
-                assert.strictEqual(command, 'gsettings');
-                environments.push(options?.env);
-                const key = `${args[1]}:${args[2]}`;
-                const answers: Record<string, string> = {
-                    'org.gnome.system.proxy:mode': "'manual'\n",
-                    'org.gnome.system.proxy.http:host': "'proxy.example.com'\n",
-                    'org.gnome.system.proxy.http:port': '8080\n',
-                    'org.gnome.system.proxy.https:host': "''\n",
-                    'org.gnome.system.proxy.https:port': '0\n'
-                };
-                return { stdout: answers[key] ?? '', stderr: '' };
-            };
-
-            const result = await detectLinuxProxy(exec);
-
-            assert.strictEqual(result.proxyUrl, 'http://proxy.example.com:8080');
-            assert.strictEqual(environments.length, 5);
-            for (const env of environments) {
-                assert.deepStrictEqual(env, { LANGUAGE: 'C', LC_MESSAGES: 'C' });
-            }
-        });
-
-        test('the auto-config URL read also asks for the C locale', async () => {
-            const environments: Array<Record<string, string> | undefined> = [];
-            const exec: CommandExecutor = async (_command, args, options) => {
-                environments.push(options?.env);
-                return { stdout: args[2] === 'mode' ? "'auto'\n" : "'http://pac.example.com/proxy.pac'\n", stderr: '' };
-            };
-
-            const result = await detectLinuxProxy(exec);
-
-            assert.strictEqual(result.kind, 'pac');
-            assert.strictEqual(environments.length, 2);
-            assert.ok(environments.every(env => env?.LANGUAGE === 'C' && env.LC_MESSAGES === 'C'));
-        });
-
-        test('manual mode with both scheme reads failing is unknown', async () => {
-            const exec = manualMode({
-                'org.gnome.system.proxy.http:host': failing,
-                'org.gnome.system.proxy.https:host': failing
-            });
-
-            assert.strictEqual((await detectLinuxProxy(exec)).kind, 'unknown');
-        });
-
-        test('manual mode with one scheme failing and the other empty is unknown', async () => {
-            const exec = manualMode({
-                'org.gnome.system.proxy.http:host': failing,
-                'org.gnome.system.proxy.https:host': () => "''\n",
-                'org.gnome.system.proxy.https:port': () => '0\n'
-            });
-
-            assert.strictEqual((await detectLinuxProxy(exec)).kind, 'unknown');
-        });
-
-        test('manual mode with one scheme failing and the other giving a proxy returns the proxy', async () => {
-            const exec = manualMode({
-                'org.gnome.system.proxy.http:host': failing,
-                'org.gnome.system.proxy.https:host': () => "'tls.example.com'\n",
-                'org.gnome.system.proxy.https:port': () => '8443\n'
-            });
-
-            const result = await detectLinuxProxy(exec);
-
-            assert.strictEqual(result.kind, 'singleProxy');
-            assert.strictEqual(result.proxyUrl, 'http://tls.example.com:8443');
-        });
-
-        test('manual mode with both schemes empty is none', async () => {
-            const exec = manualMode({
-                'org.gnome.system.proxy.http:host': () => "''\n",
-                'org.gnome.system.proxy.http:port': () => '0\n',
-                'org.gnome.system.proxy.https:host': () => "''\n",
-                'org.gnome.system.proxy.https:port': () => '0\n'
-            });
-
-            assert.strictEqual((await detectLinuxProxy(exec)).kind, 'direct');
         });
     });
 

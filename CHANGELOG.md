@@ -24,6 +24,7 @@
 
 ### Changed
 - With several windows open, a sync publication that would write the same proxy settings this window already applied no longer re-applies them: each window keeps a record of the last plan it verifiably applied and skips only the identical rewrite. As a side effect, a hand edit of `.npmrc` or `.gitconfig` made after the last apply now stays until the next real proxy change or local apply instead of being rewritten by the next sync. Any real change — a different URL, a per-scheme HTTPS URL or bypass change, a rotated credential, or a previous attempt that did not write — still applies as before (#108).
+- Background checks start fewer processes and read SecretStorage less. The Windows environment check no longer starts PowerShell: it reads the saved variables with two `reg query` calls, skips saved values that contain non-ASCII characters instead of comparing them, and does not run at all while `otakProxy.notificationLevel` is `"off"`. GNOME detection reads all proxy settings with one `gsettings list-recursively org.gnome.system.proxy` call instead of up to five `gsettings get` calls, and each read of the saved proxy state fetches a stored proxy credential from SecretStorage at most once and no longer looks for the legacy manual-proxy key when no manual proxy is set. Detection results are unchanged (#108).
 
 ## [3.2.16] - 2026-10-03
 

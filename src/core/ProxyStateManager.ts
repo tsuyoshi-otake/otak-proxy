@@ -28,6 +28,9 @@ import {
 import { V3MigrationService, LEGACY_MANUAL_PROXY_SECRET_KEY } from './V3MigrationService';
 import { tryCanonicalizeProxyUrl } from '../utils/ProxyUrlUtils';
 
+/** Rebuilds the credential-bearing URL stored for a public URL, or `undefined`. */
+type PublicUrlReader = (publicUrl: string) => Promise<string | undefined>;
+
 /**
  * ProxyStateManager handles all proxy state operations
  *
@@ -224,14 +227,35 @@ export class ProxyStateManager implements IProxyStateManager {
         };
     }
 
+    /**
+     * One hydration pass. Every SecretStorage read of a credential goes through
+     * `reconstruct`, which reads each public URL at most once per pass: the
+     * auto, split, fallback and last-system fields often name the same proxy.
+     * The memo lives and dies with this pass (no cross-call cache, so it cannot
+     * go stale). It is correct because the pass is sequential and its only
+     * write, `normalizeConfiguredManualProxyUrl` storing a credential-bearing
+     * setting, completes before the first read; a switch to `Promise.all`, or a
+     * write after the first read, would need a new argument. A failed read
+     * resolves to `undefined` (`ProxyCredentialStore.getJson`), so a memoized
+     * promise never rejects.
+     */
     private async hydrateStateForRuntime(state: ProxyState): Promise<ProxyState> {
-        const withManual = await this.hydrateManualProxyUrl(state);
+        const reads = new Map<string, Promise<string | undefined>>();
+        const reconstruct = (publicUrl: string): Promise<string | undefined> => {
+            let read = reads.get(publicUrl);
+            if (!read) {
+                read = this.credentialStore.reconstructProxyUrl(publicUrl);
+                reads.set(publicUrl, read);
+            }
+            return read;
+        };
+        const withManual = await this.hydrateManualProxyUrl(state, reconstruct);
         const next = { ...withManual };
-        const hydratedAuto = await this.hydrateProxyUrl(withManual.autoProxyUrl);
-        const hydratedAutoHttp = await this.hydrateProxyUrl(withManual.autoHttpProxyUrl);
-        const hydratedAutoHttps = await this.hydrateProxyUrl(withManual.autoHttpsProxyUrl);
-        const hydratedFallback = await this.hydrateProxyUrl(withManual.fallbackProxyUrl);
-        const hydratedLastSystem = await this.hydrateProxyUrl(withManual.lastSystemProxyUrl);
+        const hydratedAuto = await this.hydrateProxyUrl(withManual.autoProxyUrl, reconstruct);
+        const hydratedAutoHttp = await this.hydrateProxyUrl(withManual.autoHttpProxyUrl, reconstruct);
+        const hydratedAutoHttps = await this.hydrateProxyUrl(withManual.autoHttpsProxyUrl, reconstruct);
+        const hydratedFallback = await this.hydrateProxyUrl(withManual.fallbackProxyUrl, reconstruct);
+        const hydratedLastSystem = await this.hydrateProxyUrl(withManual.lastSystemProxyUrl, reconstruct);
         if (hydratedAuto !== withManual.autoProxyUrl) {
             next.autoProxyUrl = hydratedAuto;
         }
@@ -250,7 +274,7 @@ export class ProxyStateManager implements IProxyStateManager {
         return this.withDerivedRequiresAuth(next);
     }
 
-    private async hydrateManualProxyUrl(state: ProxyState): Promise<ProxyState> {
+    private async hydrateManualProxyUrl(state: ProxyState, reconstruct: PublicUrlReader): Promise<ProxyState> {
         const config = vscode.workspace.getConfiguration('otakProxy');
         const configuredManualUrl = await this.normalizeConfiguredManualProxyUrl(config.get<string>('proxyUrl', ''));
 
@@ -258,9 +282,18 @@ export class ProxyStateManager implements IProxyStateManager {
             return state;
         }
 
+        // Without a manual URL in the state or the setting, both branches below
+        // return the state unchanged whatever the SecretStorage values are, so
+        // nothing is read. The legacy key is not skipped any other way: a delete
+        // that failed during the v3 migration, or an older window, can leave it
+        // behind even when the journal says "completed".
+        if (!state.manualProxyUrl && !configuredManualUrl) {
+            return state;
+        }
+
         const configuredPublicUrl = getProxyPublicUrl(configuredManualUrl);
         const statePublicUrl = getProxyPublicUrl(state.manualProxyUrl);
-        const secretManualUrl = await this.getManualProxySecret(statePublicUrl || configuredPublicUrl);
+        const secretManualUrl = await this.getManualProxySecret(statePublicUrl || configuredPublicUrl, reconstruct);
         const secretPublicUrl = getProxyPublicUrl(secretManualUrl);
 
         if (secretManualUrl && statePublicUrl && secretPublicUrl === statePublicUrl) {
@@ -282,13 +315,13 @@ export class ProxyStateManager implements IProxyStateManager {
         return state;
     }
 
-    private async hydrateProxyUrl(url: string | undefined): Promise<string | undefined> {
+    private async hydrateProxyUrl(url: string | undefined, reconstruct: PublicUrlReader): Promise<string | undefined> {
         if (!url || hasProxyCredentials(url)) {
             return url;
         }
 
         const publicUrl = getProxyPublicUrl(url) || url;
-        const reconstructed = await this.credentialStore.reconstructProxyUrl(publicUrl);
+        const reconstructed = await reconstruct(publicUrl);
         if (reconstructed) {
             return reconstructed;
         }
@@ -411,9 +444,12 @@ export class ProxyStateManager implements IProxyStateManager {
         }
     }
 
-    private async getManualProxySecret(publicUrl?: string): Promise<string | undefined> {
+    private async getManualProxySecret(
+        publicUrl?: string,
+        reconstruct: PublicUrlReader = url => this.credentialStore.reconstructProxyUrl(url)
+    ): Promise<string | undefined> {
         if (publicUrl) {
-            const reconstructed = await this.credentialStore.reconstructProxyUrl(publicUrl);
+            const reconstructed = await reconstruct(publicUrl);
             if (reconstructed) {
                 return reconstructed;
             }
