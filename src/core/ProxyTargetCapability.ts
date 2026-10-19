@@ -74,6 +74,29 @@ export function evaluateTargetCapabilities(request: SplitProxyRequest): TargetCa
     return evaluations;
 }
 
+/**
+ * Advisory raised wherever otak-proxy skips the VS Code user setting http.proxy
+ * because the window is remote (#108). One builder for the applier and for
+ * Diagnose so both report the same id, fingerprint and classification.
+ */
+export function vscodeRemoteNotWritableIssue(source: string): ProxyIssue {
+    const id = 'vscode.remoteExtensionHost.notWritable';
+    const targetId = 'vscode.http.proxy';
+    return {
+        id,
+        fingerprint: `${id}:${targetId}`,
+        category: 'capabilityUnavailable' satisfies ProxyIssueCategory,
+        impact: 'advisoryResidualRisk' satisfies ProxyIssueImpact,
+        targetId,
+        targetHost: 'remote',
+        source,
+        capability: 'unsupported',
+        autoAction: 'none',
+        userAction: 'showDetails',
+        evidence: {}
+    };
+}
+
 export function splitCapabilityIssues(request: SplitProxyRequest): ProxyIssue[] {
     return evaluateTargetCapabilities(request)
         .map(evaluation => evaluation.issue)

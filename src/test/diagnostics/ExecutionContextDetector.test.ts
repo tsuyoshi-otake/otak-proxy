@@ -28,7 +28,7 @@ suite('ExecutionContextDetector (#93)', () => {
         assert.strictEqual(context.extensionHostLocation, 'remoteWorkspace');
         assert.strictEqual(context.workspaceHostKind, 'codespaces');
         assert.strictEqual(context.canUseChildProcess, true);
-        assert.strictEqual(context.canWriteVSCodeUserSettings, true);
+        assert.strictEqual(context.canWriteVSCodeUserSettings, false, 'a remote window never writes http.proxy (#108)');
         assert.strictEqual(context.canAccessWorkspaceFiles, true);
         assert.strictEqual(context.canReadWindowsRegistry, false, 'a Linux host has no registry');
     });
@@ -63,6 +63,36 @@ suite('ExecutionContextDetector (#93)', () => {
         assert.strictEqual(context.canReadWindowsRegistry, false);
         assert.strictEqual(context.canWriteVSCodeUserSettings, false);
         assert.strictEqual(context.canAccessWorkspaceFiles, false);
+    });
+
+    test('only a local window may write the VS Code user setting http.proxy (#108)', () => {
+        // The one copy of the rule: VS Code routes a Global write from a remote
+        // extension host by how http.proxy is registered in that window, so a
+        // remote window writes nothing.
+        assert.strictEqual(deriveExecutionContext(environment({})).canWriteVSCodeUserSettings, true, 'local desktop');
+        assert.strictEqual(
+            deriveExecutionContext(environment({ platform: 'win32' })).canWriteVSCodeUserSettings,
+            true,
+            'local Windows'
+        );
+        for (const remoteName of ['ssh-remote', 'wsl', 'dev-container', 'attached-container', 'codespaces', 'tunnel']) {
+            assert.strictEqual(
+                deriveExecutionContext(environment({ remoteName })).canWriteVSCodeUserSettings,
+                false,
+                `${remoteName}, desktop UI`
+            );
+            assert.strictEqual(
+                deriveExecutionContext(environment({ uiKind: 'web', remoteName })).canWriteVSCodeUserSettings,
+                false,
+                `${remoteName}, browser UI`
+            );
+        }
+        assert.strictEqual(
+            deriveExecutionContext(environment({ uiKind: 'web', nodeExtensionHost: false, platform: undefined }))
+                .canWriteVSCodeUserSettings,
+            false,
+            'web worker extension host'
+        );
     });
 
     test('desktop contexts are unchanged', () => {

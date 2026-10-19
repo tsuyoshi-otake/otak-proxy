@@ -643,3 +643,5 @@
 - **旧ソースでの fail-before は npm script を使わない。** `npm run compile` は gen:nls を走らせて nls を書き換える。
   `tsc -p .` は型エラーでも emit するので、旧ソースに戻して `tsc` のあと mocha / `npx vscode-test` を直接実行する。
   out/ に新しいコードの .js が残ると「旧ソースで pass」は証拠にならないので、新規ファイルの出力は消す（PR #126）。
+
+- **VS Code の挙動を根拠にするときは、インストール済みバンドルのコードを `grep -o` で引用する。** 言い換えだけでは verifier が別の登録を見て食い違った（`http.proxy` の `scope:s?1:2`、PR #127）。

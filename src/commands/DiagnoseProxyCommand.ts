@@ -35,6 +35,8 @@ function issueReasonKey(issue: ProxyIssue): string | undefined {
             return 'diagnose.reason.applyBlockedCredentialConsent';
         case 'apply.blocked.applyFailed':
             return 'diagnose.reason.applyBlockedApplyFailed';
+        case 'vscode.remoteExtensionHost.notWritable':
+            return 'diagnose.reason.vscodeRemoteNotWritable';
         case 'diagnostics.childProcess.unavailable':
             return 'diagnose.reason.childProcessUnavailable';
         case 'windows.diagnostics.unavailable':

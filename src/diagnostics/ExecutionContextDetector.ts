@@ -89,7 +89,11 @@ export function deriveExecutionContext(environment: ExecutionEnvironment): Execu
         workspaceHostKind,
         canUseChildProcess: !isWeb,
         canReadWindowsRegistry: runsOnWindowsHost,
-        canWriteVSCodeUserSettings: !isWeb,
+        // The one copy of the rule. VS Code decides where a Global write from a
+        // remote extension host lands by how http.proxy is registered in that
+        // window (local or remote settings.json), which the extension cannot
+        // observe, so a remote window writes and removes nothing (#108).
+        canWriteVSCodeUserSettings: !isWeb && !environment.remoteName,
         canAccessWorkspaceFiles: !isWeb && environment.hasWorkspaceFolders
     };
 }

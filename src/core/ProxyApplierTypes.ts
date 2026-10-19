@@ -9,6 +9,15 @@ export interface ProxyApplyOptions {
     bypass?: string;
 }
 
+export interface ProxyApplierOptions {
+    /**
+     * Whether this window may write or remove the VS Code user setting
+     * http.proxy. Omitted means writable (the local window); a remote window
+     * answers false and the target is skipped in both directions (#108).
+     */
+    canWriteVSCodeUserSettings?: () => boolean;
+}
+
 export type ProxyConfigStatusReporter = (messageKey: string) => void;
 
 export interface ProxyConfigOperationOptions {

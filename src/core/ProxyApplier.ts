@@ -12,6 +12,7 @@ import { I18nManager } from '../i18n/I18nManager';
 import { Logger } from '../utils/Logger';
 import { ProxyStateManager } from './ProxyStateManager';
 import {
+    ProxyApplierOptions,
     ProxyApplyDetailedResult,
     ProxyApplyOptions,
     ProxyConfigResults,
@@ -36,7 +37,7 @@ import {
 import { TargetOwnershipStore } from './TargetOwnershipStore';
 import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
 import { isPerSchemeProxy } from '../config/DetectedProxyValue';
-import { splitCapabilityIssues } from './ProxyTargetCapability';
+import { splitCapabilityIssues, vscodeRemoteNotWritableIssue } from './ProxyTargetCapability';
 import { ProxyIssue } from './v3Types';
 
 /**
@@ -80,8 +81,17 @@ export class ProxyApplier {
         private stateManager?: ProxyStateManager,
         private terminalEnvManager?: TerminalEnvConfigManager,
         private pipManager?: PipConfigManager,
-        private ownershipStore?: TargetOwnershipStore
+        private ownershipStore?: TargetOwnershipStore,
+        private options: ProxyApplierOptions = {}
     ) {}
+
+    private canWriteVSCodeUserSettings(): boolean {
+        return this.options.canWriteVSCodeUserSettings?.() ?? true;
+    }
+
+    private remoteWindowIssues(): ProxyIssue[] {
+        return this.canWriteVSCodeUserSettings() ? [] : [vscodeRemoteNotWritableIssue('apply')];
+    }
 
     private isWorkspaceTrusted(): boolean {
         return vscode.workspace.isTrusted !== false;
@@ -304,17 +314,20 @@ export class ProxyApplier {
             return this.buildDetailedResult(false, true, proxyUrl, results, errorAggregator);
         }
 
-        const capabilityIssues = this.isSplitApply(applyOptions)
-            ? splitCapabilityIssues({
-                kind: applyOptions.kind,
-                httpUrl: applyOptions.httpUrl,
-                httpsUrl: applyOptions.httpsUrl,
-                bypass: applyOptions.bypass,
-                source: 'apply'
-            })
-            : applyOptions.bypass
-                ? splitCapabilityIssues({ bypass: applyOptions.bypass, source: 'apply' })
-                : [];
+        const capabilityIssues = [
+            ...(this.isSplitApply(applyOptions)
+                ? splitCapabilityIssues({
+                    kind: applyOptions.kind,
+                    httpUrl: applyOptions.httpUrl,
+                    httpsUrl: applyOptions.httpsUrl,
+                    bypass: applyOptions.bypass,
+                    source: 'apply'
+                })
+                : applyOptions.bypass
+                    ? splitCapabilityIssues({ bypass: applyOptions.bypass, source: 'apply' })
+                    : []),
+            ...this.remoteWindowIssues()
+        ];
         
         const results = await this.withOptionalProgress(
             options,
@@ -391,7 +404,7 @@ export class ProxyApplier {
         this.notifyDisableResult(options, errorAggregator, results);
 
         return {
-            ...this.buildDetailedResult(success, false, '', results, errorAggregator),
+            ...this.buildDetailedResult(success, false, '', results, errorAggregator, this.remoteWindowIssues()),
             committedRevision
         };
     }
@@ -503,6 +516,11 @@ export class ProxyApplier {
         applyOptions?: ProxyApplyOptions
     ): Promise<ProxyConfigTargetUpdateResult> {
         const options = { onStatus: reportStatus };
+        // Before the ownership dispatch, so a skipped target is neither read nor
+        // recorded in the store (#108).
+        if (target.name === 'VSCode configuration' && !this.canWriteVSCodeUserSettings()) {
+            return { success: true, outcome: 'skippedUnavailable' };
+        }
         if (!enabled && this.ownershipStore && target.ownership) {
             return this.disableOwnedTarget(target, errorAggregator, options);
         }

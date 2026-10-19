@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
-import type * as vscode from 'vscode';
+import * as os from 'os';
+import * as vscode from 'vscode';
 import {
     OwnershipOwner,
     TargetHost,
@@ -22,32 +23,77 @@ export function publicFingerprint(value: string): string {
 
 export type TargetOwnershipVerdict = 'owned' | 'external' | 'unverifiable';
 
+/** What tells two remote hosts of the same kind apart. */
+export interface HostIdentity {
+    hostname: string;
+    homedir: string;
+    /** `WSL_DISTRO_NAME`; unset digests as the empty string. */
+    wslDistro?: string;
+}
+
+/**
+ * Which host a window's records belong to. A remote workspace extension's
+ * globalState is the local window's profile storage, so a local window and
+ * every remote window of the profile read and write the same map; records and
+ * consent keys carry this scope to stay apart. The local scope is the empty
+ * string, so records and consent written before the scope existed keep their
+ * keys. A remote scope is the remote name plus a digest of the host identity:
+ * the host name alone is the same for every WSL distribution of one machine and
+ * for two users of one SSH host, and none of it is stored in plain text.
+ */
+export function hostScope(remoteName: string | undefined, identity: HostIdentity): string {
+    if (!remoteName) {
+        return '';
+    }
+    const digest = crypto
+        .createHash('sha256')
+        .update([identity.hostname, identity.homedir, identity.wslDistro ?? ''].join('\0'))
+        .digest('hex')
+        .slice(0, 12);
+    return `${remoteName}:${digest}`;
+}
+
+/** The scope of the window this extension host serves. */
+export function currentHostScope(): string {
+    return hostScope(vscode.env.remoteName, {
+        hostname: os.hostname(),
+        homedir: os.homedir(),
+        wslDistro: process.env.WSL_DISTRO_NAME
+    });
+}
+
 export class TargetOwnershipStore {
     constructor(
         private readonly globalState: vscode.Memento,
-        private readonly credentialStore: ProxyCredentialStore
+        private readonly credentialStore: ProxyCredentialStore,
+        private readonly scope: string = currentHostScope()
     ) {}
 
-    getAll(): Record<string, TargetOwnership> {
+    private getAll(): Record<string, TargetOwnership> {
         return this.globalState.get<Record<string, TargetOwnership>>(OWNERSHIP_KEY, {});
     }
 
+    private recordKey(targetId: string): string {
+        return this.scope ? `${this.scope}|${targetId}` : targetId;
+    }
+
     get(targetId: string): TargetOwnership | undefined {
-        return this.getAll()[targetId];
+        return this.getAll()[this.recordKey(targetId)];
     }
 
     async update(ownership: TargetOwnership): Promise<void> {
         const all = this.getAll();
-        all[ownership.targetId] = ownership;
+        all[this.recordKey(ownership.targetId)] = ownership;
         await this.globalState.update(OWNERSHIP_KEY, all);
     }
 
     async remove(targetId: string): Promise<void> {
         const all = this.getAll();
-        if (!(targetId in all)) {
+        const key = this.recordKey(targetId);
+        if (!(key in all)) {
             return;
         }
-        delete all[targetId];
+        delete all[key];
         await this.globalState.update(OWNERSHIP_KEY, all);
     }
 

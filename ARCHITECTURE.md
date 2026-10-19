@@ -521,6 +521,8 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - Off removes a value only when `TargetOwnershipStore.inspectOwnership` says `owned`. `external` (no record, or a different value) is kept as `preservedExternal`; `unverifiable` (a record exists but the secret-aware fingerprint or HMAC key needed to compare a credential-bearing value is missing) is kept as `ownershipUnverified`, which lists the target in `ProxyConfigResults.unverifiedTargetIds`
   - `notifyDisableResult`: errors show the aggregated error; unverified targets show `warning.proxyOffUnverified` naming each target by its localized label (`ProxyTargetLabels.ts`, shared with diagnostics), also when errors exist; `message.proxyDisabled` is shown only when there are no errors, no unverified target and the call is not silent
   - The status bar shows `$(warning)` for Off when a stored outcome is `ownershipUnverified`; the outcome is replaced by the next apply or Off
+  - Remote-window guard (#108): `ProxyApplier.updateTarget` skips the `VSCode configuration` target in both directions, before the ownership dispatch, when the constructor option `canWriteVSCodeUserSettings` answers false. The result is `skippedUnavailable` (a success; the state tracker keeps the previous `vscodeConfigured`), the ownership store is neither read nor written for `vscode.http.proxy`, and the result carries the advisory issue `vscode.remoteExtensionHost.notWritable` (`vscodeRemoteNotWritableIssue`, source `apply`). The option is omitted (writable) in a local window; `extension.ts` passes `ExecutionContextDetector.detect().canWriteVSCodeUserSettings`, which `deriveExecutionContext` computes as `!isWeb && !remoteName` and which is the only copy of the rule. Why skipped: VS Code registers `http.proxy` per window (application scope when `http.useLocalProxyConfiguration` is on, machine scope otherwise), so where a Global write from a remote extension host lands is VS Code's decision and the extension cannot observe it; it could reach the local `settings.json` and be synced on. Diagnose applies the same rule: no `vscode.managedProxyMismatch` / `vscode.managedProxyResidual` in a remote window, and the advisory (source `executionContext`) only while the proxy is expected active. The advisory is not a user-action issue, so at the default `notificationLevel` it raises no toast.
+  - Host scope of ownership records (#108): a remote workspace extension's `globalState` is the profile storage the local window uses, so the local window and every remote window read and write one ownership map. `TargetOwnershipStore` keys each record by `currentHostScope()`: the local scope is empty and keeps the plain target id (records written before #108 keep matching), a remote scope is `<remoteName>:<12 hex of sha256(hostname, homedir, WSL_DISTRO_NAME)>` and the key is `<scope>|<targetId>`. Records written by an older version from a remote window stay under the plain key, so a remote window no longer reads them. The read-modify-write of the shared map can lose a concurrent update from another host; a lost record makes Off keep the value (the safe direction).
   - Error aggregation and user notification
   - `warning.splitProxyPartial` is shown only when an issue id ends with `.splitProxy.notRepresentable`, not for the advisory bypass list
   - Writes exactly the plan it is handed: the per-scheme URLs and bypass are
@@ -546,6 +548,14 @@ Two serialized sections keep the ordering consistent without deadlocking:
   `credentialConsent`, applies the then-current state once and refreshes the status bar. Deny and
   dismissal record nothing. The marker maps to runtime state `awaitingUser` (status bar
   `Auto (blocked)`) and is cleared by the next `saveProxyConfigResults` (#108)
+- **Consent scope**: the consent record lives in the same shared `globalState`, so its keys are
+  per host too (`credentialConsentKey(url, scope)` in `CredentialConsentKey.ts`, with the scope
+  `ProxyRemediationService` reads once from `currentHostScope()`). The local scope returns the
+  fingerprint of the credential-free address that earlier versions stored, so consent given before
+  #108 keeps covering the local window; a remote scope returns a different digest that includes
+  the scope. `judgeCredentialTargetConsent`, the pending-prompt dedupe in
+  `startCredentialConsentPrompt` and the Allow write in `askCredentialConsent` all use that key, so
+  a remote host is asked once for itself (#108)
 - **Basis**: the fence's generation is handed to the applier, which records its
   per-target results against that state — a result commit that lands after
   another writer committed a newer desired state is discarded instead (#108)
