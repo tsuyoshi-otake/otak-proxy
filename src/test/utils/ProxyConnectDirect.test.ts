@@ -20,6 +20,7 @@ import {
     testProxyConnection,
     testProxyConnectionParallel
 } from '../../utils/ProxyConnectionTest';
+import proxyConnectRequestModule = require('../../utils/ProxyConnectRequest');
 import { proxyEndpointVerdict } from '../../utils/ProxyTestFailure';
 import { TestResult } from '../../utils/ProxyTestTypes';
 
@@ -452,7 +453,7 @@ suite('Proxy connection test uses its own connection (#108 item 9)', () => {
             }
         });
 
-        test('a head that keeps trickling is cut by the parallel overall timeout', async function() {
+        test('a head that keeps trickling is cut by the parallel timeouts within the overall bound', async function() {
             this.timeout(10000);
             const timers: NodeJS.Timeout[] = [];
             const proxy = await listenRaw((_request, socket) => {
@@ -460,17 +461,40 @@ suite('Proxy connection test uses its own connection (#108 item 9)', () => {
                 timers.push(setInterval(() => socket.write('a'), 20));
             });
             try {
-                // The socket idle timeout equals the per-test timeout; 1000 ms against a 20 ms trickle keeps a
-                // stalled CI runner from firing it before the overall timeout (1500 ms) this test is about.
-                const result = await testProxyConnectionParallel(`http://127.0.0.1:${proxy.port}`, ['https://www.github.com'], 1000);
-                assert.strictEqual(result.failureKind, 'timeout');
-                assert.ok(result.errors.some(error => error.url === 'All tests'), JSON.stringify(result.errors));
+                // Either the overall timer (timeout + 500 ms) or the socket idle timeout may end the run:
+                // on Linux CI the idle timeout fired first twice (PR #126, #127), even against a 20 ms
+                // trickle. The contract is that the run ends as a timeout, within the overall bound, and
+                // closes the socket; which timer wins is not.
+                const timeout = 300;
+                const result = await testProxyConnectionParallel(`http://127.0.0.1:${proxy.port}`, ['https://www.github.com'], timeout);
+                assert.strictEqual(result.failureKind, 'timeout', JSON.stringify(result.errors));
+                assert.ok((result.duration ?? Infinity) < timeout + 500 + 1000, `ended after ${result.duration} ms`);
                 assert.strictEqual(result.proxyConnected, true);
                 await proxy.closed(1);
             } finally {
                 timers.forEach(clearInterval);
                 await proxy.close();
             }
+        });
+    });
+
+    suite('parallel overall timeout', () => {
+        teardown(() => sinon.restore());
+
+        test('an attempt that never settles is cut by the overall timer, reported as "All tests" and cancelled', async function() {
+            this.timeout(5000);
+            const cancel = sinon.spy();
+            // A connection that reaches the proxy and then never settles: only the overall timer can end it,
+            // independent of socket idle timers and runner load.
+            sinon.stub(proxyConnectRequestModule, 'connectThroughProxy').callsFake((_options: unknown, onProxyConnected?: () => void) => {
+                onProxyConnected?.();
+                return { result: new Promise<never>(() => undefined), cancel };
+            });
+            const result = await testProxyConnectionParallel('http://127.0.0.1:9', ['https://www.github.com'], 100);
+            assert.strictEqual(result.failureKind, 'timeout');
+            assert.ok(result.errors.some(error => error.url === 'All tests'), JSON.stringify(result.errors));
+            assert.strictEqual(result.proxyConnected, true);
+            assert.strictEqual(cancel.callCount, 1, 'the outstanding attempt is cancelled');
         });
     });
 
