@@ -446,24 +446,22 @@ suite('ExtensionInitializer Connection Testing Integration', function() {
             assert.ok(monitor !== null, 'Monitor should still be running');
         });
 
-        test('should clamp testInterval to valid range (30-600)', async () => {
-            const state: ProxyState = {
-                mode: ProxyMode.Auto
-            };
-
-            mockStateManager.getState.resolves(state);
+        test('hands the testInterval setting to the monitor in milliseconds and leaves the range to it (#108)', async () => {
+            mockStateManager.getState.resolves({ mode: ProxyMode.Auto });
 
             initializer = createInitializer();
-            initializer.initializeProxyMonitor();
+            const monitor = initializer.initializeProxyMonitor();
+            const updateConfig = sinon.spy(monitor, 'updateConfig');
 
-            // Try setting interval below minimum (should be clamped to 30)
             initializer.handleConfigurationChange('testInterval', 10);
-
-            // Try setting interval above maximum (should be clamped to 600)
             initializer.handleConfigurationChange('testInterval', 1000);
+            initializer.handleConfigurationChange('testInterval', NaN);
 
-            // Should not throw errors
-            assert.ok(true, 'Should handle out-of-range values gracefully');
+            assert.deepStrictEqual(updateConfig.args.map(args => args[0]), [
+                { connectionTestInterval: 10_000 },
+                { connectionTestInterval: 1_000_000 },
+                { connectionTestInterval: NaN }
+            ]);
         });
     });
 });

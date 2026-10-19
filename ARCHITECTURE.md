@@ -62,7 +62,8 @@ src/
 │
 ├── remediation/         # Safe apply orchestration
 │   ├── ProxyApplyAttempt.ts    # One apply attempt: one state read, one shared write plan
-│   └── ProxyRemediationService.ts  # Credential consent, target policy, retries
+│   ├── CredentialConsentReapply.ts # Re-apply after the user allows a credential write
+│   └── ProxyRemediationService.ts  # Credential consent judgement and prompt, target policy, retries
 │
 ├── sync/                # Multi-instance synchronization
 │   ├── SyncManager.ts          # Sync orchestrator
@@ -500,6 +501,7 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - First-launch detection and setup dialog (`InitialSetupFlow.askForInitialSetup`): the setup decision commits through `commitDecidedPatch` like the toggle; an answer that could not be saved (`exhausted`) shows `error.initialSetupNotSaved` and `performInitialSetup` leaves `hasInitialSetup` unset, so the setup is offered again on the next start
   - Migration from legacy settings
   - Auto mode monitoring startup
+  - Monitor settings (`pollingInterval`, `testInterval`, `maxRetries`) are handed to the monitor raw; `normalizeProxyMonitorConfig` (`ProxyMonitorConfig.ts`) owns their validity (non-number or non-finite becomes the default, ranges are clamped, `maxRetries` is a whole number 0 to 10)
 
 #### ProxyStateManager
 - **Responsibility**: ProxyState persistence and retrieval
@@ -516,7 +518,11 @@ Two serialized sections keep the ordering consistent without deadlocking:
 - **Key features**:
   - `applyProxy()`: Enable proxy (Git, VS Code, npm, terminal environment variables)
   - `disableProxy()`: Disable proxy
+  - Off removes a value only when `TargetOwnershipStore.inspectOwnership` says `owned`. `external` (no record, or a different value) is kept as `preservedExternal`; `unverifiable` (a record exists but the secret-aware fingerprint or HMAC key needed to compare a credential-bearing value is missing) is kept as `ownershipUnverified`, which lists the target in `ProxyConfigResults.unverifiedTargetIds`
+  - `notifyDisableResult`: errors show the aggregated error; unverified targets show `warning.proxyOffUnverified` naming each target by its localized label (`ProxyTargetLabels.ts`, shared with diagnostics), also when errors exist; `message.proxyDisabled` is shown only when there are no errors, no unverified target and the call is not silent
+  - The status bar shows `$(warning)` for Off when a stored outcome is `ownershipUnverified`; the outcome is replaced by the next apply or Off
   - Error aggregation and user notification
+  - `warning.splitProxyPartial` is shown only when an issue id ends with `.splitProxy.notRepresentable`, not for the advisory bypass list
   - Writes exactly the plan it is handed: the per-scheme URLs and bypass are
     resolved upstream, and the applier never reads the state to resolve them (#108)
 - **Tests**: ProxyApplier.test.ts, ProxyApplier.property.test.ts
@@ -529,6 +535,17 @@ Two serialized sections keep the ordering consistent without deadlocking:
 - **Gate**: `planUrlsMissingRequiredCredentials` runs after the plan is resolved and
   before consent or any write; a refused attempt records
   `UNRESOLVED_LOCAL_CREDENTIAL_ERROR` through a generation-fenced commit (#108)
+- **Consent**: `ProxyRemediationService.applyWithSafety` judges consent and never asks it
+  (`allowed` / `blockedByPolicy` / `needsConsent` with the sorted consent keys of every
+  credential-bearing URL in the plan), so no prompt is awaited inside the toggle queue. On
+  `consentRequired` the attempt commits `applyBlocked: 'credentialConsent'` through a
+  generation-fenced commit (a stale commit starts no prompt), then, unless the attempt is silent,
+  starts `startCredentialConsentPrompt` without awaiting it. One prompt is shown per consent-key
+  set. Allow records every key in `globalState` and then runs `reapplyAfterCredentialConsent`
+  (`CredentialConsentReapply.ts`), which does nothing unless the proxy is still on and still marked
+  `credentialConsent`, applies the then-current state once and refreshes the status bar. Deny and
+  dismissal record nothing. The marker maps to runtime state `awaitingUser` (status bar
+  `Auto (blocked)`) and is cleared by the next `saveProxyConfigResults` (#108)
 - **Basis**: the fence's generation is handed to the applier, which records its
   per-target results against that state — a result commit that lands after
   another writer committed a newer desired state is discarded instead (#108)
@@ -620,6 +637,7 @@ Two serialized sections keep the ordering consistent without deadlocking:
   - `setProxy()`: Set npm proxy (proxy, https-proxy)
   - `unsetProxy()`: Remove npm proxy
   - `getProxy()`: Get current npm proxy
+  - `inspectOwnedProxy()`: what Off decides on. Reads the `proxy` and `https-proxy` entries of the npm user config file only (the layer `config set` / `config delete` act on); a missing file is an empty layer; when npm will not name the file, the merged `inspectProxy` read stands in. `externalValueLoaded` reports a value npm still loads from another layer for a key the user file leaves empty, so the applier records `preservedExternal` instead of `cleared`. `inspectProxy()` keeps the merged view for diagnostics.
 - **Features**: Windows support (via `cmd.exe /d /s /c`), environment variable sanitization
 
 #### TerminalEnvConfigManager

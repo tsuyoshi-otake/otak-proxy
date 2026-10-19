@@ -19,6 +19,7 @@ import { ProxyMode, ProxyState, SystemProxyCheckOutcome } from './types';
 import { ProxyMonitor, ProxyDetectionResult } from '../monitoring/ProxyMonitor';
 import type { ReachabilityChange } from '../monitoring/ProxyMonitorConnection';
 import { ProxyConnectionTester } from '../monitoring/ProxyConnectionTester';
+import { settingSecondsToMs } from '../monitoring/ProxyMonitorConfig';
 import { Logger } from '../utils/Logger';
 import { TestResult } from '../utils/ProxyUtils';
 import { InitializerContext } from './ExtensionInitializerTypes';
@@ -75,11 +76,12 @@ export class ExtensionInitializer {
      */
     initializeProxyMonitor(): ProxyMonitor {
         const config = vscode.workspace.getConfiguration('otakProxy');
-        const pollingInterval = config.get<number>('pollingInterval', 30);
-        const maxRetries = config.get<number>('maxRetries', 3);
+        // Raw values: normalizeProxyMonitorConfig owns their validity.
+        const pollingInterval = config.get<unknown>('pollingInterval', 30);
+        const maxRetries = config.get<unknown>('maxRetries', 3);
         const priority = config.get<string[]>('detectionSourcePriority', ['environment', 'vscode', 'platform']);
         const enableConnectionTest = config.get<boolean>('autoTestEnabled', true);
-        const connectionTestInterval = config.get<number>('testInterval', 60) * 1000; // Convert to ms
+        const connectionTestInterval = settingSecondsToMs(config.get<unknown>('testInterval', 60));
 
         // Update SystemProxyDetector priority
         this.context.systemProxyDetector.updateDetectionPriority(priority);
@@ -89,9 +91,9 @@ export class ExtensionInitializer {
             this.context.systemProxyDetector,
             this.context.proxyChangeLogger,
             {
-                pollingInterval: pollingInterval * 1000, // Convert seconds to ms
+                pollingInterval: settingSecondsToMs(pollingInterval),
                 debounceDelay: 1000, // 1 second debounce
-                maxRetries: maxRetries,
+                maxRetries: maxRetries as number, // raw setting value; the monitor normalizes it
                 retryBackoffBase: 1, // 1 second base
                 detectionSourcePriority: priority,
                 enableConnectionTest: enableConnectionTest,
@@ -292,17 +294,12 @@ export class ExtensionInitializer {
 
         switch (key) {
             case 'testInterval': {
-                // Convert seconds to milliseconds and clamp to valid range
-                const intervalSeconds = typeof value === 'number' ? value : 60;
-                const clampedSeconds = Math.max(30, Math.min(600, intervalSeconds));
-                const intervalMs = clampedSeconds * 1000;
-
-                // Update ProxyMonitor's connection test interval
+                // The monitor's normalization owns the range and the fallback.
                 this.proxyMonitor.updateConfig({
-                    connectionTestInterval: intervalMs
+                    connectionTestInterval: settingSecondsToMs(value)
                 });
 
-                Logger.info(`Test interval updated to ${clampedSeconds} seconds`);
+                Logger.info(`Test interval setting changed to ${String(value)}`);
                 break;
             }
 

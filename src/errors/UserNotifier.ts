@@ -47,7 +47,7 @@ export class UserNotifier {
         const formattedMessage = this.formatMessage(summarizedMessage, summarizedSuggestions);
         
         // Check throttling
-        const throttleKey = `error:${message}`;
+        const throttleKey = this.throttleKey('error', message, params);
         // Git config lock errors can spam during repeated retries; throttle them harder.
         const isGitLockError = this.isGitLockError(translatedMessage);
         const throttleMs = isGitLockError ? 60000 : undefined;
@@ -75,7 +75,7 @@ export class UserNotifier {
      * @param params - Optional parameters for message key substitution
      */
     showSuccess(message: string, params?: Record<string, string>): void {
-        const throttleKey = `success:${message}`;
+        const throttleKey = this.throttleKey('success', message, params);
         if (!this.throttler.shouldShow(throttleKey)) {
             return;
         }
@@ -93,6 +93,17 @@ export class UserNotifier {
     showWarning(message: string, params?: Record<string, string>): void {
         const translatedMessage = this.translateIfKey(message, params);
         vscode.window.setStatusBarMessage(`$(warning) ${translatedMessage}`, 10000);
+    }
+
+    /**
+     * Dedupe key of one notification: the message key plus its parameters, so
+     * two messages that differ only in a parameter (for example two proxy URLs)
+     * are both shown. A message without parameters is deduped by its key.
+     */
+    private throttleKey(kind: 'error' | 'success', message: string, params?: Record<string, string>): string {
+        return params === undefined
+            ? `${kind}:${message}`
+            : `${kind}:${message}:${JSON.stringify(params)}`;
     }
 
     /**
@@ -150,7 +161,7 @@ export class UserNotifier {
         const formattedMessage = this.formatMessage(summarizedMessage, summarizedSuggestions);
         
         // Check throttling
-        const throttleKey = `error:${message}`;
+        const throttleKey = this.throttleKey('error', message, params);
         const isGitLockError = this.isGitLockError(translatedMessage);
         const throttleMs = isGitLockError ? 60000 : undefined;
 

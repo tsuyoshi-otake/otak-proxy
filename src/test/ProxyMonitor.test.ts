@@ -184,16 +184,18 @@ suite('ProxyMonitor Test Suite', () => {
             assert.ok(monitor.getState().isActive);
         });
 
-        test('should validate polling interval range', () => {
+        test('should clamp the polling interval to 10 s - 300 s', () => {
             monitor = new ProxyMonitor(mockDetector as any, logger, { pollingInterval: 60000 });
+            const baseInterval = () => (monitor as any).baseConfig.pollingInterval;
 
-            // Should clamp to minimum
-            monitor.updateConfig({ pollingInterval: 5000 }); // 5s, min is 10s
+            monitor.updateConfig({ pollingInterval: 5000 });
+            assert.strictEqual(baseInterval(), 10000);
 
-            // Should clamp to maximum
-            monitor.updateConfig({ pollingInterval: 500000 }); // 500s, max is 300s
+            monitor.updateConfig({ pollingInterval: 500000 });
+            assert.strictEqual(baseInterval(), 300000);
 
-            assert.ok(true); // No errors thrown
+            monitor.updateConfig({ pollingInterval: NaN });
+            assert.strictEqual(baseInterval(), 30000, 'a non-number falls back to the default');
         });
     });
 

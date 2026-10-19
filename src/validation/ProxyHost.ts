@@ -9,7 +9,7 @@ import * as net from 'net';
 export const DNS_HOSTNAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 export const INVALID_DNS_HOSTNAME_ERROR =
-    'Hostname contains invalid characters (only alphanumeric, dots, and hyphens allowed)';
+    'Hostname contains invalid characters (only alphanumeric, dots, hyphens, and underscores allowed)';
 
 export const IPV6_BRACKETS_REQUIRED_ERROR =
     'IPv6 addresses must be enclosed in brackets (for example http://[::1]:8080)';

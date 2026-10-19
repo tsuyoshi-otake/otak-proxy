@@ -91,6 +91,20 @@ export interface NpmProxyValues {
     'https-proxy': string | null;
 }
 
+const NPM_PROXY_KEYS: readonly NpmProxyKey[] = ['proxy', 'https-proxy'];
+
+/**
+ * What the ownership inspection reads: the user config file only, plus whether
+ * npm still loads a value for a key that file leaves empty.
+ */
+export interface NpmOwnedProxyInspection extends ProxyConfigInspection<NpmProxyValues> {
+    /** npm loads a value from a layer otak-proxy never writes (global, project, environment) or in a form it never writes. */
+    externalValueLoaded?: boolean;
+}
+
+/** npm would not say where its user config file is, so that layer cannot be read. */
+class NpmUserConfigLocationUnknown extends Error {}
+
 function normalizeNpmValue(value: unknown): string | null {
     if (value === undefined || value === null) {
         return null;
@@ -359,11 +373,12 @@ export class NpmConfigManager {
         const outcome = await compareThenDelete({
             expected,
             read: async () => {
-                const inspection = await this.inspectProxy();
-                if (inspection.status !== 'available' || !inspection.values) {
+                try {
+                    return (await this.readOwnershipValues()).values[key];
+                } catch (error) {
+                    Logger.warn('npm user config re-read failed before an owned unset:', error);
                     return UNSET_UNREADABLE;
                 }
-                return inspection.values[key];
             },
             deleteKey: async () => {
                 await this.execNpm(['config', 'delete', key]);
@@ -401,15 +416,96 @@ export class NpmConfigManager {
         try {
             return { status: 'available', values: await this.readProxyValues() };
         } catch (error) {
-            const failure = this.handleError(error);
-            if (failure.errorType !== 'NOT_INSTALLED') {
-                Logger.error('Error getting npm proxy:', error);
+            return this.failedInspection(error);
+        }
+    }
+
+    /**
+     * Reads what Off may decide on: the `proxy` and `https-proxy` entries of
+     * the npm user config file, the layer `config set` and `config delete`
+     * act on. A value that exists only in a global or project `.npmrc` is not
+     * otak-proxy's, so it is not returned as a value; `externalValueLoaded`
+     * says npm still loads one for a key the file leaves empty. Diagnostics
+     * keep the merged `inspectProxy`.
+     */
+    async inspectOwnedProxy(): Promise<NpmOwnedProxyInspection> {
+        try {
+            const { values, userLayer } = await this.readOwnershipValues();
+            if (!userLayer) {
+                return { status: 'available', values };
             }
-            return {
-                status: failure.errorType === 'NOT_INSTALLED' ? 'unavailable' : 'error',
-                error: failure.error,
-                errorType: failure.errorType
-            };
+            let externalValueLoaded = false;
+            for (const key of NPM_PROXY_KEYS) {
+                if (values[key] === null && await this.isValueLoadedByNpm(key)) {
+                    externalValueLoaded = true;
+                }
+            }
+            return { status: 'available', values, externalValueLoaded };
+        } catch (error) {
+            return this.failedInspection(error);
+        }
+    }
+
+    private failedInspection(error: unknown): ProxyConfigInspection<NpmProxyValues> {
+        const failure = this.handleError(error);
+        if (failure.errorType !== 'NOT_INSTALLED') {
+            Logger.error('Error getting npm proxy:', error);
+        }
+        return {
+            status: failure.errorType === 'NOT_INSTALLED' ? 'unavailable' : 'error',
+            error: failure.error,
+            errorType: failure.errorType
+        };
+    }
+
+    /**
+     * The one reader of the user layer for ownership: the inspection and both
+     * reads of an owned unset go through it, so a user config location npm
+     * will not reveal (it redacts a path containing a UUID, or prints nothing)
+     * is handled in one place. The layer cannot be found then, so the merged
+     * read of `inspectProxy` stands in and `userLayer` is false; failing
+     * instead would make Off fail where it works today.
+     *
+     * A missing user config file is an empty layer. A null from
+     * `readTopLevelNpmrcString` is "absent or not verifiable", never a
+     * successful read; for ownership it is safe in one direction: otak-proxy
+     * never writes arrays, bare flags, `${VAR}` references or sections, so a
+     * value in one of those forms is never otak-proxy's and Off never deletes
+     * it. `externalValueLoaded` reports that npm still loads such a value.
+     */
+    private async readOwnershipValues(): Promise<{ values: NpmProxyValues; userLayer: boolean }> {
+        let text: string;
+        try {
+            text = await this.readUserConfigText({ missingFileIsEmpty: true });
+        } catch (error) {
+            if (!(error instanceof NpmUserConfigLocationUnknown)) {
+                throw error;
+            }
+            Logger.warn(`${error.message}; reading the merged npm config for ownership instead`);
+            return { values: await this.readProxyValues(), userLayer: false };
+        }
+        return {
+            values: {
+                proxy: normalizeNpmValue(readTopLevelNpmrcString(text, 'proxy')),
+                'https-proxy': normalizeNpmValue(readTopLevelNpmrcString(text, 'https-proxy'))
+            },
+            userLayer: true
+        };
+    }
+
+    /**
+     * Whether `npm config get <key>` yields a value. A refusal to print counts
+     * as loaded: npm only redacts a value it holds.
+     */
+    private async isValueLoadedByNpm(key: NpmProxyKey): Promise<boolean> {
+        try {
+            const { stdout } = await this.execNpm(['config', 'get', key]);
+            return normalizeNpmValue(stdout) !== null;
+        } catch (error) {
+            if (isProtectedGetRefusal(error)) {
+                return true;
+            }
+            throw error;
         }
     }
 
@@ -424,7 +520,7 @@ export class NpmConfigManager {
                 if (!isProtectedGetRefusal(error)) {
                     throw error;
                 }
-                userConfigText ??= this.readUserConfigText();
+                userConfigText ??= this.readUserConfigText({ missingFileIsEmpty: false });
                 values[key] = readProtectedUserValue(await userConfigText, key);
             }
         }
@@ -436,22 +532,25 @@ export class NpmConfigManager {
      * npm also refuses to print a path containing text it redacts (a UUID);
      * the location is then unknown and no file is guessed.
      */
-    private async readUserConfigText(): Promise<string> {
+    private async readUserConfigText(options: { missingFileIsEmpty: boolean }): Promise<string> {
         let path: string | null;
         try {
             path = normalizeNpmValue((await this.execNpm(['config', 'get', 'userconfig'])).stdout);
         } catch (error) {
             if (isProtectedGetRefusal(error)) {
-                throw new Error('npm user config location is protected');
+                throw new NpmUserConfigLocationUnknown('npm user config location is protected');
             }
             throw error;
         }
         if (!path) {
-            throw new Error('npm user config location is unknown');
+            throw new NpmUserConfigLocationUnknown('npm user config location is unknown');
         }
         try {
             return await this.readUserConfigFile(path);
         } catch (error) {
+            if (options.missingFileIsEmpty && getErrorCode(error) === 'ENOENT') {
+                return '';
+            }
             // Rethrown without the fs message: ENOENT would classify as "npm not installed".
             Logger.warn('npm user config could not be read:', error);
             throw new Error('npm user config could not be read');

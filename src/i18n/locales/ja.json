@@ -79,7 +79,7 @@
     "error.attemptedUrls": "試行したテストURL:",
     "validation.proxyUrl.empty": "Proxy URLを空にすることはできません",
     "validation.proxyUrl.shellMetacharacters": "Proxy URLに危険なシェルメタ文字が含まれています",
-    "validation.proxyUrl.hostnameInvalid": "ホスト名に使用できない文字が含まれています（英数字、ドット、ハイフンのみ使用できます）",
+    "validation.proxyUrl.hostnameInvalid": "ホスト名に無効な文字が含まれています（英数字、ドット、ハイフン、アンダースコアのみ使用できます）",
     "validation.proxyUrl.invalidFormat": "URL形式が無効です",
     "validation.proxyUrl.protocol": "プロトコルは http:// または https:// にしてください",
     "validation.proxyUrl.hostnameRequired": "ホスト名が必要です",
@@ -320,5 +320,16 @@
     "diagnose.reason.bypassNotApplied": "システムのプロキシバイパスを検出しましたが、適用していません",
     "warning.splitProxyPartial": "HTTP と HTTPS で異なるプロキシを検出しました。npm とターミナルには両方を書きましたが、Git と VS Code は1つの URL しか保持できません。",
     "statusbar.autoApplyBlocked": "Auto（ブロック）",
-    "statusbar.tooltip.autoApplyBlocked": "Autoモード - 希望したproxyは適用されていません"
+    "statusbar.tooltip.autoApplyBlocked": "Autoモード - 希望したproxyは適用されていません",
+    "warning.proxyOffUnverified": "Proxyをオフにしましたが、otak-proxyが書き込んだことを確認できなかったため、一部の値は残しています: {targets}。Proxyをオンにしてから再度オフにするか、手動で削除してください。",
+    "statusbar.tooltip.proxyOffUnverified": "Proxyはオフですが、otak-proxyが書き込んだことを確認できなかったため、一部の値は残されています。Proxyをオンにしてから再度オフにするか、手動で削除してください。",
+    "diagnose.target.gitGlobalHttpProxy": "Git グローバル http.proxy",
+    "diagnose.target.npmUserHttpsProxy": "npm ユーザー https-proxy",
+    "diagnose.target.proxyCredentials": "Proxy 認証情報",
+    "diagnose.target.workspaceApply": "Proxy 設定の適用",
+    "diagnose.reason.localCredentialUnresolved": "このマシンではProxyの認証情報を取得できません。Configure Manual Proxy で再入力してください",
+    "diagnose.reason.applyBlockedUntrustedWorkspace": "ワークスペースが信頼されていないため、Proxy設定は変更されませんでした",
+    "diagnose.reason.applyBlockedInvalidProxyUrl": "Proxy URLが無効なため、Proxy設定は適用されませんでした",
+    "diagnose.reason.applyBlockedCredentialConsent": "認証情報を平文の設定ファイルへ書き込むことへの同意がまだないか、otakProxy.credentialTargetPolicy の設定でブロックされているため、適用が中断されています。Proxyの切り替えまたは Configure Manual Proxy の実行でプロンプトに回答するか、設定を変更してください",
+    "diagnose.reason.applyBlockedApplyFailed": "直近の適用は一部のターゲットで完了しませんでした"
 }

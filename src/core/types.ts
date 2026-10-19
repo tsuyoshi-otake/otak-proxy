@@ -81,12 +81,14 @@ export interface ProxyState {
     pipConfigured?: boolean;
     terminalEnvConfigured?: boolean;
     targetOutcomes?: Partial<Record<'git' | 'vscode' | 'npm' | 'pip' | 'terminalEnv',
-        'configured' | 'cleared' | 'skippedUnavailable' | 'preservedExternal' | 'failed'>>;
+        'configured' | 'cleared' | 'skippedUnavailable' | 'preservedExternal' | 'ownershipUnverified' | 'failed'>>;
     /**
      * Apply was refused before any target write. Distinct from a partial write
-     * failure recorded only in lastError / targetOutcomes.
+     * failure recorded only in lastError / targetOutcomes. `credentialConsent`:
+     * a credential-bearing plan waits for the user's consent or is blocked by
+     * `otakProxy.credentialTargetPolicy`.
      */
-    applyBlocked?: 'untrustedWorkspace' | 'invalidProxyUrl';
+    applyBlocked?: 'untrustedWorkspace' | 'invalidProxyUrl' | 'credentialConsent';
     systemProxyDetected?: boolean;
     lastError?: string;
     // Feature: auto-mode-proxy-testing

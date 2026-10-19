@@ -90,6 +90,10 @@ There is **no separate Manual mode**. A URL entered with `otak: Configure Manual
   ┌──────────────────────────────────────────┐
   │ ⊘ Proxy: Off                             │  proxy disabled; managed settings cleared
   ├──────────────────────────────────────────┤
+  │ ⚠ Proxy: Off                             │  switched off, but a value was kept because
+  │                                          │  otak-proxy could not verify that it wrote
+  │                                          │  it (see Troubleshooting)
+  ├──────────────────────────────────────────┤
   │ ⟳ Auto: http://proxy.example.com:8080    │  following the detected system proxy
   ├──────────────────────────────────────────┤
   │ ⌁ Auto (Fallback): http://192.168.1.2:88 │  no system proxy; using your configured
@@ -108,12 +112,13 @@ There is **no separate Manual mode**. A URL entered with `otak: Configure Manual
   │                                          │  hover for details
   ├──────────────────────────────────────────┤
   │ ⚠ Auto (blocked)                         │  apply was refused (for example an
-  │                                          │  untrusted workspace); desired Auto
-  │                                          │  is not treated as applied
+  │                                          │  untrusted workspace, or proxy credentials
+  │                                          │  still waiting for your consent); desired
+  │                                          │  Auto is not treated as applied
   └──────────────────────────────────────────┘
 ```
 
-The glyphs above stand for the VS Code codicons `$(circle-slash)` (⊘), `$(sync)` (⟳), `$(plug)` (⌁), and `$(warning)` (⚠). When the last apply failed or was blocked, ⚠ replaces the usual icon of the current state.
+The glyphs above stand for the VS Code codicons `$(circle-slash)` (⊘), `$(sync)` (⟳), `$(plug)` (⌁), and `$(warning)` (⚠). When the last apply failed or was blocked, ⚠ replaces the usual icon of the current state. In Off, ⚠ means the last switch-off kept a value it could not verify as its own.
 
 When `otakProxy.showProxyUrl` is `false`, the URL is replaced with `Configured` (for example, `Auto: Configured`). Set it back to `true`, or use the **Show URL** link in the tooltip, to display the address.
 
@@ -255,7 +260,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
 
 - VS Code: writes the global `http.proxy` setting through the VS Code configuration API.
 - Git: writes the global `http.proxy` with `git config --global`. Git uses this single key for both HTTP and HTTPS remotes (HTTPS goes through CONNECT). `https.proxy` does not route traffic, so otak-proxy does not write it; Off still removes a leftover `https.proxy` that otak-proxy owns.
-- npm: writes the user-level `proxy` and `https-proxy` with `npm config set`. When `npm config get` refuses to print a proxy URL that contains a password (as npm 10.8 and later do), otak-proxy reads that value from the npm user config file (`.npmrc`) to confirm the write and to decide what Off may remove. If the value cannot be confirmed there (for example, when it is set only in a project or global `.npmrc`), Off keeps it and reports the npm target as failed.
+- npm: writes the user-level `proxy` and `https-proxy` with `npm config set`. Off looks at the npm user config file (`.npmrc`) only, the layer `npm config set` and `npm config delete` act on, and removes a value from it only when it is the one otak-proxy wrote. This is also how it reads a proxy URL with a password, which `npm config get` refuses to print (npm 10.8 and later). A value npm loads from a project or global `.npmrc` or from the environment (`npm_config_proxy` and the like), or a value in a form otak-proxy never writes, is not otak-proxy's: Off never removes it, and the npm target is reported as an external override (advisory) instead of a failure. A missing user config file counts as an empty layer. If npm will not say where its user config file is, Off falls back to the value `npm config get` reports.
 - pip: writes the user-level `global.proxy` with `python -m pip config --user` (trying `py`, `python`, then `python3` on Windows, and `python3`, then `python` elsewhere). pip stores one URL for both HTTP and HTTPS. This target is skipped when Python or pip is not installed.
 - Integrated terminals: sets `HTTP_PROXY` and `HTTPS_PROXY` for new terminals, plus the lowercase variants on non-Windows hosts.
 - Off removes only the values that otak-proxy wrote and that have not changed since. Values that you or other tools set or changed are kept.
@@ -267,7 +272,7 @@ Open the Command Palette (`Cmd/Ctrl+Shift+P`) and run:
 - Use a proxy URL with credentials only when your proxy requires them. otak-proxy stores the credential part in VS Code SecretStorage where available and keeps global state and sync data free of credentials.
 - VS Code, Git, npm, and pip read their own configuration files, so applying a proxy URL with credentials writes those credentials in plaintext to files such as `settings.json`, `.gitconfig`, `.npmrc`, and the pip user config file.
 - `otakProxy.credentialTargetPolicy` controls this:
-  - `ask` (default): asks once per proxy address on each machine before writing its credentials. One prompt covers every credential-bearing URL an apply writes, including the HTTPS URL of a per-scheme proxy. Background applies are skipped until you allow it.
+  - `ask` (default): asks once per proxy address on each machine before writing its credentials. One prompt covers every credential-bearing URL an apply writes, including the HTTPS URL of a per-scheme proxy. The apply that needs your answer stops at once and the status bar shows `Auto (blocked)`; the prompt is shown on its own and nothing waits for it, so other toggles and applies are not held up. **Allow Plaintext Write** records your consent and applies the current proxy once. Deny or closing the prompt records nothing and the status bar stays `Auto (blocked)` until the next apply or toggle. Switching Off while the prompt is open clears the blocked state, and answering Allow afterwards applies nothing. Reloading the window drops an open prompt; the blocked state stays until the next apply. Background applies are skipped without a prompt until you allow it.
   - `allowPlaintextTargets`: writes without asking.
   - `blockPlaintextTargets`: never applies a proxy URL with credentials. Use it when your organization forbids credentials in tool config files.
 - If a proxy URL's credentials cannot be restored on this machine — for example storing them in SecretStorage failed — otak-proxy skips the apply instead of writing the URL without its credentials. This covers every apply: the system-proxy monitor, the toggle, sync, and startup, not only the startup check. For a per-scheme proxy this applies per address: the apply is skipped when any address that needed credentials cannot restore them.
@@ -348,6 +353,7 @@ Replace `<version>` with the `version` in `package.json`, then reload VS Code.
 - **"Failed to toggle proxy mode"**: the saved proxy state kept changing while the toggle was saving it — for example another VS Code window or the background check saved at the same time — so the toggle changed nothing. Click the status bar again. If it keeps failing, reload the window and check the otak-proxy output log.
 - **"The initial proxy setup could not be saved..."**: the saved proxy state kept changing while your first-run answer was being saved, so the answer was not stored. The setup prompt is offered again the next time the window starts; answer it then. If it keeps failing, check the otak-proxy output log.
 - **A warning says saved Windows proxy environment settings differ from this VS Code process**: quit every VS Code window, start VS Code again, and open new terminals (see [Windows Environment Variable Check](#windows-environment-variable-check)).
+- **"Proxy turned off, but some values were kept because otak-proxy could not verify that it wrote them: ..."** (the status bar shows ⚠ Proxy: Off): the named setting holds a proxy URL with credentials, and the record that proves otak-proxy wrote it, or the key that checks the password, is missing on this machine (for example after clearing VS Code's stored secrets). Off keeps such a value instead of guessing. Either turn the proxy on again and then off, which writes a fresh record and lets Off remove the value, or delete the listed value by hand as shown in the next entry. A value you set yourself is not part of this warning: Off keeps it silently.
 - **Proxy settings remain after switching Off or uninstalling**: switch otak-proxy Off first, then run `otak: Diagnose Proxy State`. If settings still remain, check them and remove only the entries you no longer want:
 
   ```bash

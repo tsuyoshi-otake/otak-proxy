@@ -225,15 +225,17 @@ export function createApplyBlockedIssue(
     reason: NonNullable<ProxyState['applyBlocked']> | 'applyFailed'
 ): ProxyIssue {
     const untrusted = reason === 'untrustedWorkspace';
+    // Both wait for a decision only the user can make, so neither is a failure.
+    const awaitingUser = untrusted || reason === 'credentialConsent';
     return {
         id: `apply.blocked.${reason}`,
         fingerprint: `apply.blocked.${reason}`,
-        category: untrusted ? 'capabilityUnavailable' : 'applyFailed',
-        impact: untrusted ? 'requiresUserDecision' : 'blocksConvergence',
+        category: untrusted ? 'capabilityUnavailable' : awaitingUser ? 'needsCredentialConsent' : 'applyFailed',
+        impact: awaitingUser ? 'requiresUserDecision' : 'blocksConvergence',
         targetId: 'workspace.apply',
         targetHost: 'workspaceHost',
         source: 'proxyApplier',
-        capability: untrusted ? 'permissionRequired' : 'supported',
+        capability: awaitingUser ? 'permissionRequired' : 'supported',
         autoAction: 'none',
         userAction: 'showDetails',
         evidence: { applyBlocked: reason }

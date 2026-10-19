@@ -133,6 +133,9 @@ class FakeNpmManager {
             : { success: true };
     }
     async inspectProxy() { return { status: 'available' as const, values: { ...this.values } }; }
+    async inspectOwnedProxy() {
+        return { status: 'available' as const, values: { ...this.values }, externalValueLoaded: false };
+    }
 }
 
 class FakeSingleManager {
@@ -159,7 +162,7 @@ class FakeTerminalManager {
     async unsetProxy() { this.unsetCount++; this.value = null; return { success: true }; }
 }
 
-function createOwnershipStore(): TargetOwnershipStore {
+function createOwnershipHarness(): { store: TargetOwnershipStore; secrets: Map<string, string> } {
     const values = new Map<string, unknown>();
     const secrets = new Map<string, string>();
     const memento = {
@@ -174,7 +177,27 @@ function createOwnershipStore(): TargetOwnershipStore {
         delete: async (key: string) => { secrets.delete(key); },
         onDidChange: () => ({ dispose: () => {} })
     } as vscode.SecretStorage;
-    return new TargetOwnershipStore(memento, new ProxyCredentialStore(secretStorage));
+    return { store: new TargetOwnershipStore(memento, new ProxyCredentialStore(secretStorage)), secrets };
+}
+
+function createOwnershipStore(): TargetOwnershipStore {
+    return createOwnershipHarness().store;
+}
+
+interface NotifierCalls {
+    successes: string[];
+    warnings: Array<{ message: string; params?: Record<string, string> }>;
+    errors: string[];
+}
+
+function createRecordingNotifier(): { notifier: UserNotifier; calls: NotifierCalls } {
+    const calls: NotifierCalls = { successes: [], warnings: [], errors: [] };
+    const notifier = {
+        showSuccess: (message: string) => { calls.successes.push(message); },
+        showWarning: (message: string, params?: Record<string, string>) => { calls.warnings.push({ message, params }); },
+        showError: (message: string) => { calls.errors.push(message); }
+    } as unknown as UserNotifier;
+    return { notifier, calls };
 }
 
 function createTargets(): FakeTargetSet {
@@ -187,12 +210,11 @@ function createTargets(): FakeTargetSet {
     };
 }
 
-function createApplier(targets: FakeTargetSet, ownershipStore: TargetOwnershipStore): ProxyApplier {
-    const notifier = {
-        showSuccess: () => {},
-        showWarning: () => {},
-        showError: () => {}
-    } as unknown as UserNotifier;
+function createApplier(
+    targets: FakeTargetSet,
+    ownershipStore: TargetOwnershipStore,
+    notifier: UserNotifier = createRecordingNotifier().notifier
+): ProxyApplier {
     return new ProxyApplier(
         targets.git as unknown as GitConfigManager,
         targets.vscode as unknown as VscodeConfigManager,
@@ -219,6 +241,151 @@ function createRealNpmTarget(npm: FakeNpmConfig, readUserConfigFile = npm.readUs
 }
 
 suite('Ownership-safe proxy disable integration', () => {
+    suite('Off names the values it kept because ownership could not be verified (#108)', () => {
+        const CREDENTIALED = 'http://alice:s3cret@proxy.example.com:8080';
+
+        test('a lost HMAC key keeps the Git value and the warning names the target by its label', async () => {
+            const harness = createOwnershipHarness();
+            const targets = createTargets();
+            const { notifier, calls } = createRecordingNotifier();
+            const applier = createApplier(targets, harness.store, notifier);
+            assert.strictEqual((await applier.applyProxyDetailed(CREDENTIALED, true, { silent: true })).success, true);
+
+            harness.secrets.clear();
+            const disabled = await applier.disableProxyDetailed();
+
+            assert.strictEqual(targets.git.values['http.proxy'], CREDENTIALED, 'an unverifiable value is kept');
+            assert.deepStrictEqual(targets.git.unsetCalls, []);
+            assert.strictEqual(disabled.results.gitOutcome, 'ownershipUnverified');
+            assert.ok(disabled.results.unverifiedTargetIds?.includes('git.global.http.proxy'));
+            assert.deepStrictEqual(calls.successes, [], 'no "proxy disabled" while a value is still there');
+            assert.strictEqual(calls.warnings.length, 1);
+            assert.strictEqual(calls.warnings[0].message, 'warning.proxyOffUnverified');
+            assert.ok(calls.warnings[0].params?.targets.includes('Git global http.proxy'), calls.warnings[0].params?.targets);
+            assert.ok(!calls.warnings[0].params?.targets.includes('git.global.http.proxy'), 'a label, not the raw id');
+            assert.ok(!JSON.stringify(calls).includes('s3cret'));
+        });
+
+        test('a value the user set after otak-proxy wrote its own stays preservedExternal, not unverified', async () => {
+            const harness = createOwnershipHarness();
+            const targets = createTargets();
+            const { notifier, calls } = createRecordingNotifier();
+            const applier = createApplier(targets, harness.store, notifier);
+            assert.strictEqual((await applier.applyProxyDetailed(CREDENTIALED, true, { silent: true })).success, true);
+
+            targets.git.values['http.proxy'] = 'http://alice:other@proxy.example.com:8080';
+            const disabled = await applier.disableProxyDetailed();
+
+            assert.strictEqual(disabled.results.gitOutcome, 'preservedExternal');
+            assert.deepStrictEqual(calls.warnings, []);
+            assert.deepStrictEqual(calls.successes, ['message.proxyDisabled']);
+        });
+
+        test('a credential-free value is verified without the HMAC key and is cleared', async () => {
+            const harness = createOwnershipHarness();
+            const targets = createTargets();
+            const { notifier, calls } = createRecordingNotifier();
+            const applier = createApplier(targets, harness.store, notifier);
+            assert.strictEqual((await applier.applyProxyDetailed('http://proxy.example.com:8080', true, { silent: true })).success, true);
+
+            // The fake also fills the legacy https.proxy key, which otak-proxy no longer records.
+            targets.git.values['https.proxy'] = null;
+            harness.secrets.clear();
+            const disabled = await applier.disableProxyDetailed();
+
+            assert.strictEqual(disabled.results.gitOutcome, 'cleared');
+            assert.deepStrictEqual(calls.warnings, []);
+            assert.deepStrictEqual(calls.successes, ['message.proxyDisabled']);
+        });
+    });
+
+    suite('npm Off reads only the user layer (#108)', () => {
+        const OWNED = 'http://proxy.example.com:8080';
+
+        async function applyThenOff(npm: FakeNpmConfig) {
+            const { notifier, calls } = createRecordingNotifier();
+            const targets = { ...createTargets(), npm: createRealNpmTarget(npm) };
+            const applier = createApplier(targets, createOwnershipStore(), notifier);
+            const applied = await applier.applyProxyDetailed(OWNED, true, { silent: true });
+            const disabled = await applier.disableProxyDetailed();
+            return { applied, disabled, calls };
+        }
+
+        test('the same value in the user and the global layer: the user value is removed, the global one stays, Off is not an error', async () => {
+            const npm = createFakeNpmConfig({}, { global: { proxy: OWNED, 'https-proxy': OWNED } });
+            const { applied, disabled, calls } = await applyThenOff(npm);
+
+            assert.strictEqual(applied.success, true, JSON.stringify(applied.errors));
+            assert.strictEqual(npm.get('proxy'), null);
+            assert.strictEqual(npm.get('https-proxy'), null);
+            assert.strictEqual(npm.getGlobal('proxy'), OWNED);
+            assert.strictEqual(disabled.success, true, JSON.stringify(disabled.errors));
+            assert.strictEqual(disabled.results.npmOutcome, 'preservedExternal');
+            assert.deepStrictEqual(calls.errors, []);
+            assert.deepStrictEqual(calls.successes, ['message.proxyDisabled']);
+        });
+
+        test('a value that exists only in the global layer is preserved without an error', async () => {
+            const npm = createFakeNpmConfig({}, { global: { proxy: OWNED } });
+            const { notifier, calls } = createRecordingNotifier();
+            const targets = { ...createTargets(), npm: createRealNpmTarget(npm) };
+            const disabled = await createApplier(targets, createOwnershipStore(), notifier).disableProxyDetailed();
+
+            assert.strictEqual(disabled.success, true, JSON.stringify(disabled.errors));
+            assert.strictEqual(disabled.results.npmOutcome, 'preservedExternal');
+            assert.strictEqual(npm.getGlobal('proxy'), OWNED);
+            assert.deepStrictEqual(calls.errors, []);
+        });
+
+        test('a credentialed value that only the global layer holds is preserved and its password never appears', async () => {
+            const credentialed = 'http://alice:s3cret@proxy.example.com:8080';
+            const npm = createFakeNpmConfig({}, { global: { 'https-proxy': credentialed } });
+            const { notifier, calls } = createRecordingNotifier();
+            const targets = { ...createTargets(), npm: createRealNpmTarget(npm) };
+            const disabled = await createApplier(targets, createOwnershipStore(), notifier).disableProxyDetailed();
+
+            assert.strictEqual(disabled.success, true, JSON.stringify(disabled.errors));
+            assert.strictEqual(disabled.results.npmOutcome, 'preservedExternal');
+            assert.ok(!JSON.stringify([disabled, calls]).includes('s3cret'));
+        });
+
+        test('no user config file: Off has nothing to remove and is clean', async () => {
+            const npm = createFakeNpmConfig({}, { missingUserConfigFile: true });
+            const { notifier } = createRecordingNotifier();
+            const targets = { ...createTargets(), npm: createRealNpmTarget(npm) };
+            const disabled = await createApplier(targets, createOwnershipStore(), notifier).disableProxyDetailed();
+
+            assert.strictEqual(disabled.success, true, JSON.stringify(disabled.errors));
+            assert.strictEqual(disabled.results.npmOutcome, 'cleared');
+        });
+
+        test('a user config path npm will not name falls back to the merged read and still removes the owned value', async () => {
+            const npm = createFakeNpmConfig({}, { emptyUserConfigPath: true });
+            const { applied, disabled } = await applyThenOff(npm);
+
+            assert.strictEqual(applied.success, true, JSON.stringify(applied.errors));
+            assert.strictEqual(disabled.success, true, JSON.stringify(disabled.errors));
+            assert.strictEqual(disabled.results.npmOutcome, 'cleared');
+            assert.strictEqual(npm.get('proxy'), null);
+        });
+
+        test('npm not installed is skipped, not failed', async () => {
+            const npm = createFakeNpmConfig();
+            const { notifier } = createRecordingNotifier();
+            const manager = new NpmConfigManager(undefined, {
+                isWindows: false,
+                env: {},
+                commandAvailable: () => false,
+                commandRunner: npm.runner,
+                readUserConfigFile: npm.readUserConfigFile
+            });
+            const targets = { ...createTargets(), npm: manager as unknown as FakeNpmManager };
+            const disabled = await createApplier(targets, createOwnershipStore(), notifier).disableProxyDetailed();
+
+            assert.strictEqual(disabled.results.npmOutcome, 'skippedUnavailable');
+        });
+    });
+
     test('Auto then Off writes and removes a credentialed npm proxy (#85)', async () => {
         const npm = createFakeNpmConfig();
         const targets = { ...createTargets(), npm: createRealNpmTarget(npm) };

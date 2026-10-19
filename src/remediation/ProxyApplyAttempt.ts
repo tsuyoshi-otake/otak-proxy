@@ -1,6 +1,6 @@
 import { AppliedPlanTracker } from '../core/AppliedPlanTracker';
 import { commitUnlessStale, createFencedApply, StateWriter } from '../core/GenerationFence';
-import { captureLogicalGeneration } from '../core/LogicalGeneration';
+import { captureLogicalGeneration, LogicalGeneration } from '../core/LogicalGeneration';
 import { ProxyApplyDetailedResult, ProxyApplyOptions } from '../core/ProxyApplierTypes';
 import { AppliedPlan, proxyApplyPlanUrls, resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
 import { Logger } from '../utils/Logger';
@@ -10,6 +10,7 @@ import {
 } from '../utils/ProxyStateSanitizer';
 import { RemediationStopReason } from './RemediationOutcome';
 import {
+    CredentialConsentRequest,
     ProxyApplyDetailedDelegate,
     ProxyApplyTrigger,
     ProxyRemediationService
@@ -55,7 +56,7 @@ function appliedPlanPart(plan: ProxyApplyOptions | undefined): AppliedPlan['plan
 export async function runProxyApplyAttempt(
     stateWriter: StateWriter,
     applyDetailed: ProxyApplyDetailedDelegate,
-    remediationService: Pick<ProxyRemediationService, 'applyWithSafety'> | undefined,
+    remediationService: Pick<ProxyRemediationService, 'applyWithSafety' | 'startCredentialConsentPrompt'> | undefined,
     url: string,
     enabled: boolean,
     trigger: ProxyApplyTrigger,
@@ -98,14 +99,22 @@ export async function runProxyApplyAttempt(
             applyDetailed
         );
 
-        const result = !remediationService
-            ? await runAttemptWithoutRemediation(fencedApply, url, enabled, plan)
-            : await remediationService.applyWithSafety(url, enabled, { ...plan, trigger }, fencedApply)
-                .then(r => ({
-                    success: r.success,
-                    applyResult: r.applyResult,
-                    stopReason: r.outcome.stopReason
-                }));
+        let result: ProxyApplyAttemptResult;
+        if (!remediationService) {
+            result = await runAttemptWithoutRemediation(fencedApply, url, enabled, plan);
+        } else {
+            const safe = await remediationService.applyWithSafety(url, enabled, { ...plan, trigger }, fencedApply);
+            result = {
+                success: safe.success,
+                applyResult: safe.applyResult,
+                stopReason: safe.outcome.stopReason
+            };
+            if (result.stopReason === 'consentRequired') {
+                await markAndAskCredentialConsent(
+                    stateWriter, generation, remediationService, safe.consentRequest, options?.silent === true
+                );
+            }
+        }
 
         if (result.success && result.applyResult?.success === true && !result.applyResult.superseded) {
             applied = { enabled, url, plan: appliedPlanPart(plan) };
@@ -114,6 +123,33 @@ export async function runProxyApplyAttempt(
     } finally {
         appliedPlanTracker?.noteAttemptFinished(applied);
     }
+}
+
+/**
+ * Records that the apply waits for the user's consent, then starts the prompt
+ * without waiting for it: the marker is committed first, so a prompt answered
+ * at once finds it. A stale commit means a newer generation owns the state,
+ * and that generation asks for itself. A silent attempt never prompts.
+ */
+async function markAndAskCredentialConsent(
+    stateWriter: StateWriter,
+    generation: LogicalGeneration,
+    remediationService: Pick<ProxyRemediationService, 'startCredentialConsentPrompt'>,
+    request: CredentialConsentRequest | undefined,
+    silent: boolean
+): Promise<void> {
+    const committed = await commitUnlessStale(stateWriter, generation, 'applyResults', current => ({
+        ...current,
+        applyBlocked: 'credentialConsent'
+    }));
+    if (committed === 'stale' || !request) {
+        return;
+    }
+    if (silent) {
+        Logger.warn('Skipped silent proxy apply because credential target consent is required on this machine.');
+        return;
+    }
+    remediationService.startCredentialConsentPrompt(request);
 }
 
 async function runAttemptWithoutRemediation(

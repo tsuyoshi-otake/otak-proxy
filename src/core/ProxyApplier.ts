@@ -30,7 +30,8 @@ import { buildProxyValidationSuggestions } from './ProxyValidationMessages';
 import {
     showAggregatedErrors,
     showProxyConfigured,
-    showProxyDisabled
+    showProxyDisabled,
+    showProxyDisableUnverified
 } from './ProxyApplierNotifications';
 import { TargetOwnershipStore } from './TargetOwnershipStore';
 import { hasProxyCredentials, removeProxyCredentials } from '../utils/ProxyStateSanitizer';
@@ -38,10 +39,26 @@ import { isPerSchemeProxy } from '../config/DetectedProxyValue';
 import { splitCapabilityIssues } from './ProxyTargetCapability';
 import { ProxyIssue } from './v3Types';
 
+/**
+ * Outcome of an Off that removed everything it could prove it owns. A value
+ * whose ownership could not be verified outranks one known to be external:
+ * the user can still act on it (see warning.proxyOffUnverified).
+ */
+function keptOutcome(
+    preservedExternal: boolean,
+    unverified: ReadonlySet<string>
+): Pick<ProxyConfigTargetUpdateResult, 'outcome' | 'unverifiedTargetIds'> {
+    if (unverified.size > 0) {
+        return { outcome: 'ownershipUnverified', unverifiedTargetIds: [...unverified] };
+    }
+    return { outcome: preservedExternal ? 'preservedExternal' : 'cleared' };
+}
+
 export const UNTRUSTED_WORKSPACE_APPLY_MESSAGE =
     'Proxy settings were not changed because the workspace is untrusted.';
 const INVALID_PROXY_URL_APPLY_MESSAGE =
     'Proxy settings were not applied because the proxy URL is invalid.';
+const SPLIT_NOT_REPRESENTABLE_SUFFIX = '.splitProxy.notRepresentable';
 
 /**
  * ProxyApplier handles the application and removal of proxy settings
@@ -178,7 +195,9 @@ export class ProxyApplier {
 
         if (!options?.silent) {
             showProxyConfigured(proxyUrl, this.sanitizer, this.userNotifier);
-            if (capabilityIssues.some(issue => issue.category === 'capabilityUnavailable')) {
+            // Only a split the targets cannot store warns; the bypass list is
+            // advisory by design (system.bypass.notApplied) and has its own note.
+            if (capabilityIssues.some(issue => issue.id.endsWith(SPLIT_NOT_REPRESENTABLE_SUFFIX))) {
                 this.userNotifier.showWarning('warning.splitProxyPartial');
             }
         }
@@ -186,14 +205,23 @@ export class ProxyApplier {
 
     private notifyDisableResult(
         options: ProxyApplyOptions | undefined,
-        errorAggregator: ErrorAggregator
+        errorAggregator: ErrorAggregator,
+        results: ProxyConfigResults
     ): void {
-        if (errorAggregator.hasErrors()) {
+        const hasErrors = errorAggregator.hasErrors();
+        if (hasErrors) {
             showAggregatedErrors(errorAggregator, this.userNotifier);
-            return;
         }
 
-        if (!options?.silent) {
+        // The error toast does not name the values Off kept, so the warning
+        // shows next to it; "Proxy disabled" only when nothing was kept unverified.
+        const unverifiedTargetIds = results.unverifiedTargetIds ?? [];
+        if (options?.silent) {
+            return;
+        }
+        if (unverifiedTargetIds.length > 0) {
+            showProxyDisableUnverified(this.userNotifier, unverifiedTargetIds);
+        } else if (!hasErrors) {
             showProxyDisabled(this.userNotifier);
         }
     }
@@ -360,7 +388,7 @@ export class ProxyApplier {
         const success = this.areConfigResultsSuccessful(results);
         
         // Use ErrorAggregator for any failures and UserNotifier for feedback
-        this.notifyDisableResult(options, errorAggregator);
+        this.notifyDisableResult(options, errorAggregator, results);
 
         return {
             ...this.buildDetailedResult(success, false, '', results, errorAggregator),
@@ -431,6 +459,12 @@ export class ProxyApplier {
                 applyOptions
             );
             const success = targetResult.success;
+            if (targetResult.unverifiedTargetIds?.length) {
+                results.unverifiedTargetIds = [
+                    ...(results.unverifiedTargetIds ?? []),
+                    ...targetResult.unverifiedTargetIds
+                ];
+            }
             switch (target.name) {
                 case 'Git configuration':
                     results.gitSuccess = success;
@@ -632,10 +666,11 @@ export class ProxyApplier {
         // Locks cannot serialize `git config` / `npm config` / settings.json
         // writers outside this process.
         const firstPass = await this.classifyOwnedObservations(target.name, inspection.observations ?? []);
+        const unverified = new Set(firstPass.unverified);
         if (firstPass.owned.length === 0) {
             return {
                 success: true,
-                outcome: firstPass.preservedExternal ? 'preservedExternal' : 'cleared'
+                ...keptOutcome(firstPass.preservedExternal || inspection.externalValueLoaded === true, unverified)
             };
         }
 
@@ -661,11 +696,13 @@ export class ProxyApplier {
         }
 
         const confirmed = await this.classifyOwnedObservations(target.name, confirmation.observations ?? []);
-        const preservedExternal = firstPass.preservedExternal || confirmed.preservedExternal;
+        confirmed.unverified.forEach(targetId => unverified.add(targetId));
+        const preservedExternal = firstPass.preservedExternal || confirmed.preservedExternal ||
+            inspection.externalValueLoaded === true || confirmation.externalValueLoaded === true;
         if (confirmed.owned.length === 0) {
             return {
                 success: true,
-                outcome: preservedExternal ? 'preservedExternal' : 'cleared'
+                ...keptOutcome(preservedExternal, unverified)
             };
         }
 
@@ -693,7 +730,8 @@ export class ProxyApplier {
                 return { success: false, outcome: 'failed', errorType: after.errorType };
             }
 
-            let stillPreserved = preservedExternal || (result.preservedKeys?.length ?? 0) > 0;
+            let stillPreserved = preservedExternal || (result.preservedKeys?.length ?? 0) > 0 ||
+                after.externalValueLoaded === true;
             if (after.status === 'available') {
                 const afterPass = await this.classifyOwnedObservations(
                     target.name,
@@ -705,6 +743,7 @@ export class ProxyApplier {
                     return { success: false, outcome: 'failed' };
                 }
                 stillPreserved = stillPreserved || afterPass.preservedExternal;
+                afterPass.unverified.forEach(targetId => unverified.add(targetId));
                 for (const request of confirmed.owned) {
                     const remaining = after.observations?.find(observation => observation.targetId === request.targetId);
                     if (!remaining?.value) {
@@ -715,7 +754,7 @@ export class ProxyApplier {
 
             return {
                 success: true,
-                outcome: stillPreserved ? 'preservedExternal' : 'cleared'
+                ...keptOutcome(stillPreserved, unverified)
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -728,8 +767,9 @@ export class ProxyApplier {
         targetName: string,
         observations: readonly ProxyOwnershipObservation[],
         options: { logPreserve?: boolean } = {}
-    ): Promise<{ owned: OwnedTargetUnsetRequest[]; preservedExternal: boolean }> {
+    ): Promise<{ owned: OwnedTargetUnsetRequest[]; preservedExternal: boolean; unverified: string[] }> {
         const owned: OwnedTargetUnsetRequest[] = [];
+        const unverified: string[] = [];
         let preservedExternal = false;
         const logPreserve = options.logPreserve !== false;
         for (const observation of observations) {
@@ -740,21 +780,25 @@ export class ProxyApplier {
                 continue;
             }
 
-            const isOwned = await this.ownershipStore!.isOwnedByOtakProxy(
+            const verdict = await this.ownershipStore!.inspectOwnership(
                 observation.targetId,
                 observation.value,
                 hasProxyCredentials(observation.value)
             );
-            if (isOwned) {
+            if (verdict === 'owned') {
                 owned.push({ targetId: observation.targetId, expectedValue: observation.value });
+                continue;
+            }
+            if (verdict === 'unverifiable') {
+                unverified.push(observation.targetId);
             } else {
                 preservedExternal = true;
-                if (logPreserve) {
-                    Logger.info(`${targetName} value preserved because ownership did not match: ${observation.targetId}`);
-                }
+            }
+            if (logPreserve) {
+                Logger.info(`${targetName} value preserved because ownership ${verdict === 'unverifiable' ? 'could not be verified' : 'did not match'}: ${observation.targetId}`);
             }
         }
-        return { owned, preservedExternal };
+        return { owned, preservedExternal, unverified };
     }
 
     private getApplyTargets(): ProxyConfigTarget[] {
@@ -857,11 +901,14 @@ export class ProxyApplier {
             ownership: {
                 targets: Object.values(ids).map(targetId => ({ targetId, targetHost: 'workspaceHost' })),
                 inspect: async () => {
-                    const result = await this.npmManager.inspectProxy();
+                    // The user config file decides ownership; a value npm loads
+                    // from another layer is reported as external, never removed.
+                    const result = await this.npmManager.inspectOwnedProxy();
                     return {
                         status: result.status,
                         error: result.error,
                         errorType: result.errorType,
+                        externalValueLoaded: result.externalValueLoaded,
                         observations: result.values
                             ? (Object.keys(ids) as NpmProxyKey[]).map(key => ({ targetId: ids[key], value: result.values![key] }))
                             : undefined

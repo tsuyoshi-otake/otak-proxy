@@ -165,6 +165,7 @@ suite('Remote apply dedupe (#108)', function() {
                 const tracker = new AppliedPlanTracker();
                 const receiver = makeReceiver(harness.manager, tracker);
 
+                const prompts: Array<readonly string[]> = [];
                 const refusedRemediation = {
                     applyWithSafety: async () => ({
                         success: false,
@@ -172,8 +173,10 @@ suite('Remote apply dedupe (#108)', function() {
                         retrySuppressed: false,
                         lockSkipped: stopReason === 'lockSkipped',
                         lockIoError: stopReason === 'lockIoError',
-                        outcome: { stopReason }
-                    })
+                        outcome: { stopReason },
+                        consentRequest: stopReason === 'consentRequired' ? { keys: ['consent-key'] } : undefined
+                    }),
+                    startCredentialConsentPrompt: (request: { keys: readonly string[] }) => { prompts.push(request.keys); }
                 };
                 const result = await runProxyApplyAttempt(
                     harness.manager,
@@ -186,6 +189,11 @@ suite('Remote apply dedupe (#108)', function() {
                     tracker
                 );
                 assert.strictEqual(result.success, false);
+                assert.deepStrictEqual(
+                    prompts,
+                    stopReason === 'consentRequired' ? [['consent-key']] : [],
+                    'only a consent stop starts the prompt'
+                );
 
                 await applyRemoteSyncState({
                     mode: ProxyMode.Auto,

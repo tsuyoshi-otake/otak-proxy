@@ -21,7 +21,8 @@ export type ProxyApplyTrigger =
     | 'startup'
     | 'sync'
     | 'autoDetection'
-    | 'autoReachability';
+    | 'autoReachability'
+    | 'credentialConsent';
 
 export interface SafeProxyApplyOptions extends ProxyApplyOptions {
     trigger: ProxyApplyTrigger;
@@ -41,6 +42,20 @@ export interface ProxyRemediationServiceOptions {
     sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * What the user has to answer before a credential-bearing plan may be written:
+ * the consent keys (sorted, unique) of every credential-bearing URL in the
+ * plan. Keys only, never the URLs, so no credential reaches a result object.
+ */
+export interface CredentialConsentRequest {
+    readonly keys: readonly string[];
+}
+
+type CredentialConsentJudgement =
+    | { kind: 'allowed' }
+    | { kind: 'blockedByPolicy' }
+    | { kind: 'needsConsent'; request: CredentialConsentRequest };
+
 export interface SafeProxyApplyResult {
     success: boolean;
     applyResult?: ProxyApplyDetailedResult;
@@ -52,6 +67,8 @@ export interface SafeProxyApplyResult {
     lockIoError: boolean;
     /** Secret-free terminal record of this request, including why it stopped (#78). */
     outcome: RemediationOutcome;
+    /** Present when the plan stopped at `consentRequired` and the user may still allow it. */
+    consentRequest?: CredentialConsentRequest;
 }
 
 type UnrecordedApplyResult = Omit<SafeProxyApplyResult, 'outcome'>;
@@ -108,6 +125,9 @@ export class ProxyRemediationService {
     private readonly redactor = new ProxySecretRedactor();
     private attemptSequence = 0;
     private lastOutcome: RemediationOutcome | undefined;
+    /** Consent prompts on screen, one per consent-key set. */
+    private readonly pendingConsentPrompts = new Set<string>();
+    private credentialConsentReapply: (() => Promise<void>) | undefined;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -136,9 +156,12 @@ export class ProxyRemediationService {
     ): Promise<SafeProxyApplyResult> {
         const attempt = ++this.attemptSequence;
         const settings = readV3Settings();
-        if (!(await this.ensureCredentialTargetConsent(proxyApplyPlanCredentialUrls(proxyUrl, options), options, settings))) {
+        // Consent is judged here and never asked here: a prompt awaited inside
+        // the toggle queue would hold every later toggle until it is answered.
+        const consent = this.judgeCredentialTargetConsent(proxyApplyPlanCredentialUrls(proxyUrl, options), settings);
+        if (consent.kind !== 'allowed') {
             const diagnosticReport = await this.runDiagnosticsIfEnabled(settings);
-            return this.recordOutcome(attempt, enabled, options, settings, {
+            const blocked = this.recordOutcome(attempt, enabled, options, settings, {
                 success: false,
                 diagnosticReport,
                 retryAttempted: false,
@@ -146,6 +169,7 @@ export class ProxyRemediationService {
                 lockSkipped: false,
                 lockIoError: false
             }, true);
+            return consent.kind === 'needsConsent' ? { ...blocked, consentRequest: consent.request } : blocked;
         }
 
         const targets = this.getWriteTargets();
@@ -604,37 +628,65 @@ export class ProxyRemediationService {
      * URL in the write plan, not just the primary: a per-scheme split writes
      * each URL to npm and the terminal environment (#108). One prompt covers
      * all of them; approving records consent for each public URL, keyed the
-     * same way single-URL consent always was.
+     * same way single-URL consent always was. Settings and globalState only,
+     * no UI.
      */
-    private async ensureCredentialTargetConsent(
+    private judgeCredentialTargetConsent(
         credentialUrls: readonly string[],
-        options: SafeProxyApplyOptions,
         settings: V3Settings
-    ): Promise<boolean> {
+    ): CredentialConsentJudgement {
         if (credentialUrls.length === 0) {
-            return true;
+            return { kind: 'allowed' };
         }
 
         if (settings.credentialTargetPolicy === 'allowPlaintextTargets') {
-            return true;
+            return { kind: 'allowed' };
         }
 
         if (settings.credentialTargetPolicy === 'blockPlaintextTargets') {
             Logger.warn('Skipped proxy apply because credential-bearing target writes are blocked by policy.');
-            return false;
+            return { kind: 'blockedByPolicy' };
         }
 
         const consent = this.context.globalState.get<Record<string, boolean>>(CREDENTIAL_TARGET_CONSENT_KEY, {});
-        const unconsented = credentialUrls.filter(url => !consent[this.consentKeyFor(url)]);
-        if (unconsented.length === 0) {
-            return true;
+        const keys = [...new Set(credentialUrls.map(url => this.consentKeyFor(url)))].sort();
+        if (keys.every(key => consent[key])) {
+            return { kind: 'allowed' };
         }
+        return { kind: 'needsConsent', request: { keys } };
+    }
 
-        if (options.silent) {
-            Logger.warn('Skipped silent proxy apply because credential target consent is required on this machine.');
-            return false;
+    /**
+     * Registers the function that applies the then-current state once the user
+     * allows a credential write. The composition root owns it: this service
+     * does not know how to read state or run the apply entry point.
+     */
+    setCredentialConsentReapply(reapply: () => Promise<void>): void {
+        this.credentialConsentReapply = reapply;
+    }
+
+    /**
+     * Shows the consent prompt without waiting for it. One prompt per consent-key
+     * set: a second request for a set that is already on screen shows nothing.
+     * Allow records every key and then re-applies; Deny and dismissal record
+     * nothing, so the blocked marker the caller committed stays.
+     */
+    startCredentialConsentPrompt(request: CredentialConsentRequest): void {
+        const promptId = request.keys.join('|');
+        if (this.pendingConsentPrompts.has(promptId)) {
+            return;
         }
+        this.pendingConsentPrompts.add(promptId);
+        this.notifyAfterApply(async () => {
+            try {
+                await this.askCredentialConsent(request);
+            } finally {
+                this.pendingConsentPrompts.delete(promptId);
+            }
+        });
+    }
 
+    private async askCredentialConsent(request: CredentialConsentRequest): Promise<void> {
         const i18n = I18nManager.getInstance();
         const allow = i18n.t('action.allowPlaintextWrite');
         const showDetails = i18n.t('action.showDetails');
@@ -644,19 +696,27 @@ export class ProxyRemediationService {
             showDetails
         );
 
-        if (action === allow) {
-            const granted = { ...consent };
-            for (const url of credentialUrls) {
-                granted[this.consentKeyFor(url)] = true;
-            }
-            await this.context.globalState.update(CREDENTIAL_TARGET_CONSENT_KEY, granted);
-            return true;
-        }
-
         if (action === showDetails) {
             await vscode.commands.executeCommand('otak-proxy.diagnoseProxy');
+            return;
         }
-        return false;
+        if (action !== allow) {
+            return;
+        }
+
+        try {
+            const granted = { ...this.context.globalState.get<Record<string, boolean>>(CREDENTIAL_TARGET_CONSENT_KEY, {}) };
+            for (const key of request.keys) {
+                granted[key] = true;
+            }
+            await this.context.globalState.update(CREDENTIAL_TARGET_CONSENT_KEY, granted);
+        } catch (error) {
+            Logger.warn('Could not record credential target consent:', this.redactor.redactString(String(error)));
+            return;
+        }
+        void this.credentialConsentReapply?.().catch(error => {
+            Logger.warn('Re-apply after credential consent failed:', this.redactor.redactString(String(error)));
+        });
     }
 
     private consentKeyFor(url: string): string {

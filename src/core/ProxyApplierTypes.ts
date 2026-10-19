@@ -35,6 +35,7 @@ export type ProxyTargetOutcome =
     | 'cleared'
     | 'skippedUnavailable'
     | 'preservedExternal'
+    | 'ownershipUnverified'
     | 'failed';
 
 export interface ProxyConfigTargetUpdateResult {
@@ -42,6 +43,8 @@ export interface ProxyConfigTargetUpdateResult {
     outcome: ProxyTargetOutcome;
     errorType?: string;
     residualKeys?: readonly string[];
+    /** Targets whose value was kept because ownership could not be verified (`ownershipUnverified`). */
+    unverifiedTargetIds?: readonly string[];
 }
 
 export interface ProxyOwnershipObservation {
@@ -52,6 +55,13 @@ export interface ProxyOwnershipObservation {
 export interface ProxyOwnershipInspection {
     status: 'available' | 'unavailable' | 'error';
     observations?: ProxyOwnershipObservation[];
+    /**
+     * True when the tool still loads a value for a key whose observation above
+     * is empty: from a layer otak-proxy never writes (npm global, project or
+     * environment) or in a form it never writes. Nothing here is otak-proxy's
+     * to remove, but Off must report it as external, never as cleared.
+     */
+    externalValueLoaded?: boolean;
     error?: string;
     errorType?: string;
 }
@@ -88,6 +98,8 @@ export interface ProxyConfigResults {
     npmOutcome?: ProxyTargetOutcome;
     pipOutcome?: ProxyTargetOutcome;
     terminalEnvOutcome?: ProxyTargetOutcome;
+    /** Ids of the targets whose value Off kept because ownership could not be verified. */
+    unverifiedTargetIds?: string[];
 }
 
 export interface ProxyApplyDetailedResult {

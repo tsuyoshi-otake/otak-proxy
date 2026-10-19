@@ -84,7 +84,7 @@ function nextConfiguredState(
         return previous;
     }
 
-    if (outcome === 'preservedExternal') {
+    if (outcome === 'preservedExternal' || outcome === 'ownershipUnverified') {
         return false;
     }
 
