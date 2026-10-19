@@ -37,8 +37,12 @@ export class InputSanitizer {
     // one linear check; applied to the value as typed — with TAB, LF and CR
     // removed because the URL parser drops those characters before it
     // parses — and only when the typed value's parse has no userinfo.
+    // The same happens with an all-digit password that the removed TAB/LF/CR
+    // joins to a "?", "#", "/" or "\" ("http://user:8080<TAB>#@host" parses
+    // as host "user", port 8080): the password would be shown as the port,
+    // so a digit port counts too when an "@" follows it later in the value.
     private static readonly EMPTY_PORT_AUTHORITY =
-        /^[\u0000-\u0020]*[a-z][a-z0-9+.-]*:[\/\\]*[^\/?#\\@]*:[\/?#\\]/i;
+        /^[\u0000-\u0020]*[a-z][a-z0-9+.-]*:[\/\\]*[^\/?#\\@]*:(?:[\/?#\\]|\d+[\/?#\\][^]*@)/i;
 
     /**
      * Masks password in proxy URL for display
