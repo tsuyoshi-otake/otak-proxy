@@ -4,53 +4,140 @@ import { createHash } from 'crypto';
 
 export const PROXY_ENVIRONMENT_NAMES = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY'] as const;
 export type ProxyEnvironmentName = typeof PROXY_ENVIRONMENT_NAMES[number];
-export type SavedProxyEnvironment = Record<ProxyEnvironmentName, string | null>;
+/**
+ * The saved values of one scope. `null`: the value is absent. `''`: present and
+ * empty. `undefined`: present, but its text is not known, because `reg.exe`
+ * writes the console code page and a value with a character at or above
+ * U+0080 cannot be decoded reliably; the monitor does not compare it.
+ */
+export type SavedProxyEnvironment = Record<ProxyEnvironmentName, string | null | undefined>;
 export interface WindowsProxyEnvironmentSnapshot {
     user: SavedProxyEnvironment;
     machine: SavedProxyEnvironment;
 }
 
-// Fixed input only. Neither proxy values nor exception details enter argv/logs.
-export const READ_PROXY_ENVIRONMENT_SCRIPT = `
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$result = @{}
-foreach ($scope in @('User', 'Machine')) {
-    $values = @{}
-    foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')) {
-        $values[$name] = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]$scope)
-    }
-    $result[$scope.ToLowerInvariant()] = $values
-}
-ConvertTo-Json -InputObject $result -Compress
-`;
-
 const execFileAsync = promisify(execFile);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+type ExecFileAsync = (
+    file: string,
+    args: string[],
+    options: { encoding: 'utf8'; windowsHide: boolean; timeout: number; maxBuffer: number; signal: AbortSignal }
+) => Promise<{ stdout: string }>;
 
-export function parseWindowsProxyEnvironment(stdout: string): WindowsProxyEnvironmentSnapshot {
-    const result: unknown = JSON.parse(stdout);
-    if (!isRecord(result)) {
-        throw new Error('Invalid environment response');
+// The key each scope is saved under: the name `reg query` is given, and the
+// path it prints as the header of its output.
+const ENVIRONMENT_KEYS = {
+    user: { query: 'HKCU\\Environment', header: 'HKEY_CURRENT_USER\\Environment' },
+    machine: {
+        query: 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+        header: 'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
     }
-    for (const scope of ['user', 'machine']) {
-        const values = result[scope];
-        if (!isRecord(values) || !PROXY_ENVIRONMENT_NAMES.every(name =>
-            Object.hasOwn(values, name) && (values[name] === null || typeof values[name] === 'string'))) {
-            throw new Error('Incomplete environment response');
+} as const;
+
+/**
+ * `    <name>    REG_<TYPE>    <value>`: exactly four spaces between the parts,
+ * so leading spaces of a value are kept, and an empty value may omit the last
+ * separator. The `s` flag keeps a raw line feed inside a value. Static and
+ * linear, so untrusted registry text cannot steer it.
+ */
+const REG_VALUE_LINE = /^ {4}(.+?) {4}(REG_[A-Z0-9_]+)(?: {4}(.*))?$/s;
+const NON_ASCII = /[\u0080-\u{10FFFF}]/u;
+
+/**
+ * `ExpandEnvironmentStrings`: `%NAME%` becomes its value (names are
+ * case-insensitive); an unknown name copies `%NAME` and resumes at its closing
+ * `%`, which can open the next name; a lone `%` stays.
+ */
+function expandEnvironmentStrings(text: string, environment: NodeJS.ProcessEnv): string {
+    const values = new Map<string, string>();
+    for (const [name, value] of Object.entries(environment)) {
+        if (value !== undefined) {
+            values.set(name.toUpperCase(), value);
         }
     }
-    return result as unknown as WindowsProxyEnvironmentSnapshot;
+    let expanded = '';
+    let position = 0;
+    while (position < text.length) {
+        const open = text.indexOf('%', position);
+        const close = open === -1 ? -1 : text.indexOf('%', open + 1);
+        if (close === -1) {
+            expanded += text.slice(position);
+            break;
+        }
+        expanded += text.slice(position, open);
+        const value = values.get(text.slice(open + 1, close).toUpperCase());
+        if (value === undefined) {
+            expanded += text.slice(open, close);
+            position = close;
+        } else {
+            expanded += value;
+            position = close + 1;
+        }
+    }
+    return expanded;
 }
 
-export async function readWindowsProxyEnvironment(signal: AbortSignal): Promise<WindowsProxyEnvironmentSnapshot> {
-    const { stdout } = await execFileAsync('powershell.exe', [
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', READ_PROXY_ENVIRONMENT_SCRIPT
-    ], { encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024, signal });
-    return parseWindowsProxyEnvironment(stdout);
+/**
+ * The four proxy variables of one key, from the output of `reg query <key>`
+ * (decoded as UTF-8). It throws, with a fixed message, when the output is not
+ * that key's listing or names a variable twice: a failed read must never pass
+ * for an absent variable. Lines after the header that are not value lines (a
+ * subkey path, the continuation of another variable's multi-line value) are
+ * skipped, and so are the key's other variables. REG_SZ gives its text,
+ * REG_EXPAND_SZ the text expanded with `expansionEnvironment`, and any other
+ * type `null` (`GetEnvironmentVariable` reads those as null too). The error
+ * never carries output text: values may be credentials.
+ */
+export function parseRegQueryEnvironment(
+    stdout: string,
+    keyPath: string,
+    expansionEnvironment: NodeJS.ProcessEnv = process.env
+): SavedProxyEnvironment {
+    const lines = stdout.split('\r\n');
+    const header = lines.findIndex(line => line.trim() !== '');
+    if (header === -1 || lines[header].toUpperCase() !== keyPath.toUpperCase()) {
+        throw new Error('Unexpected reg query output');
+    }
+    const saved: SavedProxyEnvironment = { HTTP_PROXY: null, HTTPS_PROXY: null, ALL_PROXY: null, NO_PROXY: null };
+    const seen = new Set<string>();
+    for (const line of lines.slice(header + 1)) {
+        const match = REG_VALUE_LINE.exec(line);
+        const name = match?.[1].toUpperCase() as ProxyEnvironmentName | undefined;
+        if (!match || !name || !PROXY_ENVIRONMENT_NAMES.includes(name)) {
+            continue;
+        }
+        if (seen.has(name)) {
+            throw new Error('Duplicate variable in reg query output');
+        }
+        seen.add(name);
+        const [, , type, raw = ''] = match;
+        if (type !== 'REG_SZ' && type !== 'REG_EXPAND_SZ') {
+            continue;
+        }
+        if (NON_ASCII.test(raw)) {
+            saved[name] = undefined;
+        } else {
+            saved[name] = type === 'REG_EXPAND_SZ' ? expandEnvironmentStrings(raw, expansionEnvironment) : raw;
+        }
+    }
+    return saved;
+}
+
+// Fixed input only. Neither proxy values nor exception details enter argv/logs.
+// Whole-key queries, one process at a time: the key lists every variable, so
+// the buffer is sized for a 32,767-character PATH.
+export async function readWindowsProxyEnvironment(
+    signal: AbortSignal,
+    exec: ExecFileAsync = execFileAsync
+): Promise<WindowsProxyEnvironmentSnapshot> {
+    const query = async (scope: keyof typeof ENVIRONMENT_KEYS): Promise<SavedProxyEnvironment> => {
+        const { stdout } = await exec('reg', ['query', ENVIRONMENT_KEYS[scope].query], {
+            encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 256 * 1024, signal
+        });
+        return parseRegQueryEnvironment(stdout, ENVIRONMENT_KEYS[scope].header);
+    };
+    const user = await query('user');
+    return { user, machine: await query('machine') };
 }
 
 interface WatchOptions {
@@ -111,6 +198,11 @@ export class WindowsProxyEnvironmentMonitor {
     }
 
     private async readAndCompare(): Promise<void> {
+        // The monitor only notifies: with notifications off there is nothing to
+        // read, so no process is started and nothing is observed.
+        if (this.options.canNotify?.() === false) {
+            return;
+        }
         try {
             const snapshot = await (this.options.read ?? readWindowsProxyEnvironment)(this.abort.signal);
             if (this.disposed) {
@@ -121,7 +213,13 @@ export class WindowsProxyEnvironmentMonitor {
             const processValues = new Map(Object.entries(environment).map(([name, value]) => [name.toUpperCase(), value]));
             const mismatches: Array<[ProxyEnvironmentName, string | null, string | null]> = [];
             for (const name of PROXY_ENVIRONMENT_NAMES) {
-                const saved = snapshot.user[name] || snapshot.machine[name];
+                // An unknown value (undefined) is neither compared nor observed;
+                // an unset or empty user value defers to the machine value.
+                const user = snapshot.user[name];
+                const saved = user === undefined ? undefined : user || snapshot.machine[name];
+                if (saved === undefined) {
+                    continue;
+                }
                 if (saved !== null) {
                     this.observed.add(name);
                 }

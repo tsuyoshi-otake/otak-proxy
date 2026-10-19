@@ -116,52 +116,36 @@ suite('PlatformProxyDetection Auto-config (#58)', () => {
     });
 
     suite('detectLinuxProxy', () => {
-        test('mode=none is none', async () => {
-            const exec: CommandExecutor = async (_command, args) => {
-                if (args.includes('mode')) {
-                    return { stdout: `'none'`, stderr: '' };
-                }
-                throw new Error(`unexpected gsettings args: ${args.join(' ')}`);
-            };
+        const listing = (...lines: string[]): CommandExecutor => async (_command, args) => {
+            assert.deepStrictEqual(args, ['list-recursively', 'org.gnome.system.proxy']);
+            return { stdout: `${lines.join('\n')}\n`, stderr: '' };
+        };
 
-            const result = await detectLinuxProxy(exec);
+        test('mode=none is none', async () => {
+            const result = await detectLinuxProxy(listing("org.gnome.system.proxy mode 'none'"));
             assert.strictEqual(result.proxyUrl, null);
             assert.strictEqual(result.kind, 'direct');
             assert.notStrictEqual(result.capability, 'unsupported');
         });
 
         test('mode=manual with host/port returns a URL', async () => {
-            const exec: CommandExecutor = async (_command, args) => {
-                if (args.includes('mode')) {
-                    return { stdout: `'manual'`, stderr: '' };
-                }
-                if (args.includes('host')) {
-                    return { stdout: `'proxy.example.com'`, stderr: '' };
-                }
-                if (args.includes('port')) {
-                    return { stdout: '8080', stderr: '' };
-                }
-                throw new Error(`unexpected gsettings args: ${args.join(' ')}`);
-            };
-
-            const result = await detectLinuxProxy(exec);
+            const result = await detectLinuxProxy(listing(
+                "org.gnome.system.proxy mode 'manual'",
+                "org.gnome.system.proxy.http host 'proxy.example.com'",
+                'org.gnome.system.proxy.http port 8080',
+                "org.gnome.system.proxy.https host ''",
+                'org.gnome.system.proxy.https port 0'
+            ));
             assert.strictEqual(result.proxyUrl, 'http://proxy.example.com:8080');
             assert.strictEqual(result.kind, 'singleProxy');
             assert.strictEqual(result.capability, 'supported');
         });
 
         test('mode=auto is unsupported PAC, not none', async () => {
-            const exec: CommandExecutor = async (_command, args) => {
-                if (args.includes('mode')) {
-                    return { stdout: `'auto'`, stderr: '' };
-                }
-                if (args.includes('autoconfig-url')) {
-                    return { stdout: `'http://pac.example.com/proxy.pac'`, stderr: '' };
-                }
-                throw new Error(`unexpected gsettings args: ${args.join(' ')}`);
-            };
-
-            const result = await detectLinuxProxy(exec);
+            const result = await detectLinuxProxy(listing(
+                "org.gnome.system.proxy mode 'auto'",
+                "org.gnome.system.proxy autoconfig-url 'http://pac.example.com/proxy.pac'"
+            ));
             assert.strictEqual(result.proxyUrl, null);
             assert.strictEqual(result.kind, 'pac');
             assert.strictEqual(result.capability, 'unsupported');

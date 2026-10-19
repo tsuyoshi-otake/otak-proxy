@@ -1,13 +1,34 @@
 import * as assert from 'assert';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { I18nManager } from '../i18n/I18nManager';
 import { SystemProxyDetector } from '../config/SystemProxyDetector';
 import { startWindowsProxyEnvironmentNotification } from '../monitoring/WindowsProxyEnvironmentNotification';
 import {
-    parseWindowsProxyEnvironment, readWindowsProxyEnvironment,
+    PROXY_ENVIRONMENT_NAMES, readWindowsProxyEnvironment,
     WindowsProxyEnvironmentMonitor, WindowsProxyEnvironmentSnapshot
 } from '../monitoring/WindowsProxyEnvironment';
+
+const execFileAsync = promisify(execFile);
+
+// Test-only oracle: the read the monitor used before #108 (PowerShell and
+// [Environment]::GetEnvironmentVariable), kept to compare snapshots on the
+// real registry. Fixed input only.
+const POWERSHELL_ORACLE_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$result = @{}
+foreach ($scope in @('User', 'Machine')) {
+    $values = @{}
+    foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')) {
+        $values[$name] = [Environment]::GetEnvironmentVariable($name, [EnvironmentVariableTarget]$scope)
+    }
+    $result[$scope.ToLowerInvariant()] = $values
+}
+ConvertTo-Json -InputObject $result -Compress
+`;
 
 suite('WindowsProxyEnvironment integration', () => {
     let sandbox: sinon.SinonSandbox;
@@ -25,7 +46,7 @@ suite('WindowsProxyEnvironment integration', () => {
         saved = { user: { ...empty }, machine: { ...empty } };
         saved.user.HTTP_PROXY = 'http://notification-user:notification-secret@notify.invalid:9080';
         saved.machine.NO_PROXY = 'notification-only.invalid';
-        read = sandbox.stub().callsFake(async () => parseWindowsProxyEnvironment(JSON.stringify(saved)));
+        read = sandbox.stub().callsFake(async () => saved);
         I18nManager.getInstance().initialize('ja');
     });
     teardown(() => { monitor?.dispose(); monitor = undefined; sandbox.restore(); });
@@ -81,6 +102,7 @@ suite('WindowsProxyEnvironment integration', () => {
         monitor = startWindowsProxyEnvironmentNotification(read);
         await monitor?.check();
         assert.strictEqual(warning.callCount, 0);
+        assert.strictEqual(read.callCount, 0, 'with notifications off nothing is read');
     });
 
     test('does not launch a reader on remote or non-Windows hosts', () => {
@@ -93,11 +115,30 @@ suite('WindowsProxyEnvironment integration', () => {
         assert.strictEqual(read.callCount, 0);
     });
 
-    test('real Windows PowerShell read obeys the JSON protocol without modifying OS settings', async function () {
+    test('real reg query read has the snapshot shape and agrees with the PowerShell read it replaced (read-only)', async function () {
         if (process.platform !== 'win32') { this.skip(); }
+        this.timeout(30_000);
+        const { stdout } = await execFileAsync('powershell.exe', [
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', POWERSHELL_ORACLE_SCRIPT
+        ], { encoding: 'utf8', windowsHide: true, timeout: 20_000, maxBuffer: 64 * 1024 });
+        const oracle = JSON.parse(stdout) as Record<'user' | 'machine', Record<string, string | null>>;
+
         const result = await readWindowsProxyEnvironment(new AbortController().signal);
-        // Do not include OS values in assertion failure output.
-        assert.strictEqual(typeof result.user, 'object');
-        assert.strictEqual(typeof result.machine, 'object');
+
+        // Never put an OS value in an assertion: compare, then report names only.
+        const mismatching: string[] = [];
+        let unknown = 0;
+        for (const scope of ['user', 'machine'] as const) {
+            for (const name of PROXY_ENVIRONMENT_NAMES) {
+                const value = result[scope][name];
+                assert.ok(value === null || value === undefined || typeof value === 'string', `${scope}.${name} has the wrong type`);
+                if (value === undefined) {
+                    unknown++;
+                } else if (value !== oracle[scope][name]) {
+                    mismatching.push(`${scope}.${name}`);
+                }
+            }
+        }
+        assert.deepStrictEqual(mismatching, [], `${unknown} of 8 values were unknown and excluded`);
     });
 });

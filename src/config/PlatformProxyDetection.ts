@@ -323,10 +323,49 @@ function isGsettingsNotApplicable(error: unknown): boolean {
         || GSETTINGS_NO_SCHEMA_PATTERN.test(String(message ?? ''));
 }
 
+/** The GNOME proxy schema and its children (`.http`, `.https`, ...) in one listing. */
+const GNOME_PROXY_SCHEMA = 'org.gnome.system.proxy';
+
+/** The settings detection reads, by dotted key; every other key of the listing is ignored. */
+const GNOME_PROXY_KEYS: ReadonlySet<string> = new Set([
+    'mode', 'autoconfig-url', 'http.host', 'http.port', 'https.host', 'https.port'
+]);
+
+/**
+ * `gsettings list-recursively` prints `<schema> <key> <value>` per key, with the
+ * value as `g_variant_print` shows it, which is the text `gsettings get` prints
+ * for that key. A child schema prints its own id, so `http.host` is the line
+ * `org.gnome.system.proxy.http host '...'`. A line that does not have that shape
+ * fails the parse with a fixed message: a line may carry a credential, so none
+ * of its content enters the error.
+ */
+function parseGnomeProxySettings(stdout: string): Map<string, string> {
+    const settings = new Map<string, string>();
+    for (const line of stdout.split(/\r?\n/)) {
+        if (!line.trim()) {
+            continue;
+        }
+        const keyStart = line.indexOf(' ') + 1;
+        const valueStart = keyStart === 0 ? -1 : line.indexOf(' ', keyStart) + 1;
+        if (valueStart <= 0) {
+            throw new Error('Unexpected gsettings list-recursively output');
+        }
+        const schema = line.slice(0, keyStart - 1);
+        const key = line.slice(keyStart, valueStart - 1);
+        const dotted = schema === GNOME_PROXY_SCHEMA
+            ? key
+            : schema.startsWith(`${GNOME_PROXY_SCHEMA}.`) ? `${schema.slice(GNOME_PROXY_SCHEMA.length + 1)}.${key}` : undefined;
+        if (dotted && GNOME_PROXY_KEYS.has(dotted)) {
+            settings.set(dotted, line.slice(valueStart));
+        }
+    }
+    return settings;
+}
+
 export async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDetectionWithSource> {
-    let mode: string;
+    let stdout: string;
     try {
-        ({ stdout: mode } = await exec('gsettings', ['get', 'org.gnome.system.proxy', 'mode'], GSETTINGS_OPTIONS));
+        ({ stdout } = await exec('gsettings', ['list-recursively', GNOME_PROXY_SCHEMA], GSETTINGS_OPTIONS));
     } catch (error) {
         if (isGsettingsNotApplicable(error)) {
             Logger.debug('gsettings or the GNOME proxy schema is not available; no GNOME proxy setting:', error);
@@ -337,16 +376,15 @@ export async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDete
     }
 
     try {
+        const settings = parseGnomeProxySettings(stdout);
+        // Only the mode value decides auto and manual: another key may contain either word.
+        const mode = settings.get('mode');
+        if (mode === undefined) {
+            throw new Error('The gsettings listing has no proxy mode');
+        }
 
         if (mode.includes('auto')) {
-            let autoConfigUrl: string | undefined;
-            try {
-                const { stdout: rawUrl } = await exec('gsettings', ['get', 'org.gnome.system.proxy', 'autoconfig-url'], GSETTINGS_OPTIONS);
-                const cleaned = rawUrl.replace(/'/g, '').trim();
-                autoConfigUrl = cleaned || undefined;
-            } catch {
-                autoConfigUrl = undefined;
-            }
+            const autoConfigUrl = (settings.get('autoconfig-url') ?? '').replace(/'/g, '').trim() || undefined;
             return {
                 proxyUrl: null,
                 source: 'linux',
@@ -367,8 +405,8 @@ export async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDete
             return noneDetection();
         }
 
-        const http = await readGnomeSchemeProxy(exec, 'http');
-        const https = await readGnomeSchemeProxy(exec, 'https');
+        const http = readGnomeSchemeProxy(settings, 'http');
+        const https = readGnomeSchemeProxy(settings, 'https');
         // One scheme unreadable still lets the other one's proxy through; with
         // no proxy found, an unreadable scheme leaves "no proxy" unproven.
         if (!http.url && !https.url && (http.failed || https.failed)) {
@@ -385,18 +423,18 @@ export async function detectLinuxProxy(exec: CommandExecutor): Promise<ProxyDete
     }
 }
 
-async function readGnomeSchemeProxy(
-    exec: CommandExecutor,
+/** A scheme whose host or port is missing from the listing counts as unreadable. */
+function readGnomeSchemeProxy(
+    settings: ReadonlyMap<string, string>,
     scheme: 'http' | 'https'
-): Promise<{ url?: string; failed: boolean }> {
-    try {
-        const { stdout: host } = await exec('gsettings', ['get', `org.gnome.system.proxy.${scheme}`, 'host'], GSETTINGS_OPTIONS);
-        const { stdout: port } = await exec('gsettings', ['get', `org.gnome.system.proxy.${scheme}`, 'port'], GSETTINGS_OPTIONS);
-        const cleanHost = host.replace(/'/g, '').trim();
-        const cleanPort = port.trim();
-        return { url: cleanHost && cleanPort !== '0' ? `http://${cleanHost}:${cleanPort}` : undefined, failed: false };
-    } catch (error) {
-        Logger.debug(`GNOME ${scheme} proxy query failed:`, error);
+): { url?: string; failed: boolean } {
+    const host = settings.get(`${scheme}.host`);
+    const port = settings.get(`${scheme}.port`);
+    if (host === undefined || port === undefined) {
+        Logger.debug(`GNOME ${scheme} proxy host or port is missing from the gsettings listing`);
         return { failed: true };
     }
+    const cleanHost = host.replace(/'/g, '').trim();
+    const cleanPort = port.trim();
+    return { url: cleanHost && cleanPort !== '0' ? `http://${cleanHost}:${cleanPort}` : undefined, failed: false };
 }
