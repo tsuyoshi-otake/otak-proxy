@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [3.2.17] - 2026-10-19
 
 ### Security
 - Release pipeline hardening: the invisible-Unicode scanner no longer skips a text file because it contains a NUL byte, fails when a run scans zero files, covers the full Unicode 16.0 Default_Ignorable code point table plus U+2800, and gains a `--dir` mode that CI and the publish workflow use to scan the packaged VSIX itself, not only its sources. The scanner no longer trusts file extensions: a binary file is skipped only when its content carries the PNG or MP3 signature, a file that cannot be read or a directory entry that is not a regular file fails the scan, and a repository-mode candidate that is missing from the working tree is reported as missing instead of silently ignored. The publish workflow now runs only on pushed `v*` tags: it verifies the tag matches `package.json` and sits on `main`, checks both registry tokens before anything publishes, pins every action to a commit SHA, publishes the same artifact to each registry in its own job, and no longer passes `--skip-duplicate`, so re-publishing an existing version fails instead of passing silently. Pull requests now run the same lint, tests, packaging and dependency audit in CI, and Dependabot proposes weekly npm and GitHub Actions updates with a three-day cooldown (#108).
