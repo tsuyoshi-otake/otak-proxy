@@ -2264,3 +2264,25 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
   - 以前のバージョンがリモートウィンドウから書いた値は、もう外さない。手で消す必要がある。
   - ローカルとリモートが同時に書くと、記録を失うことがある（安全側: Off は値を残す）。
   - 本物のリモートウィンドウでは試していない。
+
+## 2026-10-19 — #108 v3.2.17 を公開する
+
+**Issue**: #108（#78 を含む）
+**PR**: #128（リリース）、修正は #109–#114、#120–#127
+**コミット**: `9bafb1f`（version）、tag `v3.2.17` は main の `a5836cf`
+**分担**: Claude Code が version を上げ、tag を push し、公開と GitHub release を確認した。
+
+- 症状: 2026-10-18 の監査で見つかった問題（#108 の 13 行、#78）が main に揃った。
+- 修正: `npm version 3.2.17 --no-git-tag-version`、CHANGELOG の `[Unreleased]` を `[3.2.17] - 2026-10-19` にした。PR #128 の CI が通ってからマージし、main のマージコミットに annotated tag を付けた。
+- レビューで直した点（リリース前の CI）:
+  - T09 のテスト「a head that keeps trickling is cut by the parallel overall timeout」が Linux CI で 2 回落ちた（PR #126 は予算 200 ms、PR #127 は 1000 ms）。どちらも socket の無通信タイムアウトが全体タイマーより先に切った。
+  - 1 回目は「CI 機が止まった」と診断し、予算を広げた（`4ec0708`）。2 回目の失敗で、この診断が誤りだと分かった。
+  - 仕組みは特定できていない（Windows / Node 26 では再現せず、Linux 環境がない）。テストは約束（timeout で上限内に終わり、socket を閉じる）だけを assert するように変え、全体タイマーの分岐は `connectThroughProxy` を決して終わらない fake にした決定的なテストで確かめた（`9015e1c`）。
+- Verification:
+  - 公開 workflow（run 39194322260）: Check registry tokens、Verify ref, test and package、Marketplace、Open VSX の 4 job が成功。ログに両方の `Published odangoo.otak-proxy v3.2.17`。
+  - Open VSX の API が 3.2.17 を返した（HTTP 200）。GitHub release に VSIX（SHA-256 `66305C1B…615A7`）を付けた。
+- Learning: タイミングで落ちるテストを直す前に、どのタイマーが勝ったかと、その仕組みを確かめる。予算を広げるだけの修正は、仕組みが違えば次の CI でまた落ちる。仕組みが分からないときは、テストを約束に絞り、分岐は fake で決定的に確かめる。
+- 残留リスク:
+  - Linux で socket の無通信タイムアウトが先に発火する仕組みは未解明。
+  - npm audit は CI で high 18 件（既存）。
+  - host lane の既知の失敗 7 件は CI で流していない。
