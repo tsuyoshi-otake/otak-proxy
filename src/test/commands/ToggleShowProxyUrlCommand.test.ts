@@ -75,7 +75,7 @@ suite('ToggleShowProxyUrlCommand Unit Tests', () => {
                 counters.statusBarUpdates++;
                 statusBarCalls.push(s);
             },
-            checkAndUpdateSystemProxy: async () => {},
+            checkAndUpdateSystemProxy: async () => 'completed' as const,
             startSystemProxyMonitoring: async () => {},
             stopSystemProxyMonitoring: async () => {},
             userNotifier: {

@@ -853,8 +853,9 @@ suite('SystemProxyUpdateService Tests', () => {
             state = { ...seed };
             detectStub.resolves(unknownDetection);
 
-            await service.checkAndUpdateSystemProxy();
+            const outcome = await service.checkAndUpdateSystemProxy();
 
+            assert.strictEqual(outcome, 'detectionFailed', 'callers can tell a failed query from no proxy');
             assert.deepStrictEqual(state, seed, 'state is exactly what it was');
             sinon.assert.notCalled(saveStateStub);
             sinon.assert.notCalled(applyProxyStub);

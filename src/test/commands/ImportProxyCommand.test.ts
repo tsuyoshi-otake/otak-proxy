@@ -114,7 +114,7 @@ suite('ImportProxyCommand Unit Tests', () => {
                 counters.statusBarUpdates++;
                 statusBarStates.push({ ...next });
             },
-            checkAndUpdateSystemProxy: async () => {},
+            checkAndUpdateSystemProxy: async () => 'completed' as const,
             startSystemProxyMonitoring: async () => {
                 counters.monitoringStarts++;
             },

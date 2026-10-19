@@ -178,7 +178,7 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
                 updateStatusBar: () => { events.push('statusBar'); },
                 checkAndUpdateSystemProxy: async () => {
                     if (!options?.detectedUrl) {
-                        return;
+                        return 'completed';
                     }
                     // The detection path committing under the toggle is the
                     // benign revision/test-field writer the CAS loop must fold
@@ -190,6 +190,7 @@ suite('ToggleProxyCommand commits the desired mode before apply (#78)', () => {
                         lastDetectionSource: 'windows',
                         ...options.detectedFields
                     });
+                    return 'completed';
                 },
                 startSystemProxyMonitoring: async () => {
                     events.push('monitorStart');

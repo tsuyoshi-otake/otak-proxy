@@ -117,9 +117,24 @@ export async function detectWindowsProxy(exec: CommandExecutor): Promise<ProxyDe
 
         return noneDetection();
     } catch (error) {
+        if (isMissingRegistryKey(error)) {
+            // No Internet Settings key: nothing configures a WinINet proxy.
+            return noneDetection();
+        }
         Logger.error('Windows registry query failed:', error);
         return unknownDetection();
     }
+}
+
+/**
+ * `reg query` on an absent key exits 1 with this text. It is localized, so on
+ * a non-English Windows a missing key stays `unknown` (the safe side).
+ */
+const REG_MISSING_KEY_PATTERN = /unable to find the specified registry key/i;
+
+function isMissingRegistryKey(error: unknown): boolean {
+    const { message, stderr } = (error ?? {}) as { message?: unknown; stderr?: unknown };
+    return [message, stderr].some(text => typeof text === 'string' && REG_MISSING_KEY_PATTERN.test(text));
 }
 
 /**
@@ -174,17 +189,16 @@ export function parseMacOSNetworkServices(stdout: string): string[] {
 
 interface MacNetworkServices {
     services: string[];
-    /** The list command failed or listed nothing, so the names are guesses. */
+    /** The list command failed, so the names are guesses. */
     usedFallback: boolean;
 }
 
 async function listMacOSNetworkServices(exec: CommandExecutor): Promise<MacNetworkServices> {
     try {
         const { stdout } = await exec('networksetup', ['-listallnetworkservices']);
-        const services = parseMacOSNetworkServices(stdout);
-        if (services.length > 0) {
-            return { services, usedFallback: false };
-        }
+        // A successful list with no enabled service is an answer: there is no
+        // service that could carry a proxy, so nothing is guessed (#108).
+        return { services: parseMacOSNetworkServices(stdout), usedFallback: false };
     } catch (error) {
         Logger.debug('networksetup -listallnetworkservices failed; falling back to well-known names:', error);
     }

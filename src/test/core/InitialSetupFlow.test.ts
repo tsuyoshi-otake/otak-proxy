@@ -329,15 +329,32 @@ suite('InitialSetupFlow Tests', () => {
             assert.strictEqual(state.mode, ProxyMode.Auto);
         });
 
-        test('configure manually runs the Configure command and finishes the setup', async () => {
+        test('configure manually runs the Configure command and finishes the setup once a URL is set', async () => {
+            showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
+            showWarningMessageStub.resolves(i18n.t('action.configureManual'));
+            detectStub.resolves('unknown');
+            executeCommandStub.withArgs('otak-proxy.configureUrl').callsFake(async () => {
+                state = { ...state, manualProxyUrl: 'http://manual.example:8080' };
+            });
+
+            const finished = await flow.askForInitialSetup();
+
+            assert.strictEqual(finished, true);
+            sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
+            assert.deepStrictEqual(recordedApplyCalls, [{ url: 'http://manual.example:8080', enabled: true }]);
+        });
+
+        test('configure manually, then cancelling the URL prompt, leaves the setup unfinished', async () => {
             showInformationMessageStub.onFirstCall().resolves(i18n.t('action.autoSystem'));
             showWarningMessageStub.resolves(i18n.t('action.configureManual'));
             detectStub.resolves('unknown');
 
             const finished = await flow.askForInitialSetup();
 
-            assert.strictEqual(finished, true);
+            assert.strictEqual(finished, false, 'nothing configured: offered again on the next start');
             sinon.assert.calledWith(executeCommandStub, 'otak-proxy.configureUrl');
+            sinon.assert.notCalled(applyProxyStub);
+            assert.strictEqual(state.mode, ProxyMode.Off);
         });
     });
 

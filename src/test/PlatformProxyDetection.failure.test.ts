@@ -41,6 +41,19 @@ suite('Failed platform query is not "no proxy" (#108)', () => {
             assert.deepStrictEqual(result, { proxyUrl: null, source: null, kind: 'unknown' });
         });
 
+        test('a missing Internet Settings key is direct, not unknown', async () => {
+            const exec: CommandExecutor = async () => {
+                throw commandError('Command failed: reg query', {
+                    stderr: 'ERROR: The system was unable to find the specified registry key or value.\r\n'
+                });
+            };
+
+            const result = await detectWindowsProxy(exec);
+
+            assert.strictEqual(result.kind, 'direct');
+            assert.strictEqual(result.proxyUrl, null);
+        });
+
         test('a timed-out reg query is unknown', async () => {
             const exec: CommandExecutor = async () => {
                 throw Object.assign(new Error('spawn reg ETIMEDOUT'), { killed: true, signal: 'SIGTERM' });
@@ -232,6 +245,25 @@ suite('Failed platform query is not "no proxy" (#108)', () => {
             };
 
             assert.deepStrictEqual(await detectMacOSProxy(exec), { proxyUrl: null, source: null, kind: 'unknown' });
+        });
+
+        test('a list that succeeds with no enabled service is direct and guesses no service names', async () => {
+            const queried: string[] = [];
+            const exec: CommandExecutor = async (_command, args) => {
+                if (args.includes('-listallnetworkservices')) {
+                    return {
+                        stdout: 'An asterisk (*) denotes that a network service is disabled.\n*Wi-Fi\n',
+                        stderr: ''
+                    };
+                }
+                queried.push(args.join(' '));
+                throw commandError('Command failed: networksetup');
+            };
+
+            const result = await detectMacOSProxy(exec);
+
+            assert.strictEqual(result.kind, 'direct');
+            assert.deepStrictEqual(queried, [], 'no fallback service is queried');
         });
 
         test('a failing list with answering fallback services is none', async () => {

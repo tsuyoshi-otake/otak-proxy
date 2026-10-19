@@ -200,8 +200,9 @@ export class InitialSetupFlow {
                 return await this.handleAutoSetup(state, i18n, initialStateSignature);
             }
             if (action === i18n.t('action.configureManual')) {
-                await this.configureFallbackProxy(initialStateSignature);
-                return true;
+                // Cancelling the URL prompt configures nothing, so the setup
+                // stays unfinished like a dismissed warning.
+                return await this.configureFallbackProxy(initialStateSignature);
             }
             return false;
         }
@@ -218,18 +219,25 @@ export class InitialSetupFlow {
         return true;
     }
 
-    private async configureFallbackProxy(initialStateSignature: string): Promise<void> {
+    /**
+     * `true` when the setup is settled: a fallback proxy is configured, or
+     * another writer changed the state first. `false` when the user configured
+     * nothing (for example cancelled the URL prompt).
+     */
+    private async configureFallbackProxy(initialStateSignature: string): Promise<boolean> {
         if (!await this.continueIfSetupStateCurrent(initialStateSignature)) {
-            return;
+            return true;
         }
         await vscode.commands.executeCommand('otak-proxy.configureUrl');
         const updatedState = await this.context.proxyStateManager.getState();
-        if (updatedState.manualProxyUrl) {
-            this.useAutoProxy(updatedState, updatedState.manualProxyUrl, true);
-            await this.context.proxyStateManager.saveState(updatedState);
-            await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
-            this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
+        if (!updatedState.manualProxyUrl) {
+            return false;
         }
+        this.useAutoProxy(updatedState, updatedState.manualProxyUrl, true);
+        await this.context.proxyStateManager.saveState(updatedState);
+        await applyProxyThroughContext(this.context, updatedState.manualProxyUrl, true);
+        this.context.updateStatusBar?.(await this.context.proxyStateManager.getState());
+        return true;
     }
 
     private async handleManualSetup(

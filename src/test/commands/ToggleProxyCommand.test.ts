@@ -7,7 +7,7 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { executeToggleProxy } from '../../commands/ToggleProxyCommand';
 import { CommandContext } from '../../commands/types';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, SystemProxyCheckOutcome } from '../../core/types';
 import { ProxyRuntimeDiagnostics } from '../../diagnostics/ProxyRuntimeDiagnostics';
 import { I18nManager } from '../../i18n/I18nManager';
 import { ApplyLockService } from '../../remediation/ApplyLockService';
@@ -60,7 +60,7 @@ suite('ToggleProxyCommand Unit Tests', () => {
 
     function createContext(
         initialState: ProxyState,
-        checkAndUpdateSystemProxy: () => Promise<void>,
+        checkAndUpdateSystemProxy: () => Promise<SystemProxyCheckOutcome | void>,
         applyProxySettings?: (url: string, enabled: boolean) => Promise<boolean>
     ): {
         ctx: CommandContext;
@@ -111,7 +111,7 @@ suite('ToggleProxyCommand Unit Tests', () => {
             updateStatusBar: (next) => {
                 statusBarStates.push({ ...next });
             },
-            checkAndUpdateSystemProxy,
+            checkAndUpdateSystemProxy: async () => (await checkAndUpdateSystemProxy()) ?? 'completed',
             startSystemProxyMonitoring: async () => { monitorCalls.push('start'); },
             stopSystemProxyMonitoring: async () => { monitorCalls.push('stop'); },
             userNotifier: {
@@ -151,6 +151,24 @@ suite('ToggleProxyCommand Unit Tests', () => {
             enabled: true
         });
         assert.deepStrictEqual(monitorCalls, ['start']);
+    });
+
+    test('Off to Auto when detection fails: the mode stays Off, nothing is written, no fallback or no-proxy prompt (#108)', async () => {
+        // With a manual URL and enableFallback on, treating "unknown" as "no
+        // proxy" would test and engage the fallback or turn Auto OFF.
+        const initial: ProxyState = { mode: ProxyMode.Off, manualProxyUrl: 'http://127.0.0.1:9' };
+        const { ctx, getState, applyCalls, monitorCalls } = createContext(
+            initial,
+            async () => 'detectionFailed'
+        );
+
+        const result = await executeToggleProxy(ctx);
+
+        assert.strictEqual(result.success, false);
+        assert.deepStrictEqual(getState(), initial, 'nothing is committed');
+        assert.deepStrictEqual(applyCalls, []);
+        assert.deepStrictEqual(monitorCalls, []);
+        sinon.assert.calledOnceWithExactly(showWarningMessageStub, i18n.t('warning.detectionFailed'));
     });
 
     test('should switch from Auto to Off', async () => {

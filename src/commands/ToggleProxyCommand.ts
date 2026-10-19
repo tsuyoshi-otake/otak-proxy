@@ -355,6 +355,19 @@ async function supersedeToggle(ctx: CommandContext, latest: ProxyState): Promise
     return { success: true };
 }
 
+/**
+ * The OS query failed, so it is unknown whether a system proxy exists: that
+ * is not "no proxy", so neither the manual fallback nor the no-proxy setup
+ * prompt applies. The mode stays as it was and nothing is written (#108).
+ * The warning is not awaited, so the toggle queue is released at once.
+ */
+async function failToggleOnDetectionFailure(ctx: CommandContext, i18n: I18nManager): Promise<CommandResult> {
+    Logger.warn('Toggle to Auto stopped: system proxy detection failed; the mode is unchanged.');
+    void vscode.window.showWarningMessage(i18n.t('warning.detectionFailed'));
+    ctx.updateStatusBar(await ctx.getProxyState());
+    return { success: false };
+}
+
 /** `false` asks the caller for another round; a CommandResult ends the toggle. */
 async function runToggleRound(
     ctx: CommandContext,
@@ -371,7 +384,9 @@ async function runToggleRound(
     // the state as it stands afterwards, not on a snapshot taken before.
     const detectionRan = nextMode === ProxyMode.Auto && !basis.autoProxyUrl;
     if (detectionRan) {
-        await ctx.checkAndUpdateSystemProxy();
+        if (await ctx.checkAndUpdateSystemProxy() === 'detectionFailed') {
+            return failToggleOnDetectionFailure(ctx, i18n);
+        }
         basis = await ctx.getProxyState();
         if (basis.mode !== fromMode) {
             return supersedeToggle(ctx, basis);
