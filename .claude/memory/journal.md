@@ -2109,3 +2109,130 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - Verification: 新しい suite（bypass だけの変更 3 通り、HTTP 側だけの変更、同じ検出を bypass あり・なしで、Auto OFF のガード、`handleProxyChanged` と `checkAndUpdateSystemProxy` を同じ初期状態で動かす parity 表）。修正前の比較で 3 件 red（bypass だけ、HTTP 側だけ、parity の「bypass-only change: startup apply count」）。独立した verifier が 13 基準すべて合格（lint 0、unit 1218 + 74 passing・5 pending、host 616 passing・既知の 7 件だけ失敗、smoke 4）。
 - Learning: 「変わったか」の判定が複数の経路にあるなら、同じ関数で決め、parity 表で両方の経路を同じ入力から動かして比べる。片方だけ直すと、もう片方が古い規則のまま残る。
 - 残留リスク: 起動時と Auto への切り替えで、bypass だけの変更とスキームごとの変更に「system proxy changed」の通知が出るようになった（モニタと同じ）。`hasKnownConvergenceFailure` と `hasKnownEnableFailure` は、プロキシが検出されず対象が設定済みのときに食い違う（follow-up）。
+
+## 2026-10-19 — #108 項目 7 の検出側: OS への問い合わせが失敗したら「プロキシなし」ではなく unknown
+
+**Issue**: #108
+**PR**: #123
+**コミット**: `ae4fe37`、`b242542`、`d2f16ac`、`adc9992`
+**分担**: Devin が `ae4fe37` を実装した。Codex の 2 回のレビュー指摘への修正（`b242542`、`d2f16ac`）と、CI で見つかったマスクの漏れの修正（`adc9992`）は、Devin が使えなくなったあと Claude Code が書いて検証した。
+
+- 症状: Windows の `reg query`、Linux の `gsettings`、macOS の `networksetup` が失敗またはタイムアウトすると、検出は「プロキシなし」を返していた。Auto ではプロキシが外され、fallback に切り替わり、「system proxy removed」が出た。
+- 原因: プラットフォーム層が例外を握りつぶして `null`（direct）を返しており、「答えがない」と「プロキシがない」を区別していなかった。
+- 修正:
+  - 失敗は `kind: 'unknown'` にした。消費側はどれも最後の既知の値を保つ。
+    - モニタは失敗した試行として数える（retry、backoff、`allRetriesFailed`）。
+    - `SystemProxyUpdateService` は状態に触れない。
+    - Import は `warning.detectionFailed` を出す。
+    - 初回 setup は Configure Manual / Redetect を出し、何も設定されなければ次回の起動でもう一度聞く。
+  - 「該当なし」は none のまま: `gsettings` がない、GNOME のスキーマがない、`No schemas installed`、Windows の `Internet Settings` キーがない（英語の `reg` メッセージのみ）、macOS の一覧が成功して有効なサービスが 0。
+- レビューで直した点:
+  - Codex の 1 回目（`b242542`）:
+    - 世代 capture の失敗を、ライフサイクルが変わった後には数えない。
+    - 初回 setup の unknown 分岐を足した。
+    - `No schemas installed` を none にした。
+  - Codex の 2 回目（`d2f16ac`）:
+    - 初回 setup で Configure Manual を選んだあと URL の入力をキャンセルしたら、setup を終わったことにしない（未完了のまま）。
+    - macOS で一覧が空のとき、既定のサービス名を推測して問い合わせない。
+    - Windows でキーがないときは direct。
+    - Off→Auto の toggle が unknown を「なし」と読んで、fallback やプロキシ設定の案内に進んでいた。`checkAndUpdateSystemProxy` が `SystemProxyCheckOutcome` を返すようにし、toggle は `detectionFailed` を受け取ったら mode を変えず、何も書かずに警告する。
+  - CI（`adc9992`）: property テストの反例 `http://usra0a:80<TAB>#@haa.example`。URL パーサが TAB を落とすので、数字だけのパスワードが port として表示されていた（main にもある既存の漏れ）。`EMPTY_PORT_AUTHORITY` の対象を、数字の port の後ろに `@` が続く値まで広げた。
+- Verification:
+  - `d2f16ac` の新しい 4 行も、`adc9992` の決定的な表も、修正前のコードで red を確認した。
+  - lint 0。unit 1275 + 74 passing。host は既知の 7 件だけ失敗。smoke 4。
+  - 独立した verifier は、`git show` で読んで C1〜C5 と C7 を合格にした。C6（CI）は上の property 反例で fail で、修正後に CI を取り直した。
+- Learning:
+  - 「問い合わせが失敗した」は 3 つ目の結果として型に入れ、呼び出しの連鎖の最後（toggle、初回 setup）まで返す。途中で `void` に落とすと、上の層は「なし」と読んでしまう。
+  - URL パーサが TAB・LF・CR を落とすことは、マスクの分岐を決めるすべての判定で前提にする。
+- 残留リスク:
+  - 英語以外の Windows では、キーがないときも unknown のまま（安全側）。
+  - Codex は 3 回目の再レビューを利用上限で実行できなかった。代わりに独立した verifier で確認した。
+
+## 2026-10-19 — #108 CPU の追加分: 1 回のポーリングで起こすプロセスと SecretStorage の読み取りを減らす
+
+**Issue**: #108
+**PR**: #124
+**コミット**: `9b23eb6`（#123 に rebase した後の SHA）
+**分担**: sonnet の subagent が実装した。Claude Code がレビューし、検証してコミットした。
+
+- 症状:
+  - Windows の環境変数チェックは、ポーリングのたびに PowerShell を起動していた（中央値 795 ms）。
+  - Linux の検出は、キーごとに `gsettings get` を呼んでいた。
+  - `getState()` は同じ URL を SecretStorage から何度も読んでいた。
+- 原因: 1 回のチェックに必要な読み取りを、まとめていなかった。
+- 修正:
+  - Windows: HKCU、HKLM の順に、キー全体を `reg query` で 2 回読む（中央値 54 ms）。非 ASCII を含む値は「あるが不明」として扱い、比べない。通知が off の間は何も読まない。
+  - Linux: 1 回の検出で `gsettings list-recursively` を 1 回だけ呼ぶ。
+  - `hydrateStateForRuntime` はパスごとに memo を持ち、異なる URL ごとに 1 回だけ読む。
+- レビューで直させた点: なし（独立した verifier が 13 基準すべて合格）。Codex のレビューは利用上限で実行されなかった。
+- Verification:
+  - 古い per-key の fake と新しい単一呼び出しの fake に、同じ 14 行を通した。古いコードは新しい fake で 19 件 red。
+  - 通知 off の行は、修正前に「1 !== 0」で red。
+  - lint 0。unit 1308 + 74 passing。host は既知の 7 件だけ失敗。smoke 4。
+- Learning: 検出結果が同じことを示すには、古い実装と新しい実装に同じ入力の表を通す（oracle テスト）。
+- 残留リスク:
+  - 通知 off の間は何も読まないので、backoff した retry の遅延は、通知を戻したあと最初に読むまで残る。
+  - 改行を含む値は、行の途中で切れることがある。
+  - SecretStorage の一時的な失敗は、1 回のパスで同じ URL を指すすべてのフィールドに及ぶ。
+
+## 2026-10-19 — #108 接続テストを http.request ではなく自前の CONNECT 接続で行う
+
+**Issue**: #108
+**PR**: #125
+**コミット**: `e6734f9`、`5c65bba`
+**分担**: sonnet の subagent が実装した。Claude Code がレビューし、host テストの空振り対策の assertion を足して、検証とコミットを行った。
+
+- 症状: VS Code の中では `http`/`https` が proxy-agent に差し替えられていて、プロキシ A のテストが `http.proxy`（B）を経由することがあった。host で再現した。拒否するプロキシ A が、B からの `502 Bad Gateway`（`connectRejected`、`proxyEndpointOk: true`）として報告され、到達できないプロキシなのに Auto が OFF にならなかった。
+- 原因: 接続テストが、VS Code が差し替えるモジュールを通っていた。
+- 修正:
+  - `connectThroughProxy()` を作った。`http:` は `net.connect`、`https:` は `tls.connect`（`ca` なし、SNI はホスト名のときだけ）。CONNECT は自分で書き、応答ヘッダも自分で読む（16 KiB の上限、厳密な status 行）。拒否はすべて `classifyConnectError` を通す。
+  - 不正な応答ヘッダの kind は `unknown` から `protocol` に変わった（判定は同じ）。
+  - OS のストアにしかない CA で署名された https プロキシは `protocol` になる（README と CHANGELOG に記載）。
+- レビューで直させた点:
+  - 報告に、host 実行時の mode が書かれていなかった（verifier の C9 が fail）。
+  - 0 接続という assertion は、テストの途中で誰かが `http.proxy` を書き換えると空振りで通ってしまう。テストの後に `http.proxy` が recorder を指したままかを assert するようにした。
+- Verification:
+  - テスト 1、2 と host テスト 9 は、修正前に red（host: `connectRejected`、`http.proxy` への接続 1）。
+  - lint 0。unit 1333 + 74 passing。host は既知の 7 件だけ失敗（テスト 9 は pass）。smoke 4。
+  - 独立した verifier は、C9 以外の 14 基準を合格にした。
+- Learning: 「何も届かなかった」を assert するテストは、宛先がテストの最後まで同じだったことも assert する。そうしないと、宛先を誰かが動かしたときに空振りで通る。
+- 残留リスク:
+  - OS のストアだけで信頼される証明書と `systemCertificatesV2` は、VS Code の中で試していない。
+  - `127.0.0.2` がない macOS では、host テストが skip する。
+
+## 2026-10-19 — #108 正直な UI: Off の所有権が不明なら成功と言わない、npm はユーザー層だけ、同意はトグルのキューの外
+
+**Issue**: #108
+**PR**: #126
+**コミット**: `15cc3c4`
+**分担**: sonnet の subagent が実装した。Claude Code がレビューし、fail-before を旧ソースで取り、検証してコミットした。
+
+- 症状:
+  - Off で、認証情報付きの値の所有権を確かめられない（記録か HMAC 鍵がない）とき、値が残ったまま「プロキシを無効にしました」と出ていた。
+  - 認証情報の同意プロンプトを、トグルのキューの中で await していた。2 回目の apply はプロンプトが閉じるまで待った。
+  - npm の Off は、global / project 層にある値やユーザー設定ファイルがないことを失敗として扱った。
+  - `pollingInterval` / `maxRetries` が NaN だと `setInterval(NaN)` が 1 ms ごとに動いた。
+  - パラメータだけが違う 2 つの成功メッセージで、2 つ目が捨てられた。
+- 原因: 「確かめられない」を「他人の値」と同じ分岐にまとめていた。同意の UI を状態遷移の中で待っていた。設定値の正規化に持ち主がいなかった。
+- 修正:
+  - `inspectOwnership` は owned / external / unverifiable の 3 値を返す。unverifiable は `ownershipUnverified` として警告と status bar に出す。
+  - 同意は同期で判定し、`applyBlocked: 'credentialConsent'` を世代付きで commit してから、待たないプロンプトを 1 つ出す。Allow のあと 1 回だけ再適用する。
+  - npm の Off はユーザー層だけを読む。他の層の値は `preservedExternal`。
+  - `normalizeProxyMonitorConfig` が監視設定の妥当性を持つ。`UserNotifier` の throttle key にパラメータを含める。
+- レビューで直させた点:
+  - verifier の C1: `owner: 'external'` の記録が external になるテストがなかった。追加した。
+  - verifier の C8: 報告に、境界付きの競合テストの失敗メッセージ（`did not settle within 500 ms`）と `1 !== 2` がなかった。保存したログから追記した。
+  - 2 回目の verifier:
+    - 判定テストが host lane の `v3Foundation.test.ts` にあった。unit lane の `TargetOwnershipStore.inspectOwnership.test.ts` に移した。
+    - `ProxyMonitor.test.ts` の中身のない clamp テストを、消すのではなく値を assert する形に戻した。
+    - README の npm の項目に、環境変数から読まれる値も外さないと書いた。
+    - 旧ロジック（`isOwnedByOtakProxy`）に同じ表を通し、unverifiable の 2 行が `external` になることを assertion で示した。
+- Verification:
+  - 旧ソースに戻して取った fail-before: unit 10 ファイルで失敗、host 24 件失敗（既知 7 + T11 の 17）。
+  - lint 0。unit 1394 + 84 passing。host は既知の 7 件だけ失敗。smoke 4。`gen:nls` の再実行で差分なし。
+- Learning:
+  - 「確かめられない」は「他人のもの」とも「自分のもの」とも別の 3 つ目の結果として持つ。黙って external に入れると、成功メッセージが嘘になる。
+  - npm script での fail-before は使えない。compile が gen:nls を走らせて nls を書き換え、tsc は型エラーでも emit する。旧ソースでは mocha / vscode-test を直接実行する。
+- 残留リスク:
+  - ウィンドウを reload すると保留中の同意プロンプトは消え、`credentialConsent` の印は次の apply まで残る。
+  - `suggestion.validHostname` の文言はまだ「dots, and hyphens」のまま。
