@@ -460,7 +460,9 @@ suite('Proxy connection test uses its own connection (#108 item 9)', () => {
                 timers.push(setInterval(() => socket.write('a'), 20));
             });
             try {
-                const result = await testProxyConnectionParallel(`http://127.0.0.1:${proxy.port}`, ['https://www.github.com'], 200);
+                // The socket idle timeout equals the per-test timeout; 1000 ms against a 20 ms trickle keeps a
+                // stalled CI runner from firing it before the overall timeout (1500 ms) this test is about.
+                const result = await testProxyConnectionParallel(`http://127.0.0.1:${proxy.port}`, ['https://www.github.com'], 1000);
                 assert.strictEqual(result.failureKind, 'timeout');
                 assert.ok(result.errors.some(error => error.url === 'All tests'), JSON.stringify(result.errors));
                 assert.strictEqual(result.proxyConnected, true);
