@@ -2236,3 +2236,31 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - 残留リスク:
   - ウィンドウを reload すると保留中の同意プロンプトは消え、`credentialConsent` の印は次の apply まで残る。
   - `suggestion.validHostname` の文言はまだ「dots, and hyphens」のまま。
+
+## 2026-10-19 — #108 項目 10、12: リモートウィンドウでは http.proxy に触れず、所有権と同意の記録をホストごとに分ける
+
+**Issue**: #108
+**PR**: #127
+**コミット**: `5b3ad59`
+**分担**: sonnet の subagent が実装した。Claude Code がレビューし、VS Code のバンドルから証拠を引用し直して、検証とコミットを行った。
+
+- 症状:
+  - リモートウィンドウで `http.proxy` を Global に書くと、ローカルの settings.json とリモートのマシン設定のどちらに入るかが、そのウィンドウの登録で変わった。Off もどちらを消すか分からなかった。
+  - 所有権の記録と認証情報の同意は、ローカルとすべてのリモートウィンドウで共有されていた。
+  - Settings Sync が認証情報付きの `http.proxy` を他のマシンへ運ぶことを、案内していなかった。
+- 原因:
+  - VS Code 1.141.0 は `http.proxy` を `scope:s?1:2` で登録する（`s` は `http.useLocalProxyConfiguration`）。拡張からはこの値を観測できない。
+  - 拡張の globalState は、ローカルウィンドウのプロファイルの storage に extension id だけを key にして保存される。
+- 修正:
+  - `canWriteVSCodeUserSettings = !isWeb && !remoteName` を 1 か所で決めた。applier はリモートでは `skippedUnavailable` を返し、advisory を 1 件出す（toast なし）。
+  - `hostScope` / `currentHostScope` で記録と同意の key にホストの scope を付けた。ローカルの scope は空なので、古い記録はそのまま使える。
+  - 同意の文言に `settingsSync.ignoredSettings` を足した（16 locale）。
+- レビューで直させた点: verifier の C10。報告書のバンドル証拠が言い換えだけだった。`workbench.desktop.main.js` から登録、resolver、`MainThreadStorage` のコードを `grep -o` で引用し直した。
+- Verification:
+  - 新しいテストは、旧ソースで red を確認した（例: 「a remote window never writes http.proxy (#108): true !== false」）。
+  - lint 0。unit 1432 + 84 passing。host は既知の 7 件だけ失敗。smoke 4。
+- Learning: VS Code の挙動を根拠にするときは、インストール済みバンドルのコードを引用する。言い換えだけでは、確かめた人と同じ所を見ているか、他の人が判断できない。
+- 残留リスク:
+  - 以前のバージョンがリモートウィンドウから書いた値は、もう外さない。手で消す必要がある。
+  - ローカルとリモートが同時に書くと、記録を失うことがある（安全側: Off は値を残す）。
+  - 本物のリモートウィンドウでは試していない。
