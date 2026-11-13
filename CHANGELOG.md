@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [3.2.18] - 2026-11-13
 
 ### Security
 - A proxy URL that contains a control character is now rejected. With a leading TAB (for example from a paste out of a spreadsheet), the host and credential checks were skipped while the URL parser dropped the character, so a Windows login such as `http://DOMAIN\user:pass@proxy:8080` was accepted, its password was saved in plain text in `otakProxy.proxyUrl` and the stored state, and it was written to Git, npm and the terminal without the credential consent prompt. Control characters anywhere in the URL (C0 controls and DEL, including a NUL inside the credentials) are now an invalid-URL error; surrounding spaces are still trimmed (#130).
