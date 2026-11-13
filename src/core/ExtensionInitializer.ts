@@ -47,6 +47,11 @@ export class ExtensionInitializer {
     private systemProxyCheckInterval: NodeJS.Timeout | undefined;
     private startupTestState: StartupTestState = { isPending: false };
     private proxyMonitorEventQueue: Promise<void> = Promise.resolve();
+    /**
+     * Counts stop requests. A monitoring start that awaits detection compares
+     * it afterwards, so a stop that arrived in between is not undone (#130).
+     */
+    private monitoringStopRequests = 0;
 
     constructor(context: InitializerContext) {
         this.context = context;
@@ -159,6 +164,7 @@ export class ExtensionInitializer {
      * Feature: auto-mode-proxy-testing - Runs startup connection test
      */
     async startSystemProxyMonitoring(): Promise<void> {
+        const stopRequests = this.monitoringStopRequests;
         const state = await this.context.proxyStateManager.getState();
 
         // Monitoring is only meaningful in Auto mode. In other modes, ensure it's stopped.
@@ -190,10 +196,19 @@ export class ExtensionInitializer {
         if (outcome.kind === 'exhausted') {
             Logger.warn('Could not reset proxyReachable before monitoring start (CAS exhausted); starting anyway');
         }
-        const latest = await this.context.proxyStateManager.getState();
-
         // Check system proxy immediately using legacy method
         await this.checkAndUpdateSystemProxy();
+
+        // The detection above can take seconds. A stop requested meanwhile
+        // found the monitor not yet active and had nothing to stop, so this
+        // start must not go on to start it; the mode is read again for a
+        // switch to Off whose stop is still to come (#130).
+        const latest = await this.context.proxyStateManager.getState();
+        if (stopRequests !== this.monitoringStopRequests || latest.mode !== ProxyMode.Auto) {
+            this.startupTestState.isPending = false;
+            Logger.info('Monitoring start abandoned: monitoring was stopped or the mode left Auto during detection');
+            return;
+        }
 
         // Stop any existing legacy interval
         if (this.systemProxyCheckInterval) {
@@ -245,6 +260,7 @@ export class ExtensionInitializer {
      * Stop system proxy monitoring
      */
     async stopSystemProxyMonitoring(): Promise<void> {
+        this.monitoringStopRequests++;
         // Stop legacy interval if running
         if (this.systemProxyCheckInterval) {
             clearInterval(this.systemProxyCheckInterval);

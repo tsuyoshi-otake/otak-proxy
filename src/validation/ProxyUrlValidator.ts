@@ -17,7 +17,8 @@ export interface ValidationResult {
  * Brings a proxy URL into its one canonical form without changing what is
  * accepted (#108):
  * - surrounding ASCII spaces are trimmed and the scheme is lowercased
- *   (tab/CR/LF are shell metacharacters and stay rejected, never trimmed);
+ *   (control characters, tab/CR/LF included, are rejected by the validator and
+ *   never trimmed);
  * - a path that is exactly `/` (no query, no fragment) is dropped — any other
  *   path, query or fragment is left in place and stays invalid;
  * - in the userinfo, a `%` not followed by two hex digits is a literal `%` and
@@ -50,6 +51,26 @@ export function canonicalizeProxyUrl(url: string): string {
 }
 
 /**
+ * True when the text holds a C0 control character or DEL (#130).
+ *
+ * The WHATWG URL parser strips C0 controls from both ends of its input and
+ * removes tab, LF and CR everywhere, so with one of them present the parser
+ * reads a different string than the checks before it: a leading tab hid the
+ * scheme from the authority check, and a backslash login passed as a path with
+ * its password. No proxy URL needs these characters, so they are rejected
+ * wherever they stand instead of being normalized away.
+ */
+function containsControlCharacter(text: string): boolean {
+    for (let index = 0; index < text.length; index++) {
+        const code = text.charCodeAt(index);
+        if (code <= 0x1f || code === 0x7f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * ProxyUrlValidator class for comprehensive proxy URL validation
  * 
  * Validates proxy URLs for format correctness and security. Credentials may
@@ -79,6 +100,10 @@ export class ProxyUrlValidator {
         const securityError = this.validateSecurity(canonical);
         if (securityError) {
             return { isValid: false, errors: [securityError] };
+        }
+
+        if (containsControlCharacter(canonical)) {
+            return { isValid: false, errors: ['Proxy URL contains control characters'] };
         }
 
         const preParseError = this.validateProxyAuthoritySyntax(canonical);

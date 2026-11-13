@@ -2286,3 +2286,48 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
   - Linux で socket の無通信タイムアウトが先に発火する仕組みは未解明。
   - npm audit は CI で high 18 件（既存）。
   - host lane の既知の失敗 7 件は CI で流していない。
+
+## 2026-11-13 — v3.2.17（main `03fbcef`）の不具合調査
+
+**Issue**: なし（調査のみ。修正と Issue 化は未着手）
+**コミット**: なし（調査はコードを変えていない）
+**分担**: Claude Code が 5 領域（設定書き込み、検出・監視、コア制御、同期・ロック、セキュリティ・診断）を subagent に読ませ、届いた候補を `out/` のプローブで再実行して確かめた。
+
+- 症状: 確認できた不具合は 22 件。優先度の高い 5 件:
+  - `ProxyStateManager.getState()` が SecretStorage を待つ間に終わったコミットを、古いコピーの書き戻しで巻き戻す。`commitState` も revision の確認と `inMemoryState` の更新の間に await があり、同じ revision の 2 件が両方通る（`ProxyStateManager.ts:61-65,104-115`）。
+  - 先頭に TAB などの C0 制御文字がある proxy URL は authority の検査を素通りし、`\` 入りの資格情報が設定と state に平文で残り、同意の対象にもならない（`ProxyUrlValidator.ts:30-33,116-118`）。
+  - 資格情報付きの手動 URL が system proxy と同じアドレスのとき、モニタのテスト結果がすべて「別の endpoint」として捨てられ、Auto: OFF が効かない（`ExtensionProxyEventHandlers.ts:306,530`）。
+  - 起動の検出中に Off をコミットすると、検出の完了後にモニタが始まり、Off のまま動き続ける（`ExtensionInitializer.ts:193-214`）。
+  - PAC から直結への変化がイベントにならず、PAC の表示と前の proxy が残る（`ProxyMonitor.ts:320-325`）。
+- 根本原因: 未特定（件ごとに別。上の 1 件目は世代フェンスと CAS の前提を崩すので、他の件の一部はこの上に重なっている可能性がある。切り分けていない）。
+- 修正: なし。
+- Verification:
+  - 17 件は subagent のプローブを自分で再実行し、同じ出力を得た（検出・監視 4、コア制御 5、同期・ロック 4、セキュリティ・診断 4）。
+  - 設定書き込みの 5 件は実物の git / npm / py を叩くプローブで、再実行していない。4 件は該当コードを読んで主張と合うことを確かめた。git のタイムアウトの件はコードを照合していない。
+  - プローブは scratchpad の `agent-*` ディレクトリにある（セッション限りで、残らない）。
+- Learning: 未検証（修正していないので、rules.md には昇格させない）。
+- 残留リスク:
+  - 未検証の候補が 2 件ある: GNOME / macOS の IPv6 や scheme 付きホストが「proxy なし」になる件（`PlatformProxyDetection.ts:290,439`）と、起動時の `register()` の失敗で同期が無効のままになる件（`SyncManager.ts:148-152`）。
+  - 調査前のベースライン（unit、host lane）は取っていない。
+
+## 2026-11-13 — #130 上位 5 項目を直す
+
+**Issue**: #130
+**コミット**: なし（ブランチ `fix/130-state-commit-loss`、未コミット。ユーザーの指示待ち）
+**分担**: Claude Code が実装とテストを書き、fresh-context の rubric-verifier が 11 項目を採点した。
+
+- 症状と修正:
+  - 項目 1: `getState()` が SecretStorage を待つ間に終わったコミットを、古いコピーの書き戻しで巻き戻した。`commitState` は同じ revision の 2 件を両方通した。書き込みを `writeQueue` で直列にし、読み取りの副作用（メモリへのキャッシュ、旧 mode の保存、scrub）は `writeGeneration` が変わっていないときだけにした。変わっていたら読み直す（上限 5 回）。
+  - 項目 2: 先頭の TAB などで `^(https?):\/\/` が一致せず authority の検査が飛び、`new URL()` は制御文字を落として解析した。C0 制御文字と DEL を含む URL を拒否する。
+  - 項目 3: endpoint の比較が資格情報込みの `proxyUrlIdentity` で、資格情報なしの検出 URL と hydrate 済みの `autoProxyUrl` が常に不一致だった。`sameProxyEndpoint`（同じ公開 URL、資格情報は両側にあるときだけ比べる）に置き換えた（ハンドラの 4 か所）。
+  - 項目 4: 監視の開始が検出を待つ間に来た stop は、モニタがまだ動いていないので何も止めなかった。stop の回数と mode を検出の後で確かめ直し、変わっていたらモニタを始めず `isPending` を戻す。
+  - 項目 5: `reportsProxyChange` が URL と split routing だけを比べ、PAC / WPAD / 直結の間の変化が出なかった。検出の auto-config の種別も比べる（最初の検出は種別だけでは出さない）。
+- Verification:
+  - 各項目の回帰テストは修正前に red（項目 1: 3 件、項目 2: 60 件以上、項目 5: 3 件）、または修正を外すミューテーションで red（項目 3: 6 件、項目 4: 3 件）。
+  - lint exit 0、unit lane 1531 passing（ベースライン 1433）、host lane 664 passing / 7 failing（rules.md の既知の 7 件と同じ。修正前の実行とも一致）。
+  - rubric-verifier: C1〜C8、C10、C11 が pass。C9（改行コード）が fail: `ExtensionInitializer.ts` に足したフィールドのコメントに空行が挟まり、bare LF が 5 行あった。直して CRLF 343 / LF 343 を確かめ、該当テストを再実行した。
+- Learning: rules.md に 3 件を追記した（ProxyStateManager の読み書き、endpoint の比較、制御文字）。
+- 残留リスク:
+  - host lane の新しい経路（SecretStorage の実物の待ち時間）は fake でしか確かめていない。
+  - 項目 3 の後も、`handleProxyChanged` は資格情報なしの検出 URL を `state.autoProxyUrl` に入れてから apply に渡す。apply 側が資格情報を付け直すかは確かめていない。
+  - 調査で見つけた残り 17 件（PAC 検出が Auto: OFF を解除する件、Import / Configure の古い state の保存など）は未着手。
