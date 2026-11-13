@@ -87,4 +87,73 @@ suite('ApplyLockService lease renewal', () => {
         assert.strictEqual(observed.acquired, false);
         assert.strictEqual(observed.reason, 'held');
     });
+
+    test('an in-flight renew must not recreate the lock after release (#137)', async function () {
+        this.timeout(10000);
+        let restoreWrite: (() => void) | null = null;
+        try {
+            const holder = new ApplyLockService({ baseDir });
+            const acquired = await holder.tryAcquire(target, 5000);
+            assert.ok(acquired.acquired && acquired.handle, 'holder must acquire the lock');
+            const handle = acquired.handle;
+
+            // Hold the renew's write open so the release lands while the renew
+            // is between its read and its write — the window in which the
+            // write used to resurrect the deleted lock. Patch the real
+            // fs/promises object: every `import * as fs` wrapper forwards
+            // through getters, so this intercepts the service's calls too
+            // (sinon cannot stub the getter-only wrapper namespace).
+            const fsp = require('fs/promises') as { writeFile: (p: unknown, data: unknown) => Promise<unknown> };
+            const realWriteFile = fsp.writeFile;
+            let writeEntered!: () => void;
+            let releaseWrite!: () => void;
+            const entered = new Promise<void>(resolve => { writeEntered = resolve; });
+            const gate = new Promise<void>(resolve => { releaseWrite = resolve; });
+            let gateUsed = false;
+            fsp.writeFile = async (p: unknown, data: unknown): Promise<unknown> => {
+                if (!gateUsed && String(p).endsWith('.lock.json')) {
+                    gateUsed = true;
+                    writeEntered();
+                    await gate;
+                }
+                return realWriteFile(p, data);
+            };
+            restoreWrite = () => { fsp.writeFile = realWriteFile; };
+
+            const renewResult = holder.renew(handle, 5000);
+            await entered;
+            const releaseResult = holder.release(handle);
+            // Give release's read+unlink a bounded window to land while the
+            // write is still held: on unfixed code the unlink completes first
+            // and the released write resurrects the lock. A correct
+            // implementation serializes release behind the in-flight renew,
+            // so this wait simply elapses there.
+            await Promise.race([releaseResult.then(() => undefined), sleep(150)]);
+            releaseWrite();
+
+            assert.strictEqual(await renewResult, true, 'the in-flight renew itself still completes');
+            await releaseResult;
+
+            const leaked = await fs.readdir(baseDir).then(names => names.filter(n => n.endsWith('.lock.json')));
+            assert.deepStrictEqual(leaked, [], 'release must leave no lock file a renew can resurrect');
+
+            const peer = await new ApplyLockService({ baseDir }).tryAcquire(target, 300);
+            assert.strictEqual(peer.acquired, true, 'a peer must be able to acquire after release');
+        } finally {
+            restoreWrite?.();
+        }
+    });
+
+    test('renew on a released handle returns false and writes nothing (#137)', async () => {
+        const holder = new ApplyLockService({ baseDir });
+        const acquired = await holder.tryAcquire(target, 5000);
+        assert.ok(acquired.acquired && acquired.handle, 'holder must acquire the lock');
+        const handle = acquired.handle;
+
+        assert.strictEqual(await holder.release(handle), true);
+        assert.strictEqual(await holder.renew(handle, 5000), false, 'a released handle must not renew');
+
+        const leaked = await fs.readdir(baseDir).then(names => names.filter(n => n.endsWith('.lock.json')));
+        assert.deepStrictEqual(leaked, [], 'no lock file may exist after release');
+    });
 });

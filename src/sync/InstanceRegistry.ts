@@ -29,6 +29,7 @@ export type { IInstanceRegistry, InstanceInfo } from './InstanceRegistryTypes';
 export class InstanceRegistry implements IInstanceRegistry {
     private readonly store: InstanceRegistryStore;
     private instanceId: string | null = null;
+    private registeredAt: number | null = null;
     private readonly windowId: string;
     private readonly pid: number;
     private readonly extensionVersion: string;
@@ -58,6 +59,7 @@ export class InstanceRegistry implements IInstanceRegistry {
             this.instanceId = generateInstanceId();
 
             const now = Date.now();
+            this.registeredAt = now;
             const instanceInfo: InstanceInfo = {
                 id: this.instanceId,
                 pid: this.pid,
@@ -83,6 +85,7 @@ export class InstanceRegistry implements IInstanceRegistry {
         } catch (error) {
             Logger.error('Failed to register instance:', error);
             this.instanceId = null;
+            this.registeredAt = null;
             return false;
         }
     }
@@ -110,6 +113,7 @@ export class InstanceRegistry implements IInstanceRegistry {
 
             Logger.log(`Unregistered instance: ${this.instanceId}`);
             this.instanceId = null;
+            this.registeredAt = null;
         } catch (error) {
             Logger.error('Failed to unregister instance:', error);
         }
@@ -184,20 +188,38 @@ export class InstanceRegistry implements IInstanceRegistry {
      * Update heartbeat for current instance
      */
     async updateHeartbeat(): Promise<void> {
-        if (!this.instanceId) {
+        const instanceId = this.instanceId;
+        if (!instanceId) {
             return;
         }
 
         try {
             await this.store.withLock(async () => {
                 const lockFile = await this.store.readLockFile();
+                const now = Date.now();
 
                 // Find and update this instance's heartbeat
+                let found = false;
                 for (const instance of lockFile.instances) {
-                    if (instance.id === this.instanceId) {
-                        instance.lastHeartbeat = Date.now();
+                    if (instance.id === instanceId) {
+                        instance.lastHeartbeat = now;
+                        found = true;
                         break;
                     }
+                }
+
+                if (!found) {
+                    // A cleanup or a wiped registry dropped this live window's
+                    // entry; the heartbeat puts it back instead of leaving the
+                    // window invisible to its peers (#137).
+                    lockFile.instances.push({
+                        id: instanceId,
+                        pid: this.pid,
+                        windowId: this.windowId,
+                        registeredAt: this.registeredAt ?? now,
+                        lastHeartbeat: now,
+                        extensionVersion: this.extensionVersion
+                    });
                 }
 
                 await this.store.writeLockFile(lockFile);

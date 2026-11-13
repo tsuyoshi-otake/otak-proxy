@@ -34,19 +34,32 @@ export class InstanceRegistryStore {
     }
 
     async readLockFile(): Promise<InstancesLockFile> {
+        if (!fs.existsSync(this.lockFilePath)) {
+            return this.createEmptyLockFile();
+        }
+
+        let content: string;
         try {
-            if (!fs.existsSync(this.lockFilePath)) {
+            content = fs.readFileSync(this.lockFilePath, 'utf-8');
+        } catch (error) {
+            // A transient read failure (EBUSY from a scan holding the file, a
+            // missing share) is not an empty registry: rethrow so callers do
+            // not write a fake empty file over the real entries (#137). A
+            // vanished file is a legitimately empty registry.
+            if (getErrorCode(error) === 'ENOENT') {
                 return this.createEmptyLockFile();
             }
+            throw error;
+        }
 
-            const content = fs.readFileSync(this.lockFilePath, 'utf-8');
-            if (!content || content.trim() === '') {
-                return this.createEmptyLockFile();
-            }
+        if (!content || content.trim() === '') {
+            return this.createEmptyLockFile();
+        }
 
+        try {
             return JSON.parse(content) as InstancesLockFile;
         } catch (error) {
-            Logger.warn('Failed to read lock file, creating new one:', error);
+            Logger.warn('Failed to parse lock file, creating new one:', error);
             return this.createEmptyLockFile();
         }
     }
