@@ -2343,3 +2343,23 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
 - 修正: 期待値を「scheme と最後の `@` の間に user か password がある」に直し、空の userinfo の 4 つの形を `examples` に入れた。タグは付け替えず、v3.2.19 で出す。CHANGELOG の 3.2.18 に「Not published」と書いた。
 - Verification: CI の seed と別の 3 つの seed で、各 40 万件が通った。
 - Learning: rules.md に追記した（property テストは、リリースのゲートに入る前に seed を変えて多く回す）。
+
+## 2026-11-13 — #130 v3.2.19 を公開する
+
+**Issue**: #130
+**PR**: #131（修正、`93568c2`）、#132（v3.2.18 の版上げ、未公開）、#133（テストの修正 `152bf56` と v3.2.19 の版上げ `78e1446`）
+**コミット**: tag `v3.2.19` は main の `e18a05b`。tag `v3.2.18`（`e0eeb11`）は残した。
+**分担**: Claude Code がマージ、版上げ、タグの push、公開の確認、GitHub release を行った。
+
+- 症状: v3.2.18 の publish は unit テストで止まり、公開されなかった（1 つ前の entry）。
+- 修正: テストの期待値を直し、`npm version 3.2.19 --no-git-tag-version`。CHANGELOG の 3.2.18 に「Not published」、3.2.19 に「3.2.18 の変更の最初の公開版」と書いた。PR #133 の CI と Codex（指摘なし）を待ってからマージし、main のマージコミットに annotated tag を付けた。
+- Verification:
+  - publish workflow（run 43435801218）: Check registry tokens、Verify ref, test and package、Marketplace、Open VSX の 4 job が成功。ログに両方の `Published odangoo.otak-proxy v3.2.19`。
+  - Marketplace の検索 API と Open VSX の API が 3.2.19 を返した（tag の push から約 9 分後。20 秒間隔のポーリングの 12 回目）。
+  - GitHub release `v3.2.19` に VSIX（SHA-256 `723f4fbc…e6ae76`）を付けた。
+  - 3 つの PR はどれも CI が通り、Codex の要約は `has_any_findings: false`。
+- Learning: 1 つ前の entry と同じ（rules.md に追記済み）。
+- 残留リスク:
+  - README は変えていないので、レジストリが配信する README は確かめていない。
+  - 調査で見つけた残り 17 件は未着手（2026-11-13 の調査の entry）。
+  - host lane の既知の失敗 7 件は CI で流していない。
