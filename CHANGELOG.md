@@ -1,6 +1,12 @@
 # Change Log
 
+## [3.2.19] - 2026-11-13
+
+First published release of the 3.2.18 changes below. No change to the extension itself: a new test added in 3.2.18 expected every accepted URL containing `@` to carry credentials, which is wrong for an empty userinfo (`http://@host`), and the test is corrected (#130).
+
 ## [3.2.18] - 2026-11-13
+
+Not published: the release workflow stopped at the unit tests (#130). These changes first ship in 3.2.19.
 
 ### Security
 - A proxy URL that contains a control character is now rejected. With a leading TAB (for example from a paste out of a spreadsheet), the host and credential checks were skipped while the URL parser dropped the character, so a Windows login such as `http://DOMAIN\user:pass@proxy:8080` was accepted, its password was saved in plain text in `otakProxy.proxyUrl` and the stored state, and it was written to Git, npm and the terminal without the credential consent prompt. Control characters anywhere in the URL (C0 controls and DEL, including a NUL inside the credentials) are now an invalid-URL error; surrounding spaces are still trimmed (#130).
