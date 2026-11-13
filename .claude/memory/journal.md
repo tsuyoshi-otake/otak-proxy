@@ -2364,19 +2364,19 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
   - 調査で見つけた残り 17 件は未着手（2026-11-13 の調査の entry）。
   - host lane の既知の失敗 7 件は CI で流していない。
 
-## 2026-11-14 — 2026-11-13 の調査の残り 17 件を Issue にする
+## 2026-11-14 — 2026-11-13 の調査の残り 17 件を確かめ、16 件を Issue にする
 
 **Issue**: #135（コア制御 3）、#136（検出・監視 2）、#137（同期・apply ロック 4）、#138（設定の書き込み 5）、#139（診断 1）、#140（不可視文字スキャナ 1）
 **分担**: Claude Code が再確認と Issue の作成を行った。ソースは変えていない。
 
-- 症状: 2026-11-13 の調査の 22 件のうち、#130 で直した 5 件の残り 17 件に Issue が無かった。
+- 症状: 2026-11-13 の調査の 22 件のうち、#130 で直した 5 件の残り 17 件に Issue が無かった。17 件のうち 1 件（userinfo 内の NUL）は直っていたので、Issue にしたのは 16 件。
 - 確認: main `bb8e3d6`（v3.2.19）で `npm run compile` の後、調査のプローブを `out/` に対して再実行した。
-  - 実物のツールを使わない 12 件のうち 11 件が再現した。
+  - 実物のツールを使わない 12 件のうち、10 件がプローブで丸ごと再現した。#135 の項目 1 は Import 側だけ再現し、Configure 側はコードの照合だけ。
   - userinfo 内の NUL は `valid: false` になった。#130 の制御文字の拒否で直っているので、Issue にしていない。
   - 設定の書き込みの 5 件は実物の git / npm / py を使うので再実行していない。該当ファイルは `git diff v3.2.17 main` に含まれない。
   - 行番号は main で照合した。#130 で変わった `ProxyMonitor.ts` だけ、行を直した（`:355-381`）。
 - 分け方: 領域ごとに 1 Issue（1 PR の単位）。未検証の候補 2 件と #130 項目 3 の残り（`handleProxyChanged` が資格情報の無い URL を apply に渡す）は、#135 / #136 / #137 に「完了条件に含めない」節として書いた。
-- Learning: vscode を require する `out/` のモジュールを素の node のプローブから読むと `Cannot find module 'vscode'` で落ちる。`node -r scripts/vscode-shim.cjs <probe>` で読める。
+- Learning: vscode を require する `out/` のモジュールを素の node のプローブから読むと `Cannot find module 'vscode'` で落ちる。リポジトリの直下で `node -r ./scripts/vscode-shim.cjs <probe>` とすれば読める。`-r` の引数はモジュールとして解決されるので、`./` の無い `scripts/vscode-shim.cjs` は `Cannot find module` で落ちる（Node v26.12.1 で確認）。
 - 残留リスク:
   - プローブはセッションの scratchpad にあり、セッションの後は残らない。再現の手順は各 Issue の本文に書いた。
   - #135 の Configure、#138 の git のタイムアウトは、プローブで再現していない（Issue に明記）。
