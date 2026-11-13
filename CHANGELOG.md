@@ -1,5 +1,16 @@
 # Change Log
 
+## [Unreleased]
+
+### Security
+- A proxy URL that contains a control character is now rejected. With a leading TAB (for example from a paste out of a spreadsheet), the host and credential checks were skipped while the URL parser dropped the character, so a Windows login such as `http://DOMAIN\user:pass@proxy:8080` was accepted, its password was saved in plain text in `otakProxy.proxyUrl` and the stored state, and it was written to Git, npm and the terminal without the credential consent prompt. Control characters anywhere in the URL (C0 controls and DEL, including a NUL inside the credentials) are now an invalid-URL error; surrounding spaces are still trimmed (#130).
+
+### Fixed
+- A saved proxy state change can no longer be silently undone inside one window. Reading the state waits for SecretStorage, and a read that started before a change (a toggle to Off, a connection-test result) and finished after it used to put the old state back in memory; two changes made at the same moment could also both be accepted. This could leave the status bar and the saved mode showing Auto after a toggle to Off had already removed the proxies. Writes now run one at a time and a read never replaces a newer state (#130).
+- Auto: OFF now works when the manual proxy URL has credentials for the same address as the system proxy. The monitor's connection tests were all discarded as belonging to "another proxy" because the stored URL carried credentials and the tested URL did not, so an unreachable system proxy was never turned off, and a proxy that was off never came back (#130).
+- Switching Off while Auto is still detecting the system proxy no longer leaves the monitor running. The monitor used to start after the detection finished, kept polling and testing in Off, and made the next switch to Auto skip its immediate detection and startup test (#130).
+- Removing a PAC or WPAD setting is now noticed while VS Code is running. A change between PAC, WPAD and "no proxy" was not reported, so the status bar and diagnostics kept showing PAC and the proxy applied before the PAC stayed in Git, npm, VS Code and the terminal until a reload or a toggle (#130).
+
 ## [3.2.17] - 2026-10-19
 
 ### Security

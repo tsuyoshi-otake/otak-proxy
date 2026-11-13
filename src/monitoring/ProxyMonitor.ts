@@ -29,6 +29,17 @@ import {
 import { detectProxyWithRetry } from './ProxyMonitorDetection';
 import { detectionSplitRoutingIdentity } from '../config/DetectedProxyValue';
 
+/**
+ * Which unsupported auto-config (PAC, WPAD) a detection names, or 'none'.
+ * Such a detection has no proxy URL and no split routing, exactly like "no
+ * proxy", so neither of those tells the two apart (#130).
+ */
+function detectedAutoConfig(result: Pick<ProxyDetectionResult, 'kind' | 'capability'>): string {
+    return result.capability === 'unsupported' && (result.kind === 'pac' || result.kind === 'wpad')
+        ? result.kind
+        : 'none';
+}
+
 export type { ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
 
 /**
@@ -62,6 +73,9 @@ export class ProxyMonitor extends EventEmitter {
     // Per-scheme endpoints / bypass of the last successful detection. A change
     // there with the same primary URL still changes routing, so it is a change (#93).
     private lastSplitRouting = detectionSplitRoutingIdentity({});
+    // PAC / WPAD of the last successful detection. Undefined until the first
+    // one: the start path has already handled what that detection reports.
+    private lastAutoConfig: string | undefined;
     private isCheckInProgress: boolean = false;
     /** Invalidates callbacks that started under an earlier start/stop lifecycle. */
     private lifecycleEpoch: number = 0;
@@ -320,7 +334,8 @@ export class ProxyMonitor extends EventEmitter {
     private reportsProxyChange(result: ProxyDetectionResult): boolean {
         return result.success && (
             result.proxyUrl !== this.lastProxyUrl ||
-            detectionSplitRoutingIdentity(result) !== this.lastSplitRouting
+            detectionSplitRoutingIdentity(result) !== this.lastSplitRouting ||
+            (this.lastAutoConfig !== undefined && detectedAutoConfig(result) !== this.lastAutoConfig)
         );
     }
 
@@ -362,6 +377,7 @@ export class ProxyMonitor extends EventEmitter {
         this.state.recordCheckSuccess(result.proxyUrl, result.source);
         this.lastProxyUrl = result.proxyUrl;
         this.lastSplitRouting = detectionSplitRoutingIdentity(result);
+        this.lastAutoConfig = detectedAutoConfig(result);
     }
 
     /**

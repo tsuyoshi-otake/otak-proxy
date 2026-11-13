@@ -32,6 +32,13 @@ import { tryCanonicalizeProxyUrl } from '../utils/ProxyUrlUtils';
 type PublicUrlReader = (publicUrl: string) => Promise<string | undefined>;
 
 /**
+ * How often getState() hydrates again because a write landed while it waited
+ * on SecretStorage. Each repeat needs another completed write, so the bound is
+ * only reached under a continuous stream of commits.
+ */
+const MAX_READ_ATTEMPTS = 5;
+
+/**
  * ProxyStateManager handles all proxy state operations
  *
  * Requirement 3.1: Centralized state management
@@ -41,6 +48,17 @@ type PublicUrlReader = (publicUrl: string) => Promise<string | undefined>;
 export class ProxyStateManager implements IProxyStateManager {
     private inMemoryState: ProxyState | null = null;
     private readonly credentialStore: ProxyCredentialStore;
+    /**
+     * Counts completed writes of the state (#130). A read that hydrated across
+     * an await compares it before caching its result: a hydrated copy of the
+     * state from before a commit must not replace that commit.
+     */
+    private writeGeneration = 0;
+    /**
+     * Writes run one at a time (#130), so the revision check of commitState and
+     * the write it guards cannot interleave with another write.
+     */
+    private writeQueue: Promise<void> = Promise.resolve();
 
     constructor(private context: vscode.ExtensionContext) {
         this.credentialStore = new ProxyCredentialStore(context.secrets);
@@ -57,11 +75,33 @@ export class ProxyStateManager implements IProxyStateManager {
     async getState(): Promise<ProxyState> {
         await new V3MigrationService(this.context).migrateIfNeeded();
 
+        // Hydration waits on SecretStorage. A write that completes meanwhile
+        // makes this read's result a copy of the state before that write, so it
+        // is neither cached nor saved; the read starts over from the new state.
+        for (let attempt = 1; ; attempt++) {
+            const generation = this.writeGeneration;
+            const read = await this.readStateOnce(generation);
+            if (this.writeGeneration === generation || attempt >= MAX_READ_ATTEMPTS) {
+                return read;
+            }
+        }
+    }
+
+    /**
+     * One read. Its side effects (the in-memory cache of the hydrated state,
+     * the legacy-mode save, the scrub) happen only while no write has completed
+     * since `generation` was read.
+     */
+    private async readStateOnce(generation: number): Promise<ProxyState> {
+        const unchanged = () => this.writeGeneration === generation;
+
         // If we have an in-memory fallback state, use it
         if (this.inMemoryState) {
             const hydratedState = await this.hydrateStateForRuntime(this.inMemoryState);
             const migratedState = this.migrateManualModeToAuto(hydratedState);
-            this.inMemoryState = { ...migratedState };
+            if (unchanged()) {
+                this.inMemoryState = { ...migratedState };
+            }
             return migratedState;
         }
 
@@ -71,18 +111,18 @@ export class ProxyStateManager implements IProxyStateManager {
             const migratedState = await this.migrateOldSettings();
             const normalizedState = this.migrateManualModeToAuto(migratedState);
             if (normalizedState.mode !== migratedState.mode) {
-                await this.saveState(normalizedState);
+                await this.saveStateIf(unchanged, normalizedState);
             }
             return normalizedState;
         }
         const hydratedState = await this.hydrateStateForRuntime(state);
         const migratedState = this.migrateManualModeToAuto(hydratedState);
         if (migratedState.mode !== hydratedState.mode) {
-            await this.saveState(migratedState);
+            await this.saveStateIf(unchanged, migratedState);
             return migratedState;
         }
 
-        await this.scrubPersistedStateIfNeeded(state);
+        await this.scrubPersistedStateIfNeeded(state, unchanged);
         return migratedState;
     }
 
@@ -94,7 +134,15 @@ export class ProxyStateManager implements IProxyStateManager {
      * @param {ProxyState} state - State to save
      */
     async saveState(state: ProxyState): Promise<void> {
-        await this.writeState({ ...state, revision: this.nextRevision(state) });
+        await this.saveStateIf(() => true, state);
+    }
+
+    private saveStateIf(condition: () => boolean, state: ProxyState): Promise<void> {
+        return this.serializeWrite(async () => {
+            if (condition()) {
+                await this.writeState({ ...state, revision: this.nextRevision(state) });
+            }
+        });
     }
 
     /**
@@ -102,16 +150,28 @@ export class ProxyStateManager implements IProxyStateManager {
      * once N+1 has already been committed, so a late retry cannot roll disk back.
      */
     async commitState(expectedRevision: number, next: ProxyState): Promise<StateCommitResult> {
-        const current = this.readStoredState();
-        const currentRevision = current ? stateRevision(current) : 0;
-        if (currentRevision !== expectedRevision) {
-            return { kind: 'superseded', current: current ?? next };
-        }
+        return this.serializeWrite<StateCommitResult>(async () => {
+            const current = this.readStoredState();
+            const currentRevision = current ? stateRevision(current) : 0;
+            if (currentRevision !== expectedRevision) {
+                return { kind: 'superseded', current: current ?? next };
+            }
 
-        const revision = expectedRevision + 1;
-        const committed: ProxyState = { ...next, revision };
-        await this.writeState(committed);
-        return { kind: 'committed', revision, state: committed };
+            const revision = expectedRevision + 1;
+            const committed: ProxyState = { ...next, revision };
+            await this.writeState(committed);
+            return { kind: 'committed', revision, state: committed };
+        });
+    }
+
+    /**
+     * Runs `write` after every write queued before it has settled. A write
+     * must not wait on another queued write from inside the queue.
+     */
+    private serializeWrite<T>(write: () => Promise<T>): Promise<T> {
+        const result = this.writeQueue.then(write);
+        this.writeQueue = result.then(() => undefined, () => undefined);
+        return result;
     }
 
     private nextRevision(state: ProxyState): number {
@@ -130,11 +190,13 @@ export class ProxyStateManager implements IProxyStateManager {
             await this.context.globalState.update('proxyState', persisted);
             // Keep the full state only in memory for the current session. Persistent state is sanitized.
             this.inMemoryState = this.withDerivedRequiresAuth(state);
+            this.writeGeneration++;
         } catch (error) {
             // Requirement 3.2: Log error and continue with in-memory state
             Logger.error('Failed to write proxy state to global storage:', error);
             Logger.log('Continuing with in-memory state as fallback');
             this.inMemoryState = this.withDerivedRequiresAuth(state);
+            this.writeGeneration++;
 
             // Notify user about the issue (only if vscode.window is available)
             try {
@@ -374,18 +436,25 @@ export class ProxyStateManager implements IProxyStateManager {
         }
     }
 
-    private async scrubPersistedStateIfNeeded(state: ProxyState): Promise<void> {
+    private async scrubPersistedStateIfNeeded(state: ProxyState, unchanged: () => boolean): Promise<void> {
         const sanitizedState = this.sanitizeStateForPersistence(state);
         if (JSON.stringify(sanitizedState) === JSON.stringify(state)) {
             return;
         }
 
-        try {
-            await this.persistProxySecrets(state);
-            await this.context.globalState.update('proxyState', sanitizedState);
-        } catch (error) {
-            Logger.warn('Failed to scrub proxy credentials from persisted state:', error);
-        }
+        // Queued with the writes: the scrub rewrites the persisted state it
+        // read, so it must not land on top of a write that completed since.
+        await this.serializeWrite(async () => {
+            if (!unchanged()) {
+                return;
+            }
+            try {
+                await this.persistProxySecrets(state);
+                await this.context.globalState.update('proxyState', sanitizedState);
+            } catch (error) {
+                Logger.warn('Failed to scrub proxy credentials from persisted state:', error);
+            }
+        });
     }
 
     /**

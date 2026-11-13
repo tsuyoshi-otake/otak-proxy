@@ -41,6 +41,38 @@ export function normalizeProxyForComparison(value: string): string {
  * Built on `splitProxyUrl` so identity and SecretStorage keying share one
  * normalization. Values that do not parse compare by exact text.
  */
+/**
+ * True when both values name the same proxy endpoint (#130): the same address
+ * in WHATWG-normalized form, and the same credentials when both carry some.
+ * A value without credentials matches that address with any credentials.
+ *
+ * The system proxy is detected, tested and reported without credentials, while
+ * the stored state returns the same address with the credentials SecretStorage
+ * holds for it. Whether an endpoint answers is a fact about the address, so
+ * the two are one endpoint. Values that do not parse compare by exact text;
+ * two absent values are the same (no proxy).
+ */
+export function sameProxyEndpoint(left: string | undefined, right: string | undefined): boolean {
+    if (!left || !right) {
+        return !left && !right;
+    }
+
+    try {
+        const splitLeft = splitProxyUrl(left);
+        const splitRight = splitProxyUrl(right);
+        if (splitLeft.publicUrl !== splitRight.publicUrl) {
+            return false;
+        }
+        if (!splitLeft.credentials || !splitRight.credentials) {
+            return true;
+        }
+        return splitLeft.credentials.username === splitRight.credentials.username
+            && splitLeft.credentials.password === splitRight.credentials.password;
+    } catch {
+        return left === right;
+    }
+}
+
 export function sameProxyUrlWithCredentials(left: string, right: string): boolean {
     try {
         const splitLeft = splitProxyUrl(left);

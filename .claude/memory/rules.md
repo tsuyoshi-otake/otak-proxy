@@ -235,6 +235,8 @@
   経路を足したら、`SystemProxyUpdateService.test.ts` の parity 表に両方の経路を同じ初期状態から動かす行を足す
   — verified by: 修正前の比較で parity の行が red。
 
+- **`ProxyStateManager` の読み取りは await をまたぐ。読んだ後に state を書く処理は、書き込みの列（`serializeWrite`）に入れ、`writeGeneration` が読み始めと同じときだけ書く。** `getState()` は SecretStorage を待ってから `inMemoryState` にキャッシュを書き戻していて、待ちの間に終わったコミットを巻き戻した。`commitState` も revision の確認と書き込みの間に await があり、同じ revision の 2 件が両方通った。世代フェンスと CAS はすべてこの上に載っている — verified by: `ProxyStateManager.concurrency.test.ts` が修正前に 3 件 red、キャッシュの条件を外すミューテーションと列を外すミューテーションでそれぞれ red（#130）。
+- **「同じ endpoint か」は `sameProxyEndpoint`（`src/utils/ProxyUrlIdentity.ts`）で比べる。`proxyUrlIdentity` は世代の identity で、資格情報を含む。** モニタは資格情報の無い検出 URL をテストし、`getState()` は同じアドレスに SecretStorage の資格情報を付けて返す。資格情報込みで比べると、手動 URL が system proxy と同じアドレスに資格情報を持つだけで、テスト完了と到達性の変化がすべて「別の endpoint」として捨てられた — verified by: 片側だけ資格情報がある場合を不一致に戻すミューテーションで `EndpointVerdictWithStoredCredentials.test.ts` が 6 件 red（#130）。
 - **revision を含む署名やガードは、自分の apply の結果コミット（revision +1）で必ず stale になる。**
   比べるのは apply が返す `committedRevision`、または mode と URL の identity。コマンドの flow テストは
   本物の `ProxyStateManager` と revision を進める applier を通す。stub context は revision を進めないので、
@@ -516,6 +518,7 @@
   空のときに見つけた `@` を捨てて次の `//` で探し直し、`:` の探索を run の外まで進めていた。短い文字種の総当たり
   672 万件で正規表現との差分は 0 で、13.8 万文字の入力では 60 ms と 1000 ms の上限に掛からなかった。138 万文字で
   4.6〜6.9 秒になった（長さ 10 倍で約 100 倍、#108）。
+- **パーサーが黙って落とす文字は、検証の前に拒否する。** WHATWG の URL 解析は両端の C0 制御文字と、途中の TAB・LF・CR を落とす。検証が見た文字列と解析される文字列が変わり、先頭の TAB 1 つで scheme の正規表現が外れて authority の検査が飛んだ。`\` 入りの資格情報が通り、資格情報として認識されず、平文で保存された。正規表現が一致しないときに「検査なしで通す」分岐は、その入力を後段が必ず拒むことを実物で確かめる — verified by: `ProxyUrlControlCharacters.test.ts` が修正前に LF・CR 以外の全制御文字で red（#130）。
 - **設定の `otakProxy.proxyUrl` を読んで state や SecretStorage に入れる経路は、どれも同じ検証と正規化を通す。** 設定変更の
   ハンドラ（`CommandRegistry.handleProxyUrlChange`）、`getState()` の取り込み（`normalizeConfiguredManualProxyUrl`。
   `migrateOldSettings` も使う）、`getState()` が最初に呼ぶ v3 移行（`V3MigrationService.migrateIfNeeded`）。無効な値は

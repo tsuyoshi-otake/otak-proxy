@@ -17,13 +17,13 @@ import { commitUnlessStale, commitUnlessStaleWithRevision, publishUnlessStale } 
 import {
     LogicalGeneration,
     captureLogicalGeneration,
-    isStaleGeneration,
-    proxyUrlIdentity
+    isStaleGeneration
 } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import type { ManualFallbackOutcome } from './SystemProxyUpdateService';
 import { ProxyMode, ProxyState, ProxyTestResult, stateRevision } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
+import { sameProxyEndpoint } from '../utils/ProxyUrlIdentity';
 
 export interface StartupTestState {
     isPending: boolean;
@@ -60,7 +60,7 @@ export async function handleProxyChanged(
     const wasAutoModeOff = state.autoModeOff === true;
     applyProxyDetectionResultToState(state, result);
     // One endpoint keeps its verdict however the URL is spelled (#97).
-    const sameEndpoint = proxyUrlIdentity(previousProxy) === proxyUrlIdentity(state.autoProxyUrl);
+    const sameEndpoint = sameProxyEndpoint(previousProxy, state.autoProxyUrl);
     if (result.proxyUrl) {
         applyEndpointVerdict(state, sameEndpoint, result.testResult);
     }
@@ -286,7 +286,7 @@ async function stateStillFromTest(
     if (committedRevision !== undefined && stateRevision(latest) !== committedRevision) {
         return undefined;
     }
-    if (testResult.proxyUrl && proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(latest.autoProxyUrl)) {
+    if (testResult.proxyUrl && !sameProxyEndpoint(testResult.proxyUrl, latest.autoProxyUrl)) {
         return undefined;
     }
     return latest;
@@ -303,7 +303,7 @@ export async function handleProxyStateChanged(
         return;
     }
 
-    if (proxyUrlIdentity(data.proxyUrl) !== proxyUrlIdentity(state.autoProxyUrl) && data.proxyUrl) {
+    if (data.proxyUrl && !sameProxyEndpoint(data.proxyUrl, state.autoProxyUrl)) {
         // Reachability event for a different endpoint must not mutate the current generation.
         return;
     }
@@ -525,11 +525,14 @@ function isStaleTestCompletion(
 /**
  * The verdict belongs to the endpoint the test reached. A test of a new
  * endpoint precedes the proxyChanged event that owns it; committing it here
- * would advance the revision and make that event stale (#97).
+ * would advance the revision and make that event stale (#97). The monitor
+ * tests the detected URL, which has no credentials; the stored URL may carry
+ * the ones SecretStorage holds for that address, and is still that endpoint
+ * (#130).
  */
 function isTestOfAnotherEndpoint(testResult: TestResult, current: ProxyState): boolean {
     return Boolean(testResult.proxyUrl) &&
-        proxyUrlIdentity(testResult.proxyUrl) !== proxyUrlIdentity(current.autoProxyUrl);
+        !sameProxyEndpoint(testResult.proxyUrl, current.autoProxyUrl);
 }
 
 /**
