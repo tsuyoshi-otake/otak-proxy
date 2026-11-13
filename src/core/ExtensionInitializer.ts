@@ -107,13 +107,21 @@ export class ExtensionInitializer {
             this.connectionTester || undefined
         );
 
-        // Set up proxyChanged event handler
-        this.proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
-            this.enqueueProxyMonitorEvent(() => handleProxyChanged(
-                this.context,
-                result,
-                state => this.systemProxyUpdateService.resolveManualFallback(state)
-            ));
+        // Set up proxyChanged event handler. A change the handler did not adopt
+        // is handed back to the monitor, which reports the detection again at
+        // its next check (#136).
+        const monitor = this.proxyMonitor;
+        monitor.on('proxyChanged', (result: ProxyDetectionResult) => {
+            this.enqueueProxyMonitorEvent(async () => {
+                const outcome = await handleProxyChanged(
+                    this.context,
+                    result,
+                    state => this.systemProxyUpdateService.resolveManualFallback(state)
+                );
+                if (outcome === 'notAdopted') {
+                    monitor.proxyChangeNotAdopted(result);
+                }
+            });
         });
 
         // Feature: auto-mode-proxy-testing - Handle test complete events

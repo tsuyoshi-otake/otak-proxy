@@ -1,0 +1,160 @@
+/**
+ * #136 item 1, the monitor's side of the contract: a listener that did not
+ * adopt a proxyChanged event says so, and the next check reports the detection
+ * again. The handler's side and the wiring are tested in
+ * core/UnadoptedProxyChange.flow.test.ts.
+ */
+import * as assert from 'assert';
+import { ProxyChangeLogger } from '../monitoring/ProxyChangeLogger';
+import { ProxyDetectionResult, ProxyMonitor } from '../monitoring/ProxyMonitor';
+import type { ProxyCheckTrigger } from '../monitoring/ProxyMonitorTypes';
+import { InputSanitizer } from '../validation/InputSanitizer';
+
+const X = 'http://proxy-x.example.com:8080';
+const Y = 'http://proxy-y.example.com:8080';
+const Z = 'http://proxy-z.example.com:8080';
+
+suite('ProxyMonitor re-reports a change the listener did not adopt (#136)', () => {
+    let monitor: ProxyMonitor;
+    let detected: string | null;
+    let reports: ProxyDetectionResult[];
+
+    setup(() => {
+        detected = X;
+        reports = [];
+        monitor = new ProxyMonitor(
+            { detectSystemProxy: async () => detected },
+            new ProxyChangeLogger(new InputSanitizer()),
+            { pollingInterval: 60_000, debounceDelay: 1000, maxRetries: 0, enableConnectionTest: false }
+        );
+        monitor.on('proxyChanged', (result: ProxyDetectionResult) => reports.push(result));
+        monitor.start();
+    });
+
+    teardown(() => {
+        monitor.stop();
+    });
+
+    async function check(proxyUrl: string | null): Promise<void> {
+        detected = proxyUrl;
+        await (monitor as unknown as { executeCheck(trigger: ProxyCheckTrigger): Promise<unknown> }).executeCheck('polling');
+    }
+
+    const reportedUrls = () => reports.map(report => report.proxyUrl);
+
+    test('control: a reported change is not reported again at the next check', async () => {
+        await check(X);
+        await check(Y);
+        await check(Y);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y]);
+    });
+
+    test('the latest report that was not adopted is reported again, once', async () => {
+        await check(X);
+        await check(Y);
+
+        monitor.proxyChangeNotAdopted(reports[1]);
+        await check(Y);
+        await check(Y);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Y]);
+    });
+
+    test('a not-adopted answer does not make a different detection look unchanged', async () => {
+        await check(X);
+        await check(Y);
+
+        monitor.proxyChangeNotAdopted(reports[1]);
+        await check(Z);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Z]);
+    });
+
+    test('an answer for a report a newer one replaced is ignored', async () => {
+        await check(X);
+        await check(Y);
+        await check(Z);
+
+        monitor.proxyChangeNotAdopted(reports[1]);
+        await check(Z);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Z], 'Z is the latest report; the answer for Y changes nothing');
+    });
+
+    test('an answer for a report that was already answered is ignored', async () => {
+        await check(X);
+        await check(Y);
+
+        monitor.proxyChangeNotAdopted(reports[1]);
+        monitor.proxyChangeNotAdopted(reports[1]);
+        await check(Y);
+        await check(Y);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Y]);
+    });
+
+    test('an answer that arrives after stop() is ignored: the start path detects afresh', async () => {
+        await check(X);
+        await check(Y);
+
+        monitor.stop();
+        monitor.start();
+        monitor.proxyChangeNotAdopted(reports[1]);
+        await check(Y);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y]);
+    });
+
+    test('a failed check keeps the pending re-report for the next successful one', async () => {
+        await check(X);
+        await check(Y);
+        monitor.proxyChangeNotAdopted(reports[1]);
+
+        (monitor as unknown as { detector: unknown }).detector = {
+            detectSystemProxy: async () => { throw new Error('platform query failed'); }
+        };
+        await check(Y);
+        (monitor as unknown as { detector: unknown }).detector = { detectSystemProxy: async () => detected };
+        await check(Y);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Y]);
+    });
+
+    test('repeats are bounded: a change answered not-adopted every time is reported 4 times in all', async () => {
+        await check(X);
+
+        for (let attempt = 0; attempt < 8; attempt++) {
+            await check(Y);
+            const latest = reports[reports.length - 1];
+            if (latest.proxyUrl === Y) {
+                monitor.proxyChangeNotAdopted(latest);
+            }
+        }
+
+        assert.deepStrictEqual(
+            reportedUrls(),
+            [X, Y, Y, Y, Y],
+            'the first report and three repeats; then the detection stays reported'
+        );
+    });
+
+    test('a quiet check ends the streak: the next change is repeated again', async () => {
+        await check(X);
+        for (let attempt = 0; attempt < 6; attempt++) {
+            await check(Y);
+            const latest = reports[reports.length - 1];
+            if (latest.proxyUrl === Y) {
+                monitor.proxyChangeNotAdopted(latest);
+            }
+        }
+        await check(Y);
+        const before = reports.length;
+
+        await check(Z);
+        monitor.proxyChangeNotAdopted(reports[reports.length - 1]);
+        await check(Z);
+
+        assert.strictEqual(reports.length, before + 2, 'Z is reported, answered, and reported again');
+    });
+});

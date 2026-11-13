@@ -65,7 +65,11 @@ async function createHarness(initial: ProxyState): Promise<MonitorHarness> {
     let queue: Promise<void> = Promise.resolve();
     monitor.on('proxyChanged', (result: ProxyDetectionResult) => {
         changes.push(result.kind);
-        queue = queue.then(() => handleProxyChanged(context, result));
+        queue = queue.then(async () => {
+            if (await handleProxyChanged(context, result) === 'notAdopted') {
+                monitor.proxyChangeNotAdopted(result);
+            }
+        });
     });
     monitor.setGenerationCapture(async () => captureLogicalGeneration(await real.manager.getState()));
 
