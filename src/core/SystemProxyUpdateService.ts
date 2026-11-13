@@ -139,7 +139,6 @@ export class SystemProxyUpdateService {
         detected: ProxyDetectionWithSource
     ): Promise<void> {
         state.systemProxyDetected = true;
-        state.autoModeOff = false;
         state.lastDetectionKind = detected.kind;
         state.lastDetectionCapability = detected.capability;
         state.lastDetectionSource = detected.source ?? undefined;
@@ -149,6 +148,8 @@ export class SystemProxyUpdateService {
         const fallbackEnabled = config.get<boolean>('enableFallback', true);
 
         if (fallbackEnabled && state.manualProxyUrl && await this.isFallbackReachable(state.manualProxyUrl)) {
+            // The fallback answering is the proof that leaves Auto: OFF (#97).
+            state.autoModeOff = false;
             state.autoProxyUrl = state.manualProxyUrl;
             state.usingFallbackProxy = true;
             state.fallbackProxyUrl = state.manualProxyUrl;
@@ -157,6 +158,10 @@ export class SystemProxyUpdateService {
             return;
         }
 
+        // A PAC/WPAD is not resolved and no fallback answered: nothing proves the
+        // endpoint Auto: OFF removed is back, so Auto: OFF stays (only a state
+        // that was not OFF is normalized to `false`).
+        state.autoModeOff = state.autoModeOff === true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         setRequiresAuthFromLiveUrls(state);

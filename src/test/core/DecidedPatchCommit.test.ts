@@ -192,6 +192,30 @@ suite('commitDecidedPatch folds a decided patch onto the latest state (#78)', ()
         assert.strictEqual(h.stored().requiresAuth, undefined);
     });
 
+    test('a patch function is evaluated against each latest state it folds onto (#135)', async () => {
+        // A patch that derives a field from other fields (credential bookkeeping
+        // follows the URLs) must follow the state a lost race refolds onto.
+        const h = harness({ revision: 1, mode: ProxyMode.Off, autoProxyUrl: 'http://a.example:8080' });
+        h.queuedCommitWrites.push(() => {
+            h.write(current => ({ ...current, autoProxyUrl: 'http://b.example:8080' }));
+        });
+        const seen: Array<string | undefined> = [];
+
+        const outcome = await commitDecidedPatch(
+            h.writer,
+            latest => {
+                seen.push(latest.autoProxyUrl);
+                return { lastError: `derived from ${latest.autoProxyUrl}` };
+            },
+            alwaysValid
+        );
+
+        assert.strictEqual(outcome.kind, 'committed');
+        assert.deepStrictEqual(seen, ['http://a.example:8080', 'http://b.example:8080']);
+        assert.strictEqual(h.stored().lastError, 'derived from http://b.example:8080');
+        assert.strictEqual(h.stored().autoProxyUrl, 'http://b.example:8080');
+    });
+
     test('diffProxyState covers the union of keys, carrying deletions as undefined', () => {
         const before: ProxyState = {
             mode: ProxyMode.Off,

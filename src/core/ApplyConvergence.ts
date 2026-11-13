@@ -1,3 +1,4 @@
+import { Logger } from '../utils/Logger';
 import { commitUnlessStale, FenceOwner, publishUnlessStale, StateWriter } from './GenerationFence';
 import { captureLogicalGeneration, sameLogicalIdentity } from './LogicalGeneration';
 import { ProxyState, StateCommitResult, stateRevision } from './types';
@@ -14,39 +15,95 @@ export interface ApplyConvergenceContext {
 }
 
 /**
+ * Attempts to clear the pending flag. Each one is a read and a compare-and-set
+ * on that read, so a loss means a commit landed between the two.
+ */
+const CLEAR_PENDING_MAX_ATTEMPTS = 3;
+
+/**
  * Ends an apply that started from a state saved with convergencePending:
  * clears the flag and publishes the converged state. A state that moved to
- * another logical identity meanwhile belongs to the writer that moved it.
- * The revision is not compared: the apply itself writes the Configured flags.
+ * another logical identity meanwhile belongs to the writer that moved it: it
+ * is neither cleared nor published here, at the clear or at the publish.
+ *
+ * The decision follows the logical identity, never the revision: the apply
+ * itself writes the Configured flags, and a connection-test result or another
+ * apply's results advance the revision without changing what the state means.
+ * A clear that loses to such a commit re-reads and tries again, at most
+ * CLEAR_PENDING_MAX_ATTEMPTS times (a local re-read, so no timers). When every
+ * attempt loses, the flag stays set and a warning says so: the call ends, the
+ * state is never published as converged, and the next apply's own clear owns
+ * the flag.
  */
 export async function clearPendingThenPublish(
     context: ApplyConvergenceContext,
     owner: FenceOwner,
     desired: ProxyState
 ): Promise<void> {
-    const afterApply = await context.proxyStateManager.getState();
+    const manager = context.proxyStateManager;
+    const afterApply = await manager.getState();
     const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
-    if (!sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(afterApply))) {
+    const stillDesired = (state: ProxyState): boolean =>
+        sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state));
+
+    let latest = afterApply;
+    let cleared = false;
+    for (let attempt = 0; attempt < CLEAR_PENDING_MAX_ATTEMPTS && !cleared; attempt++) {
+        if (attempt > 0) {
+            latest = await manager.getState();
+        }
+        if (!stillDesired(latest)) {
+            return;
+        }
+
+        const outcome = await commitUnlessStale(
+            manager,
+            captureLogicalGeneration(latest),
+            owner,
+            current => ({ ...current, convergencePending: false })
+        );
+        cleared = outcome !== 'stale';
+    }
+    if (!cleared) {
+        Logger.warn(
+            `Could not clear convergencePending after ${CLEAR_PENDING_MAX_ATTEMPTS} attempts ` +
+            `(${owner}): the state kept changing; it stays pending and is not published.`
+        );
         return;
     }
 
-    const cleared = await commitUnlessStale(
-        context.proxyStateManager,
-        captureLogicalGeneration(afterApply),
-        owner,
-        current => ({ ...current, convergencePending: false })
-    );
-    if (cleared === 'stale') {
+    const published = await manager.getState();
+    if (!stillDesired(published)) {
         return;
     }
-
-    const published = await context.proxyStateManager.getState();
     await publishUnlessStale(
         context.publishProxyState,
         captureLogicalGeneration(published),
         owner,
         published
     );
+}
+
+/**
+ * Publishes a state a command just committed. A state flagged
+ * convergencePending belongs to the writer whose apply is still running: that
+ * writer publishes once it converged, from a re-read that includes this
+ * commit, so nothing unapplied is published as converged. A publish failure is
+ * logged, not thrown: the commit stands.
+ */
+export async function publishCommitted(
+    publish: ((state: ProxyState) => Promise<void>) | undefined,
+    committed: ProxyState
+): Promise<void> {
+    if (!publish || committed.convergencePending) {
+        return;
+    }
+
+    try {
+        await publish(committed);
+    } catch (error) {
+        Logger.warn('Failed to publish proxy state:', error);
+    }
 }
 
 /**
@@ -95,6 +152,14 @@ export function diffProxyState(before: ProxyState, after: ProxyState): Partial<P
 }
 
 /**
+ * What a caller decided: the fields it sets, or a function of the latest state
+ * for a patch that derives a field from other fields (credential bookkeeping
+ * follows the URLs, a mode change follows the current mode). A function is
+ * evaluated again on every state the patch is folded onto.
+ */
+export type DecidedPatch = Partial<ProxyState> | ((latest: ProxyState) => Partial<ProxyState>);
+
+/**
  * Folds a patch a caller already decided onto the latest stored state. Each
  * attempt re-reads: when the guard rejects (another writer owns the state or
  * its identity moved), nothing is written; when the compare-and-set loses the
@@ -107,7 +172,7 @@ export function diffProxyState(before: ProxyState, after: ProxyState): Partial<P
  */
 export async function commitDecidedPatch(
     writer: DecidedPatchWriter,
-    patch: Partial<ProxyState>,
+    patch: DecidedPatch,
     stillValid: (latest: ProxyState) => boolean
 ): Promise<DecidedPatchOutcome> {
     for (let attempt = 0; attempt < DECIDED_PATCH_MAX_ATTEMPTS; attempt++) {
@@ -116,9 +181,10 @@ export async function commitDecidedPatch(
             return { kind: 'moved', state: latest };
         }
 
+        const decided = typeof patch === 'function' ? patch(latest) : patch;
         const next: ProxyState = { ...latest };
-        for (const key of Object.keys(patch) as (keyof ProxyState)[]) {
-            const value = patch[key];
+        for (const key of Object.keys(decided) as (keyof ProxyState)[]) {
+            const value = decided[key];
             if (value === undefined) {
                 delete next[key];
             } else {

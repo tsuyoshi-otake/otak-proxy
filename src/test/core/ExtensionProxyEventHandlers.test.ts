@@ -277,6 +277,39 @@ suite('ExtensionProxyEventHandlers Tests', () => {
         sinon.assert.calledOnce(saveStateStub);
     });
 
+    test('unsupported PAC detection keeps Auto: OFF: nothing proves the proxy that was removed is back (#135)', async () => {
+        state = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://old-proxy.example.com:8080',
+            autoModeOff: true,
+            proxyReachable: false,
+            usingFallbackProxy: false,
+            gitConfigured: false,
+            vscodeConfigured: false,
+            npmConfigured: false,
+            lastDetectionSource: 'windows'
+        };
+        const result: ProxyDetectionResult = {
+            proxyUrl: null,
+            source: 'windows',
+            kind: 'wpad',
+            capability: 'unsupported',
+            timestamp: Date.now(),
+            success: true
+        };
+
+        await handleProxyChanged(context, result);
+
+        assert.strictEqual(state.autoModeOff, true, 'a PAC/WPAD detection is not a successful connection test');
+        assert.strictEqual(state.autoProxyUrl, 'http://old-proxy.example.com:8080');
+        assert.strictEqual(state.lastDetectionKind, 'wpad');
+        assert.strictEqual(state.lastDetectionCapability, 'unsupported');
+        assert.strictEqual(state.systemProxyDetected, true);
+        sinon.assert.notCalled(applyProxySettingsStub);
+        sinon.assert.neverCalledWith(publishStateStub, sinon.match({ autoModeOff: false }));
+        sinon.assert.calledWith(updateStatusBarStub, sinon.match({ autoModeOff: true }));
+    });
+
     test('apply-blocked Auto does not toast success or paint the pre-apply snapshot', async () => {
         const showSuccess = context.userNotifier.showSuccess as sinon.SinonStub;
         applyProxySettingsStub.callsFake(async () => {

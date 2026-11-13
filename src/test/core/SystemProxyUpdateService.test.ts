@@ -492,6 +492,81 @@ suite('SystemProxyUpdateService Tests', () => {
         sinon.assert.neverCalledWith(notifyStub, 'fallback.usingManualProxy');
     });
 
+    suite('unsupported PAC under Auto: OFF (#135)', () => {
+        const removedProxy = 'http://removed.example:8080';
+        const manualUrl = 'http://manual.example:3128';
+
+        function autoOffState(): ProxyState {
+            return {
+                mode: ProxyMode.Auto,
+                autoProxyUrl: removedProxy,
+                autoModeOff: true,
+                proxyReachable: false,
+                usingFallbackProxy: false,
+                gitConfigured: false,
+                vscodeConfigured: false,
+                npmConfigured: false
+            };
+        }
+
+        const pacDetection = { proxyUrl: null, source: 'windows', kind: 'pac', capability: 'unsupported' };
+
+        test('without a fallback, the PAC detection keeps Auto: OFF and applies nothing', async () => {
+            state = autoOffState();
+            configValues.enableFallback = false;
+            detectStub.resolves(pacDetection);
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.strictEqual(state.autoModeOff, true, 'a PAC is not resolved, so it proves nothing about the removed proxy');
+            assert.strictEqual(state.autoProxyUrl, removedProxy);
+            assert.strictEqual(state.lastDetectionKind, 'pac');
+            sinon.assert.notCalled(applyProxyStub);
+            sinon.assert.neverCalledWith(publishStateStub, sinon.match({ autoModeOff: false }));
+        });
+
+        test('a manual fallback that does not answer keeps Auto: OFF and applies nothing', async () => {
+            state = { ...autoOffState(), manualProxyUrl: manualUrl };
+            configValues.enableFallback = true;
+            detectStub.resolves(pacDetection);
+            connectionTester!.testProxyAuto.resolves({
+                success: false,
+                proxyUrl: manualUrl,
+                testUrls: ['https://example.com'],
+                errors: [{ url: 'https://example.com', message: 'connect ECONNREFUSED 127.0.0.1:9' }],
+                failureKind: 'endpointUnreachable',
+                proxyEndpointOk: false,
+                timestamp: 0
+            });
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.strictEqual(state.autoModeOff, true);
+            assert.strictEqual(state.usingFallbackProxy, false);
+            sinon.assert.notCalled(applyProxyStub);
+        });
+
+        test('a manual fallback that answers is the proof: Auto: OFF is lifted and the fallback is applied', async () => {
+            state = { ...autoOffState(), manualProxyUrl: manualUrl };
+            configValues.enableFallback = true;
+            detectStub.resolves(pacDetection);
+            connectionTester!.testProxyAuto.resolves({
+                success: true,
+                proxyUrl: manualUrl,
+                testUrls: [],
+                errors: [],
+                timestamp: 0
+            });
+
+            await service.checkAndUpdateSystemProxy();
+
+            assert.strictEqual(state.autoModeOff, false);
+            assert.strictEqual(state.usingFallbackProxy, true);
+            assert.strictEqual(state.autoProxyUrl, manualUrl);
+            sinon.assert.calledWith(applyProxyStub, manualUrl, true);
+        });
+    });
+
     test('getConfiguration is queried with otakProxy scope', async () => {
         state.mode = ProxyMode.Auto;
         state.manualProxyUrl = 'http://manual.example:3128';

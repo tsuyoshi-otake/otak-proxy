@@ -8,7 +8,7 @@
  */
 
 import * as vscode from 'vscode';
-import { ProxyMode } from '../core/types';
+import { ProxyMode, ProxyState } from '../core/types';
 import { canonicalizeValidProxyUrl, tryCanonicalizeProxyUrl } from '../utils/ProxyUtils';
 import { Logger } from '../utils/Logger';
 import { CommandContext, CommandResult } from './types';
@@ -20,7 +20,8 @@ import {
     setRequiresAuthFromLiveUrls
 } from '../utils/ProxyStateSanitizer';
 import { I18nManager } from '../i18n/I18nManager';
-import { ProxyState } from '../core/types';
+import { diffProxyState } from '../core/ApplyConvergence';
+import { commitCommandPatch } from './CommandStateCommit';
 
 export async function showInvalidProxyUrl(ctx: CommandContext, proxyUrl: string, i18n: I18nManager): Promise<void> {
     const errorDetails = {
@@ -42,40 +43,64 @@ export async function showInvalidProxyUrl(ctx: CommandContext, proxyUrl: string,
     );
 }
 
-async function saveManualProxyUrl(ctx: CommandContext, state: ProxyState, proxyUrl: string): Promise<void> {
-    state.manualProxyUrl = proxyUrl;
-    // Recompute the credential bookkeeping from the URLs actually present so
-    // replacing or dropping a credential-bearing address cannot leave a stale
-    // requiresAuth/authRequiredProxyUrls behind (#108).
-    setRequiresAuthFromLiveUrls(state);
-    await ctx.saveProxyState(state);
+/**
+ * Saves the manual URL onto the latest state, not onto the copy read before
+ * the input box opened (#135): a toggle or a sync delivery that landed while
+ * the box was open stays. Both the credential bookkeeping and the drop to Off
+ * (a legacy Manual mode whose URL was cleared) are derived from the state the
+ * commit lands on. Returns that state, and whether this save dropped Manual.
+ */
+async function saveManualProxyUrl(
+    ctx: CommandContext,
+    proxyUrl: string
+): Promise<{ committed: ProxyState; droppedManual: boolean }> {
+    const folded = { droppedManual: false };
+    const committed = await commitCommandPatch(ctx, latest => {
+        const decided: ProxyState = { ...latest, manualProxyUrl: proxyUrl };
+        // Recompute the credential bookkeeping from the URLs actually present so
+        // replacing or dropping a credential-bearing address cannot leave a stale
+        // requiresAuth/authRequiredProxyUrls behind (#108).
+        setRequiresAuthFromLiveUrls(decided);
+        folded.droppedManual = latest.mode === ProxyMode.Manual && !proxyUrl;
+        if (folded.droppedManual) {
+            decided.mode = ProxyMode.Off;
+        }
+        return diffProxyState(latest, decided);
+    });
 
     await vscode.workspace.getConfiguration('otakProxy').update(
         'proxyUrl',
         removeProxyCredentials(proxyUrl) || proxyUrl,
         vscode.ConfigurationTarget.Global
     );
+    return { committed, droppedManual: folded.droppedManual };
 }
 
-async function applyManualModeChange(ctx: CommandContext, state: ProxyState, proxyUrl: string): Promise<void> {
-    if (state.mode !== ProxyMode.Manual) {
+/**
+ * Applies what the committed state says: a Manual mode with a URL enables it,
+ * a Manual mode whose URL was just cleared is disabled. Any other mode is
+ * applied by whoever owns it, so a toggle to Off made meanwhile applies nothing.
+ */
+async function applyManualModeChange(
+    ctx: CommandContext,
+    committed: ProxyState,
+    droppedManual: boolean,
+    proxyUrl: string
+): Promise<void> {
+    if (committed.mode === ProxyMode.Manual) {
+        await ctx.applyProxySettings(proxyUrl, true);
+    } else if (droppedManual) {
+        await ctx.applyProxySettings('', false);
+    } else {
         return;
     }
 
-    if (proxyUrl) {
-        await ctx.applyProxySettings(proxyUrl, true);
-    } else {
-        state.mode = ProxyMode.Off;
-        await ctx.saveProxyState(state);
-        await ctx.applyProxySettings('', false);
-    }
-
-    ctx.updateStatusBar(state);
+    ctx.updateStatusBar(await ctx.getProxyState());
 }
 
 async function handleProxyUrlInput(
     ctx: CommandContext,
-    state: ProxyState,
+    shownManualUrl: string | undefined,
     proxyUrl: string,
     i18n: I18nManager
 ): Promise<CommandResult> {
@@ -95,19 +120,20 @@ async function handleProxyUrlInput(
     // Resubmitting the credential-free URL of a stored credential-bearing URL
     // (the prefill the command shows) keeps the stored credentials: removing
     // them requires entering different credentials or a different URL (#108).
-    const storedUrl = state.manualProxyUrl;
+    // "Stored" is what the prompt was prefilled from: that is what the user
+    // resubmitted, whatever was committed while the box was open.
     if (
         canonicalUrl &&
-        storedUrl &&
+        shownManualUrl &&
         !hasProxyCredentials(canonicalUrl) &&
-        hasProxyCredentials(storedUrl) &&
-        getProxyPublicUrl(canonicalUrl) === getProxyPublicUrl(storedUrl)
+        hasProxyCredentials(shownManualUrl) &&
+        getProxyPublicUrl(canonicalUrl) === getProxyPublicUrl(shownManualUrl)
     ) {
-        canonicalUrl = storedUrl;
+        canonicalUrl = shownManualUrl;
     }
 
-    await saveManualProxyUrl(ctx, state, canonicalUrl);
-    await applyManualModeChange(ctx, state, canonicalUrl);
+    const { committed, droppedManual } = await saveManualProxyUrl(ctx, canonicalUrl);
+    await applyManualModeChange(ctx, committed, droppedManual, canonicalUrl);
     return { success: true };
 }
 
@@ -134,7 +160,9 @@ function manualProxyPrefillValue(manualProxyUrl: string | undefined): string {
  */
 export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandResult> {
     try {
-        const state = await ctx.getProxyState();
+        // Only the URL the box is prefilled from is read before the wait; the
+        // save goes onto the state read after it (#135).
+        const shownManualUrl = (await ctx.getProxyState()).manualProxyUrl;
         const i18n = I18nManager.getInstance();
         const proxyUrl = await vscode.window.showInputBox({
             prompt: i18n.t('prompt.proxyUrl'),
@@ -142,14 +170,14 @@ export async function executeConfigureUrl(ctx: CommandContext): Promise<CommandR
             // The stored URL may be hydrated with SecretStorage credentials;
             // prefill the credential-free canonical form so the password is
             // never shown in clear (#108).
-            value: manualProxyPrefillValue(state.manualProxyUrl)
+            value: manualProxyPrefillValue(shownManualUrl)
         });
 
         if (proxyUrl === undefined) {
             return { success: true };
         }
 
-        return await handleProxyUrlInput(ctx, state, proxyUrl, i18n);
+        return await handleProxyUrlInput(ctx, shownManualUrl, proxyUrl, i18n);
     } catch (error) {
         Logger.error('Configure URL command failed:', error);
         

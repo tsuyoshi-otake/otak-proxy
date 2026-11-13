@@ -153,18 +153,14 @@ async function recordUnsupportedAutoConfig(
     result: ProxyDetectionResult
 ): Promise<void> {
     const previousKind = state.lastDetectionKind;
-    state.systemProxyDetected = true;
-    state.autoModeOff = false;
-    state.lastDetectionKind = result.kind;
-    state.lastDetectionCapability = result.capability;
-    if (result.source) {
-        state.lastDetectionSource = result.source;
-    }
 
+    // Auto: OFF is left only by proof that the removed endpoint answers (#97).
+    // A PAC/WPAD is not resolved, so seeing one proves nothing: the state stays
+    // as it was, and only a state that was not OFF is normalized to `false`.
     await commitAndPublish(context, started, 'detection', current => ({
         ...current,
         systemProxyDetected: true,
-        autoModeOff: false,
+        autoModeOff: current.autoModeOff === true,
         lastDetectionKind: result.kind,
         lastDetectionCapability: result.capability,
         lastDetectionSource: result.source ?? current.lastDetectionSource
