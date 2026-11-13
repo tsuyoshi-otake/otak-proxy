@@ -2331,3 +2331,15 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
   - host lane の新しい経路（SecretStorage の実物の待ち時間）は fake でしか確かめていない。
   - 項目 3 の後も、`handleProxyChanged` は資格情報なしの検出 URL を `state.autoProxyUrl` に入れてから apply に渡す。apply 側が資格情報を付け直すかは確かめていない。
   - 調査で見つけた残り 17 件（PAC 検出が Auto: OFF を解除する件、Import / Configure の古い state の保存など）は未着手。
+
+## 2026-11-13 — #130 v3.2.18 の publish が unit テストで止まる
+
+**Issue**: #130
+**PR**: #131（修正、`93568c2`）、#132（v3.2.18 の版上げ）、タグ `v3.2.18` は main の `e0eeb11`
+**分担**: Claude Code がマージ、タグの push、失敗の調査を行った。
+
+- 症状: publish workflow（run 43434525103）の Unit tests が 1 件 fail し、両レジストリの publish job は skipped。何も公開されていない。
+- 根本原因: #131 で足した property テスト「an accepted URL holds no control character and is read with its credentials」の期待値が誤っていた。「`@` を含む URL は資格情報を持つ」と書いたが、userinfo が空の `http://@[::1]` は受理され、資格情報は無い（seed 1890943113 の 1105 件目、反例 `["http://","@","[::1]"]`）。プロダクションコードの不具合ではない。ローカルの 4 回と PR の CI 2 回は seed が違い、通っていた。
+- 修正: 期待値を「scheme と最後の `@` の間に user か password がある」に直し、空の userinfo の 4 つの形を `examples` に入れた。タグは付け替えず、v3.2.19 で出す。CHANGELOG の 3.2.18 に「Not published」と書いた。
+- Verification: CI の seed と別の 3 つの seed で、各 40 万件が通った。
+- Learning: rules.md に追記した（property テストは、リリースのゲートに入る前に seed を変えて多く回す）。

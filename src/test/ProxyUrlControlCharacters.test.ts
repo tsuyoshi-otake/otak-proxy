@@ -19,6 +19,23 @@ const BACKSLASH_LOGIN = 'http://DOMAIN\\alice:s3cret@proxy:8080';
 const PLAIN = 'http://proxy.example.com:8080';
 const WITH_CREDENTIALS = 'http://alice:s3cret@proxy.example.com:8080';
 
+/**
+ * True when the text between the scheme and the last `@` names a user or a
+ * password. `http://@host` and `http://:@host` carry neither.
+ */
+function hasRawUserinfo(url: string): boolean {
+    const authority = url.replace(/^[a-z]+:\/\//i, '');
+    const at = authority.lastIndexOf('@');
+    if (at < 0) {
+        return false;
+    }
+    const userinfo = authority.slice(0, at);
+    const colon = userinfo.indexOf(':');
+    const user = colon < 0 ? userinfo : userinfo.slice(0, colon);
+    const password = colon < 0 ? '' : userinfo.slice(colon + 1);
+    return user !== '' || password !== '';
+}
+
 suite('Proxy URL control characters (#130)', () => {
     const validator = new ProxyUrlValidator();
 
@@ -77,11 +94,21 @@ suite('Proxy URL control characters (#130)', () => {
                 // split sees: a password never rides along unrecognized.
                 assert.strictEqual(
                     hasProxyCredentials(accepted),
-                    accepted.includes('@'),
+                    hasRawUserinfo(accepted),
                     `credentials of ${JSON.stringify(url)}`
                 );
             }),
-            { numRuns: 2000, examples: [[['\t', 'http://', 'DOMAIN\\', 'alice', ':', 's3cret', '@', 'proxy', ':8080']]] }
+            {
+                numRuns: 2000,
+                examples: [
+                    [['\t', 'http://', 'DOMAIN\\', 'alice', ':', 's3cret', '@', 'proxy', ':8080']],
+                    // An empty userinfo is no credential (CI counterexample, v3.2.18).
+                    [['http://', '@', '[::1]']],
+                    [['http://', ':', '@', 'proxy']],
+                    [['http://', ':', 's3cret', '@', 'proxy']],
+                    [['http://', 'alice', ':', '@', 'proxy']]
+                ]
+            }
         );
     });
 });
