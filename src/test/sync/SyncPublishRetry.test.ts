@@ -459,4 +459,137 @@ suite('Failed publish retry (#137)', function() {
         const afterStop = await readShared();
         assert.strictEqual(afterStop?.proxyState.mode, ProxyMode.Manual, 'stop must cancel the pending retry');
     });
+
+    test('a fresh snapshot that lost the CAS resolves the older pending commit and re-adopts the winner (#145)', async () => {
+        const aStore = createLocalStore({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a-old.example:8080' });
+        const aProbe = createProbe();
+        const aManager = await startQuiet('window-a', { publishRetryDelaysMs: [150, 300], publishRetryRandom: () => 0.5 });
+        wireReceiver(aManager, aStore, aProbe);
+
+        const bManager = await startQuiet('window-b');
+        await bManager.notifyChange({ mode: ProxyMode.Auto, autoProxyUrl: 'http://proxy.example:8080', revision: 4 });
+
+        await aManager.triggerSync();
+        await waitFor(() => aProbe.deliveries.length === 1, 'adoption of v1');
+        await Promise.all(aProbe.deliveries);
+        assert.strictEqual(aStore.stored.autoProxyUrl, 'http://proxy.example:8080', 'v1 was adopted');
+
+        // A commits Off; its publish fails, so the commit sits pending with a
+        // retry scheduled. A newer local commit then publishes and loses its
+        // compare-and-swap to a write the file saw in between — the same "the
+        // other window won" a stale retry meets (#145).
+        let blockOffWrites = true;
+        failRenames(content => content.includes('"mode": "off"'), () => blockOffWrites);
+        await aStore.saveState({ mode: ProxyMode.Off });
+        await aManager.notifyChange(aStore.stored);
+        assert.ok(aManager.getSyncStatus().lastError, 'the failed publish records an error');
+
+        // The newer commit's compare-and-swap loses: only its own payload is
+        // told 'stale', so the pending Off retry still goes through the real
+        // CAS and would clobber the winner on unfixed code.
+        blockOffWrites = false;
+        const file = (aManager as unknown as { sharedStateFile: SharedStateFile }).sharedStateFile;
+        const realCas = file.compareAndSwap!.bind(file);
+        file.compareAndSwap = async (expected, sharedState) =>
+            sharedState.proxyState.autoProxyUrl === 'http://a-new.example:9090' ? 'stale' : realCas(expected, sharedState);
+
+        await aStore.saveState({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a-new.example:9090' });
+        await aManager.notifyChange(aStore.stored);
+
+        // The stale CAS resolves the older pending record like the retry path
+        // does: no retry may ever publish the Off commit over the winner, and
+        // the window re-adopts the shared state.
+        await waitFor(() => aStore.stored.autoProxyUrl === 'http://proxy.example:8080',
+            'A to re-adopt the shared winner after its newer snapshot lost the CAS');
+        assert.strictEqual(
+            (aManager as unknown as { pendingPublish: unknown }).pendingPublish,
+            null,
+            'the older pending record is resolved, not preserved to publish later'
+        );
+        const shared = await readShared();
+        assert.strictEqual(shared?.version, 1, 'no losing write may clobber the winner');
+        assert.strictEqual(shared?.proxyState.autoProxyUrl, 'http://proxy.example:8080');
+    });
+
+    test('a forced delivery below the watermark is superseded; equality still adopts (#145)', async () => {
+        const aStore = createLocalStore({ mode: ProxyMode.Auto, autoProxyUrl: 'http://seed.example:8080' });
+        const aManager = await startQuiet('window-a');
+        const outcomes: boolean[] = [];
+        const absorb = async (adopted: () => Promise<boolean>) => {
+            outcomes.push(await adopted());
+        };
+        const save = async (state: ProxyState) => {
+            await aStore.saveState(state);
+            return aStore.revision;
+        };
+
+        // A v3 delivery lands first: the watermark is now 3.
+        await aManager.absorbRemoteChange(
+            { state: { mode: ProxyMode.Auto, autoProxyUrl: 'http://newer.example:8080' }, version: 3 },
+            save,
+            absorb
+        );
+        assert.strictEqual(aStore.stored.autoProxyUrl, 'http://newer.example:8080', 'v3 was adopted');
+
+        // A forced delivery whose version sits BELOW the watermark is older
+        // than what this window already has: force exists to re-adopt the
+        // same version, never to roll it back (#145).
+        await aManager.absorbRemoteChange(
+            { state: { mode: ProxyMode.Auto, autoProxyUrl: 'http://stale.example:8080' }, version: 2, force: true },
+            save,
+            absorb
+        );
+        assert.strictEqual(outcomes[1], false, 'a forced delivery below the watermark is superseded');
+        assert.strictEqual(aStore.stored.autoProxyUrl, 'http://newer.example:8080', 'the newer local state was not rolled back');
+
+        // The same-version forced re-delivery is still adopted — the bypass
+        // covers equality only.
+        await aManager.absorbRemoteChange(
+            { state: { mode: ProxyMode.Auto, autoProxyUrl: 'http://resent.example:8080' }, version: 3, force: true },
+            save,
+            absorb
+        );
+        assert.strictEqual(outcomes[2], true, 'a forced delivery at the watermark still adopts');
+        assert.strictEqual(aStore.stored.autoProxyUrl, 'http://resent.example:8080');
+    });
+
+    test('a successful forced re-adoption clears the publish error and reports synchronized (#145)', async () => {
+        const aStore = createLocalStore({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a-old.example:8080' });
+        const aProbe = createProbe();
+        const aManager = await startQuiet('window-a', { publishRetryDelaysMs: [50, 80], publishRetryRandom: () => 0.5 });
+        wireReceiver(aManager, aStore, aProbe);
+        const statuses: Array<{ lastError: string | null; lastSyncTime: number | null }> = [];
+        aManager.on('syncStateChanged', status => {
+            statuses.push({ lastError: status.lastError, lastSyncTime: status.lastSyncTime });
+        });
+
+        const bManager = await startQuiet('window-b');
+        await bManager.notifyChange({ mode: ProxyMode.Auto, autoProxyUrl: 'http://proxy.example:8080', revision: 4 });
+
+        await aManager.triggerSync();
+        await waitFor(() => aProbe.deliveries.length === 1, 'adoption of v1');
+        await Promise.all(aProbe.deliveries);
+
+        // A's Off commit can never be delivered; the retries exhaust and the
+        // exhaustion path force-delivers the shared state.
+        failRenames(content => content.includes('"mode": "off"'), () => true);
+        await aStore.saveState({ mode: ProxyMode.Off });
+        await aManager.notifyChange(aStore.stored);
+        assert.ok(aManager.getSyncStatus().lastError, 'the failed publish records an error');
+        const emissionsBeforeRecovery = statuses.length;
+
+        await waitFor(() => aStore.stored.mode === ProxyMode.Auto,
+            'A to re-adopt the shared state after the retries gave out');
+
+        // The recovery marks the manager synchronized: the stale publish
+        // error is cleared, the recovery counts as a sync, and the status
+        // bar hears about it — it must not show a sync error forever (#145).
+        const status = aManager.getSyncStatus();
+        assert.strictEqual(status.lastError, null, 'the recovered adoption clears the publish error');
+        assert.ok(status.lastSyncTime !== null, 'the recovery counts as a sync');
+        assert.ok(
+            statuses.length > emissionsBeforeRecovery && statuses[statuses.length - 1].lastError === null,
+            'a recovered status is emitted so the status bar stops showing the error'
+        );
+    });
 });

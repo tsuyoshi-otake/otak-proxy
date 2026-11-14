@@ -340,14 +340,22 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 Logger.warn(
                     `Discarding stale sync publication (CAS expected version ${String(expectedVersion)}).`
                 );
-                if (retryPending && this.pendingPublish === retryPending) {
-                    // The scheduled retry lost the compare-and-swap: another
-                    // window's write landed between the read and the write, so
-                    // the pending local commit is superseded by what it lost
-                    // to — the same "another window won" a non-retry stale
-                    // means. Resolve it instead of leaving a pending publish
-                    // with no retry scheduled, which would skip every remote
-                    // adoption forever (#137).
+                // A stale CAS means another window's write landed between the
+                // read and the compare-and-swap: the loser is superseded by
+                // what it lost to. The pending record must still reach a
+                // terminal state — resolve it instead of leaving a pending
+                // publish with no retry scheduled, which would skip every
+                // remote adoption forever, and re-deliver the shared state so
+                // the skipped remote versions are adopted (#137). A fresh
+                // snapshot resolves only a pending record no newer than its
+                // own commit: a record newer than it belongs to a later commit
+                // and keeps its own retries (#145).
+                const pendingSuperseded = retryPending
+                    ? this.pendingPublish === retryPending
+                    : snapshotRevision !== undefined &&
+                        this.pendingPublish !== null &&
+                        this.pendingPublish.snapshotRevision <= snapshotRevision;
+                if (pendingSuperseded) {
                     this.clearPendingPublishRetry();
                     void this.redeliverSharedState();
                 }
