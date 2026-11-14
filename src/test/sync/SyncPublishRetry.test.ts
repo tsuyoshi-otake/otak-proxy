@@ -324,6 +324,53 @@ suite('Failed publish retry (#137)', function() {
         assert.strictEqual(shared?.proxyState.mode, ProxyMode.Auto);
     });
 
+    test('a stale CAS during a scheduled retry resolves the pending commit instead of blocking adoption', async () => {
+        const aStore = createLocalStore({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a-old.example:8080' });
+        const aProbe = createProbe();
+        const aManager = await startQuiet('window-a', { publishRetryDelaysMs: [40, 80], publishRetryRandom: () => 0.5 });
+        wireReceiver(aManager, aStore, aProbe);
+
+        const bManager = await startQuiet('window-b');
+        await bManager.notifyChange({ mode: ProxyMode.Auto, autoProxyUrl: 'http://proxy.example:8080', revision: 4 });
+
+        await aManager.triggerSync();
+        await waitFor(() => aProbe.deliveries.length === 1, 'adoption of v1');
+        await Promise.all(aProbe.deliveries);
+
+        // A commits Off; the first publish fails, so the commit is pending
+        // and a retry is scheduled.
+        let blockOffWrites = true;
+        failRenames(content => content.includes('"mode": "off"'), () => blockOffWrites);
+        await aStore.saveState({ mode: ProxyMode.Off });
+        await aManager.notifyChange(aStore.stored);
+        assert.ok(aManager.getSyncStatus().lastError, 'the failed publish records an error');
+
+        // The write path recovers, but the retry's compare-and-swap loses to
+        // another window's write that landed between the read and the write.
+        blockOffWrites = false;
+        const file = (aManager as unknown as { sharedStateFile: SharedStateFile }).sharedStateFile;
+        const realCas = file.compareAndSwap!.bind(file);
+        let casCalls = 0;
+        file.compareAndSwap = async (expected, sharedState) => {
+            casCalls += 1;
+            return casCalls === 1 ? 'stale' : realCas(expected, sharedState);
+        };
+
+        // On the stale CAS the pending commit must reach a terminal state:
+        // cleared, with the window re-adopting the shared state that won —
+        // never a pending publish with no retry scheduled, which would skip
+        // every remote delivery forever.
+        await waitFor(() => aStore.stored.mode === ProxyMode.Auto,
+            'A to re-adopt the shared state after its retry lost the CAS');
+        assert.strictEqual(
+            (aManager as unknown as { pendingPublish: unknown }).pendingPublish,
+            null,
+            'no pending commit may outlive its scheduled retries'
+        );
+        const shared = await readShared();
+        assert.strictEqual(shared?.version, 1, 'the other window\'s write was not clobbered by the losing retry');
+    });
+
     test('a newer local publish supersedes the pending retry; stop cancels it', async () => {
         const aManager = await startQuiet('window-a', { publishRetryDelaysMs: [80, 160], publishRetryRandom: () => 0.5 });
 

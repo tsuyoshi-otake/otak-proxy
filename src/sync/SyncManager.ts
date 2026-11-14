@@ -38,6 +38,19 @@ const PUBLISH_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000, 4000];
 const PUBLISH_RETRY_JITTER = 0.25;
 
 /**
+ * The decided-but-undelivered local commit and its retry bookkeeping (#137).
+ * The retry loop passes the record itself into publishState so a stale
+ * compare-and-swap can tell "the pending that scheduled me is still current"
+ * from one a newer commit replaced mid-flight.
+ */
+interface PendingPublish {
+    state: ProxyState;
+    snapshotRevision: number;
+    attempts: number;
+    generation: number;
+}
+
+/**
  * SyncManager coordinates synchronization between multiple otak-proxy instances.
  *
  * Architecture:
@@ -101,12 +114,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * (#137). While set, remote adoptions are skipped: saving a remote state
      * would silently overwrite the commit the retries are still delivering.
      */
-    private pendingPublish: {
-        state: ProxyState;
-        snapshotRevision: number;
-        attempts: number;
-        generation: number;
-    } | null = null;
+    private pendingPublish: PendingPublish | null = null;
     private publishRetryTimer: NodeJS.Timeout | null = null;
     private publishRetrySeq = 0;
     private publishRetryDelaysMs: readonly number[] = PUBLISH_RETRY_DELAYS_MS;
@@ -299,7 +307,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * already holds, not a new local snapshot, so it moves neither the fence
      * nor the watermark (#108).
      */
-    private async publishState(state: ProxyState, snapshotRevision?: number, isRetry: boolean = false): Promise<void> {
+    private async publishState(state: ProxyState, snapshotRevision?: number, retryPending?: PendingPublish): Promise<void> {
         try {
             const instanceId = this.instanceRegistry.getInstanceId();
             if (!instanceId) {
@@ -330,6 +338,17 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 Logger.warn(
                     `Discarding stale sync publication (CAS expected version ${String(expectedVersion)}).`
                 );
+                if (retryPending && this.pendingPublish === retryPending) {
+                    // The scheduled retry lost the compare-and-swap: another
+                    // window's write landed between the read and the write, so
+                    // the pending local commit is superseded by what it lost
+                    // to — the same "another window won" a non-retry stale
+                    // means. Resolve it instead of leaving a pending publish
+                    // with no retry scheduled, which would skip every remote
+                    // adoption forever (#137).
+                    this.clearPendingPublishRetry();
+                    void this.redeliverSharedState();
+                }
                 return;
             }
 
@@ -358,7 +377,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         } catch (error) {
             Logger.error('Failed to notify state change:', error);
             this.lastError = error instanceof Error ? error.message : String(error);
-            if (isRetry) {
+            if (retryPending) {
                 this.queuePublishRetry();
             } else if (snapshotRevision !== undefined && this.isStarted) {
                 this.schedulePublishRetry(state, snapshotRevision);
@@ -410,7 +429,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                     return;
                 }
                 current.attempts += 1;
-                await this.publishState(current.state, current.snapshotRevision, true);
+                await this.publishState(current.state, current.snapshotRevision, current);
             });
         }, this.publishRetryDelaysMs[pending.attempts] * jitter);
         this.publishRetryTimer.unref?.();
