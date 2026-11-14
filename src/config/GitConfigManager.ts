@@ -46,9 +46,23 @@ export interface GitConfigManagerOptions {
      * tests inject a recorder to observe the contract without real processes.
      */
     processTreeKiller?: GitProcessTreeKiller;
+    /**
+     * The process the default runner starts: `execFile` in production. A
+     * test injects a fake child — a promise that settles when the test says
+     * so, carrying a `child` with a pid like `promisify(execFile)` returns —
+     * so the timeout/tree-kill contract is exercised deterministically
+     * instead of racing a real `git` against a deadline.
+     */
+    commandSpawner?: GitCommandSpawner;
 }
 
 export type GitProcessTreeKiller = (pid: number | undefined) => Promise<void>;
+
+export type GitCommandSpawner = (
+    command: string,
+    args: string[],
+    execOptions: Omit<GitCommandOptions, 'timeout'>
+) => Promise<{ stdout: string; stderr: string }>;
 
 const TASKKILL_TIMEOUT_MS = 5000;
 
@@ -85,7 +99,8 @@ const defaultCommandRunnerImpl = async (
     command: string,
     args: string[],
     options: GitCommandOptions,
-    killProcessTree: GitProcessTreeKiller
+    killProcessTree: GitProcessTreeKiller,
+    spawn: GitCommandSpawner = execFileAsync
 ): Promise<{ stdout: string; stderr: string }> => {
     // execFile's own timeout kills only the direct child — on Windows that is
     // the cmd\git.exe wrapper, and the real git.exe keeps running (#138). The
@@ -94,7 +109,7 @@ const defaultCommandRunnerImpl = async (
     // and the rejection carries the same shape execFile's timeout produces
     // (killed + SIGTERM), which every downstream classifier already reads.
     const { timeout: timeoutMs, ...execOptions } = options;
-    const pending = execFileAsync(command, args, execOptions);
+    const pending = spawn(command, args, execOptions);
     const child = (pending as { child?: { pid?: number; kill?: (signal?: string) => boolean } }).child;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -190,7 +205,13 @@ export class GitConfigManager {
         this.timeout = options.timeoutMs ?? GIT_CONFIG_COMMAND_TIMEOUT_MS;
         this.commandRunner = options.commandRunner
             ?? ((command, args, commandOptions) =>
-                defaultCommandRunnerImpl(command, args, commandOptions, options.processTreeKiller ?? killGitProcessTree));
+                defaultCommandRunnerImpl(
+                    command,
+                    args,
+                    commandOptions,
+                    options.processTreeKiller ?? killGitProcessTree,
+                    options.commandSpawner ?? execFileAsync
+                ));
     }
 
     private async execGitConfigWithRetry(args: string[], options?: GitConfigOperationOptions): Promise<void> {
