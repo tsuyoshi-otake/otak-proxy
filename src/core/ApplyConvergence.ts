@@ -1,3 +1,4 @@
+import { splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { Logger } from '../utils/Logger';
 import { commitUnlessStale, FenceOwner, publishUnlessStale, StateWriter } from './GenerationFence';
 import { captureLogicalGeneration, sameLogicalIdentity } from './LogicalGeneration';
@@ -99,8 +100,17 @@ export async function clearPendingThenPublish(
         const manager = context.proxyStateManager;
         const afterApply = await manager.getState();
         const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
+        // The clear's bar is stricter than the logical identity a stale
+        // result is judged by: a commit that only re-routes the same primary
+        // URL (per-scheme fields or bypass changed) is still "the same state"
+        // to isStaleGeneration, but to this call it is another apply's
+        // state — its flag is not this call's to clear, nor its state to
+        // publish. The comparison stays local so every other fence keeps the
+        // narrower meaning of stale (#135).
+        const desiredSplit = splitRoutingIdentity(desired);
         const stillDesired = (state: ProxyState): boolean =>
-            sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state));
+            sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state))
+            && splitRoutingIdentity(state) === desiredSplit;
         // No claim means a call site that cleared before ownership tracking:
         // it stays allowed. A claim checks the map, so a flag another apply
         // claimed meanwhile is left to that apply's own clear.
@@ -121,7 +131,7 @@ export async function clearPendingThenPublish(
                 manager,
                 captureLogicalGeneration(latest),
                 owner,
-                current => (ownsPendingFlag() ? { ...current, convergencePending: false } : undefined)
+                current => (ownsPendingFlag() && stillDesired(current) ? { ...current, convergencePending: false } : undefined)
             );
             if (outcome === 'unchanged') {
                 // The claim was lost between the guard and the commit: the
