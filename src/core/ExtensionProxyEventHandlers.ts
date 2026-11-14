@@ -11,7 +11,7 @@ import {
     TestResult
 } from '../utils/ProxyUtils';
 import type { ReportedProxyChange } from '../utils/ProxyTestTypes';
-import { claimConvergencePending, clearPendingThenPublish, ConvergencePendingClaim, releaseConvergencePending } from './ApplyConvergence';
+import { clearPendingThenPublish, newConvergencePendingToken } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import {
     FenceCommitResult,
@@ -272,7 +272,9 @@ export async function handleProxyTestComplete(
     }
 
     let recoveredFromAutoOff = false;
-    let pendingClaim: ConvergencePendingClaim | undefined;
+    // One token for this test's pending flag, whatever the fold lands on: a
+    // commit that never lands wrote no token, so nothing needs releasing.
+    const pendingToken = newConvergencePendingToken();
     const commit = await commitUnlessStaleWithRevision(context.proxyStateManager, started, 'connectionTest', state => {
         if (state.mode !== ProxyMode.Auto) {
             return undefined;
@@ -289,17 +291,14 @@ export async function handleProxyTestComplete(
         // other apply path: until then the proxy is not active (#97).
         next.convergencePending = isProxyEndpointUnreachable(testResult) || recoveredFromAutoOff;
         if (next.convergencePending) {
-            // The flag rides the shared state, so its owner travels as an
-            // in-memory claim this apply's clear presents later (#135).
-            pendingClaim = claimConvergencePending(context.extensionContext ?? context);
+            // The flag's owner travels inside the same write: the clear
+            // presents this token and only clears the flag it landed (#135).
+            next.convergencePendingToken = pendingToken;
         }
         return next;
     });
 
     if (commit.outcome === 'stale') {
-        if (pendingClaim) {
-            releaseConvergencePending(pendingClaim);
-        }
         clearStartupPendingIfNeeded(startupTestState, testResult);
         return;
     }
@@ -332,7 +331,7 @@ export async function handleProxyTestComplete(
         }
         await applyProxyThroughContext(context, latest.autoProxyUrl, true, { silent: true });
         Logger.info(`Proxy ${context.sanitizer.maskPassword(latest.autoProxyUrl)} proved reachable, Auto Mode back on`);
-        await clearPendingThenPublish(context, 'connectionTest', latest, pendingClaim);
+        await clearPendingThenPublish(context, 'connectionTest', latest, pendingToken);
         context.updateStatusBar?.(await context.proxyStateManager.getState());
     }
 }
@@ -413,20 +412,20 @@ async function saveApplyThenPublish(
     desired: ProxyState,
     apply: () => Promise<void>
 ): Promise<'applied' | 'stale'> {
-    const pendingClaim = claimConvergencePending(context.extensionContext ?? context);
+    const pendingToken = newConvergencePendingToken();
     const pending = await commitUnlessStale(context.proxyStateManager, started, owner, current => ({
         ...current,
         ...desired,
         revision: current.revision,
-        convergencePending: true
+        convergencePending: true,
+        convergencePendingToken: pendingToken
     }));
     if (pending === 'stale') {
-        releaseConvergencePending(pendingClaim);
         return 'stale';
     }
 
     await apply();
-    await clearPendingThenPublish(context, owner, desired, pendingClaim);
+    await clearPendingThenPublish(context, owner, desired, pendingToken);
     return 'applied';
 }
 

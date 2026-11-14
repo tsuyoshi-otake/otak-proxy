@@ -20,7 +20,7 @@ import { InstanceRegistry, IInstanceRegistry } from './InstanceRegistry';
 import { FileWatcher, IFileWatcher } from './FileWatcher';
 import { ConflictResolver, SyncableState } from './ConflictResolver';
 import { ISyncConfigManager } from './SyncConfigManager';
-import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
+import { sanitizeProxyStateForPersistence, stripConvergencePendingToken } from '../utils/ProxyStateSanitizer';
 import { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
 import { reconcileSharedState, RemoteSyncDelivery } from './SyncReconciler';
 import { SyncManagerTimers } from './SyncManagerTimers';
@@ -321,7 +321,9 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 this.currentState?.version ?? 0
             ) + 1;
             const now = Date.now();
-            const sharedProxyState = sanitizeProxyStateForPersistence(state);
+            // The pending token is window-local: the published state must not
+            // carry this window's apply ownership to its peers (#135).
+            const sharedProxyState = stripConvergencePendingToken(sanitizeProxyStateForPersistence(state));
 
             const sharedState: SharedState = {
                 version,
@@ -530,7 +532,10 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 return false;
             }
             try {
-                const localRevision = await saveRemoteState({ ...delivery.state });
+                // The pending token names the publishing window's apply; an
+                // adoption must not import an ownership this window does not
+                // hold (#135).
+                const localRevision = await saveRemoteState(stripConvergencePendingToken({ ...delivery.state }));
                 this.localHistoryRevision = Math.max(this.localHistoryRevision, localRevision);
                 this.highestSharedVersion = Math.max(this.highestSharedVersion, delivery.version);
                 return true;

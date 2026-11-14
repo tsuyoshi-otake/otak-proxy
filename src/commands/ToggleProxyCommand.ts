@@ -10,13 +10,11 @@
 
 import * as vscode from 'vscode';
 import {
-    claimConvergencePending,
     clearPendingThenPublish,
     commitDecidedPatch,
-    diffProxyState,
-    ConvergencePendingClaim,
     DecidedPatchWriter,
-    releaseConvergencePending
+    diffProxyState,
+    newConvergencePendingToken
 } from '../core/ApplyConvergence';
 import { commandConvergenceContext } from './CommandStateCommit';
 import { captureLogicalGeneration, sameLogicalIdentity } from '../core/LogicalGeneration';
@@ -316,7 +314,7 @@ async function failToggle(ctx: CommandContext): Promise<CommandResult> {
  * startSystemProxyMonitoring cannot publish a still-pending state to other
  * windows (#78).
  */
-async function applyCommittedToggle(ctx: CommandContext, committed: ProxyState, pendingClaim?: ConvergencePendingClaim): Promise<boolean> {
+async function applyCommittedToggle(ctx: CommandContext, committed: ProxyState, pendingToken?: string): Promise<boolean> {
     const newActiveUrl = ctx.getActiveProxyUrl(committed);
 
     if (committed.mode === ProxyMode.Off) {
@@ -328,7 +326,7 @@ async function applyCommittedToggle(ctx: CommandContext, committed: ProxyState, 
         committed.mode !== ProxyMode.Off && Boolean(newActiveUrl)
     );
 
-    await clearPendingThenPublish(toggleConvergenceContext(ctx), 'toggle', committed, pendingClaim);
+    await clearPendingThenPublish(toggleConvergenceContext(ctx), 'toggle', committed, pendingToken);
 
     if (committed.mode === ProxyMode.Auto) {
         await ctx.startSystemProxyMonitoring();
@@ -393,13 +391,15 @@ async function runToggleRound(
     const followUps: ToggleFollowUp[] = [];
     await decideNextState(ctx, decided, nextMode, detectionRan, i18n, followUps);
 
+    // One token for this round's flag, written by the same patch that lands
+    // it: a patch that never lands wrote no token, so nothing needs
+    // releasing and a lost round cannot strand the flag (#135).
+    const pendingToken = newConvergencePendingToken();
     const patch: Partial<ProxyState> = {
         ...diffProxyState(basis, decided),
-        convergencePending: true
+        convergencePending: true,
+        convergencePendingToken: pendingToken
     };
-    // The flag is this round's claim: if the CAS loses, the claim goes back;
-    // if it lands, the flag belongs to this apply until its clear (#135).
-    const pendingClaim = claimConvergencePending(ctx.extensionContext ?? ctx);
     const basisGeneration = captureLogicalGeneration(basis);
     const outcome = await commitDecidedPatch(
         toggleWriter(ctx),
@@ -409,7 +409,7 @@ async function runToggleRound(
     );
 
     if (outcome.kind === 'committed') {
-        const applied = await applyCommittedToggle(ctx, outcome.state, pendingClaim);
+        const applied = await applyCommittedToggle(ctx, outcome.state, pendingToken);
         // Only the round whose commit landed runs its follow-ups; a moved or
         // failed round's prompts and toasts are dropped with its decision.
         for (const followUp of followUps) {
@@ -418,7 +418,6 @@ async function runToggleRound(
         return { success: applied };
     }
 
-    releaseConvergencePending(pendingClaim);
     if (outcome.kind === 'moved') {
         if (outcome.state.mode !== fromMode) {
             // Another writer owns the state now; nothing is owed, like a

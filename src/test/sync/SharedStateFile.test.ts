@@ -182,6 +182,31 @@ suite('SharedStateFile Unit Tests', () => {
             assert.strictEqual(readState!.proxyState.lastTestResult!.proxyUrl, 'http://proxy.example.com:8080/');
             assert.strictEqual(readState!.testResult!.proxyUrl, 'http://proxy.example.com:8080/');
         });
+
+        test('should not carry a convergence pending token into or out of the shared file (#135)', async () => {
+            const state: SharedState = {
+                version: 1,
+                lastModified: Date.now(),
+                lastModifiedBy: 'instance-1',
+                proxyState: {
+                    mode: ProxyMode.Auto,
+                    autoProxyUrl: 'http://proxy.example.com:8080',
+                    convergencePending: true,
+                    convergencePendingToken: 'window-local-token'
+                }
+            };
+
+            await sharedStateFile.write(state);
+
+            const filePath = path.join(testDir, 'otak-proxy-sync', 'sync-state.json');
+            const content = fs.readFileSync(filePath, 'utf-8');
+            assert.ok(!content.includes('convergencePendingToken'), 'the file never stores the window-local token');
+            assert.ok(!content.includes('window-local-token'));
+
+            const readState = await sharedStateFile.read();
+            assert.strictEqual(readState!.proxyState.convergencePending, true, 'the flag itself still syncs');
+            assert.strictEqual(readState!.proxyState.convergencePendingToken, undefined, 'a read state imports no token');
+        });
     });
 
     /**

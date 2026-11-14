@@ -21,7 +21,8 @@ import { getErrorCode } from '../utils/ErrorUtils';
 import { FileLease, FileLeaseTimeoutError } from '../utils/FileLease';
 import {
     sanitizeProxyStateForPersistence,
-    sanitizeProxyTestResultForPersistence
+    sanitizeProxyTestResultForPersistence,
+    stripConvergencePendingToken
 } from '../utils/ProxyStateSanitizer';
 
 /**
@@ -407,7 +408,7 @@ export class SharedStateFile implements ISharedStateFile {
     private sanitizeSharedState(state: SharedState): SharedState {
         return {
             ...state,
-            proxyState: sanitizeProxyStateForPersistence(state.proxyState),
+            proxyState: stripConvergencePendingToken(sanitizeProxyStateForPersistence(state.proxyState)),
             testResult: sanitizeProxyTestResultForPersistence(state.testResult)
         };
     }

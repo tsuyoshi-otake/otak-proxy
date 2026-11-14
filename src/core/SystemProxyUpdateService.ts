@@ -5,7 +5,7 @@ import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptions
 import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource, isProxyEndpointReachable } from '../utils/ProxyUtils';
-import { claimConvergencePending, clearPendingThenPublish, releaseConvergencePending } from './ApplyConvergence';
+import { clearPendingThenPublish, newConvergencePendingToken } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
 import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration } from './LogicalGeneration';
@@ -192,15 +192,15 @@ export class SystemProxyUpdateService {
         state: ProxyState,
         previousProxy: string | undefined
     ): Promise<void> {
-        const pendingClaim = claimConvergencePending(this.context.extensionContext ?? this.context);
+        const pendingToken = newConvergencePendingToken();
         const pending = await commitUnlessStale(this.context.proxyStateManager, started, 'detection', current => ({
             ...current,
             ...state,
             revision: current.revision,
-            convergencePending: true
+            convergencePending: true,
+            convergencePendingToken: pendingToken
         }));
         if (pending === 'stale') {
-            releaseConvergencePending(pendingClaim);
             return;
         }
 
@@ -212,10 +212,10 @@ export class SystemProxyUpdateService {
             activeProxyUrl ? splitApplyOptionsFromState(state) : { silent: true }
         );
 
-        // The pending flag is this apply's claim: the bounded clear publishes
-        // the post-apply state, and a foreign flag another apply committed
-        // meanwhile is left to its owner (#135).
-        await clearPendingThenPublish(this.context, 'detection', state, pendingClaim);
+        // The pending flag carries this apply's token: the bounded clear
+        // publishes the post-apply state, and a foreign flag another apply
+        // committed meanwhile is left to its owner (#135).
+        await clearPendingThenPublish(this.context, 'detection', state, pendingToken);
         const published = await this.context.proxyStateManager.getState();
         if (applied) {
             this.notifyAutoProxyChange(state, previousProxy);

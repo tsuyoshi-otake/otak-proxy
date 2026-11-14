@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { Logger } from '../utils/Logger';
 import { commitUnlessStale, FenceOwner, publishUnlessStale, StateWriter } from './GenerationFence';
@@ -16,49 +17,16 @@ export interface ApplyConvergenceContext {
 }
 
 /**
- * In-memory ownership of a `convergencePending` flag. The flag rides the
- * shared/persisted state, so it cannot name the apply that set it; the claim
- * lives here instead, keyed by the per-window object every apply channel
- * shares (the extension context). When a second apply commits the flag for
- * the same logical identity, its claim replaces the first's — and the first
- * apply's clear, retried or not, then sees a foreign claim and leaves the
- * flag and the unpublished state alone (#135).
+ * An opaque, unique token one apply writes together with its
+ * `convergencePending` flag, in the same commit. Ownership travels with the
+ * write: a commit that never lands wrote no token, so there is nothing to
+ * release and no side-channel bookkeeping whose leak could strand the flag
+ * or block the real owner's clear. Every refold of that commit writes the
+ * same token, so the landed value always names the apply whose apply still
+ * runs (#135).
  */
-const pendingClaims = new WeakMap<object, ConvergencePendingClaim>();
-
-/** Opaque ownership of one apply's `convergencePending` commit. */
-export interface ConvergencePendingClaim {
-    readonly key: object;
-    readonly prev: ConvergencePendingClaim | undefined;
-}
-
-/**
- * Claims the flag the caller is about to commit for `key` — the apply's own
- * channel key (the extension context). Claim before the pending commit so a
- * commit that never lands can be released back to the claim it displaced.
- */
-export function claimConvergencePending(key: object): ConvergencePendingClaim {
-    const claim: ConvergencePendingClaim = { key, prev: pendingClaims.get(key) };
-    pendingClaims.set(key, claim);
-    return claim;
-}
-
-/**
- * Gives back a claim the owning apply no longer needs — a pending commit
- * that lost its race, or a flag its clear consumed. Releasing restores the
- * claim it displaced, so an earlier apply's flag is not orphaned by a commit
- * that never landed. Releasing a claim a newer one already replaced is a
- * no-op.
- */
-export function releaseConvergencePending(claim: ConvergencePendingClaim): void {
-    if (pendingClaims.get(claim.key) !== claim) {
-        return;
-    }
-    if (claim.prev) {
-        pendingClaims.set(claim.key, claim.prev);
-    } else {
-        pendingClaims.delete(claim.key);
-    }
+export function newConvergencePendingToken(): string {
+    return crypto.randomUUID();
 }
 
 /**
@@ -82,88 +50,96 @@ const CLEAR_PENDING_MAX_ATTEMPTS = 3;
  * state is never published as converged, and the next apply's own clear owns
  * the flag.
  *
- * `pendingClaim` is the apply's own claim on the flag (`claimConvergencePending`
- * where the flag was committed). The clear only proceeds while that claim is
- * still the current one: a second apply whose pending commit landed meanwhile
- * claimed the flag instead, and clearing or publishing over it would release a
- * still-applying state as converged. The claim is checked again inside the
- * fold, right before the compare-and-set, so a claim lost mid-commit reports
- * 'unchanged' and the call leaves the flag alone.
+ * `pendingToken` is the token the apply's own pending commit wrote with the
+ * flag (`newConvergencePendingToken`). The clear only proceeds while the
+ * stored token is that same value: a second apply whose pending commit
+ * landed meanwhile rewrote the token, and clearing or publishing over its
+ * flag would release a still-applying state as converged. The token is
+ * checked again inside the fold, right before the compare-and-set, so a
+ * commit that lost mid-commit reports 'unchanged' and the call leaves the
+ * flag alone. A call without a token may only clear a flag that carries
+ * none — the behaviour a call site had before ownership travelled with the
+ * write.
  */
 export async function clearPendingThenPublish(
     context: ApplyConvergenceContext,
     owner: FenceOwner,
     desired: ProxyState,
-    pendingClaim?: ConvergencePendingClaim
+    pendingToken?: string
 ): Promise<void> {
-    try {
-        const manager = context.proxyStateManager;
-        const afterApply = await manager.getState();
-        const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
-        // The clear's bar is stricter than the logical identity a stale
-        // result is judged by: a commit that only re-routes the same primary
-        // URL (per-scheme fields or bypass changed) is still "the same state"
-        // to isStaleGeneration, but to this call it is another apply's
-        // state — its flag is not this call's to clear, nor its state to
-        // publish. The comparison stays local so every other fence keeps the
-        // narrower meaning of stale (#135).
-        const desiredSplit = splitRoutingIdentity(desired);
-        const stillDesired = (state: ProxyState): boolean =>
-            sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state))
-            && splitRoutingIdentity(state) === desiredSplit;
-        // No claim means a call site that cleared before ownership tracking:
-        // it stays allowed. A claim checks the map, so a flag another apply
-        // claimed meanwhile is left to that apply's own clear.
-        const ownsPendingFlag = (): boolean =>
-            pendingClaim === undefined || pendingClaims.get(pendingClaim.key) === pendingClaim;
+    const manager = context.proxyStateManager;
+    const afterApply = await manager.getState();
+    const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
+    // The clear's bar is stricter than the logical identity a stale
+    // result is judged by: a commit that only re-routes the same primary
+    // URL (per-scheme fields or bypass changed) is still "the same state"
+    // to isStaleGeneration, but to this call it is another apply's
+    // state — its flag is not this call's to clear, nor its state to
+    // publish. The comparison stays local so every other fence keeps the
+    // narrower meaning of stale (#135).
+    const desiredSplit = splitRoutingIdentity(desired);
+    const stillDesired = (state: ProxyState): boolean =>
+        sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state))
+        && splitRoutingIdentity(state) === desiredSplit;
+    // The flag belongs to the commit that wrote its token. A tokenless call
+    // answers only a tokenless flag; a token answers only its own.
+    const ownsPendingFlag = (state: ProxyState): boolean =>
+        pendingToken === undefined
+            ? state.convergencePendingToken === undefined
+            : state.convergencePendingToken === pendingToken;
 
-        let latest = afterApply;
-        let cleared = false;
-        for (let attempt = 0; attempt < CLEAR_PENDING_MAX_ATTEMPTS && !cleared; attempt++) {
-            if (attempt > 0) {
-                latest = await manager.getState();
-            }
-            if (!stillDesired(latest) || !ownsPendingFlag()) {
-                return;
-            }
-
-            const outcome = await commitUnlessStale(
-                manager,
-                captureLogicalGeneration(latest),
-                owner,
-                current => (ownsPendingFlag() && stillDesired(current) ? { ...current, convergencePending: false } : undefined)
-            );
-            if (outcome === 'unchanged') {
-                // The claim was lost between the guard and the commit: the
-                // flag now belongs to another apply, and retrying would only
-                // see the same foreign claim.
-                return;
-            }
-            cleared = outcome !== 'stale';
+    let latest = afterApply;
+    let cleared = false;
+    for (let attempt = 0; attempt < CLEAR_PENDING_MAX_ATTEMPTS && !cleared; attempt++) {
+        if (attempt > 0) {
+            latest = await manager.getState();
         }
-        if (!cleared) {
-            Logger.warn(
-                `Could not clear convergencePending after ${CLEAR_PENDING_MAX_ATTEMPTS} attempts ` +
-                `(${owner}): the state kept changing; it stays pending and is not published.`
-            );
+        if (!stillDesired(latest) || !ownsPendingFlag(latest)) {
             return;
         }
 
-        const published = await manager.getState();
-        if (!stillDesired(published)) {
-            return;
-        }
-        await publishUnlessStale(
-            context.publishProxyState,
-            captureLogicalGeneration(published),
+        const outcome = await commitUnlessStale(
+            manager,
+            captureLogicalGeneration(latest),
             owner,
-            published
+            current => {
+                if (!ownsPendingFlag(current) || !stillDesired(current)) {
+                    return undefined;
+                }
+                const next: ProxyState = { ...current, convergencePending: false };
+                delete next.convergencePendingToken;
+                return next;
+            }
         );
-    } finally {
-        if (pendingClaim) {
-            releaseConvergencePending(pendingClaim);
+        if (outcome === 'unchanged') {
+            // The token changed between the guard and the commit: the flag
+            // now belongs to another apply, and retrying would only see the
+            // same foreign token.
+            return;
         }
+        cleared = outcome !== 'stale';
     }
+    if (!cleared) {
+        Logger.warn(
+            `Could not clear convergencePending after ${CLEAR_PENDING_MAX_ATTEMPTS} attempts ` +
+            `(${owner}): the state kept changing; it stays pending and is not published.`
+        );
+        return;
+    }
+
+    const published = await manager.getState();
+    // The clear removed our flag and token, so ownership cannot be re-proved
+    // here — and must not be: any flag now standing belongs to a commit that
+    // landed after ours, whose apply still runs and publishes itself.
+    if (!stillDesired(published) || published.convergencePending === true) {
+        return;
+    }
+    await publishUnlessStale(
+        context.publishProxyState,
+        captureLogicalGeneration(published),
+        owner,
+        published
+    );
 }
 
 /**
