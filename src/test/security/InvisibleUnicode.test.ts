@@ -236,6 +236,19 @@ suite('Invisible Unicode detector (GlassWorm)', () => {
         assert.ok(findings.every(f => f.codePoint === VARIATION_SELECTOR_16));
     });
 
+    test('a keycap mark on a non-keycap base does not hide an unbounded selector channel (#140)', () => {
+        // U+20E3 renders a keycap glyph only on a digit/#/* base. After any
+        // other base the selector+mark pair is still an invisible bit, so it
+        // must count against the same budget as a bare selector: the cap has
+        // to look at the base, not only at the mark that follows.
+        const triple = cp(0x00a9, VARIATION_SELECTOR_16, COMBINING_KEYCAP);
+        const findings = scanTextForInvisibleUnicode(triple.repeat(40));
+        assert.strictEqual(findings.length, 8);
+        assert.ok(findings.every(f => f.codePoint === VARIATION_SELECTOR_16));
+        // A single such triple is still a tolerated oddity under the cap.
+        assert.deepStrictEqual(scanTextForInvisibleUnicode(triple), []);
+    });
+
     test('keycap exemptions do not consume the invisible-selector budget (#140)', () => {
         // The keycap mark renders its sequence as a visible glyph, so it is
         // not part of the invisible channel the cap bounds.

@@ -248,8 +248,10 @@ const COMBINING_ENCLOSING_KEYCAP = 0x20e3;
  * of a few hundred selectors passed the scan unflagged. Capping the count
  * caps that channel at 32 bits (4 bytes) per file, orders of magnitude below
  * any real payload and far above what legitimate emoji text uses. Selectors
- * in a complete keycap sequence are not counted: U+20E3 renders the sequence
- * as a visible keycap glyph, so a hidden bit cannot ride it.
+ * in a complete keycap sequence - keycap base (0-9, #, *) + U+FE0F + U+20E3 -
+ * are not counted: the sequence renders as a visible keycap glyph, so a
+ * hidden bit cannot ride it. A trailing U+20E3 after any other base does not
+ * produce the glyph, so those selectors are counted like bare ones.
  */
 export const MAX_EXEMPTED_EMOJI_SELECTORS = 32;
 
@@ -367,7 +369,15 @@ export function scanTextForInvisibleUnicode(text, options = {}) {
             allowEmojiPresentation
         });
 
-        if (exempt && isPresentationSelector && nextCodePoint !== COMBINING_ENCLOSING_KEYCAP) {
+        // Selectors in a complete keycap sequence are not counted — but only
+        // when the base can actually form the keycap glyph (0-9, #, *). A
+        // trailing U+20E3 after a pictographic base renders as a stray mark,
+        // not a keycap, so the selector is still an invisible bit and must
+        // count against the same budget as a bare one (#140).
+        const isCompleteKeycapSelector = isPresentationSelector &&
+            isKeycapBase(previousCodePoint) &&
+            nextCodePoint === COMBINING_ENCLOSING_KEYCAP;
+        if (exempt && isPresentationSelector && !isCompleteKeycapSelector) {
             exemptedEmojiSelectors += 1;
         }
 
