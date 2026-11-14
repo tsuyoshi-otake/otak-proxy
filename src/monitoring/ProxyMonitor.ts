@@ -375,7 +375,12 @@ export class ProxyMonitor extends EventEmitter {
 
     private emitProxyChangeIfNeeded(result: ProxyDetectionResult, trigger: ProxyCheckTrigger): void {
         if (!this.reportsProxyChange(result)) {
-            if (result.success) {
+            // A quiet check ends the not-adopted streak only once no report
+            // is still waiting for its answer: the listener resolves the
+            // last report asynchronously, and resetting while it can still
+            // reject would restart the count at zero on every poll and keep
+            // MAX_REREPORTS forever out of reach (#136).
+            if (result.success && !this.lastReport) {
                 this.rereports = 0;
             }
             return;
@@ -423,6 +428,24 @@ export class ProxyMonitor extends EventEmitter {
         this.lastSplitRouting = report.before.splitRouting;
         this.lastAutoConfig = report.before.autoConfig;
         Logger.info('Proxy change was not adopted; the next check reports it again');
+    }
+
+    /**
+     * The listener's answer to a proxyChanged event it took — or had nothing
+     * to take: the report settled. The outstanding-report marker clears and
+     * the rejection streak ends: only consecutive not-adopted answers count
+     * toward MAX_REREPORTS, and a settled report is what releases a quiet
+     * check to reset the count (#136). Answers for anything but the latest
+     * report of the current lifecycle are ignored, same as
+     * proxyChangeNotAdopted.
+     */
+    proxyChangeSettled(result: ProxyDetectionResult): void {
+        const report = this.lastReport;
+        if (!report || report.result !== result || !this.isCurrentLifecycle(report.epoch)) {
+            return;
+        }
+        this.lastReport = undefined;
+        this.rereports = 0;
     }
 
     private recordedDetection(): RecordedDetection {

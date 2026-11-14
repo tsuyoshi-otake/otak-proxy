@@ -120,6 +120,12 @@ export class ExtensionInitializer {
                 );
                 if (outcome === 'notAdopted') {
                     monitor.proxyChangeNotAdopted(result);
+                } else {
+                    // A settled report releases the monitor's outstanding
+                    // report so the next quiet check ends the rejection
+                    // streak — while it is outstanding the streak is kept
+                    // (#136).
+                    monitor.proxyChangeSettled(result);
                 }
             });
         });

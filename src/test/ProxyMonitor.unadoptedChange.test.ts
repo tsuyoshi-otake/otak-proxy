@@ -139,6 +139,61 @@ suite('ProxyMonitor re-reports a change the listener did not adopt (#136)', () =
         );
     });
 
+    test('an unchanged check while a report is still unanswered does not reset the streak', async () => {
+        await check(X);
+
+        // The listener answers asynchronously: an unchanged poll that runs
+        // before the answer arrives must not count as the streak ending —
+        // otherwise every rejected report restarts the count at zero and
+        // MAX_REREPORTS is never reached.
+        const emittedY = () => reportedUrls().filter(url => url === Y).length;
+        for (let attempt = 0; attempt < 10 && emittedY() < 6; attempt++) {
+            const countBefore = reports.length;
+            await check(Y);
+            if (reports.length === countBefore) {
+                continue;
+            }
+            const latest = reports[reports.length - 1];
+            // The report is still unanswered when the next check sees the
+            // same detection; only then does the rejection land.
+            await check(Y);
+            monitor.proxyChangeNotAdopted(latest);
+        }
+
+        assert.strictEqual(emittedY(), 4, 'the first report plus the three bounded repeats');
+    });
+
+    test('a report the listener settled breaks the rejection streak', async () => {
+        await check(X);
+        await check(Y);
+        monitor.proxyChangeNotAdopted(reports[1]);
+        await check(Y);
+
+        // The repeat is settled this time: a streak of one ends here.
+        monitor.proxyChangeSettled(reports[2]);
+
+        // Two rejections on the next change produce two re-reports — the
+        // earlier rejection may not carry over through the settled report.
+        await check(Z);
+        monitor.proxyChangeNotAdopted(reports[3]);
+        await check(Z);
+        monitor.proxyChangeNotAdopted(reports[4]);
+        await check(Z);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Y, Z, Z, Z]);
+    });
+
+    test('a settled answer for a report a newer one replaced is ignored', async () => {
+        await check(X);
+        await check(Y);
+        await check(Z);
+
+        monitor.proxyChangeSettled(reports[1]);
+        await check(Z);
+
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Z], 'the stale answer changed nothing');
+    });
+
     test('a quiet check ends the streak: the next change is repeated again', async () => {
         await check(X);
         for (let attempt = 0; attempt < 6; attempt++) {
