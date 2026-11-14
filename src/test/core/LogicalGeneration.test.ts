@@ -73,4 +73,32 @@ suite('LogicalGeneration (#17)', () => {
             revision: 8
         }), true);
     });
+
+    test('a split-routing-only change at the same revision does not make a captured generation stale', () => {
+        // Per-scheme URLs and bypass are not part of the logical identity by
+        // design: the detection paths compare them through splitRoutingIdentity.
+        // A connection-test or apply result that lands after a commit which only
+        // re-routed the same primary URL is still current, not stale (#135).
+        const started = captureLogicalGeneration({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            revision: 4
+        });
+
+        assert.strictEqual(isStaleGeneration(started, {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            detectedBypass: 'localhost;*.internal.example',
+            revision: 4
+        }), false, 'a bypass-only change does not stale a completion');
+
+        assert.strictEqual(isStaleGeneration(started, {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example:8080',
+            autoProxyKind: 'perSchemeProxy',
+            autoHttpProxyUrl: 'http://http.example:8080',
+            autoHttpsProxyUrl: 'http://https.example:8443',
+            revision: 4
+        }), false, 'a per-scheme-only change does not stale a completion');
+    });
 });

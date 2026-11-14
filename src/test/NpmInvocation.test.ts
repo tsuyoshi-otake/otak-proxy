@@ -38,4 +38,30 @@ suite('NpmInvocation', () => {
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
+
+    test('a quoted Windows PATH entry still resolves npm (#138)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-npm-inv-'));
+        try {
+            fs.mkdirSync(path.join(root, 'node_modules', 'npm', 'bin'), { recursive: true });
+            fs.writeFileSync(path.join(root, 'npm.cmd'), '');
+            fs.writeFileSync(path.join(root, 'node.exe'), '');
+            const cliJs = path.join(root, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+            fs.writeFileSync(cliJs, '');
+
+            // Windows accepts "C:\dir with spaces" entries in PATH; a resolver
+            // that does not strip the quotes reports npm as not installed.
+            const invocation = resolveNpmInvocation(['config', 'get', 'proxy'], {
+                isWindows: true,
+                env: {
+                    PATH: `"${root}"`,
+                    PATHEXT: '.COM;.EXE;.BAT;.CMD'
+                }
+            });
+
+            assert.strictEqual(invocation.command, path.join(root, 'node.exe'));
+            assert.strictEqual(invocation.args[0], cliJs);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
 });

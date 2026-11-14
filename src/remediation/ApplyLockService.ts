@@ -101,6 +101,14 @@ export class ApplyLockService {
     private readonly perUserDefaultDir: boolean;
     private readonly lockDirDeps: LockDirDeps;
     private readonly now: () => number;
+    /**
+     * Per-handle serialization + released mark (#137). `release()` marks the
+     * handle before its unlink, and the unlink is queued behind any renew
+     * already in flight, so a slow renewal write always lands before the
+     * delete instead of resurrecting the lock afterwards. A renew whose turn
+     * comes after release() was called sees the mark and writes nothing.
+     */
+    private readonly handleStates = new WeakMap<ApplyLockHandle, { released: boolean; tail: Promise<void> }>();
 
     constructor(options: ApplyLockServiceOptions = {}) {
         // OTAK_PROXY_LOCK_DIR lets tests point the shared apply lock at a hermetic
@@ -240,37 +248,70 @@ export class ApplyLockService {
             : held;
     }
 
-    async release(handle: ApplyLockHandle): Promise<boolean> {
-        const record = await this.readLock(handle.path);
-        if (!record || record.token !== handle.token) {
-            return false;
+    private handleState(handle: ApplyLockHandle): { released: boolean; tail: Promise<void> } {
+        let state = this.handleStates.get(handle);
+        if (!state) {
+            state = { released: false, tail: Promise.resolve() };
+            this.handleStates.set(handle, state);
         }
+        return state;
+    }
 
-        try {
-            await fs.unlink(handle.path);
-            return true;
-        } catch (error) {
-            return isErrno(error, 'ENOENT');
-        }
+    /**
+     * Runs `op` after every earlier release/renew on the same handle settled:
+     * the ordering that makes an in-flight renew's write land before the
+     * release's unlink instead of recreating the file after it (#137).
+     */
+    private runHandleOp<T>(handle: ApplyLockHandle, op: () => Promise<T>): Promise<T> {
+        const state = this.handleState(handle);
+        const run = state.tail.then(op, op);
+        state.tail = run.then(() => undefined, () => undefined);
+        return run;
+    }
+
+    async release(handle: ApplyLockHandle): Promise<boolean> {
+        // Mark before deleting: a renew that runs later sees the released
+        // mark and does not resurrect the lock (#137).
+        this.handleState(handle).released = true;
+        return this.runHandleOp(handle, async () => {
+            const record = await this.readLock(handle.path);
+            if (!record || record.token !== handle.token) {
+                return false;
+            }
+
+            try {
+                await fs.unlink(handle.path);
+                return true;
+            } catch (error) {
+                return isErrno(error, 'ENOENT');
+            }
+        });
     }
 
     /**
      * Extends the lease of a lock this process still holds. No-ops (returns
-     * false) when the lock was reclaimed by another holder in the meantime.
+     * false) when the lock was reclaimed by another holder in the meantime or
+     * the handle was released first (#137).
      */
     async renew(handle: ApplyLockHandle, ttlMs: number): Promise<boolean> {
-        const record = await this.readLock(handle.path);
-        if (!record || record.token !== handle.token) {
-            return false;
-        }
+        return this.runHandleOp(handle, async () => {
+            if (this.handleState(handle).released) {
+                return false;
+            }
 
-        const renewed: ApplyLockRecord = { ...record, expiresAt: this.now() + ttlMs };
-        try {
-            await fs.writeFile(handle.path, JSON.stringify(renewed), 'utf8');
-            return true;
-        } catch {
-            return false;
-        }
+            const record = await this.readLock(handle.path);
+            if (!record || record.token !== handle.token) {
+                return false;
+            }
+
+            const renewed: ApplyLockRecord = { ...record, expiresAt: this.now() + ttlMs };
+            try {
+                await fs.writeFile(handle.path, JSON.stringify(renewed), 'utf8');
+                return true;
+            } catch {
+                return false;
+            }
+        });
     }
 
     async withLocks<T>(

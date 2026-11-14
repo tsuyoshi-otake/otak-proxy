@@ -236,6 +236,7 @@ suite('Assurance: deterministic failure injection and recovery', () => {
             },
             trigger: 'network',
             sleep: async ms => { waits.push(ms); },
+            isCancelled: () => false,
             onAllRetriesFailed: () => assert.fail('success must not report an exhausted retry')
         });
         assert.strictEqual(success.success, true);
@@ -256,6 +257,7 @@ suite('Assurance: deterministic failure injection and recovery', () => {
             },
             trigger: 'network',
             sleep: async () => undefined,
+            isCancelled: () => false,
             onAllRetriesFailed: () => { exhausted++; }
         });
         assert.strictEqual(failure.success, false);

@@ -107,13 +107,38 @@ export class ExtensionInitializer {
             this.connectionTester || undefined
         );
 
-        // Set up proxyChanged event handler
-        this.proxyMonitor.on('proxyChanged', (result: ProxyDetectionResult) => {
-            this.enqueueProxyMonitorEvent(() => handleProxyChanged(
-                this.context,
-                result,
-                state => this.systemProxyUpdateService.resolveManualFallback(state)
-            ));
+        // Set up proxyChanged event handler. A change the handler did not adopt
+        // is handed back to the monitor, which reports the detection again at
+        // its next check (#136).
+        const monitor = this.proxyMonitor;
+        monitor.on('proxyChanged', (result: ProxyDetectionResult) => {
+            this.enqueueProxyMonitorEvent(async () => {
+                let outcome: Awaited<ReturnType<typeof handleProxyChanged>>;
+                try {
+                    outcome = await handleProxyChanged(
+                        this.context,
+                        result,
+                        state => this.systemProxyUpdateService.resolveManualFallback(state)
+                    );
+                } catch (error) {
+                    // A report whose handler threw still gets an answer: count
+                    // it not-adopted so the bounded re-report path decides on a
+                    // fresh detection whether the state adopted it — an
+                    // unanswered report would block the streak reset forever
+                    // (#136). The error keeps its existing logged path.
+                    monitor.proxyChangeNotAdopted(result);
+                    throw error;
+                }
+                if (outcome === 'notAdopted') {
+                    monitor.proxyChangeNotAdopted(result);
+                } else {
+                    // A settled report releases the monitor's outstanding
+                    // report so the next quiet check ends the rejection
+                    // streak — while it is outstanding the streak is kept
+                    // (#136).
+                    monitor.proxyChangeSettled(result);
+                }
+            });
         });
 
         // Feature: auto-mode-proxy-testing - Handle test complete events

@@ -20,6 +20,8 @@ import { OutputChannelManager } from '../errors/OutputChannelManager';
 import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { assignDetectedProxyToState } from '../config/DetectedProxyValue';
 import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
+import { clearPendingThenPublish, diffProxyState, newConvergencePendingToken } from '../core/ApplyConvergence';
+import { commandConvergenceContext, commitCommandPatch } from './CommandStateCommit';
 
 /**
  * Execute the import proxy command
@@ -41,8 +43,6 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
         });
         const detectedProxy = detected.proxyUrl;
         const detectedSource: AppliedProxySource | undefined = detected.source ?? undefined;
-
-        const state = await ctx.getProxyState();
 
         if (isUnsupportedAutoConfig(detected)) {
             const action = await vscode.window.showWarningMessage(
@@ -90,11 +90,11 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
             );
 
             if (action === i18n.t('action.testFirst')) {
-                return await handleTestFirst(ctx, state, detected, detectedSource, i18n);
+                return await handleTestFirst(ctx, detected, detectedSource, i18n);
             } else if (action === i18n.t('action.useAutoMode')) {
-                return await handleUseAutoMode(ctx, state, detected, detectedSource);
+                return await handleUseAutoMode(ctx, detected, detectedSource);
             } else if (action === i18n.t('action.saveAsManual')) {
-                return await handleSaveAsManual(ctx, state, detectedProxy);
+                return await handleSaveAsManual(ctx, detectedProxy);
             }
         } else {
             // Requirement 6.3: Show action buttons for manual setup and redetect
@@ -137,7 +137,6 @@ export async function executeImportProxy(ctx: CommandContext): Promise<CommandRe
  */
 async function handleTestFirst(
     ctx: CommandContext,
-    state: ProxyState,
     detected: ProxyDetectionWithSource,
     detectedSource: AppliedProxySource | undefined,
     i18n: I18nManager
@@ -160,9 +159,9 @@ async function handleTestFirst(
         );
 
         if (useAction === i18n.t('action.useAutoMode')) {
-            return await handleUseAutoMode(ctx, state, detected, detectedSource);
+            return await handleUseAutoMode(ctx, detected, detectedSource);
         } else if (useAction === i18n.t('action.saveAsManual')) {
-            return await handleSaveAsManual(ctx, state, detectedProxy);
+            return await handleSaveAsManual(ctx, detectedProxy);
         }
     } else {
         // Requirement 1.1, 3.3: Use showErrorWithDetails for concise notification with detailed logging
@@ -190,34 +189,64 @@ async function handleTestFirst(
 }
 
 /**
- * Handle "Use Auto Mode" action
+ * The fields "Use Auto Mode" decides, set on `state`.
+ */
+function useDetectedProxyAsAuto(
+    state: ProxyState,
+    detected: ProxyDetectionWithSource,
+    detectedSource: AppliedProxySource | undefined
+): void {
+    assignDetectedProxyToState(state, detected);
+    state.mode = ProxyMode.Auto;
+    state.autoModeOff = false;
+    state.usingFallbackProxy = false;
+    state.fallbackProxyUrl = undefined;
+    if (detectedSource) {
+        state.lastDetectionSource = detectedSource;
+    }
+    state.proxyReachable = undefined;
+    state.lastTestResult = undefined;
+    state.lastTestTimestamp = undefined;
+    state.systemProxyDetected = true;
+    setRequiresAuthFromLiveUrls(state);
+}
+
+/**
+ * Handle "Use Auto Mode" action. The choice is explicit, so it also wins over a
+ * toggle that landed while the notification was open; every other field is
+ * whatever was committed last, not the copy read before the prompt (#135).
  */
 async function handleUseAutoMode(
     ctx: CommandContext,
-    state: ProxyState,
     detected: ProxyDetectionWithSource,
     detectedSource: AppliedProxySource | undefined
 ): Promise<CommandResult> {
     const detectedProxy = detected.proxyUrl!;
     if (validateProxyUrl(detectedProxy)) {
-        const wasAutoMode = state.mode === ProxyMode.Auto;
-        assignDetectedProxyToState(state, detected);
-        state.mode = ProxyMode.Auto;
-        state.autoModeOff = false;
-        state.usingFallbackProxy = false;
-        state.fallbackProxyUrl = undefined;
-        if (detectedSource) {
-            state.lastDetectionSource = detectedSource;
-        }
-        state.proxyReachable = undefined;
-        state.lastTestResult = undefined;
-        state.lastTestTimestamp = undefined;
-        state.systemProxyDetected = true;
-        setRequiresAuthFromLiveUrls(state);
-        await ctx.saveProxyState(state);
+        // Set by the fold of the attempt that committed: the monitor restarts
+        // only when the state it replaced was Auto.
+        const folded = { wasAutoMode: false };
+        // The detected URL is applied below: the pending flag this commit
+        // lands carries this apply's token, so only its own clear may release
+        // it; a commit that never lands wrote no token (#135).
+        const pendingToken = newConvergencePendingToken();
+        const committed = await commitCommandPatch(ctx, latest => {
+            folded.wasAutoMode = latest.mode === ProxyMode.Auto;
+            const decided: ProxyState = { ...latest };
+            useDetectedProxyAsAuto(decided, detected, detectedSource);
+            // The detected URL is applied below: mark the commit pending so
+            // nothing unapplied is published as converged; the post-apply
+            // publish carries the results the apply recorded (#135).
+            return {
+                ...diffProxyState(latest, decided),
+                convergencePending: true,
+                convergencePendingToken: pendingToken
+            };
+        });
         const applied = await ctx.applyProxySettings(detectedProxy, true);
+        await clearPendingThenPublish(commandConvergenceContext(ctx), 'importProxy', committed, pendingToken);
         ctx.updateStatusBar(await ctx.getProxyState());
-        if (wasAutoMode) {
+        if (folded.wasAutoMode) {
             await ctx.stopSystemProxyMonitoring();
         }
         await ctx.startSystemProxyMonitoring();
@@ -234,22 +263,22 @@ async function handleUseAutoMode(
 }
 
 /**
- * Handle "Save as Manual" action
+ * Handle "Save as Manual" action. Only the manual URL is decided: the mode and
+ * everything else stay as committed meanwhile, so a toggle to Off that landed
+ * while the notification was open is not rolled back (#135).
  */
 async function handleSaveAsManual(
     ctx: CommandContext,
-    state: ProxyState,
     detectedProxy: string
 ): Promise<CommandResult> {
     if (validateProxyUrl(detectedProxy)) {
-        state.manualProxyUrl = detectedProxy;
-        await ctx.saveProxyState(state);
+        await commitCommandPatch(ctx, { manualProxyUrl: detectedProxy });
         await vscode.workspace.getConfiguration('otakProxy').update(
             'proxyUrl',
             removeProxyCredentials(detectedProxy) || detectedProxy,
             vscode.ConfigurationTarget.Global
         );
-        ctx.updateStatusBar(state);
+        ctx.updateStatusBar(await ctx.getProxyState());
         ctx.userNotifier.showSuccess('message.savedAsManualProxy', {
             url: sanitizeProxyUrl(detectedProxy)
         });

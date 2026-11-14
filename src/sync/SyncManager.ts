@@ -20,13 +20,35 @@ import { InstanceRegistry, IInstanceRegistry } from './InstanceRegistry';
 import { FileWatcher, IFileWatcher } from './FileWatcher';
 import { ConflictResolver, SyncableState } from './ConflictResolver';
 import { ISyncConfigManager } from './SyncConfigManager';
-import { sanitizeProxyStateForPersistence } from '../utils/ProxyStateSanitizer';
+import { sanitizeProxyStateForPersistence, stripConvergencePendingToken } from '../utils/ProxyStateSanitizer';
 import { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
 import { reconcileSharedState, RemoteSyncDelivery } from './SyncReconciler';
 import { SyncManagerTimers } from './SyncManagerTimers';
 import { handleSyncConfigChange } from './SyncConfigChangeHandler';
 
 export type { ISyncManager, SyncResult, SyncStatus } from './SyncTypes';
+
+/**
+ * A failed snapshot publish is retried on a bounded exponential schedule
+ * (#137): the commit was decided; only its delivery to the shared file
+ * failed. Bounded so a dead share cannot burn CPU or block remote adoptions
+ * forever, jittered so two windows do not retry in lockstep.
+ */
+const PUBLISH_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000, 4000];
+const PUBLISH_RETRY_JITTER = 0.25;
+
+/**
+ * The decided-but-undelivered local commit and its retry bookkeeping (#137).
+ * The retry loop passes the record itself into publishState so a stale
+ * compare-and-swap can tell "the pending that scheduled me is still current"
+ * from one a newer commit replaced mid-flight.
+ */
+interface PendingPublish {
+    state: ProxyState;
+    snapshotRevision: number;
+    attempts: number;
+    generation: number;
+}
 
 /**
  * SyncManager coordinates synchronization between multiple otak-proxy instances.
@@ -87,6 +109,16 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * Lets the periodic poll skip read + parse while nothing has been written.
      */
     private lastObservedFileSignature: string | null = null;
+    /**
+     * The decided-but-undelivered local commit and its retry bookkeeping
+     * (#137). While set, remote adoptions are skipped: saving a remote state
+     * would silently overwrite the commit the retries are still delivering.
+     */
+    private pendingPublish: PendingPublish | null = null;
+    private publishRetryTimer: NodeJS.Timeout | null = null;
+    private publishRetrySeq = 0;
+    private publishRetryDelaysMs: readonly number[] = PUBLISH_RETRY_DELAYS_MS;
+    private publishRetryRandom: () => number = Math.random;
 
     /**
      * Create a new SyncManager
@@ -131,7 +163,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      *
      * @returns True if started successfully
      */
-    async start(): Promise<boolean> {
+    async start(deliverLoadedSharedState: boolean = false): Promise<boolean> {
         // Check if sync is enabled in configuration
         if (!this.configManager.isSyncEnabled()) {
             Logger.log('Sync is disabled in configuration, running in standalone mode');
@@ -158,7 +190,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             this.timers.startLifecycleTimers();
 
             // Load initial state
-            await this.loadInitialState();
+            const loadedSharedState = await this.loadInitialState();
 
             // Populate cached instance count for synchronous status reporting.
             await this.refreshActiveInstances();
@@ -166,6 +198,19 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             this.isStarted = true;
             this.timers.reschedulePeriodicSync();
             this.emitStatusChanged();
+
+            if (deliverLoadedSharedState && loadedSharedState) {
+                // A start triggered by enabling sync at runtime adopts the
+                // shared state exactly like the startup path does: the loaded
+                // file is delivered through the same remoteChange channel a
+                // watcher delivery uses, so it is adopted and converged
+                // instead of being silently overwritten by this window's next
+                // publication (#137).
+                this.emit('remoteChange', {
+                    state: loadedSharedState.proxyState,
+                    version: loadedSharedState.version
+                });
+            }
 
             Logger.log('SyncManager started successfully');
             return true;
@@ -186,6 +231,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
 
         try {
             this.timers.stopAll();
+            this.clearPendingPublishRetry();
 
             // Stop file watcher
             this.fileWatcher.stop();
@@ -261,7 +307,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
      * already holds, not a new local snapshot, so it moves neither the fence
      * nor the watermark (#108).
      */
-    private async publishState(state: ProxyState, snapshotRevision?: number): Promise<void> {
+    private async publishState(state: ProxyState, snapshotRevision?: number, retryPending?: PendingPublish): Promise<void> {
         try {
             const instanceId = this.instanceRegistry.getInstanceId();
             if (!instanceId) {
@@ -275,7 +321,9 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 this.currentState?.version ?? 0
             ) + 1;
             const now = Date.now();
-            const sharedProxyState = sanitizeProxyStateForPersistence(state);
+            // The pending token is window-local: the published state must not
+            // carry this window's apply ownership to its peers (#135).
+            const sharedProxyState = stripConvergencePendingToken(sanitizeProxyStateForPersistence(state));
 
             const sharedState: SharedState = {
                 version,
@@ -292,6 +340,17 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 Logger.warn(
                     `Discarding stale sync publication (CAS expected version ${String(expectedVersion)}).`
                 );
+                if (retryPending && this.pendingPublish === retryPending) {
+                    // The scheduled retry lost the compare-and-swap: another
+                    // window's write landed between the read and the write, so
+                    // the pending local commit is superseded by what it lost
+                    // to — the same "another window won" a non-retry stale
+                    // means. Resolve it instead of leaving a pending publish
+                    // with no retry scheduled, which would skip every remote
+                    // adoption forever (#137).
+                    this.clearPendingPublishRetry();
+                    void this.redeliverSharedState();
+                }
                 return;
             }
 
@@ -308,6 +367,9 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             if (snapshotRevision !== undefined) {
                 this.localHistoryRevision = Math.max(this.localHistoryRevision, snapshotRevision);
                 this.highestSharedVersion = Math.max(this.highestSharedVersion, version);
+                // A delivered snapshot satisfies (or supersedes) the pending
+                // commit — there is nothing left to retry (#137).
+                this.clearPendingPublishRetry();
             }
             this.lastSyncTime = now;
             this.lastError = null;
@@ -317,7 +379,104 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         } catch (error) {
             Logger.error('Failed to notify state change:', error);
             this.lastError = error instanceof Error ? error.message : String(error);
+            if (retryPending) {
+                this.queuePublishRetry();
+            } else if (snapshotRevision !== undefined && this.isStarted) {
+                this.schedulePublishRetry(state, snapshotRevision);
+            }
         }
+    }
+
+    /**
+     * The commit was decided; only its delivery failed. Keep it pending so
+     * the retries can land it: raise the local-history fence now (a stale
+     * snapshot must not publish over the pending commit), and while it is
+     * pending remote adoptions are skipped so an older remote state cannot
+     * silently overwrite it (#137).
+     */
+    private schedulePublishRetry(state: ProxyState, snapshotRevision: number): void {
+        this.clearPendingPublishRetry();
+        this.pendingPublish = {
+            state,
+            snapshotRevision,
+            attempts: 0,
+            generation: ++this.publishRetrySeq
+        };
+        this.localHistoryRevision = Math.max(this.localHistoryRevision, snapshotRevision);
+        this.queuePublishRetry();
+    }
+
+    private queuePublishRetry(): void {
+        const pending = this.pendingPublish;
+        if (!pending) {
+            return;
+        }
+        if (pending.attempts >= this.publishRetryDelaysMs.length) {
+            this.exhaustPendingPublish();
+            return;
+        }
+
+        const jitter = 1 - PUBLISH_RETRY_JITTER + 2 * PUBLISH_RETRY_JITTER * this.publishRetryRandom();
+        const generation = pending.generation;
+        this.publishRetryTimer = setTimeout(() => {
+            this.publishRetryTimer = null;
+            void this.enqueue('transitionQueue', async () => {
+                const current = this.pendingPublish;
+                if (!current || current.generation !== generation) {
+                    // A newer commit or a stop superseded this retry (#137).
+                    return;
+                }
+                if (!this.isStarted || !this.configManager.isSyncEnabled()) {
+                    this.clearPendingPublishRetry();
+                    return;
+                }
+                current.attempts += 1;
+                await this.publishState(current.state, current.snapshotRevision, current);
+            });
+        }, this.publishRetryDelaysMs[pending.attempts] * jitter);
+        this.publishRetryTimer.unref?.();
+    }
+
+    private exhaustPendingPublish(): void {
+        const attempts = this.pendingPublish?.attempts ?? 0;
+        this.pendingPublish = null;
+        Logger.error(
+            `Giving up republishing the local commit after ${attempts} retries; ` +
+            're-adopting the current shared state'
+        );
+        void this.redeliverSharedState();
+    }
+
+    /**
+     * Re-deliver the shared file's current state through the remoteChange
+     * channel. Used when a pending commit's retries gave out: the remote
+     * deliveries skipped while the commit was unpublished are re-examined so
+     * the window converges instead of staying diverged (#137).
+     */
+    private async redeliverSharedState(): Promise<void> {
+        try {
+            if (!this.isStarted || !this.configManager.isSyncEnabled()) {
+                return;
+            }
+            const sharedState = await this.sharedStateFile.read();
+            if (sharedState) {
+                // Forced: the on-disk version may equal the watermark —
+                // nothing else wrote while every publish retry failed, and
+                // the normal version check would suppress exactly the
+                // re-delivery the exhaustion path needs (#137).
+                this.emit('remoteChange', { state: sharedState.proxyState, version: sharedState.version, force: true });
+            }
+        } catch (error) {
+            Logger.warn('Failed to re-deliver the shared state:', error);
+        }
+    }
+
+    private clearPendingPublishRetry(): void {
+        if (this.publishRetryTimer) {
+            clearTimeout(this.publishRetryTimer);
+            this.publishRetryTimer = null;
+        }
+        this.pendingPublish = null;
     }
 
     /**
@@ -351,20 +510,57 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         absorb: (adopted: () => Promise<boolean>) => Promise<unknown>
     ): Promise<void> {
         const adoption: Promise<boolean> = this.enqueue('transitionQueue', async () => {
-            if (delivery.version <= this.highestSharedVersion) {
+            if (!delivery.force && delivery.version <= this.highestSharedVersion) {
                 Logger.warn(
                     `Skipping superseded remote delivery ` +
                     `(version ${delivery.version}, highest ${this.highestSharedVersion}).`
                 );
                 return false;
             }
+            if (this.pendingPublish) {
+                // A remote write must not silently overwrite a decided local
+                // commit whose delivery to the shared file is still being
+                // retried: this window's local state IS that pending commit,
+                // and saving the remote state would diverge it from what the
+                // retry is about to publish (#137). The commit is republished
+                // on top of the delivery's version, or the current shared
+                // state is re-delivered when the retries give out.
+                Logger.warn(
+                    `Skipping remote delivery (version ${delivery.version}): ` +
+                    `local commit (rev ${this.pendingPublish.snapshotRevision}) is still unpublished`
+                );
+                return false;
+            }
             try {
-                const localRevision = await saveRemoteState({ ...delivery.state });
+                // The pending token names the publishing window's apply; an
+                // adoption must not import an ownership this window does not
+                // hold (#135).
+                const localRevision = await saveRemoteState(stripConvergencePendingToken({ ...delivery.state }));
                 this.localHistoryRevision = Math.max(this.localHistoryRevision, localRevision);
                 this.highestSharedVersion = Math.max(this.highestSharedVersion, delivery.version);
                 return true;
             } catch (error) {
                 Logger.error('Failed to adopt remote sync delivery:', error);
+                if (this.currentState?.version === delivery.version) {
+                    // The cache claims a shared state this adoption just
+                    // failed to deliver — the runtime-enable path caches it
+                    // before the adoption runs (#137). Drop it so the next
+                    // reconcile re-emits the delivery instead of judging
+                    // the window already synced.
+                    this.currentState = null;
+                }
+                if (delivery.force) {
+                    // A forced delivery exists because the watermark already
+                    // holds its version; a re-emission only works when the
+                    // watermark lets the same version through again.
+                    this.highestSharedVersion = Math.min(this.highestSharedVersion, delivery.version - 1);
+                }
+                // The recovery above only helps if a reconcile re-examines
+                // the file — but nothing was written, so its signature still
+                // matches the last observed one and the periodic poll would
+                // skip the reconcile forever (#137). Invalidate it so the
+                // next scheduled poll re-emits this delivery.
+                this.lastObservedFileSignature = null;
                 throw error;
             }
         });
@@ -412,7 +608,11 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             const instancesCleaned = await this.instanceRegistry.cleanup();
 
             this.lastSyncTime = Date.now();
-            this.lastError = null;
+            // A pending commit keeps its publish error until the retry lands
+            // or gives out (#137).
+            if (!this.pendingPublish) {
+                this.lastError = null;
+            }
 
             return {
                 success: true,
@@ -519,7 +719,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     /**
      * Load initial state from shared file
      */
-    private async loadInitialState(): Promise<void> {
+    private async loadInitialState(): Promise<SharedState | null> {
         try {
             const sharedState = await this.sharedStateFile.read();
             if (sharedState) {
@@ -531,11 +731,13 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 };
 
                 Logger.log('Loaded initial state from shared file');
+                return sharedState;
             }
         } catch (error) {
             Logger.warn('Failed to load initial state:', error);
             // Not critical - we'll create state on first change
         }
+        return null;
     }
 
     /**
@@ -544,7 +746,9 @@ export class SyncManager extends EventEmitter implements ISyncManager {
     private handleConfigChange(key: string, value: unknown): void {
         handleSyncConfigChange(key, value, {
             isStarted: () => this.isStarted,
-            start: () => void this.start(),
+            // A runtime enable adopts the already-published shared state the
+            // same way startup does, by delivering it as a remote change (#137).
+            start: () => void this.start(true),
             stop: () => void this.stop(),
             reschedulePeriodicSync: () => this.timers.reschedulePeriodicSync()
         });
@@ -579,14 +783,18 @@ export class SyncManager extends EventEmitter implements ISyncManager {
             // through the same transition section, but it is not a new local
             // snapshot: the snapshot fence does not apply, and it moves
             // neither the fence nor the version watermark (#108).
-            if (this.isStarted && this.configManager.isSyncEnabled()) {
+            // While a local commit is still unpublished its retry republishes
+            // the newer state instead, so the reassert is skipped (#137).
+            if (!this.pendingPublish && this.isStarted && this.configManager.isSyncEnabled()) {
                 const reasserted = result.reassertLocalState;
                 await this.enqueue('transitionQueue', () => this.publishState(reasserted));
             }
             return { conflictsResolved: result.conflictsResolved };
         }
 
-        if (result.markSynced) {
+        // A pending commit keeps its publish error until the retry lands or
+        // gives out (#137).
+        if (result.markSynced && !this.pendingPublish) {
             this.lastSyncTime = Date.now();
             this.lastError = null;
             this.emitStatusChanged();

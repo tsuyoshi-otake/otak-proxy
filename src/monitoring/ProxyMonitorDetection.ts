@@ -11,7 +11,14 @@ interface ProxyDetectionRetryOptions {
     config: ProxyMonitorConfig;
     trigger: ProxyCheckTrigger;
     onAllRetriesFailed: (data: { error: string; trigger: ProxyCheckTrigger }) => void;
+    /** Waits `ms`, or returns early once the check's lifecycle has ended. */
     sleep: (ms: number) => Promise<void>;
+    /**
+     * True once the lifecycle this check belongs to has ended (stop(), or a
+     * newer start()). A cancelled check runs no further attempt and emits no
+     * allRetriesFailed (#136).
+     */
+    isCancelled: () => boolean;
 }
 
 export async function detectProxyWithRetry(
@@ -20,10 +27,19 @@ export async function detectProxyWithRetry(
     let lastError: string | undefined;
 
     for (let attempt = 0; attempt <= options.config.maxRetries; attempt++) {
+        // Before the sleep, so a stop() never leaves a backoff behind, and
+        // after an attempt that was in flight when it arrived.
+        if (options.isCancelled()) {
+            return cancelledDetection();
+        }
+
         try {
             if (attempt > 0) {
                 const backoffMs = options.config.retryBackoffBase * Math.pow(2, attempt - 1) * 1000;
                 await options.sleep(backoffMs);
+                if (options.isCancelled()) {
+                    return cancelledDetection();
+                }
                 Logger.info(`Retry attempt ${attempt} after ${backoffMs}ms backoff`);
             }
 
@@ -44,7 +60,7 @@ export async function detectProxyWithRetry(
             lastError = error instanceof Error ? error.message : String(error);
             Logger.warn(`Proxy detection attempt ${attempt + 1} failed: ${lastError}`);
 
-            if (attempt === options.config.maxRetries) {
+            if (attempt === options.config.maxRetries && !options.isCancelled()) {
                 options.onAllRetriesFailed({ error: lastError, trigger: options.trigger });
             }
         }
@@ -56,6 +72,17 @@ export async function detectProxyWithRetry(
         timestamp: Date.now(),
         success: false,
         error: lastError
+    };
+}
+
+/** What a check that was stopped mid-detection resolves to; the monitor discards it. */
+function cancelledDetection(): ProxyDetectionResult {
+    return {
+        proxyUrl: null,
+        source: null,
+        timestamp: Date.now(),
+        success: false,
+        error: 'Detection cancelled: the monitor was stopped'
     };
 }
 

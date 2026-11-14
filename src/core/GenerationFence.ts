@@ -20,6 +20,8 @@ export type FenceOwner =
     | 'remoteState'
     | 'diagnostics'
     | 'toggle'
+    | 'configureUrl'
+    | 'importProxy'
     | 'initialSetup';
 
 export type FenceCommitResult = 'committed' | 'stale' | 'unchanged';

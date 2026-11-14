@@ -5,6 +5,7 @@ import { ProxyMode, ProxyState, StateCommitResult } from '../core/types';
 import { Logger } from '../utils/Logger';
 import {
     shouldSkipUnauthenticatedApply,
+    stripConvergencePendingToken,
     UNRESOLVED_LOCAL_CREDENTIAL_ERROR
 } from '../utils/ProxyStateSanitizer';
 
@@ -64,9 +65,12 @@ export async function applyRemoteSyncState(
     remoteState: ProxyState,
     context: RemoteSyncApplyContext
 ): Promise<boolean> {
+    // A pending token names the publishing window's apply: it never leaves
+    // that window, so an adoption imports the flag but not its owner (#135).
+    const adoptedRemote = stripConvergencePendingToken(remoteState);
     const adopted = context.adoptRemoteState
         ? await context.adoptRemoteState()
-        : await context.saveState({ ...remoteState }).then(() => true);
+        : await context.saveState({ ...adoptedRemote }).then(() => true);
     if (!adopted) {
         return false;
     }

@@ -179,7 +179,11 @@ suite('Auto: OFF verdict through the monitor (#97)', function() {
         const enqueue = (task: () => Promise<void>) => {
             queue = queue.then(task, task);
         };
-        monitor.on('proxyChanged', (result: ProxyDetectionResult) => enqueue(() => handleProxyChanged(context, result)));
+        monitor.on('proxyChanged', (result: ProxyDetectionResult) => enqueue(async () => {
+            if (await handleProxyChanged(context, result) === 'notAdopted') {
+                monitor.proxyChangeNotAdopted(result);
+            }
+        }));
         monitor.on('proxyTestComplete', (result: TestResult) => enqueue(() => handleProxyTestComplete(context, { isPending: false }, result)));
         monitor.on('proxyStateChanged', (data: ReachabilityChange) =>
             enqueue(() => handleProxyStateChanged(context, data)));

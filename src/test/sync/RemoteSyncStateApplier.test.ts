@@ -132,4 +132,23 @@ suite('RemoteSyncStateApplier integration', () => {
         assert.strictEqual(fixture.getState().autoProxyUrl, 'http://proxy.example.com:8080/');
         assert.deepStrictEqual(fixture.monitoring, ['start']);
     });
+
+    test('adopts a remote state without importing its convergence pending token (#135)', async () => {
+        const fixture = createContext();
+
+        const applied = await applyRemoteSyncState({
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example.com:8080',
+            autoModeOff: false,
+            convergencePending: true,
+            convergencePendingToken: 'publisher-window-token'
+        }, fixture.context);
+
+        assert.strictEqual(applied, false, 'a pending delivery reports no convergence, as before');
+        assert.strictEqual(
+            fixture.getState().convergencePendingToken,
+            undefined,
+            'the publisher\'s ownership token is window-local and is never adopted'
+        );
+    });
 });

@@ -5,9 +5,10 @@ import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptions
 import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource, isProxyEndpointReachable } from '../utils/ProxyUtils';
+import { clearPendingThenPublish, newConvergencePendingToken } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
-import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration, sameLogicalIdentity } from './LogicalGeneration';
+import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState, SystemProxyCheckOutcome } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
@@ -139,7 +140,6 @@ export class SystemProxyUpdateService {
         detected: ProxyDetectionWithSource
     ): Promise<void> {
         state.systemProxyDetected = true;
-        state.autoModeOff = false;
         state.lastDetectionKind = detected.kind;
         state.lastDetectionCapability = detected.capability;
         state.lastDetectionSource = detected.source ?? undefined;
@@ -149,6 +149,8 @@ export class SystemProxyUpdateService {
         const fallbackEnabled = config.get<boolean>('enableFallback', true);
 
         if (fallbackEnabled && state.manualProxyUrl && await this.isFallbackReachable(state.manualProxyUrl)) {
+            // The fallback answering is the proof that leaves Auto: OFF (#97).
+            state.autoModeOff = false;
             state.autoProxyUrl = state.manualProxyUrl;
             state.usingFallbackProxy = true;
             state.fallbackProxyUrl = state.manualProxyUrl;
@@ -157,6 +159,10 @@ export class SystemProxyUpdateService {
             return;
         }
 
+        // A PAC/WPAD is not resolved and no fallback answered: nothing proves the
+        // endpoint Auto: OFF removed is back, so Auto: OFF stays (only a state
+        // that was not OFF is normalized to `false`).
+        state.autoModeOff = state.autoModeOff === true;
         state.usingFallbackProxy = false;
         state.fallbackProxyUrl = undefined;
         setRequiresAuthFromLiveUrls(state);
@@ -186,11 +192,13 @@ export class SystemProxyUpdateService {
         state: ProxyState,
         previousProxy: string | undefined
     ): Promise<void> {
+        const pendingToken = newConvergencePendingToken();
         const pending = await commitUnlessStale(this.context.proxyStateManager, started, 'detection', current => ({
             ...current,
             ...state,
             revision: current.revision,
-            convergencePending: true
+            convergencePending: true,
+            convergencePendingToken: pendingToken
         }));
         if (pending === 'stale') {
             return;
@@ -204,22 +212,11 @@ export class SystemProxyUpdateService {
             activeProxyUrl ? splitApplyOptionsFromState(state) : { silent: true }
         );
 
-        const afterApply = await this.context.proxyStateManager.getState();
-        if (!sameLogicalIdentity(
-            captureLogicalGeneration({ ...state, revision: afterApply.revision }),
-            captureLogicalGeneration(afterApply)
-        )) {
-            return;
-        }
-
-        await commitUnlessStale(
-            this.context.proxyStateManager,
-            captureLogicalGeneration(afterApply),
-            'detection',
-            current => ({ ...current, convergencePending: false })
-        );
+        // The pending flag carries this apply's token: the bounded clear
+        // publishes the post-apply state, and a foreign flag another apply
+        // committed meanwhile is left to its owner (#135).
+        await clearPendingThenPublish(this.context, 'detection', state, pendingToken);
         const published = await this.context.proxyStateManager.getState();
-        await publishUnlessStale(this.context.publishProxyState, captureLogicalGeneration(published), 'detection', published);
         if (applied) {
             this.notifyAutoProxyChange(state, previousProxy);
         }

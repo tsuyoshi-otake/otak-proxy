@@ -771,4 +771,53 @@ suite('NpmConfigManager Test Suite', () => {
             assert.strictEqual(inspection.status, 'unavailable');
         });
     });
+
+    suite('UUID and npm-token values npm refuses to print (#138)', () => {
+        // npm redacts UUIDs and npm_… tokens anywhere in a value, not only URL
+        // passwords — a proxy URL whose username or host has that shape makes
+        // `config get` refuse exactly like a credentialed one.
+        const UUID_USERINFO = 'http://3f8b6c1a-2d4e-4a5b-9c8d-7e6f5a4b3c2d@proxy.example.com:8080';
+        const TOKEN_USERINFO = `http://npm_${'a1b2c3d4'.repeat(4)}e5f6@proxy.example.com:8080`;
+
+        function redactedBacked(npm: FakeNpmConfig) {
+            const manager = new NpmConfigManager(undefined, {
+                isWindows: false,
+                env: {},
+                commandAvailable: () => true,
+                commandRunner: async (command, args, options) => npm.runner(command, args, options),
+                readUserConfigFile: npm.readUserConfigFile
+            });
+            return { manager };
+        }
+
+        for (const [name, url] of [
+            ['a UUID', UUID_USERINFO],
+            ['an npm token', TOKEN_USERINFO]
+        ] as const) {
+            test(`setProxy succeeds when the userinfo is ${name}`, async () => {
+                const npm = createFakeNpmConfig();
+                const { manager } = redactedBacked(npm);
+
+                assert.deepStrictEqual(await manager.setProxy(url), { success: true });
+                assert.strictEqual(npm.get('proxy'), url);
+                assert.strictEqual(npm.get('https-proxy'), url);
+            });
+
+            test(`the write verifies, reads back and Off removes it when the userinfo is ${name}`, async () => {
+                const npm = createFakeNpmConfig();
+                const { manager } = redactedBacked(npm);
+
+                assert.deepStrictEqual(await manager.setProxy(url), { success: true });
+                assert.strictEqual(await manager.getProxy(), url);
+
+                const unset = await manager.unsetProxyKeys(
+                    ['proxy', 'https-proxy'],
+                    { proxy: url, 'https-proxy': url }
+                );
+                assert.deepStrictEqual(unset, { success: true });
+                assert.strictEqual(npm.get('proxy'), null);
+                assert.strictEqual(npm.get('https-proxy'), null);
+            });
+        }
+    });
 });

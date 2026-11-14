@@ -10,19 +10,23 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as sinon from 'sinon';
 import { InstanceRegistry, IInstanceRegistry } from '../../sync/InstanceRegistry';
 
 suite('InstanceRegistry Unit Tests', () => {
     let testDir: string;
     let registry: IInstanceRegistry;
+    let sandbox: sinon.SinonSandbox;
 
     setup(() => {
+        sandbox = sinon.createSandbox();
         // Create a temporary directory for tests
         testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otak-proxy-registry-test-'));
         registry = new InstanceRegistry(testDir, 'test-window-id');
     });
 
     teardown(async () => {
+        sandbox.restore();
         // Unregister and clean up
         try {
             await registry.unregister();
@@ -269,6 +273,81 @@ suite('InstanceRegistry Unit Tests', () => {
 
             // Cleanup
             await Promise.all(registries.map(r => r.unregister()));
+        });
+    });
+
+    /**
+     * #137 item 4: a live window pruned from the registry must come back on its
+     * next heartbeat, and a transient read failure must not wipe the registry.
+     */
+    suite('Registry recovery (#137)', () => {
+        const lockFilePath = () => path.join(testDir, 'otak-proxy-sync', 'instances.lock');
+
+        test('a heartbeat re-adds an entry that a cleanup removed', async () => {
+            const registryA = new InstanceRegistry(testDir, 'window-a');
+            const registryB = new InstanceRegistry(testDir, 'window-b');
+            await registryA.register();
+            await registryB.register();
+            assert.strictEqual((await registryA.getActiveInstances()).length, 2);
+
+            // Both heartbeats are older than the timeout (e.g. the machine
+            // slept); the other window's cleanup prunes both entries.
+            const data = JSON.parse(fs.readFileSync(lockFilePath(), 'utf-8'));
+            for (const instance of data.instances) {
+                instance.lastHeartbeat = Date.now() - 31_000;
+            }
+            fs.writeFileSync(lockFilePath(), JSON.stringify(data), 'utf-8');
+
+            const cleaned = await registryA.cleanup();
+            assert.ok(cleaned >= 2, `cleanup should prune the stale entries, got ${cleaned}`);
+            assert.strictEqual((await registryA.getActiveInstances()).length, 0);
+
+            // The next heartbeat of each live window re-adds its own entry.
+            await registryB.updateHeartbeat();
+            await registryA.updateHeartbeat();
+
+            const instances = await registryA.getActiveInstances();
+            assert.strictEqual(instances.length, 2, 'both live windows must be back in the registry');
+            const windowIds = instances.map(i => i.windowId).sort();
+            assert.deepStrictEqual(windowIds, ['window-a', 'window-b']);
+        });
+
+        test('a transient read failure during a heartbeat does not reset the registry to empty', async () => {
+            const registryC = new InstanceRegistry(testDir, 'window-c');
+            const registryD = new InstanceRegistry(testDir, 'window-d');
+            await registryC.register();
+            await registryD.register();
+            assert.strictEqual((await registryC.getActiveInstances()).length, 2);
+
+            // One EBUSY on the next lock-file read (e.g. an AV scan holding the
+            // file). The heartbeat may fail but must not write an empty file.
+            // Patch the real fs object: every `import * as fs` wrapper forwards
+            // through getters, so this intercepts the store's calls too (sinon
+            // cannot stub the getter-only wrapper namespace).
+            const fsm = require('fs') as { readFileSync: (p: unknown, ...rest: unknown[]) => unknown };
+            const realReadFileSync = fsm.readFileSync;
+            let injected = false;
+            fsm.readFileSync = (p: unknown, ...rest: unknown[]): unknown => {
+                if (!injected && String(p) === lockFilePath()) {
+                    injected = true;
+                    const error = new Error('EBUSY: resource busy or locked') as NodeJS.ErrnoException;
+                    error.code = 'EBUSY';
+                    throw error;
+                }
+                return realReadFileSync(p, ...rest);
+            };
+            try {
+                await registryC.updateHeartbeat();
+            } finally {
+                fsm.readFileSync = realReadFileSync;
+            }
+
+            // The transient failure is behind us; heartbeats work again.
+            await registryC.updateHeartbeat();
+            await registryD.updateHeartbeat();
+
+            const instances = await registryC.getActiveInstances();
+            assert.strictEqual(instances.length, 2, 'one EBUSY must not wipe the registry');
         });
     });
 });

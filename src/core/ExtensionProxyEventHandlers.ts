@@ -1,4 +1,4 @@
-import { clearDetectedSplitFields, splitRoutingIdentity } from '../config/DetectedProxyValue';
+import { clearDetectedSplitFields, detectionSplitRoutingIdentity, splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { isUnsupportedAutoConfig } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { ProxyDetectionResult } from '../monitoring/ProxyMonitor';
@@ -11,9 +11,14 @@ import {
     TestResult
 } from '../utils/ProxyUtils';
 import type { ReportedProxyChange } from '../utils/ProxyTestTypes';
-import { clearPendingThenPublish } from './ApplyConvergence';
+import { clearPendingThenPublish, newConvergencePendingToken } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
-import { commitUnlessStale, commitUnlessStaleWithRevision, publishUnlessStale } from './GenerationFence';
+import {
+    FenceCommitResult,
+    commitUnlessStale,
+    commitUnlessStaleWithRevision,
+    publishUnlessStale
+} from './GenerationFence';
 import {
     LogicalGeneration,
     captureLogicalGeneration,
@@ -29,30 +34,38 @@ export interface StartupTestState {
     isPending: boolean;
 }
 
+/**
+ * What became of a proxyChanged event, for ProxyMonitor.proxyChangeNotAdopted
+ * (#136).
+ * - 'settled': the monitor has nothing to repeat. The change was adopted, or
+ *   the state needs no adoption: it already holds what was detected, the mode
+ *   is not Auto, or the fallback is engaged.
+ * - 'notAdopted': a generation fence dropped the report while the state is in
+ *   Auto and still differs from what was detected. The monitor reports the
+ *   detection again at its next check.
+ */
+export type ProxyChangeOutcome = 'settled' | 'notAdopted';
+
 export async function handleProxyChanged(
     context: InitializerContext,
     result: ProxyDetectionResult,
     resolveManualFallback?: (state: ProxyState) => Promise<ManualFallbackOutcome>
-): Promise<void> {
+): Promise<ProxyChangeOutcome> {
     const state = await context.proxyStateManager.getState();
     const started = result.startedGeneration ?? captureLogicalGeneration(state);
     if (result.startedGeneration && isStaleGeneration(result.startedGeneration, state)) {
-        return;
+        return outcomeOfDroppedReport(context, result);
     }
     if (state.mode !== ProxyMode.Auto) {
-        return;
+        return 'settled';
     }
 
     if (isUnsupportedAutoConfig(result)) {
-        await recordUnsupportedAutoConfig(context, started, state, result);
-        return;
+        return recordUnsupportedAutoConfig(context, started, state, result);
     }
 
-    // With echo suppression (#29) the monitor reports "no system proxy" while
-    // the fallback proxy is engaged — that is the expected steady state, not a
-    // removal. Disabling here would tear down the working fallback.
-    if (!result.proxyUrl && state.usingFallbackProxy && state.fallbackProxyUrl) {
-        return;
+    if (isEngagedFallbackEcho(state, result)) {
+        return 'settled';
     }
 
     const previousProxy = state.autoProxyUrl;
@@ -99,7 +112,7 @@ export async function handleProxyChanged(
         !fallbackEngaged &&
         !hasKnownEnableFailure(state);
     if (stillOffWithoutProof || unchanged) {
-        await commitAndPublish(context, started, 'detection', current => ({
+        const committed = await commitAndPublish(context, started, 'detection', current => ({
             ...current,
             autoProxyUrl: state.autoProxyUrl,
             lastTestResult: state.lastTestResult,
@@ -115,10 +128,10 @@ export async function handleProxyChanged(
         }));
         // The check's connection test may have left its result to this event (#102).
         context.updateStatusBar?.(await context.proxyStateManager.getState());
-        return;
+        return committed === 'stale' ? outcomeOfDroppedReport(context, result) : 'settled';
     }
 
-    await saveApplyThenPublish(context, started, 'detection', state, async () => {
+    const saved = await saveApplyThenPublish(context, started, 'detection', state, async () => {
         // Nothing enables under Auto: OFF (#97). An engaged fallback was just
         // tested reachable and cleared it; an unreachable result set it.
         const shouldEnable = Boolean(state.autoProxyUrl) && state.autoModeOff !== true;
@@ -128,6 +141,51 @@ export async function handleProxyChanged(
             notifyProxyChange(context, state, result, previousProxy, fallbackEngaged);
         }
     });
+    return saved === 'stale' ? outcomeOfDroppedReport(context, result) : 'settled';
+}
+
+/**
+ * The outcome of a report a generation fence dropped. The monitor repeats it
+ * only while repeating can adopt it: the state is in Auto and does not hold
+ * what the detection reports. A state that does (the check's own test result
+ * committed first, another path adopted the same detection) or a mode that
+ * left Auto leaves nothing to repeat, and repeating it anyway would be
+ * dropped the same way at every check.
+ */
+async function outcomeOfDroppedReport(
+    context: InitializerContext,
+    result: ProxyDetectionResult
+): Promise<ProxyChangeOutcome> {
+    const current = await context.proxyStateManager.getState();
+    if (current.mode !== ProxyMode.Auto || isEngagedFallbackEcho(current, result) || stateHoldsDetection(current, result)) {
+        return 'settled';
+    }
+    return 'notAdopted';
+}
+
+/**
+ * With echo suppression (#29) the monitor reports "no system proxy" while
+ * the fallback proxy is engaged — that is the expected steady state, not a
+ * removal. Disabling for it would tear down the working fallback.
+ */
+function isEngagedFallbackEcho(state: ProxyState, result: ProxyDetectionResult): boolean {
+    return !result.proxyUrl && Boolean(state.usingFallbackProxy && state.fallbackProxyUrl);
+}
+
+/**
+ * Whether adopting `result` would write nothing the state does not hold: the
+ * identity the handler decides "changed" by (endpoint and routing; for a
+ * detection without a proxy URL, its kind: direct, PAC and WPAD tell apart, #130).
+ */
+function stateHoldsDetection(state: ProxyState, result: ProxyDetectionResult): boolean {
+    if (isUnsupportedAutoConfig(result)) {
+        return state.lastDetectionKind === result.kind;
+    }
+    if (!result.proxyUrl) {
+        return !state.autoProxyUrl && state.lastDetectionKind === 'direct';
+    }
+    return sameProxyEndpoint(state.autoProxyUrl, result.proxyUrl) &&
+        splitRoutingIdentity(state) === detectionSplitRoutingIdentity(result);
 }
 
 /**
@@ -151,25 +209,26 @@ async function recordUnsupportedAutoConfig(
     started: LogicalGeneration,
     state: ProxyState,
     result: ProxyDetectionResult
-): Promise<void> {
+): Promise<ProxyChangeOutcome> {
     const previousKind = state.lastDetectionKind;
-    state.systemProxyDetected = true;
-    state.autoModeOff = false;
-    state.lastDetectionKind = result.kind;
-    state.lastDetectionCapability = result.capability;
-    if (result.source) {
-        state.lastDetectionSource = result.source;
-    }
 
-    await commitAndPublish(context, started, 'detection', current => ({
+    // Auto: OFF is left only by proof that the removed endpoint answers (#97).
+    // A PAC/WPAD is not resolved, so seeing one proves nothing: the state stays
+    // as it was, and only a state that was not OFF is normalized to `false`.
+    const committed = await commitAndPublish(context, started, 'detection', current => ({
         ...current,
         systemProxyDetected: true,
-        autoModeOff: false,
+        autoModeOff: current.autoModeOff === true,
         lastDetectionKind: result.kind,
         lastDetectionCapability: result.capability,
         lastDetectionSource: result.source ?? current.lastDetectionSource
     }));
     context.updateStatusBar?.(await context.proxyStateManager.getState());
+
+    // A dropped record announces nothing: the report that adopts it warns once (#136).
+    if (committed === 'stale') {
+        return outcomeOfDroppedReport(context, result);
+    }
 
     if (previousKind !== 'pac' && previousKind !== 'wpad') {
         context.userNotifier.showWarning(
@@ -177,6 +236,7 @@ async function recordUnsupportedAutoConfig(
             { kind: unsupportedAutoConfigKindLabel(result.kind) }
         );
     }
+    return 'settled';
 }
 
 function hasKnownEnableFailure(state: ProxyState): boolean {
@@ -212,6 +272,9 @@ export async function handleProxyTestComplete(
     }
 
     let recoveredFromAutoOff = false;
+    // One token for this test's pending flag, whatever the fold lands on: a
+    // commit that never lands wrote no token, so nothing needs releasing.
+    const pendingToken = newConvergencePendingToken();
     const commit = await commitUnlessStaleWithRevision(context.proxyStateManager, started, 'connectionTest', state => {
         if (state.mode !== ProxyMode.Auto) {
             return undefined;
@@ -227,6 +290,11 @@ export async function handleProxyTestComplete(
         // A recovery is published only once its apply finished, as on every
         // other apply path: until then the proxy is not active (#97).
         next.convergencePending = isProxyEndpointUnreachable(testResult) || recoveredFromAutoOff;
+        if (next.convergencePending) {
+            // The flag's owner travels inside the same write: the clear
+            // presents this token and only clears the flag it landed (#135).
+            next.convergencePendingToken = pendingToken;
+        }
         return next;
     });
 
@@ -263,7 +331,7 @@ export async function handleProxyTestComplete(
         }
         await applyProxyThroughContext(context, latest.autoProxyUrl, true, { silent: true });
         Logger.info(`Proxy ${context.sanitizer.maskPassword(latest.autoProxyUrl)} proved reachable, Auto Mode back on`);
-        await clearPendingThenPublish(context, 'connectionTest', latest);
+        await clearPendingThenPublish(context, 'connectionTest', latest, pendingToken);
         context.updateStatusBar?.(await context.proxyStateManager.getState());
     }
 }
@@ -321,10 +389,10 @@ async function commitAndPublish(
     started: LogicalGeneration,
     owner: 'detection' | 'connectionTest' | 'autoMonitoring' | 'stateChanged',
     fold: (current: ProxyState) => ProxyState | undefined
-): Promise<void> {
+): Promise<FenceCommitResult> {
     const outcome = await commitUnlessStale(context.proxyStateManager, started, owner, fold);
     if (outcome === 'stale') {
-        return;
+        return outcome;
     }
 
     const current = await context.proxyStateManager.getState();
@@ -334,6 +402,7 @@ async function commitAndPublish(
         owner,
         current
     );
+    return outcome;
 }
 
 async function saveApplyThenPublish(
@@ -342,19 +411,22 @@ async function saveApplyThenPublish(
     owner: 'detection' | 'autoMonitoring' | 'stateChanged',
     desired: ProxyState,
     apply: () => Promise<void>
-): Promise<void> {
+): Promise<'applied' | 'stale'> {
+    const pendingToken = newConvergencePendingToken();
     const pending = await commitUnlessStale(context.proxyStateManager, started, owner, current => ({
         ...current,
         ...desired,
         revision: current.revision,
-        convergencePending: true
+        convergencePending: true,
+        convergencePendingToken: pendingToken
     }));
     if (pending === 'stale') {
-        return;
+        return 'stale';
     }
 
     await apply();
-    await clearPendingThenPublish(context, owner, desired);
+    await clearPendingThenPublish(context, owner, desired, pendingToken);
+    return 'applied';
 }
 
 function applyProxyDetectionResultToState(state: ProxyState, result: ProxyDetectionResult): void {

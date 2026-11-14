@@ -10,6 +10,7 @@ import {
     MUTEX_RETRY_DELAY_MS,
     MUTEX_STALE_MS,
     MUTEX_TIMEOUT_MS,
+    REGISTRY_READ_RETRY_DELAYS_MS,
     SYNC_DIR_NAME
 } from './InstanceRegistryConstants';
 import { InstancesLockFile } from './InstanceRegistryTypes';
@@ -34,21 +35,60 @@ export class InstanceRegistryStore {
     }
 
     async readLockFile(): Promise<InstancesLockFile> {
-        try {
-            if (!fs.existsSync(this.lockFilePath)) {
-                return this.createEmptyLockFile();
-            }
-
-            const content = fs.readFileSync(this.lockFilePath, 'utf-8');
-            if (!content || content.trim() === '') {
-                return this.createEmptyLockFile();
-            }
-
-            return JSON.parse(content) as InstancesLockFile;
-        } catch (error) {
-            Logger.warn('Failed to read lock file, creating new one:', error);
+        if (!fs.existsSync(this.lockFilePath)) {
             return this.createEmptyLockFile();
         }
+
+        let content: string;
+        try {
+            content = fs.readFileSync(this.lockFilePath, 'utf-8');
+        } catch (error) {
+            // A transient read failure (EBUSY from a scan holding the file, a
+            // missing share) is not an empty registry: rethrow so callers do
+            // not write a fake empty file over the real entries (#137). A
+            // vanished file is a legitimately empty registry.
+            if (getErrorCode(error) === 'ENOENT') {
+                return this.createEmptyLockFile();
+            }
+            throw error;
+        }
+
+        if (!content || content.trim() === '') {
+            return this.createEmptyLockFile();
+        }
+
+        try {
+            return JSON.parse(content) as InstancesLockFile;
+        } catch (error) {
+            Logger.warn('Failed to parse lock file, creating new one:', error);
+            return this.createEmptyLockFile();
+        }
+    }
+
+    /**
+     * Read the lock file with bounded retry for transient failures (#137): an
+     * AV scan holding the file yields EBUSY/EPERM for a few hundred ms, so a
+     * failed read is retried on REGISTRY_READ_RETRY_DELAYS_MS backoff with
+     * jitter. Returns undefined when every attempt failed — callers must then
+     * skip their write rather than risk wiping entries they could not read.
+     */
+    async readLockFileWithRetry(): Promise<InstancesLockFile | undefined> {
+        let lastError: unknown;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await this.readLockFile();
+            } catch (error) {
+                lastError = error;
+                const delay = REGISTRY_READ_RETRY_DELAYS_MS[attempt];
+                if (delay === undefined) {
+                    break;
+                }
+                const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+                await new Promise(resolve => setTimeout(resolve, delay + jitter));
+            }
+        }
+        Logger.warn('Instance registry is unreadable after retries; skipping the write:', lastError);
+        return undefined;
     }
 
     async writeLockFile(lockFile: InstancesLockFile): Promise<void> {

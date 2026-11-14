@@ -1,3 +1,6 @@
+import * as crypto from 'crypto';
+import { splitRoutingIdentity } from '../config/DetectedProxyValue';
+import { Logger } from '../utils/Logger';
 import { commitUnlessStale, FenceOwner, publishUnlessStale, StateWriter } from './GenerationFence';
 import { captureLogicalGeneration, sameLogicalIdentity } from './LogicalGeneration';
 import { ProxyState, StateCommitResult, stateRevision } from './types';
@@ -14,39 +17,151 @@ export interface ApplyConvergenceContext {
 }
 
 /**
+ * An opaque, unique token one apply writes together with its
+ * `convergencePending` flag, in the same commit. Ownership travels with the
+ * write: a commit that never lands wrote no token, so there is nothing to
+ * release and no side-channel bookkeeping whose leak could strand the flag
+ * or block the real owner's clear. Every refold of that commit writes the
+ * same token, so the landed value always names the apply whose apply still
+ * runs (#135).
+ */
+export function newConvergencePendingToken(): string {
+    return crypto.randomUUID();
+}
+
+/**
+ * Attempts to clear the pending flag. Each one is a read and a compare-and-set
+ * on that read, so a loss means a commit landed between the two.
+ */
+const CLEAR_PENDING_MAX_ATTEMPTS = 3;
+
+/**
  * Ends an apply that started from a state saved with convergencePending:
  * clears the flag and publishes the converged state. A state that moved to
- * another logical identity meanwhile belongs to the writer that moved it.
- * The revision is not compared: the apply itself writes the Configured flags.
+ * another logical identity meanwhile belongs to the writer that moved it: it
+ * is neither cleared nor published here, at the clear or at the publish.
+ *
+ * The decision follows the logical identity, never the revision: the apply
+ * itself writes the Configured flags, and a connection-test result or another
+ * apply's results advance the revision without changing what the state means.
+ * A clear that loses to such a commit re-reads and tries again, at most
+ * CLEAR_PENDING_MAX_ATTEMPTS times (a local re-read, so no timers). When every
+ * attempt loses, the flag stays set and a warning says so: the call ends, the
+ * state is never published as converged, and the next apply's own clear owns
+ * the flag.
+ *
+ * `pendingToken` is the token the apply's own pending commit wrote with the
+ * flag (`newConvergencePendingToken`). The clear only proceeds while the
+ * stored token is that same value: a second apply whose pending commit
+ * landed meanwhile rewrote the token, and clearing or publishing over its
+ * flag would release a still-applying state as converged. The token is
+ * checked again inside the fold, right before the compare-and-set, so a
+ * commit that lost mid-commit reports 'unchanged' and the call leaves the
+ * flag alone. A call without a token may only clear a flag that carries
+ * none — the behaviour a call site had before ownership travelled with the
+ * write.
  */
 export async function clearPendingThenPublish(
     context: ApplyConvergenceContext,
     owner: FenceOwner,
-    desired: ProxyState
+    desired: ProxyState,
+    pendingToken?: string
 ): Promise<void> {
-    const afterApply = await context.proxyStateManager.getState();
+    const manager = context.proxyStateManager;
+    const afterApply = await manager.getState();
     const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
-    if (!sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(afterApply))) {
+    // The clear's bar is stricter than the logical identity a stale
+    // result is judged by: a commit that only re-routes the same primary
+    // URL (per-scheme fields or bypass changed) is still "the same state"
+    // to isStaleGeneration, but to this call it is another apply's
+    // state — its flag is not this call's to clear, nor its state to
+    // publish. The comparison stays local so every other fence keeps the
+    // narrower meaning of stale (#135).
+    const desiredSplit = splitRoutingIdentity(desired);
+    const stillDesired = (state: ProxyState): boolean =>
+        sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state))
+        && splitRoutingIdentity(state) === desiredSplit;
+    // The flag belongs to the commit that wrote its token. A tokenless call
+    // answers only a tokenless flag; a token answers only its own.
+    const ownsPendingFlag = (state: ProxyState): boolean =>
+        pendingToken === undefined
+            ? state.convergencePendingToken === undefined
+            : state.convergencePendingToken === pendingToken;
+
+    let latest = afterApply;
+    let cleared = false;
+    for (let attempt = 0; attempt < CLEAR_PENDING_MAX_ATTEMPTS && !cleared; attempt++) {
+        if (attempt > 0) {
+            latest = await manager.getState();
+        }
+        if (!stillDesired(latest) || !ownsPendingFlag(latest)) {
+            return;
+        }
+
+        const outcome = await commitUnlessStale(
+            manager,
+            captureLogicalGeneration(latest),
+            owner,
+            current => {
+                if (!ownsPendingFlag(current) || !stillDesired(current)) {
+                    return undefined;
+                }
+                const next: ProxyState = { ...current, convergencePending: false };
+                delete next.convergencePendingToken;
+                return next;
+            }
+        );
+        if (outcome === 'unchanged') {
+            // The token changed between the guard and the commit: the flag
+            // now belongs to another apply, and retrying would only see the
+            // same foreign token.
+            return;
+        }
+        cleared = outcome !== 'stale';
+    }
+    if (!cleared) {
+        Logger.warn(
+            `Could not clear convergencePending after ${CLEAR_PENDING_MAX_ATTEMPTS} attempts ` +
+            `(${owner}): the state kept changing; it stays pending and is not published.`
+        );
         return;
     }
 
-    const cleared = await commitUnlessStale(
-        context.proxyStateManager,
-        captureLogicalGeneration(afterApply),
-        owner,
-        current => ({ ...current, convergencePending: false })
-    );
-    if (cleared === 'stale') {
+    const published = await manager.getState();
+    // The clear removed our flag and token, so ownership cannot be re-proved
+    // here — and must not be: any flag now standing belongs to a commit that
+    // landed after ours, whose apply still runs and publishes itself.
+    if (!stillDesired(published) || published.convergencePending === true) {
         return;
     }
-
-    const published = await context.proxyStateManager.getState();
     await publishUnlessStale(
         context.publishProxyState,
         captureLogicalGeneration(published),
         owner,
         published
     );
+}
+
+/**
+ * Publishes a state a command just committed. A state flagged
+ * convergencePending belongs to the writer whose apply is still running: that
+ * writer publishes once it converged, from a re-read that includes this
+ * commit, so nothing unapplied is published as converged. A publish failure is
+ * logged, not thrown: the commit stands.
+ */
+export async function publishCommitted(
+    publish: ((state: ProxyState) => Promise<void>) | undefined,
+    committed: ProxyState
+): Promise<void> {
+    if (!publish || committed.convergencePending) {
+        return;
+    }
+
+    try {
+        await publish(committed);
+    } catch (error) {
+        Logger.warn('Failed to publish proxy state:', error);
+    }
 }
 
 /**
@@ -95,6 +210,14 @@ export function diffProxyState(before: ProxyState, after: ProxyState): Partial<P
 }
 
 /**
+ * What a caller decided: the fields it sets, or a function of the latest state
+ * for a patch that derives a field from other fields (credential bookkeeping
+ * follows the URLs, a mode change follows the current mode). A function is
+ * evaluated again on every state the patch is folded onto.
+ */
+export type DecidedPatch = Partial<ProxyState> | ((latest: ProxyState) => Partial<ProxyState>);
+
+/**
  * Folds a patch a caller already decided onto the latest stored state. Each
  * attempt re-reads: when the guard rejects (another writer owns the state or
  * its identity moved), nothing is written; when the compare-and-set loses the
@@ -107,7 +230,7 @@ export function diffProxyState(before: ProxyState, after: ProxyState): Partial<P
  */
 export async function commitDecidedPatch(
     writer: DecidedPatchWriter,
-    patch: Partial<ProxyState>,
+    patch: DecidedPatch,
     stillValid: (latest: ProxyState) => boolean
 ): Promise<DecidedPatchOutcome> {
     for (let attempt = 0; attempt < DECIDED_PATCH_MAX_ATTEMPTS; attempt++) {
@@ -116,9 +239,10 @@ export async function commitDecidedPatch(
             return { kind: 'moved', state: latest };
         }
 
+        const decided = typeof patch === 'function' ? patch(latest) : patch;
         const next: ProxyState = { ...latest };
-        for (const key of Object.keys(patch) as (keyof ProxyState)[]) {
-            const value = patch[key];
+        for (const key of Object.keys(decided) as (keyof ProxyState)[]) {
+            const value = decided[key];
             if (value === undefined) {
                 delete next[key];
             } else {

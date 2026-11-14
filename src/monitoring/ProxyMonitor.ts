@@ -42,6 +42,20 @@ function detectedAutoConfig(result: Pick<ProxyDetectionResult, 'kind' | 'capabil
 
 export type { ProxyDetectionResult, ProxyMonitorConfig } from './ProxyMonitorTypes';
 
+/** What the monitor has recorded of its last successful detection, to compare the next one with. */
+interface RecordedDetection {
+    proxyUrl: string | null;
+    splitRouting: string;
+    autoConfig: string | undefined;
+}
+
+/**
+ * How many times in a row a change the listener did not adopt is reported
+ * again. Each repeat waits for the next check, so this bounds the extra work
+ * of a state that keeps moving under every check (#136).
+ */
+const MAX_REREPORTS = 3;
+
 /**
  * ProxyMonitor - Manages proxy detection with polling, debouncing, and retry logic
  *
@@ -80,6 +94,11 @@ export class ProxyMonitor extends EventEmitter {
     /** Invalidates callbacks that started under an earlier start/stop lifecycle. */
     private lifecycleEpoch: number = 0;
     private inFlightEpoch: number | null = null;
+    /** Ends the backoff sleeps still pending, so stop() leaves no timer behind. */
+    private readonly pendingSleeps = new Set<() => void>();
+    /** The change the last check reported, and what was recorded before it (#136). */
+    private lastReport?: { result: ProxyDetectionResult; epoch: number; before: RecordedDetection };
+    private rereports = 0;
     private connectionState: ProxyMonitorConnectionState;
 
     constructor(
@@ -119,6 +138,7 @@ export class ProxyMonitor extends EventEmitter {
         }
 
         this.lifecycleEpoch++;
+        this.rereports = 0;
         this.state.setActive(true);
         this.setupPolling();
         Logger.info('ProxyMonitor started');
@@ -135,8 +155,13 @@ export class ProxyMonitor extends EventEmitter {
         this.state.setActive(false);
         this.isCheckInProgress = false;
         this.inFlightEpoch = null;
+        // A stopped lifecycle has no outstanding report: a late answer for it
+        // is ignored by the epoch guard anyway, and holding it would only
+        // block the quiet-check streak reset in the next lifecycle (#136).
+        this.lastReport = undefined;
         this.clearPolling();
         this.clearDebounce();
+        this.endPendingSleeps();
         stopConnectionScheduler(this.connectionState);
         Logger.info('ProxyMonitor stopped');
     }
@@ -254,7 +279,7 @@ export class ProxyMonitor extends EventEmitter {
             }
 
             const result = {
-                ...(await this.detectWithRetry(trigger)),
+                ...(await this.detectWithRetry(trigger, epoch)),
                 startedGeneration
             };
             // A detector may resolve after stop() or after a newer start(). Its
@@ -354,6 +379,14 @@ export class ProxyMonitor extends EventEmitter {
 
     private emitProxyChangeIfNeeded(result: ProxyDetectionResult, trigger: ProxyCheckTrigger): void {
         if (!this.reportsProxyChange(result)) {
+            // A quiet check ends the not-adopted streak only once no report
+            // is still waiting for its answer: the listener resolves the
+            // last report asynchronously, and resetting while it can still
+            // reject would restart the count at zero on every poll and keep
+            // MAX_REREPORTS forever out of reach (#136).
+            if (result.success && !this.lastReport) {
+                this.rereports = 0;
+            }
             return;
         }
 
@@ -365,7 +398,66 @@ export class ProxyMonitor extends EventEmitter {
             trigger
         };
         this.logger.logChange(changeEvent);
+        this.lastReport = { result, epoch: this.lifecycleEpoch, before: this.recordedDetection() };
         this.emit('proxyChanged', result);
+    }
+
+    /**
+     * The listener's answer to a proxyChanged event it did not take into the
+     * state: a generation fence dropped it, and the state still differs from
+     * what was detected. The next check reports the detection again, as if this
+     * report had not been made. Without it the detection counts as reported and
+     * the state keeps the old proxy until the OS proxy changes again (#136).
+     *
+     * The listener answers after the check that emitted the event has
+     * completed. An answer for anything but the latest report of the current
+     * lifecycle is ignored: a newer report already replaced it, and after
+     * stop() the start path detects afresh. After MAX_REREPORTS answers in a
+     * row the detection stays reported, so a state that moves under every check
+     * cannot keep a report going.
+     */
+    proxyChangeNotAdopted(result: ProxyDetectionResult): void {
+        const report = this.lastReport;
+        if (!report || report.result !== result || !this.isCurrentLifecycle(report.epoch)) {
+            return;
+        }
+        this.lastReport = undefined;
+
+        if (this.rereports >= MAX_REREPORTS) {
+            Logger.warn(`Proxy change was not adopted ${MAX_REREPORTS} times in a row; not reporting it again`);
+            return;
+        }
+        this.rereports++;
+        this.lastProxyUrl = report.before.proxyUrl;
+        this.lastSplitRouting = report.before.splitRouting;
+        this.lastAutoConfig = report.before.autoConfig;
+        Logger.info('Proxy change was not adopted; the next check reports it again');
+    }
+
+    /**
+     * The listener's answer to a proxyChanged event it took — or had nothing
+     * to take: the report settled. The outstanding-report marker clears and
+     * the rejection streak ends: only consecutive not-adopted answers count
+     * toward MAX_REREPORTS, and a settled report is what releases a quiet
+     * check to reset the count (#136). Answers for anything but the latest
+     * report of the current lifecycle are ignored, same as
+     * proxyChangeNotAdopted.
+     */
+    proxyChangeSettled(result: ProxyDetectionResult): void {
+        const report = this.lastReport;
+        if (!report || report.result !== result || !this.isCurrentLifecycle(report.epoch)) {
+            return;
+        }
+        this.lastReport = undefined;
+        this.rereports = 0;
+    }
+
+    private recordedDetection(): RecordedDetection {
+        return {
+            proxyUrl: this.lastProxyUrl,
+            splitRouting: this.lastSplitRouting,
+            autoConfig: this.lastAutoConfig
+        };
     }
 
     private updateCheckState(result: ProxyDetectionResult): void {
@@ -384,25 +476,46 @@ export class ProxyMonitor extends EventEmitter {
      * Detects proxy with retry logic
      *
      * @param trigger - The trigger source
+     * @param epoch - The lifecycle the check belongs to; once it ended, no attempt
+     *   runs. A direct call (a focused unit-level caller) belongs to the current one.
      * @returns Detection result
      */
-    private async detectWithRetry(trigger: ProxyCheckTrigger): Promise<ProxyDetectionResult> {
+    private async detectWithRetry(
+        trigger: ProxyCheckTrigger,
+        epoch: number = this.lifecycleEpoch
+    ): Promise<ProxyDetectionResult> {
         return detectProxyWithRetry({
             detector: this.detector,
             config: this.config,
             trigger,
             sleep: (ms) => this.sleep(ms),
+            isCancelled: () => !this.isCurrentLifecycle(epoch),
             onAllRetriesFailed: (data) => this.emit('allRetriesFailed', data)
         });
     }
 
     /**
-     * Helper function to sleep.
+     * Helper function to sleep. stop() ends it early (see endPendingSleeps).
      *
      * @param ms - Milliseconds to sleep
      */
     private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        return new Promise(resolve => {
+            const wake = (): void => {
+                clearTimeout(timer);
+                this.pendingSleeps.delete(wake);
+                resolve();
+            };
+            const timer = setTimeout(wake, ms);
+            this.pendingSleeps.add(wake);
+        });
+    }
+
+    /** Wakes every pending backoff sleep; its check sees the ended lifecycle and stops (#136). */
+    private endPendingSleeps(): void {
+        for (const wake of [...this.pendingSleeps]) {
+            wake();
+        }
     }
 
     /**

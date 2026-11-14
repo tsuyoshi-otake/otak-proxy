@@ -202,16 +202,27 @@ function hasUrlPassword(value: string): boolean {
     }
 }
 
+const NPM_TOKEN_PATTERN = /npm_[A-Za-z0-9]{36}/;
+const UUID_PATTERN = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+
+/**
+ * Every shape npm redacts in `config get`: a URL password, an npm token, or a
+ * UUID — the last two usually sit in a proxy URL's username or host (#138).
+ */
+function hasProtectedShape(value: string): boolean {
+    return hasUrlPassword(value) || NPM_TOKEN_PATTERN.test(value) || UUID_PATTERN.test(value);
+}
+
 /**
  * npm refused to print `key`, so the value npm loads is one it redacts. The
- * user-file value is accepted only when it is a credentialed URL too; anything
- * else means the refused value lives in another layer, so the read is
- * unverifiable rather than empty.
+ * user-file value is accepted only when it has a protected shape too;
+ * anything else means the refused value lives in another layer, so the read
+ * is unverifiable rather than empty.
  */
 function readProtectedUserValue(userConfigText: string, key: NpmProxyKey): string {
     const value = normalizeNpmValue(readTopLevelNpmrcString(userConfigText, key));
-    if (!value || !hasUrlPassword(value)) {
-        throw new Error(`npm ${key} is protected and the user config does not hold a credentialed URL for it`);
+    if (!value || !hasProtectedShape(value)) {
+        throw new Error(`npm ${key} is protected and the user config does not hold a redactable value for it`);
     }
     return value;
 }
@@ -529,21 +540,28 @@ export class NpmConfigManager {
 
     /**
      * The user config file as npm resolves it, so `--userconfig` is honoured.
-     * npm also refuses to print a path containing text it redacts (a UUID);
-     * the location is then unknown and no file is guessed.
+     * An explicit `userConfigPath` is the file `config set` and `config delete`
+     * act on — asking npm for it is a wasted call that npm refuses anyway when
+     * the path contains text it redacts (a UUID) (#138). Without one, npm
+     * names the location; a refusal or an empty answer means it is unknown
+     * and no file is guessed.
      */
     private async readUserConfigText(options: { missingFileIsEmpty: boolean }): Promise<string> {
         let path: string | null;
-        try {
-            path = normalizeNpmValue((await this.execNpm(['config', 'get', 'userconfig'])).stdout);
-        } catch (error) {
-            if (isProtectedGetRefusal(error)) {
-                throw new NpmUserConfigLocationUnknown('npm user config location is protected');
+        if (this.userConfigPath) {
+            path = this.userConfigPath;
+        } else {
+            try {
+                path = normalizeNpmValue((await this.execNpm(['config', 'get', 'userconfig'])).stdout);
+            } catch (error) {
+                if (isProtectedGetRefusal(error)) {
+                    throw new NpmUserConfigLocationUnknown('npm user config location is protected');
+                }
+                throw error;
             }
-            throw error;
-        }
-        if (!path) {
-            throw new NpmUserConfigLocationUnknown('npm user config location is unknown');
+            if (!path) {
+                throw new NpmUserConfigLocationUnknown('npm user config location is unknown');
+            }
         }
         try {
             return await this.readUserConfigFile(path);
@@ -557,20 +575,36 @@ export class NpmConfigManager {
         }
     }
 
+    /**
+     * Strictly the user layer, no merged fallback: the compensation snapshot
+     * and current-value read must see the layer `config set` and `config
+     * delete` act on (#138). A merged read reports global and project layer
+     * values too, and restoring one of those copies it into a user config it
+     * never lived in. A location npm will not name therefore means
+     * unreadable — a residual key — never a guess at another layer's value.
+     */
+    private async readUserLayerValues(): Promise<NpmProxyValues> {
+        const text = await this.readUserConfigText({ missingFileIsEmpty: true });
+        return {
+            proxy: normalizeNpmValue(readTopLevelNpmrcString(text, 'proxy')),
+            'https-proxy': normalizeNpmValue(readTopLevelNpmrcString(text, 'https-proxy'))
+        };
+    }
+
     private async readProxySnapshot(): Promise<NpmProxyValues | undefined> {
-        const inspection = await this.inspectProxy();
-        if (inspection.status !== 'available' || !inspection.values) {
+        try {
+            return await this.readUserLayerValues();
+        } catch {
             return undefined;
         }
-        return inspection.values;
     }
 
     private async readCurrentProxyValue(key: NpmProxyKey): Promise<string | null | typeof UNREADABLE> {
-        const inspection = await this.inspectProxy();
-        if (inspection.status !== 'available' || !inspection.values) {
+        try {
+            return (await this.readUserLayerValues())[key];
+        } catch {
             return UNREADABLE;
         }
-        return inspection.values[key];
     }
 
     /**

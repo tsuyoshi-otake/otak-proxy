@@ -236,6 +236,24 @@ const ALLOWED_C0 = new Set([0x09, 0x0a, 0x0d]);
 const EMOJI_BASE_PATTERN = /\p{Extended_Pictographic}/u;
 /** Bases of keycap sequences such as `1` + U+FE0F + U+20E3. */
 const KEYCAP_BASE_PATTERN = /[0-9#*]/;
+/** U+20E3 COMBINING ENCLOSING KEYCAP - the visible mark that completes a keycap sequence. */
+const COMBINING_ENCLOSING_KEYCAP = 0x20e3;
+
+/**
+ * Bound on the per-file count of exempted invisible presentation selectors.
+ *
+ * An exempted selector is optional by definition - the file is equally valid
+ * without it - so every exempted pair is one freely-chosen invisible bit: the
+ * pre-#140 rule let a digit or emoji base carry one bit each, and a payload
+ * of a few hundred selectors passed the scan unflagged. Capping the count
+ * caps that channel at 32 bits (4 bytes) per file, orders of magnitude below
+ * any real payload and far above what legitimate emoji text uses. Selectors
+ * in a complete keycap sequence - keycap base (0-9, #, *) + U+FE0F + U+20E3 -
+ * are not counted: the sequence renders as a visible keycap glyph, so a
+ * hidden bit cannot ride it. A trailing U+20E3 after any other base does not
+ * produce the glyph, so those selectors are counted like bare ones.
+ */
+export const MAX_EXEMPTED_EMOJI_SELECTORS = 32;
 
 function categoryOf(codePoint) {
     for (const category of INVISIBLE_CATEGORIES) {
@@ -246,20 +264,29 @@ function categoryOf(codePoint) {
     return undefined;
 }
 
-function isEmojiPresentationBase(codePoint) {
-    if (codePoint < 0) {
-        return false;
-    }
-    const char = String.fromCodePoint(codePoint);
-    return EMOJI_BASE_PATTERN.test(char) || KEYCAP_BASE_PATTERN.test(char);
+function isKeycapBase(codePoint) {
+    return codePoint >= 0 && KEYCAP_BASE_PATTERN.test(String.fromCodePoint(codePoint));
+}
+
+function isExtendedPictographicBase(codePoint) {
+    return codePoint >= 0 && EMOJI_BASE_PATTERN.test(String.fromCodePoint(codePoint));
 }
 
 /**
  * @param {{ codePoint: number, index: number, previousCodePoint: number,
- *           previousWasSelector: boolean, allowEmojiPresentation: boolean }} occurrence
+ *           nextCodePoint: number, previousWasSelector: boolean,
+ *           exemptedEmojiSelectors: number, allowEmojiPresentation: boolean }} occurrence
  */
 function isExemptOccurrence(occurrence) {
-    const { codePoint, index, previousCodePoint, previousWasSelector, allowEmojiPresentation } = occurrence;
+    const {
+        codePoint,
+        index,
+        previousCodePoint,
+        nextCodePoint,
+        previousWasSelector,
+        exemptedEmojiSelectors,
+        allowEmojiPresentation
+    } = occurrence;
 
     if (ALLOWED_C0.has(codePoint)) {
         return true;
@@ -268,8 +295,17 @@ function isExemptOccurrence(occurrence) {
         // An encoding marker only at the very start; anywhere else it is embedded content.
         return index === 0;
     }
-    if ((codePoint === 0xfe0e || codePoint === 0xfe0f) && allowEmojiPresentation) {
-        return !previousWasSelector && isEmojiPresentationBase(previousCodePoint);
+    if ((codePoint === 0xfe0e || codePoint === 0xfe0f) && allowEmojiPresentation && !previousWasSelector) {
+        if (isKeycapBase(previousCodePoint)) {
+            // Only the complete keycap sequence is exempt: U+20E3 renders the
+            // pair as a visible keycap glyph, so an invisible bit cannot hide
+            // in it. A digit plus a lone selector is one smuggled bit (#140).
+            return codePoint === 0xfe0f && nextCodePoint === COMBINING_ENCLOSING_KEYCAP;
+        }
+        if (isExtendedPictographicBase(previousCodePoint)) {
+            return exemptedEmojiSelectors < MAX_EXEMPTED_EMOJI_SELECTORS;
+        }
+        return false;
     }
     return false;
 }
@@ -291,9 +327,13 @@ function isExemptOccurrence(occurrence) {
  *
  * Two exemptions keep the check usable on real files:
  *  - a BOM at offset 0 (an encoding marker, not embedded content);
- *  - a single emoji presentation selector (U+FE0E/U+FE0F) directly after an emoji or
- *    keycap base, which is how documentation writes emoji. Runs of two or more
- *    selectors are never exempt - byte smuggling always produces runs.
+ *  - an emoji presentation selector (U+FE0E/U+FE0F) that forms a real emoji
+ *    sequence: for a keycap base (0-9, #, *) only U+FE0F directly before
+ *    U+20E3, which renders the visible keycap glyph; for an
+ *    Extended_Pictographic base a single selector, at most
+ *    {@link MAX_EXEMPTED_EMOJI_SELECTORS} per file so the exemption cannot
+ *    carry one hidden bit per base (#140). Runs of two or more selectors are
+ *    never exempt - byte smuggling always produces runs.
  *
  * @param {string} text
  * @param {{ allowEmojiPresentation?: boolean }} [options]
@@ -309,18 +349,37 @@ export function scanTextForInvisibleUnicode(text, options = {}) {
     let column = 1;
     let previousCodePoint = -1;
     let previousWasSelector = false;
+    let exemptedEmojiSelectors = 0;
 
-    for (const char of text) {
+    // Materialize code points so the keycap rule can look one character ahead.
+    const chars = [...text];
+    for (let i = 0; i < chars.length; i++) {
+        const char = chars[i];
         const codePoint = char.codePointAt(0) ?? 0;
+        const nextCodePoint = i + 1 < chars.length ? (chars[i + 1].codePointAt(0) ?? 0) : -1;
         const category = categoryOf(codePoint);
         const isPresentationSelector = codePoint === 0xfe0e || codePoint === 0xfe0f;
         const exempt = isExemptOccurrence({
             codePoint,
             index,
             previousCodePoint,
+            nextCodePoint,
             previousWasSelector,
+            exemptedEmojiSelectors,
             allowEmojiPresentation
         });
+
+        // Selectors in a complete keycap sequence are not counted — but only
+        // when the base can actually form the keycap glyph (0-9, #, *). A
+        // trailing U+20E3 after a pictographic base renders as a stray mark,
+        // not a keycap, so the selector is still an invisible bit and must
+        // count against the same budget as a bare one (#140).
+        const isCompleteKeycapSelector = isPresentationSelector &&
+            isKeycapBase(previousCodePoint) &&
+            nextCodePoint === COMBINING_ENCLOSING_KEYCAP;
+        if (exempt && isPresentationSelector && !isCompleteKeycapSelector) {
+            exemptedEmojiSelectors += 1;
+        }
 
         if (category && !exempt) {
             findings.push({

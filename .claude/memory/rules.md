@@ -173,6 +173,10 @@
 - **POSIX の実ファイルシステムで所有者を比べる行は、uid を定数にせず `process.getuid()` を使う。** CI の runner の
   uid は開発機と同じとは限らない。Windows ではその行を skip するので、誤りは CI でしか表に出ない — #108 項目 4 の
   1 回目のレビューでコードを読んで見つけた（CI の uid が 1000 でないことは観測していない）。
+- **unit lane の vscode shim を書き換えるテストは、`suiteTeardown` で元に戻す。** shim は Mocha worker の中で共有される singleton なので、戻さないと同じ worker の後のテストが別の shim で動く。足したキーは消し、置き換えた値と落とした require cache は戻す — verified by: `ProxyRuntimeDiagnostics.requiresAuth.test.ts` の修正の後、unit lane が 2 回続けて通った（#139、`e1bc098`）。
+- **不可視文字スキャナの免除は、「付けるか付けないか」で 1 ビットを運べてはいけない。** 数字の後ろのセレクタを免除すると、桁ごとに 1 ビット隠せた（37 バイトの JavaScript が findings 0）。キーキャップの基底は U+20E3 が続くときだけ免除し、絵文字の基底の後ろの単独のセレクタは 1 ファイル 32 個まで（隠せるのは最大 4 バイト）。連続の検出は、見える区切り文字を挟めば逃げられるので上限にならない — verified by: `InvisibleUnicode.test.ts` の `(#140)` が修正前に `0 !== 137` で落ちた（#140）。
+- **実物のプロセスを 1 ms の期限と競わせるテストは、速い Linux の CI でたまに落ちる。** `git` が timer より先に終わると、タイムアウトのテストが `success: true` になった（run 43539968947 で落ち、再実行で通った。Windows では一度も落ちていない）。タイムアウトのテストは子プロセスを seam（`commandSpawner`）で注入し、期限の時点でまだ動いていることをテスト側で保証する — verified by: `GitConfigManager.timeout.test.ts` を 3 回続けて流して通った（#138、`4184b5d`）。
+- **Codex の指摘は inline のコメントだけでなく、レビューの本文にも書かれる。** PR #142 の 1 回目（`e5d835a`）の P1 は本文だけにあり、inline の 6 件だけを読んで見落とした。指摘の取りこぼしを防ぐには、`pulls/<n>/reviews` の `body` と `pulls/<n>/comments` の両方を読む — verified by: 2 回目のレビューの前に本文を読み直して見つけた（#137、`670f259` で修正）。
 
 ## 外部ツールのスタブ
 
@@ -195,6 +199,7 @@
   コンパイルする。`sinon.stub(ProxyUtils, 'testProxyConnectionParallel')` は例外を出さずに成功するが、
   `ProxyUtils.testProxyConnectionParallel` は本物の関数を返し続ける。定義元の `utils/ProxyConnectionTest` を
   stub すると、ProxyUtils 経由の呼び出しにも効く（sinon 21.1.2 と `out/utils/ProxyUtils.js` で確認、#78）。
+- **Windows で `execFile` の `timeout` が殺すのは直接の子だけ。** Git for Windows の `cmd\git.exe` はラッパーで、タイムアウトの後も本物の `git.exe`（とその子）が動き続け、`.gitconfig` を書き、lock を持つ。`taskkill /T` は親が死んだ後ではツリーを辿れないので、タイムアウトはランナーの中で実装し、ラッパーが生きている間に `taskkill /PID <pid> /T /F` を呼ぶ。書いたかもしれないキーは residual として報告する。pip のランナーには未適用 — verified by: `GitConfigManager.timeout.test.ts` と、実機で `git.exe` / `sh.exe` / `sleep.exe` が残ることと `taskkill /T` で消えることを確かめた（#138）。
 
 ## npm
 
@@ -208,6 +213,7 @@
   ローカルの npm 11 とは文言が違った（v3.2.12 の publish が止まった、#88）。
 - **npm は `config delete` で最後のキーを消すと、user config ファイル自体を消す。**
   実 npm テストで削除後にファイルを読むなら、先に存在を確かめる（#85）。
+- **npm は password だけでなく、UUID と `npm_…` の token の形も `config get` で伏せ字にする。** 書き込みの確認と読み戻しは 3 つの形をすべて「保護された値」として扱う。補償（partial write の巻き戻し）は user 層だけを読む: 合成された `inspectProxy` を使うと、global 層の値を user の `.npmrc` に写す — verified by: `NpmConfigManager.test.ts` と `NpmConfigManager.partialwrite.test.ts` の `(#138)` が修正前に落ち、実物の npm のプローブで user のファイルが空のまま残った（#138）。
 
 ## 世代フェンス
 
@@ -288,6 +294,12 @@
   Off → Auto の配信で監視が始まらなかった。それを引き受ける収束も無かった（#108 項目 3 の F1。
   `commitUnlessStale` に戻すとテスト 12b が red）。「stale なら返す」と決めるときは、間に入りうるコミットの
   種類ごとに、後の手順（監視、表示、失敗の報告）を誰が引き受けるかを確かめる。
+- **ユーザーの入力を待つコマンドは、待つ前に読んだ state を丸ごと保存しない。** 待ちの後に読み直し、コマンドが決めたフィールドだけを `commitCommandPatch`（`src/commands/CommandStateCommit.ts`）で畳み込む。Import の「Save as Manual」と Configure は、通知や入力ボックスの間に入った Off へのトグルを巻き戻し、他ウィンドウへ `auto` を配信していた。他のフィールドから導くフィールド（資格情報の印、Manual から Off への落とし）は、`commitDecidedPatch` に関数で渡し、着地する state から導く — verified by: `ImportProxyCommand.test.ts` / `ConfigureUrlCommand.test.ts` の `(#135)` suite が修正前に `'auto' !== 'off'` で落ちた（#135）。
+- **PAC / WPAD の検出は、Auto: OFF を解除する証拠にならない。** PAC は解決しないので、外した endpoint が戻ったことを示さない。Auto: OFF を解除するのは、テストの成功か、応答した手動 fallback だけ。`recordUnsupportedAutoConfig` と `SystemProxyUpdateService` の両方で同じ — verified by: `unsupported PAC under Auto: OFF (#135)` が修正前に `false !== true` で落ちた（#135）。
+- **ハンドラが stale として捨てた `proxyChanged` は、モニタに「取り込まなかった」と返す。** `handleProxyChanged` は `'settled' | 'notAdopted'` を返し、initializer が `ProxyMonitor.proxyChangeNotAdopted()` に渡すと、次のチェックが同じ変化を再び報告する。「stale なら必ず再報告」はループする: 起動時はチェック自身のテスト結果が先にコミットされ、その `proxyChanged` は常に stale になる。mode が Auto でない、fallback のエコー、state がすでに検出を持つ、のどれかなら `settled`。再報告は連続 3 回まで — verified by: `UnadoptedProxyChange.flow.test.ts`（実物の initializer、モニタ、state store）（#136）。
+- **共有の同一性の関数（`sameLogicalIdentity`）を広げると、それを使うすべてのフェンスで「stale」の意味が変わる。** `isStaleGeneration` を通じて 7 ファイル（接続テストの結果、apply の結果、remote の取り込み、トグル）が使う。1 か所の判定を厳しくしたいときは、その呼び出し元の中だけで追加のフィールドを比べる。`clearPendingThenPublish` は `splitRoutingIdentity` を自分の中で比べる — verified by: `LogicalGeneration.test.ts` の guard test（split routing だけの変化は stale でない）と、`ClearPendingThenPublish.test.ts` の bypass の test（#135、`e049da4`）。
+- **モニタが出した報告には、どの経路でも決着の返事を返す。** `proxyChanged` のハンドラが例外を投げたときは `proxyChangeNotAdopted`（上限付きの再報告）、取り込んだときは `proxyChangeSettled`。`stop()` は返事待ちの報告を捨てる。返事待ちが残ると、連続の回数が二度と 0 に戻らない — verified by: `ProxyMonitor.unadoptedChange.test.ts` と `UnadoptedProxyChange.flow.test.ts` の追加の 3 件が修正前に落ちた（#136、`452332b` と `db2a285`）。
+- **state の持ち主は、その state を書くコミットの中で書く。後で「解放」する持ち主の記録は漏れる。** `convergencePending` の持ち主をメモリ上の WeakMap（claim / release）で持たせたら、9 か所の呼び出し元のうち、再 fold のたびに claim する所、例外で release しない所、早い return で release しない所、コミットが stale で負けるまでの窓、の 4 通りで漏れ、本物の持ち主が印を消せなくなった（独立した検証役がコンパイル後のコードで再現）。印を立てる fold で `convergencePendingToken` も書くと、着地しなかったコミットは何も書かないので、解放の手順自体が要らない。トークンはウィンドウの外へ出さない（共有ファイルの読み書き、publish、取り込みで外す） — verified by: `ClearPendingThenPublish.test.ts` の 4 つの漏れの場面が修正前に落ちた（#135、`18308ff`）。
 
 ## ウィンドウ間の同期
 
@@ -301,6 +313,10 @@
   公開された（#108 項目 3 の R1。採用を delivery chain に戻すとテスト 11 が red）。直列区間は 2 つに分け、
   短い記帳の区間（`transitionQueue`）のタスクは、適用、監視、配信の鎖、公開を待たない。配信全体を記帳の区間で
   実行すると、監視の開始が公開するときに自分を待って止まる（デッドロックのテストが red）。
+- **共有ファイルの一時的な読み取り失敗は、「空」でも「致命的」でもない。** EBUSY を空の registry とみなすと、他ウィンドウの entry を消して書き戻す。投げて `register()` を失敗させると、`SyncManager.start()` がそのセッションの同期を止める。読み取りは backoff 付きで 3 回まで試し、それでも読めなければ書き込みだけを飛ばして成功を返す（heartbeat が自分の entry を足し直す） — verified by: `SyncRuntimeEnable.test.ts` の EBUSY の 2 件が修正前に `false !== true` で落ちた（#137、`a14f56a`）。
+- **届かなかった publish は、他ウィンドウの state で黙って上書きさせない。** 失敗した publish は 250 ms から 4 s の backoff（jitter ±25%）で再試行し、新しいローカルの publish で置き換え、stop で止める。再試行の間は remote の配信を取り込まず、使い切ったら共有ファイルを取り込み直す。この間に他ウィンドウで行った操作は、再試行が着地すると上書きされる（最大約 8 秒の窓） — verified by: `SyncPublishRetry.test.ts`（#137）。
+- **保留中の publish は、再試行の中の stale CAS でも決着させる。** stale で `return` するだけでは、`pendingPublish` が残ったままタイマーが無くなり、remote の取り込みがずっと止まる。再試行で stale になったら、他ウィンドウが勝ったとみなし、保留を消して共有の state を強制で取り込み直す（再試行でない stale と同じ扱い） — verified by: `SyncPublishRetry.test.ts` の `a stale CAS during a scheduled retry ...` が修正前に 8 秒の timeout で落ちた（#137、`670f259`）。
+- **取り込みが失敗したら、観測済みのファイルの signature も捨てる。** 共有ファイルが変わっていないので、signature が一致したままだと定期の poll は reconcile を飛ばし、file watcher も鳴らない。`lastObservedFileSignature = null` にすると、次の poll が配信をやり直す（新しいタイマーは不要、`stop()` で止まる） — verified by: `triggerSync` を使わない test が修正前に 8 秒の timeout で落ちた（#137、`c9c8067`）。
 
 ## 診断レポート
 
@@ -582,6 +598,7 @@
   `VSCODE_TEST_OPTIONS` で受け取り、このファイルを読まない（`@vscode/test-cli` 0.0.11 の `out/bin.mjs`、
   `out/cli/config.mjs`、`out/cli/platform/desktop.mjs` で確認）。CLI は `process.exit` するので、後片付けは同期の
   `exit` リスナー（`rmSync`）で書く。smoke の前後でプロファイルの数が変わらないことで確かめた（226 → 226、#108）。
+- **host lane の結果は、合計の行（`N passing` / `N failing`）で読む。exit code では読まない。** extension host が途中で落ちる（`crashed with code -2147483645`）と、テストは 474 件で止まり、合計の行は出ず、`npm test` は exit 0 を返した。同じコードの 2 回目は 679 passing / 7 failing で終わった。合計の行が無い run は、もう 1 回流す — verified by: 2026-11-14 の #135 の確認で 1 回目と 2 回目のログを比べた（#135）。
 
 ## ツール操作
 

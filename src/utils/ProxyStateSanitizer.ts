@@ -249,3 +249,18 @@ export function sanitizeProxyStateForPersistence(state: ProxyState): ProxyState 
 
     return sanitized;
 }
+
+/**
+ * `convergencePendingToken` names the in-flight apply that owns a pending
+ * flag; it is window-local bookkeeping. Anything crossing this window's
+ * boundary — the shared sync file in either direction, a remote state being
+ * adopted here — must not carry it, or a window would import an ownership
+ * it cannot present and could never release (#135). The local persisted
+ * state keeps it: a flag+token that survives a reload stays pending until
+ * the next apply, exactly like the flag alone did before.
+ */
+export function stripConvergencePendingToken(state: ProxyState): ProxyState {
+    const stripped = { ...state };
+    delete stripped.convergencePendingToken;
+    return stripped;
+}

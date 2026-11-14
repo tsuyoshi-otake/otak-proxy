@@ -2,7 +2,8 @@ import * as assert from 'assert';
 import { ProxyMode, ProxyState } from '../core/types';
 import {
     sanitizeProxyStateForPersistence,
-    sanitizeProxyTestResultForPersistence
+    sanitizeProxyTestResultForPersistence,
+    stripConvergencePendingToken
 } from '../utils/ProxyStateSanitizer';
 
 suite('ProxyStateSanitizer security tests', () => {
@@ -60,5 +61,23 @@ suite('ProxyStateSanitizer security tests', () => {
         assert.ok(!message.includes('dXNlcjpzZWNyZXQ='));
         assert.ok(!message.includes('\u001b'));
         assert.ok(message.includes('<redacted>'));
+    });
+
+    test('strips the convergence pending token from a state crossing the window boundary', () => {
+        // #135: the token names the in-flight apply that owns the flag; it is
+        // window-local and must never reach the shared file or a remote
+        // adoption, so a flag nobody here owns can never be imported.
+        const state: ProxyState = {
+            mode: ProxyMode.Auto,
+            autoProxyUrl: 'http://proxy.example.com:8080',
+            convergencePending: true,
+            convergencePendingToken: 'opaque-window-token'
+        };
+
+        const stripped = stripConvergencePendingToken(state);
+        assert.strictEqual(stripped.convergencePendingToken, undefined, 'the token does not cross the boundary');
+        assert.strictEqual(stripped.convergencePending, true, 'the flag itself still crosses');
+        assert.strictEqual(stripped.autoProxyUrl, 'http://proxy.example.com:8080');
+        assert.strictEqual(state.convergencePendingToken, 'opaque-window-token', 'the input state is not mutated');
     });
 });

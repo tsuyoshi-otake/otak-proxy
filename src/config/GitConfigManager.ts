@@ -16,6 +16,7 @@ import { ProxyConfigInspection } from './ProxyConfigInspection';
 import {
     compensatePartialProxyWrite,
     getPartialWriteCompensation,
+    PartialWriteCompensation,
     summarizePartialWriteCompensation,
     UNREADABLE
 } from './PartialProxyWriteCompensation';
@@ -39,10 +40,113 @@ export type GitCommandRunner = (
 export interface GitConfigManagerOptions {
     commandRunner?: GitCommandRunner;
     timeoutMs?: number;
+    /**
+     * Invoked with the pid of a command the runner had to kill. Production
+     * kills the whole process tree on Windows (see `killGitProcessTree`);
+     * tests inject a recorder to observe the contract without real processes.
+     */
+    processTreeKiller?: GitProcessTreeKiller;
+    /**
+     * The process the default runner starts: `execFile` in production. A
+     * test injects a fake child — a promise that settles when the test says
+     * so, carrying a `child` with a pid like `promisify(execFile)` returns —
+     * so the timeout/tree-kill contract is exercised deterministically
+     * instead of racing a real `git` against a deadline.
+     */
+    commandSpawner?: GitCommandSpawner;
 }
 
-const defaultCommandRunner: GitCommandRunner = async (command, args, options) => {
-    return await execFileAsync(command, args, options);
+export type GitProcessTreeKiller = (pid: number | undefined) => Promise<void>;
+
+export type GitCommandSpawner = (
+    command: string,
+    args: string[],
+    execOptions: Omit<GitCommandOptions, 'timeout'>
+) => Promise<{ stdout: string; stderr: string }>;
+
+const TASKKILL_TIMEOUT_MS = 5000;
+
+/**
+ * A timed-out command must not leave survivors (#138). On Windows the `git`
+ * on PATH is usually Git for Windows' `cmd\git.exe` wrapper; killing it
+ * leaves the real `git.exe` child running, still able to write .gitconfig and
+ * hold `.gitconfig.lock` after the caller has moved on. `taskkill /T` takes
+ * the whole tree down. The kill is bounded and its own failure is only
+ * logged: the original timeout is the error that matters.
+ */
+const killGitProcessTree: GitProcessTreeKiller = async pid => {
+    if (pid === undefined || process.platform !== 'win32') {
+        return;
+    }
+    try {
+        // A dead pid means the kill already cascaded (job object) — nothing
+        // to do, and no "not found" warning to log.
+        process.kill(pid, 0);
+    } catch {
+        return;
+    }
+    try {
+        await execFileAsync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+            timeout: TASKKILL_TIMEOUT_MS,
+            encoding: 'utf8'
+        });
+    } catch (error) {
+        Logger.warn(`taskkill /PID ${pid} /T /F failed after a Git command timeout:`, getErrorMessage(error));
+    }
+};
+
+const defaultCommandRunnerImpl = async (
+    command: string,
+    args: string[],
+    options: GitCommandOptions,
+    killProcessTree: GitProcessTreeKiller,
+    spawn: GitCommandSpawner = execFileAsync
+): Promise<{ stdout: string; stderr: string }> => {
+    // execFile's own timeout kills only the direct child — on Windows that is
+    // the cmd\git.exe wrapper, and the real git.exe keeps running (#138). The
+    // tree kill has to happen while the wrapper is still alive, so the
+    // timeout is implemented here instead: on expiry the whole tree goes down
+    // and the rejection carries the same shape execFile's timeout produces
+    // (killed + SIGTERM), which every downstream classifier already reads.
+    const { timeout: timeoutMs, ...execOptions } = options;
+    const pending = spawn(command, args, execOptions);
+    const child = (pending as { child?: { pid?: number; kill?: (signal?: string) => boolean } }).child;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+            // The deadline itself decides the outcome: reject before the
+            // tree cleanup starts, so a command that exits while taskkill
+            // is still working cannot win the race back to "success" — which
+            // would also skip the timeout-residual accounting. The error
+            // shape mirrors an execFile timeout, which every downstream
+            // classifier already reads (#138).
+            reject(Object.assign(
+                new Error(`Command failed: ${command} ${args.join(' ')}\nCommand timed out after ${timeoutMs}ms`),
+                { killed: true, signal: 'SIGTERM', code: null, cmd: `${command} ${args.join(' ')}` }
+            ));
+            // The cleanup still has to run — bounded by the tree killer's
+            // own timeout — but its result must not change the outcome, so
+            // it is detached and a failure there is only logged.
+            void (async () => {
+                await killProcessTree(child?.pid);
+                // Backstop for the direct child itself: on POSIX the tree
+                // killer is a no-op, and even on Windows a process can
+                // dodge taskkill.
+                child?.kill?.('SIGTERM');
+            })().catch(error =>
+                Logger.warn('Git command cleanup after a timeout failed:', getErrorMessage(error))
+            );
+        }, timeoutMs);
+    });
+
+    try {
+        return await Promise.race([pending, timedOut]);
+    } finally {
+        if (timer !== undefined) {
+            clearTimeout(timer);
+        }
+    }
 };
 
 export type { GitConfigOperationOptions, GitProxyKey, OperationResult } from './GitConfigTypes';
@@ -99,7 +203,15 @@ export class GitConfigManager {
 
     constructor(options: GitConfigManagerOptions = {}) {
         this.timeout = options.timeoutMs ?? GIT_CONFIG_COMMAND_TIMEOUT_MS;
-        this.commandRunner = options.commandRunner ?? defaultCommandRunner;
+        this.commandRunner = options.commandRunner
+            ?? ((command, args, commandOptions) =>
+                defaultCommandRunnerImpl(
+                    command,
+                    args,
+                    commandOptions,
+                    options.processTreeKiller ?? killGitProcessTree,
+                    options.commandSpawner ?? execFileAsync
+                ));
     }
 
     private async execGitConfigWithRetry(args: string[], options?: GitConfigOperationOptions): Promise<void> {
@@ -154,6 +266,13 @@ export class GitConfigManager {
                     await this.assertWrittenValues(url, written);
                 } catch (error) {
                     if (written.length === 0) {
+                        // A timed-out write is not a write that provably did
+                        // not happen: the surviving child may still apply it
+                        // (#138). Report the key residual so ownership keeps
+                        // tracking it for the next cleanup.
+                        if (classifyGitConfigError(error, this.timeout).errorType === 'TIMEOUT') {
+                            throw this.timeoutResidual(error);
+                        }
                         throw error;
                     }
                     const compensation = await this.compensatePartialSet(written, url, snapshot, options);
@@ -489,6 +608,28 @@ export class GitConfigManager {
         if (mismatched.length > 0) {
             throw new Error('Git proxy write verify failed');
         }
+    }
+
+    /**
+     * Wraps a timed-out write error with the same compensation metadata a
+     * partial set carries. No write was recorded as landed, but the killed
+     * process (or a surviving child) may have applied it anyway, so the key
+     * is residual rather than clean (#138).
+     */
+    private timeoutResidual(error: unknown): Error {
+        const compensation: PartialWriteCompensation<GitProxyKey> = {
+            keys: [{ key: GIT_ROUTING_PROXY_KEY, action: 'residual' }],
+            residualKeys: [GIT_ROUTING_PROXY_KEY],
+            conflictedKeys: [],
+            summary: ''
+        };
+        compensation.summary = summarizePartialWriteCompensation(
+            `${GIT_ROUTING_PROXY_KEY} write timed out and may still have landed`,
+            compensation
+        );
+        const wrapped = error instanceof Error ? error : new Error(String(error));
+        (wrapped as Error & { otakPartialWrite?: PartialWriteCompensation<GitProxyKey> }).otakPartialWrite = compensation;
+        return wrapped;
     }
 
     private async compensatePartialSet(

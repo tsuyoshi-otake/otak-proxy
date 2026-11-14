@@ -192,6 +192,72 @@ suite('Invisible Unicode detector (GlassWorm)', () => {
         }
     });
 
+    test('a digit carrier hiding one bit per digit is flagged (#140)', () => {
+        // Every digit is a keycap base, so "selector present / absent" after
+        // each one carried an invisible bit: the exemption must require the
+        // visible keycap mark so the bit cannot hide.
+        const payloadBytes = Buffer.from('require("child_process").exec("calc")', 'utf8');
+        let carrier = '';
+        let selectors = 0;
+        for (const byte of payloadBytes) {
+            for (let bit = 7; bit >= 0; bit--) {
+                const set = (byte >> bit) & 1;
+                carrier += '0' + (set ? cp(VARIATION_SELECTOR_16) : '');
+                selectors += set;
+            }
+        }
+        const findings = scanTextForInvisibleUnicode(`const n = "${carrier}";`);
+        assert.strictEqual(findings.length, selectors);
+        assert.ok(findings.every(f => f.codePoint === VARIATION_SELECTOR_16));
+    });
+
+    test('a keycap base needs the visible U+20E3 mark for its selector to be exempt (#140)', () => {
+        // The complete, visible keycap sequence stays exempt.
+        assert.deepStrictEqual(scanTextForInvisibleUnicode(`1${cp(VARIATION_SELECTOR_16, COMBINING_KEYCAP)}`), []);
+        assert.deepStrictEqual(scanTextForInvisibleUnicode(`#${cp(VARIATION_SELECTOR_16, COMBINING_KEYCAP)}`), []);
+        assert.deepStrictEqual(scanTextForInvisibleUnicode(`*${cp(VARIATION_SELECTOR_16, COMBINING_KEYCAP)}`), []);
+        // Digit plus selector alone is one hidden bit.
+        assert.strictEqual(scanTextForInvisibleUnicode(`1${cp(VARIATION_SELECTOR_16)}`).length, 1);
+        // Only U+FE0F forms a keycap; U+FE0E before U+20E3 is malformed.
+        assert.strictEqual(scanTextForInvisibleUnicode(`1${cp(0xfe0e, COMBINING_KEYCAP)}`).length, 1);
+        // A selector at end of input can never be completed.
+        assert.strictEqual(scanTextForInvisibleUnicode(`1${cp(VARIATION_SELECTOR_16)}`).length, 1);
+    });
+
+    test('exempted pictographic selectors are capped so they cannot carry a payload (#140)', () => {
+        // A lone base+selector pair is a real emoji sequence (copyright sign
+        // rendered as emoji) and stays exempt.
+        const pair = cp(0x00a9, VARIATION_SELECTOR_16);
+        assert.deepStrictEqual(scanTextForInvisibleUnicode(pair), []);
+        // Beyond the cap each further selector is a finding, so the channel
+        // tops out at a few bytes per file.
+        const findings = scanTextForInvisibleUnicode(pair.repeat(40));
+        assert.strictEqual(findings.length, 8);
+        assert.ok(findings.every(f => f.codePoint === VARIATION_SELECTOR_16));
+    });
+
+    test('a keycap mark on a non-keycap base does not hide an unbounded selector channel (#140)', () => {
+        // U+20E3 renders a keycap glyph only on a digit/#/* base. After any
+        // other base the selector+mark pair is still an invisible bit, so it
+        // must count against the same budget as a bare selector: the cap has
+        // to look at the base, not only at the mark that follows.
+        const triple = cp(0x00a9, VARIATION_SELECTOR_16, COMBINING_KEYCAP);
+        const findings = scanTextForInvisibleUnicode(triple.repeat(40));
+        assert.strictEqual(findings.length, 8);
+        assert.ok(findings.every(f => f.codePoint === VARIATION_SELECTOR_16));
+        // A single such triple is still a tolerated oddity under the cap.
+        assert.deepStrictEqual(scanTextForInvisibleUnicode(triple), []);
+    });
+
+    test('keycap exemptions do not consume the invisible-selector budget (#140)', () => {
+        // The keycap mark renders its sequence as a visible glyph, so it is
+        // not part of the invisible channel the cap bounds.
+        const keycaps = `1${cp(VARIATION_SELECTOR_16, COMBINING_KEYCAP)}`.repeat(40);
+        const pair = cp(0x00a9, VARIATION_SELECTOR_16);
+        const findings = scanTextForInvisibleUnicode(keycaps + pair.repeat(33));
+        assert.strictEqual(findings.length, 1);
+    });
+
     test('covers every code point the running Node marks Default_Ignorable', function () {
         this.timeout(60000);
         // The category table is hard-coded to Unicode 16.0 (unchanged in 17.0)

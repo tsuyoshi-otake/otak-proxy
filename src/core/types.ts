@@ -114,6 +114,16 @@ export interface ProxyState {
      */
     convergencePending?: boolean;
     /**
+     * Opaque token naming the apply that owns `convergencePending`. Written
+     * by the same commit that lands the flag, so ownership travels with the
+     * write: a commit that never lands wrote no token, and a clear only
+     * releases a flag whose token is its own (#135). Window-local metadata:
+     * stripped from anything published to or adopted from the shared sync
+     * file. Absent on states written before it existed — a flag without a
+     * token may be cleared by a clear without a token.
+     */
+    convergencePendingToken?: string;
+    /**
      * Non-secret metadata: the active Auto/fallback endpoint requires credentials.
      * Persisted and synced so a receiver can refuse a credentialless apply.
      * Never contains userinfo.

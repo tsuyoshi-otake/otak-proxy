@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { executeConfigureUrl, showInvalidProxyUrl } from '../../commands/ConfigureUrlCommand';
 import { InputSanitizer } from '../../validation/InputSanitizer';
 import { CommandContext } from '../../commands/types';
-import { ProxyMode, ProxyState } from '../../core/types';
+import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../../core/types';
 import { ProxyStateManager } from '../../core/ProxyStateManager';
 import { createRealStateManager } from '../realProxyStateManager';
 import { I18nManager } from '../../i18n/I18nManager';
@@ -52,14 +52,14 @@ suite('ConfigureUrlCommand Unit Tests', () => {
         getState: () => ProxyState;
         applyCalls: Array<{ url: string; enabled: boolean }>;
         notifications: Notification[];
-        counters: { statusBarUpdates: number; saveStateCalls: number };
+        counters: { statusBarUpdates: number; saveStateCalls: number; commitStateCalls: number };
     }
 
     function createContext(initialState: ProxyState, overrides?: Partial<CommandContext>): TestHarness {
         let state: ProxyState = { ...initialState };
         const applyCalls: Array<{ url: string; enabled: boolean }> = [];
         const notifications: Notification[] = [];
-        const counters = { statusBarUpdates: 0, saveStateCalls: 0 };
+        const counters = { statusBarUpdates: 0, saveStateCalls: 0, commitStateCalls: 0 };
 
         const ctx: CommandContext = {
             extensionContext: {} as vscode.ExtensionContext,
@@ -69,6 +69,7 @@ suite('ConfigureUrlCommand Unit Tests', () => {
                 state = { ...next };
             },
             commitProxyState: async (expectedRevision, next) => {
+                counters.commitStateCalls++;
                 if ((state.revision ?? 0) !== expectedRevision) {
                     return { kind: 'superseded' as const, current: { ...state } };
                 }
@@ -263,8 +264,12 @@ suite('ConfigureUrlCommand Unit Tests', () => {
         assert.strictEqual(state.manualProxyUrl, '');
         assert.deepStrictEqual(applyCalls, [{ url: '', enabled: false }]);
         assert.ok(counters.statusBarUpdates >= 1, 'expected status bar refresh after clearing manual proxy');
-        // saveProxyState is called twice: once to persist the new (empty) URL, again when switching mode to Off
-        assert.strictEqual(counters.saveStateCalls, 2);
+        // Two revision-checked commits: the decision commit stores the empty
+        // URL and the drop to Off with convergencePending, and the post-apply
+        // clear commits the flag release. The whole-snapshot saveProxyState
+        // is gone (#135).
+        assert.strictEqual(counters.commitStateCalls, 2);
+        assert.strictEqual(counters.saveStateCalls, 0);
         sinon.assert.calledOnce(configUpdateStub);
         sinon.assert.calledWith(
             configUpdateStub,
@@ -289,7 +294,8 @@ suite('ConfigureUrlCommand Unit Tests', () => {
         assert.strictEqual(state.manualProxyUrl, '');
         assert.deepStrictEqual(applyCalls, []);
         assert.strictEqual(counters.statusBarUpdates, 0);
-        assert.strictEqual(counters.saveStateCalls, 1);
+        assert.strictEqual(counters.commitStateCalls, 1);
+        assert.strictEqual(counters.saveStateCalls, 0);
         sinon.assert.calledOnce(configUpdateStub);
     });
 
@@ -444,6 +450,7 @@ suite('ConfigureUrlCommand Unit Tests', () => {
             const { ctx } = createContext({ mode: ProxyMode.Auto });
             ctx.getProxyState = () => manager.getState();
             ctx.saveProxyState = (state) => manager.saveState(state);
+            ctx.commitProxyState = (expected, next) => manager.commitState(expected, next);
             return ctx;
         }
 
@@ -546,6 +553,230 @@ suite('ConfigureUrlCommand Unit Tests', () => {
             assert.strictEqual(reloaded.manualProxyUrl, 'http://other.example:9000');
             assert.strictEqual(reloaded.requiresAuth, undefined);
             assert.strictEqual(reloaded.authRequiredProxyUrls, undefined);
+        });
+    });
+
+    suite('state committed while the input box is open (#135)', () => {
+        interface RealHarness extends TestHarness {
+            published: ProxyState[];
+            persistedState: () => ProxyState | undefined;
+            readState: () => Promise<ProxyState>;
+            /** Another writer's commit: a toggle, a sync delivery, a test result. */
+            commitFromAnotherWriter: (change: (current: ProxyState) => ProxyState) => Promise<void>;
+        }
+
+        /**
+         * The command layer over a real ProxyStateManager. saveProxyState
+         * saves and publishes the snapshot it is given, like the production
+         * wiring in extension.ts; commitProxyState is the revision-checked
+         * write the fix goes through.
+         */
+        async function realContext(initial: ProxyState): Promise<RealHarness> {
+            const { manager, persistedState } = createRealStateManager(config => getConfigurationStub.returns(config));
+            await manager.saveState(initial);
+            const harness = createContext(initial);
+            const published: ProxyState[] = [];
+            harness.ctx.getProxyState = () => manager.getState();
+            harness.ctx.saveProxyState = async (state) => {
+                await manager.saveState(state);
+                published.push({ ...state });
+            };
+            harness.ctx.commitProxyState = (expected, next) => manager.commitState(expected, next);
+            harness.ctx.publishProxyState = async (state) => {
+                published.push({ ...state });
+            };
+            return {
+                ...harness,
+                published,
+                persistedState,
+                readState: () => manager.getState(),
+                commitFromAnotherWriter: async (change) => {
+                    const current = await manager.getState();
+                    const result = await manager.commitState(stateRevision(current), change({ ...current }));
+                    assert.strictEqual(result.kind, 'committed', 'the other writer must land its commit');
+                }
+            };
+        }
+
+        test('a toggle to Off that landed while the input box was open is kept: the URL is saved, nothing is applied', async () => {
+            const h = await realContext({
+                mode: ProxyMode.Auto,
+                autoProxyUrl: 'http://detected.example:8080',
+                manualProxyUrl: 'http://old.example:8080'
+            });
+            showInputBoxStub.callsFake(async () => {
+                await h.commitFromAnotherWriter(current => ({ ...current, mode: ProxyMode.Off }));
+                return 'http://new.example:3128';
+            });
+
+            const result = await executeConfigureUrl(h.ctx);
+            const after = await h.readState();
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(after.mode, ProxyMode.Off, 'the toggle must not be rolled back to the pre-prompt mode');
+            assert.strictEqual(after.manualProxyUrl, 'http://new.example:3128');
+            assert.deepStrictEqual(h.applyCalls, []);
+            assert.ok(
+                h.published.every(state => state.mode === ProxyMode.Off),
+                `no window may be told the pre-prompt mode, published: ${h.published.map(state => state.mode)}`
+            );
+        });
+
+        test('fields another writer committed while the input box was open are kept', async () => {
+            const h = await realContext({ mode: ProxyMode.Auto, autoProxyUrl: 'http://old.example:8080' });
+            showInputBoxStub.callsFake(async () => {
+                await h.commitFromAnotherWriter(current => ({
+                    ...current,
+                    autoProxyUrl: 'http://delivered.example:9090',
+                    proxyReachable: false,
+                    lastTestTimestamp: 4242
+                }));
+                return 'http://new.example:3128';
+            });
+
+            await executeConfigureUrl(h.ctx);
+            const after = await h.readState();
+
+            assert.strictEqual(after.manualProxyUrl, 'http://new.example:3128');
+            assert.strictEqual(after.autoProxyUrl, 'http://delivered.example:9090');
+            assert.strictEqual(after.proxyReachable, false);
+            assert.strictEqual(after.lastTestTimestamp, 4242);
+        });
+
+        test('legacy Manual toggled to Off meanwhile: the new URL is saved, mode stays Off, nothing is applied', async () => {
+            const h = createContext({ mode: ProxyMode.Manual, manualProxyUrl: 'http://old.example:8080' });
+            showInputBoxStub.callsFake(async () => {
+                const current = h.getState();
+                await h.ctx.commitProxyState(stateRevision(current), { ...current, mode: ProxyMode.Off });
+                return 'http://new.example:3128';
+            });
+
+            const result = await executeConfigureUrl(h.ctx);
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(h.getState().mode, ProxyMode.Off);
+            assert.strictEqual(h.getState().manualProxyUrl, 'http://new.example:3128');
+            assert.deepStrictEqual(h.applyCalls, [], 'the mode that decides the apply is the latest one, not the pre-prompt one');
+        });
+
+        test('legacy Manual toggled to Off meanwhile: an empty URL is saved and no disable is applied', async () => {
+            const h = createContext({ mode: ProxyMode.Manual, manualProxyUrl: 'http://old.example:8080' });
+            showInputBoxStub.callsFake(async () => {
+                const current = h.getState();
+                await h.ctx.commitProxyState(stateRevision(current), { ...current, mode: ProxyMode.Off });
+                return '';
+            });
+
+            const result = await executeConfigureUrl(h.ctx);
+
+            assert.strictEqual(result.success, true);
+            assert.strictEqual(h.getState().mode, ProxyMode.Off);
+            assert.strictEqual(h.getState().manualProxyUrl, '');
+            assert.deepStrictEqual(h.applyCalls, []);
+        });
+
+        test('a lost compare-and-set race refolds onto the winner\'s credential-bearing URL and the saved bookkeeping matches', async () => {
+            const h = await realContext({ mode: ProxyMode.Auto, manualProxyUrl: 'http://old.example:8080' });
+            const commitThroughManager = h.ctx.commitProxyState;
+            let raced = false;
+            h.ctx.commitProxyState = async (expected, next) => {
+                if (!raced) {
+                    raced = true;
+                    // Wins the first compare-and-set: a detection with credentials.
+                    await h.commitFromAnotherWriter(current => ({
+                        ...current,
+                        autoProxyUrl: 'http://user:secret@auto.example:8080'
+                    }));
+                }
+                return commitThroughManager(expected, next);
+            };
+            showInputBoxStub.resolves('http://new.example:3128');
+
+            const result = await executeConfigureUrl(h.ctx);
+
+            assert.strictEqual(result.success, true);
+            assert.ok(raced, 'the race must have happened');
+            const persisted = h.persistedState();
+            assert.strictEqual(persisted?.requiresAuth, true,
+                'the live auto URL carries credentials, so the saved bookkeeping must say so');
+            assert.deepStrictEqual(persisted?.authRequiredProxyUrls, ['http://auto.example:8080/']);
+            assert.strictEqual(persisted?.manualProxyUrl, 'http://new.example:3128');
+        });
+
+        test('a Manual-mode save publishes the committed URL only after its apply finishes (#135)', async () => {
+            // Legacy Manual is only reachable through an unnormalized read —
+            // ProxyStateManager.getState migrates it to Auto — so this uses
+            // the plain context whose getProxyState returns the Manual state.
+            const h = createContext({ mode: ProxyMode.Manual, manualProxyUrl: 'http://old.example:8080' });
+            const published: ProxyState[] = [];
+            h.ctx.publishProxyState = async state => {
+                published.push({ ...state });
+            };
+            showInputBoxStub.resolves('http://new.example:3128');
+            let publishedBeforeApply: ProxyState[] = [];
+            h.ctx.applyProxySettings = async (url, enabled) => {
+                h.applyCalls.push({ url, enabled });
+                publishedBeforeApply = [...published];
+                // The real applier commits its per-target results on the
+                // stored state; a failed target shows up as lastError.
+                const current = h.getState();
+                await h.ctx.commitProxyState(stateRevision(current), {
+                    ...current,
+                    gitConfigured: false,
+                    lastError: 'git config failed'
+                });
+                return false;
+            };
+
+            const result = await executeConfigureUrl(h.ctx);
+
+            assert.strictEqual(result.success, true);
+            assert.deepStrictEqual(publishedBeforeApply, [],
+                'peers must not see a converged state before its apply finished');
+            assert.strictEqual(published.length, 1, 'only the post-apply state is published');
+            assert.strictEqual(published[0].manualProxyUrl, 'http://new.example:3128');
+            assert.strictEqual(published[0].convergencePending, false,
+                'the pending flag is cleared before the publish');
+            assert.strictEqual(published[0].lastError, 'git config failed',
+                'the publish carries the failure the apply recorded');
+            assert.strictEqual(h.getState().convergencePending, false);
+        });
+
+        test('a save that applies nothing still publishes at commit', async () => {
+            const h = createContext({ mode: ProxyMode.Auto, autoProxyUrl: 'http://auto.example:8080' });
+            const published: ProxyState[] = [];
+            h.ctx.publishProxyState = async state => {
+                published.push({ ...state });
+            };
+            showInputBoxStub.resolves('http://new.example:3128');
+
+            await executeConfigureUrl(h.ctx);
+
+            assert.deepStrictEqual(h.applyCalls, []);
+            assert.strictEqual(published.length, 1, 'the non-applying save publishes at commit');
+            assert.strictEqual(published[0].manualProxyUrl, 'http://new.example:3128');
+            assert.notStrictEqual(published[0].convergencePending, true,
+                'nothing was applied, so no pending flag belongs on the state');
+        });
+
+        test('a save that loses every compare-and-set race reports failure, writes no setting and applies nothing', async () => {
+            const h = createContext({ mode: ProxyMode.Manual, manualProxyUrl: 'http://old.example:8080' });
+            let commitAttempts = 0;
+            h.ctx.commitProxyState = async (): Promise<StateCommitResult> => {
+                commitAttempts++;
+                return { kind: 'superseded', current: { ...h.getState() } };
+            };
+            showInputBoxStub.resolves('http://new.example:3128');
+
+            const result = await executeConfigureUrl(h.ctx);
+
+            assert.strictEqual(result.success, false);
+            assert.ok(commitAttempts >= 1 && commitAttempts <= 3, `bounded attempts, got ${commitAttempts}`);
+            assert.strictEqual(h.getState().manualProxyUrl, 'http://old.example:8080', 'nothing was stored');
+            assert.deepStrictEqual(h.applyCalls, []);
+            sinon.assert.notCalled(configUpdateStub);
+            const errorNotif = h.notifications.find(n => n.type === 'error');
+            assert.strictEqual(errorNotif?.key, 'error.configureUrlFailed');
         });
     });
 });
