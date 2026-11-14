@@ -1,0 +1,176 @@
+/**
+ * @file ProxyRuntimeDiagnostics.requiresAuth.test.ts
+ * @description The diagnostics credential checks must agree with the apply
+ * gate per address (#139): `state.requiresAuth` is an aggregate over every URL
+ * field, so a credential-bearing fallback must not claim the credential-free
+ * active URL needs credentials, and must not hide a real git mismatch by
+ * dropping the expected URL. Unit lane: the vscode module is the repo shim.
+ * The shim lacks the members diagnostics reads (UIKind/ExtensionKind drive the
+ * execution context, window.terminals feeds the terminal observation, and the
+ * http configuration needs `inspect`), so it is patched below before the
+ * production modules are required; `__importStar` binds top-level keys once at
+ * require time, so any module that may already be cached from an earlier file
+ * in this worker is dropped and re-required against the patched shim.
+ */
+import * as assert from 'assert';
+import Module = require('module');
+import { ProxyMode, ProxyState } from '../core/types';
+import type { CommandRunner } from '../diagnostics/WindowsProxyDiagnostics';
+import type { ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
+
+type VscodeStub = {
+    UIKind?: { Desktop: number; Web: number };
+    ExtensionKind?: { UI: number; Workspace: number };
+    env: { language: string; uiKind?: number; remoteName?: string };
+    window: { terminals?: unknown[] };
+    workspace: {
+        isTrusted?: boolean;
+        getConfiguration: (section?: string) => {
+            get: (key: string, defaultValue?: unknown) => unknown;
+            inspect: () => undefined;
+            update: () => Promise<void>;
+        };
+    };
+};
+
+const vscode = (Module as unknown as { _load(request: string, parent: unknown): unknown })
+    ._load('vscode', module) as VscodeStub;
+vscode.UIKind = { Desktop: 1, Web: 2 };
+vscode.ExtensionKind = { UI: 1, Workspace: 2 };
+vscode.env.uiKind = vscode.UIKind.Desktop;
+vscode.env.remoteName = undefined;
+vscode.window.terminals = [];
+vscode.workspace.isTrusted = true;
+vscode.workspace.getConfiguration = () => ({
+    get: (_key: string, defaultValue?: unknown) => defaultValue,
+    inspect: () => undefined,
+    update: async () => undefined
+});
+
+for (const specifier of [
+    '../diagnostics/ExecutionContextDetector',
+    '../diagnostics/ProxyRuntimeDiagnostics'
+]) {
+    delete require.cache[require.resolve(specifier)];
+}
+const { ProxyRuntimeDiagnostics: Diagnostics } =
+    require('../diagnostics/ProxyRuntimeDiagnostics') as { ProxyRuntimeDiagnostics: typeof ProxyRuntimeDiagnostics };
+
+const SYSTEM_PROXY_URL = 'http://sysproxy.corp:3128';
+const STALE_GIT_PROXY_URL = 'http://stale.corp:9999';
+
+function contextWithEmptySecrets(): ConstructorParameters<typeof Diagnostics>[0] {
+    const secrets = new Map<string, string>();
+    return {
+        extension: { extensionKind: vscode.ExtensionKind!.Workspace },
+        secrets: {
+            get: async (key: string) => secrets.get(key),
+            store: async (key: string, value: string) => { secrets.set(key, value); },
+            delete: async (key: string) => { secrets.delete(key); }
+        }
+    } as unknown as ConstructorParameters<typeof Diagnostics>[0];
+}
+
+// git's http.proxy holds a stale value; npm already matches the expected URL;
+// Windows diagnostics and other git keys are unavailable (exit 1).
+function staleGitRunner(): CommandRunner {
+    return async (command, args) => {
+        if (command === 'git') {
+            if (args.join(' ') === 'config --global --get http.proxy') {
+                return { stdout: `${STALE_GIT_PROXY_URL}\n`, stderr: '' };
+            }
+            const unset = new Error('unset') as Error & { code?: number };
+            unset.code = 1;
+            throw unset;
+        }
+        if (command === 'reg' || command === 'netsh') {
+            const unavailable = new Error('unavailable') as Error & { code?: number };
+            unavailable.code = 1;
+            throw unavailable;
+        }
+        return {
+            stdout: JSON.stringify({ proxy: SYSTEM_PROXY_URL, 'https-proxy': SYSTEM_PROXY_URL }),
+            stderr: ''
+        };
+    };
+}
+
+function appliedAutoState(overrides: Partial<ProxyState>): ProxyState {
+    return {
+        mode: ProxyMode.Auto,
+        autoModeOff: false,
+        autoProxyUrl: SYSTEM_PROXY_URL,
+        gitConfigured: true,
+        npmConfigured: true,
+        vscodeConfigured: false,
+        targetOutcomes: { git: 'applied', npm: 'applied', vscode: 'applied' },
+        ...overrides
+    } as ProxyState;
+}
+
+suite('Diagnostics credential check agrees with the apply gate (#139)', () => {
+    test('an unrelated credentialed URL does not hide a real git mismatch or claim the active URL needs credentials', async () => {
+        // Issue repro: a credential-free system proxy is active while a
+        // credential-bearing manual URL raised the aggregate flag.
+        const diagnostics = new Diagnostics(
+            contextWithEmptySecrets(),
+            async () => appliedAutoState({
+                manualProxyUrl: 'http://alice:s3cret@fallback.corp:8080',
+                requiresAuth: true,
+                authRequiredProxyUrls: ['http://fallback.corp:8080/']
+            }),
+            { commandRunner: staleGitRunner() }
+        );
+
+        const report = await diagnostics.run({ bypassSlowCache: true });
+        assert.ok(
+            !report.issues.some(issue => issue.id === 'proxy.localCredential.unresolved'),
+            'the credential-free system proxy must not be reported as needing credentials'
+        );
+        assert.ok(
+            report.issues.some(issue => issue.id === 'git.managedProxyMismatch' && issue.impact === 'blocksConvergence'),
+            'the stale git value the aggregate flag hid is a managed mismatch'
+        );
+        assert.strictEqual(report.converged, false);
+    });
+
+    test('control: the same state without any credential reports the same mismatch', async () => {
+        const diagnostics = new Diagnostics(
+            contextWithEmptySecrets(),
+            async () => appliedAutoState({ manualProxyUrl: 'http://fallback.corp:8080' }),
+            { commandRunner: staleGitRunner() }
+        );
+
+        const report = await diagnostics.run({ bypassSlowCache: true });
+        assert.ok(
+            report.issues.some(issue => issue.id === 'git.managedProxyMismatch' && issue.impact === 'blocksConvergence')
+        );
+        assert.strictEqual(report.converged, false);
+    });
+
+    test('a credential the expected address really requires is still reported', async () => {
+        // The apply gate skipped this write and recorded the error; the
+        // credential issue must fire and the skipped write's expected URL must
+        // not judge the stale git value.
+        const diagnostics = new Diagnostics(
+            contextWithEmptySecrets(),
+            async () => appliedAutoState({
+                requiresAuth: true,
+                authRequiredProxyUrls: [`${SYSTEM_PROXY_URL}/`],
+                lastError: 'Proxy credentials are required but unavailable on this machine'
+            }),
+            { commandRunner: staleGitRunner() }
+        );
+
+        const report = await diagnostics.run({ bypassSlowCache: true });
+        assert.ok(
+            report.issues.some(issue => issue.id === 'proxy.localCredential.unresolved'),
+            'a credential the active address requires but this machine lacks is still reported'
+        );
+        assert.ok(
+            !report.issues.some(issue => issue.id === 'git.managedProxyMismatch'),
+            'a write the apply gate skipped has no expected value to mismatch'
+        );
+        assert.strictEqual(report.converged, false);
+    });
+});

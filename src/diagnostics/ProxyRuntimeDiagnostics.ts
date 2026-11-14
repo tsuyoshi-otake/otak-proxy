@@ -16,7 +16,13 @@ import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostic
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
 import { ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
-import { getProxyPublicUrl, hasProxyCredentials } from '../utils/ProxyStateSanitizer';
+import {
+    getProxyPublicUrl,
+    hasProxyCredentials,
+    planUrlsMissingRequiredCredentials,
+    shouldSkipUnauthenticatedApply
+} from '../utils/ProxyStateSanitizer';
+import { proxyApplyPlanUrls, resolveProxyApplyOptions } from '../core/ProxyApplyPlan';
 import { normalizeProxyForComparison } from '../utils/ProxyUrlIdentity';
 import { isPerSchemeProxy } from '../config/DetectedProxyValue';
 import { splitCapabilityIssues, vscodeRemoteNotWritableIssue } from '../core/ProxyTargetCapability';
@@ -749,7 +755,14 @@ export class ProxyRuntimeDiagnostics {
             return [];
         }
 
-        const required = state.requiresAuth === true || hasProxyCredentials(expected);
+        // Per address, like the apply gate (#139): the per-address list alone
+        // decides when present — the aggregate flag would also claim a
+        // credential-free active URL needs credentials merely because an
+        // unrelated field (the manual fallback, say) carries them.
+        const required = hasProxyCredentials(expected) ||
+            (state.authRequiredProxyUrls && state.authRequiredProxyUrls.length > 0
+                ? planUrlsMissingRequiredCredentials(state, this.applyPlanUrls(state, expected)).length > 0
+                : state.requiresAuth === true);
         const publicUrl = getProxyPublicUrl(expected) || expected;
         const resolution = await new ProxyCredentialStore(this.context.secrets).resolveLocalCredentials(
             publicUrl,
@@ -806,12 +819,25 @@ export class ProxyRuntimeDiagnostics {
                 return undefined;
             }
             const url = state.autoProxyUrl || state.fallbackProxyUrl;
-            if (state.requiresAuth === true && url && !hasProxyCredentials(url)) {
+            // The same skip the apply gate computes for this URL's write plan
+            // (#139): a credential the plan is missing means no write was
+            // expected, while an unrelated credentialed field leaves the
+            // expected URL — and its mismatches — in place.
+            if (url && shouldSkipUnauthenticatedApply(state, this.applyPlanUrls(state, url))) {
                 return undefined;
             }
             return url;
         }
         return state.manualProxyUrl;
+    }
+
+    /**
+     * The write plan the apply gate judges for one expected URL (#139): the
+     * URL plus the per-scheme split/bypass the state carries for it — the same
+     * set ProxyApplyAttempt and the startup/sync gates evaluate.
+     */
+    private applyPlanUrls(state: ProxyState, url: string): string[] {
+        return proxyApplyPlanUrls(url, resolveProxyApplyOptions(url, undefined, state));
     }
 
     private expectsProxyDisabled(state: ProxyState): boolean {
