@@ -1,5 +1,18 @@
 # Change Log
 
+## [3.2.20] - 2026-11-14
+
+### Security
+- Release pipeline: the invisible-Unicode scanner no longer lets a file hide data in emoji variation selectors. A selector after a digit, `#` or `*` is accepted only when the keycap mark follows and completes a visible keycap, and at most 32 selectors after other emoji are accepted per file. Before, a selector after every digit could carry one hidden bit, enough to hide a script in a file the scan reported as clean (#140).
+
+### Fixed
+- Import Proxy and Configure Manual Proxy no longer undo a change made while their prompt was open. Each one saved the whole state it had read before the prompt, so a switch to Off made meanwhile was put back to Auto in this window and sent to the other windows. They now save only their own decision on top of the latest state, and a command that applies the proxy shares the new state with other windows only after the apply has finished (#135).
+- Detecting a PAC or WPAD setting no longer lifts Auto: OFF; only a successful connection test or a reachable fallback proxy does. A finished apply no longer marks another apply's state as converged (#135).
+- A detected proxy change that could not be taken over because another change was being saved is reported again at the next check, at most three times in a row, instead of being lost until the proxy changes again. Stopping the monitor now also ends a detection retry that was waiting (#136).
+- Multi-window sync: turning sync on while VS Code is running now adopts the shared state; a state that failed to publish is retried with backoff instead of being overwritten by another window, and the window falls back to the shared state if every retry fails or another window wins; a window that dropped out of the instance registry is added back; a brief file lock on the registry no longer turns sync off or removes the other windows; and a renew that was in flight can no longer re-create an apply lock that was just released (#137).
+- Config writers: on Windows, a quoted entry in `PATH` no longer makes npm look not installed, and a timed-out Git command now stops the whole process tree (the real `git.exe` behind Git for Windows' wrapper used to keep running and could write later) and reports the key as possibly written. npm's compensation after a partial write now reads only the user `.npmrc`; a proxy URL whose user name or host looks like a UUID or an npm token no longer always fails to apply to npm; and when the Python launcher reports "No suitable Python runtime found", the next interpreter is tried (#138).
+- Diagnostics now judge proxy credentials per address, the same way the apply does, so a missing credential for one per-scheme address is reported instead of being hidden by the others (#139).
+
 ## [3.2.19] - 2026-11-13
 
 First published release of the 3.2.18 changes below. No change to the extension itself: a new test added in 3.2.18 expected every accepted URL containing `@` to carry credentials, which is wrong for an empty userinfo (`http://@host`), and the test is corrected (#130).
