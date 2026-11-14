@@ -73,4 +73,40 @@ suite('Git write timeout (#138)', () => {
             'the timed-out process pid must be handed to the process-tree killer'
         );
     });
+
+    test('a command that exits during tree cleanup still reports the timeout it exceeded', async function() {
+        // The cleanup used to run before the timeout promise rejected, so a
+        // process that exited while taskkill was still working won the race
+        // back to "success" — and skipped the timeout-residual path (#138).
+        try {
+            await execFileAsync('git', ['--version'], { timeout: 5000 });
+        } catch {
+            this.skip();
+            return;
+        }
+
+        let markCleanupDone: (() => void) | undefined;
+        const cleanupDone = new Promise<void>(resolve => { markCleanupDone = resolve; });
+        const options = {
+            // 1ms: the spawn cannot possibly finish, so the deadline passes
+            // deterministically — the question is what the race reports.
+            timeoutMs: 1,
+            processTreeKiller: async (_pid: number | undefined) => {
+                // Slow enough for the command to exit normally mid-cleanup.
+                await new Promise(resolve => setTimeout(resolve, 500));
+                markCleanupDone?.();
+            }
+        } as GitConfigManagerOptions;
+        const manager = new GitConfigManager(options);
+
+        const result = await manager.setProxy('http://proxy.example.com:8080');
+
+        assert.strictEqual(
+            result.success,
+            false,
+            'a deadline-exceeded command must not win the race back to success'
+        );
+        assert.strictEqual(result.errorType, 'TIMEOUT');
+        await cleanupDone;
+    });
 });

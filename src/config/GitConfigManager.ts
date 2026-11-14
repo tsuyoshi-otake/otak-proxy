@@ -100,17 +100,28 @@ const defaultCommandRunnerImpl = async (
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
+            // The deadline itself decides the outcome: reject before the
+            // tree cleanup starts, so a command that exits while taskkill
+            // is still working cannot win the race back to "success" — which
+            // would also skip the timeout-residual accounting. The error
+            // shape mirrors an execFile timeout, which every downstream
+            // classifier already reads (#138).
+            reject(Object.assign(
+                new Error(`Command failed: ${command} ${args.join(' ')}\nCommand timed out after ${timeoutMs}ms`),
+                { killed: true, signal: 'SIGTERM', code: null, cmd: `${command} ${args.join(' ')}` }
+            ));
+            // The cleanup still has to run — bounded by the tree killer's
+            // own timeout — but its result must not change the outcome, so
+            // it is detached and a failure there is only logged.
             void (async () => {
                 await killProcessTree(child?.pid);
                 // Backstop for the direct child itself: on POSIX the tree
-                // killer is a no-op, and even on Windows a process can dodge
-                // taskkill. The error mirrors an execFile timeout.
+                // killer is a no-op, and even on Windows a process can
+                // dodge taskkill.
                 child?.kill?.('SIGTERM');
-                reject(Object.assign(
-                    new Error(`Command failed: ${command} ${args.join(' ')}\nCommand timed out after ${timeoutMs}ms`),
-                    { killed: true, signal: 'SIGTERM', code: null, cmd: `${command} ${args.join(' ')}` }
-                ));
-            })();
+            })().catch(error =>
+                Logger.warn('Git command cleanup after a timeout failed:', getErrorMessage(error))
+            );
         }, timeoutMs);
     });
 
