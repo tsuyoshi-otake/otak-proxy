@@ -550,6 +550,12 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                     // watermark lets the same version through again.
                     this.highestSharedVersion = Math.min(this.highestSharedVersion, delivery.version - 1);
                 }
+                // The recovery above only helps if a reconcile re-examines
+                // the file — but nothing was written, so its signature still
+                // matches the last observed one and the periodic poll would
+                // skip the reconcile forever (#137). Invalidate it so the
+                // next scheduled poll re-emits this delivery.
+                this.lastObservedFileSignature = null;
                 throw error;
             }
         });

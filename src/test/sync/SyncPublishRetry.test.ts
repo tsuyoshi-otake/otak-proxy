@@ -44,11 +44,11 @@ suite('Failed publish retry (#137)', function() {
         }
     });
 
-    function mockConfig() {
+    function mockConfig(syncIntervalMs = 3_600_000) {
         return {
             isSyncEnabled: () => true,
             // Long interval: deliveries are driven by triggerSync(), not the poll.
-            getSyncInterval: () => 3_600_000,
+            getSyncInterval: () => syncIntervalMs,
             onConfigChange: () => ({ dispose: () => undefined }),
             dispose: () => undefined
         };
@@ -57,10 +57,11 @@ suite('Failed publish retry (#137)', function() {
     interface ManagerOptions {
         publishRetryDelaysMs?: readonly number[];
         publishRetryRandom?: () => number;
+        syncIntervalMs?: number;
     }
 
     async function startQuiet(windowId: string, options: ManagerOptions = {}): Promise<SyncManager> {
-        const manager = new SyncManager(testDir, windowId, mockConfig() as never, 'test');
+        const manager = new SyncManager(testDir, windowId, mockConfig(options.syncIntervalMs) as never, 'test');
         managers.push(manager);
         const tunables = manager as unknown as ManagerOptions;
         if (options.publishRetryDelaysMs) {
@@ -114,7 +115,16 @@ suite('Failed publish retry (#137)', function() {
     }
 
     /** The same wiring registerSyncEventHandlers uses, against a fake local store. */
-    function wireReceiver(manager: SyncManager, store: LocalStore, probe: ReceiverProbe): void {
+    function wireReceiver(
+        manager: SyncManager,
+        store: LocalStore,
+        probe: ReceiverProbe,
+        saveRemoteState?: (state: ProxyState) => Promise<number>
+    ): void {
+        const persist = saveRemoteState ?? (async (state: ProxyState) => {
+            await store.saveState(state);
+            return store.revision;
+        });
         manager.on('remoteChange', (delivery: RemoteSyncDelivery) => {
             const context = (adopted: () => Promise<boolean>): RemoteSyncApplyContext => ({
                 saveState: async state => { await store.saveState(state); },
@@ -131,10 +141,7 @@ suite('Failed publish retry (#137)', function() {
             });
             probe.deliveries.push(manager.absorbRemoteChange(
                 delivery,
-                async state => {
-                    await store.saveState(state);
-                    return store.revision;
-                },
+                persist,
                 adopted => applyRemoteSyncState(delivery.state, context(adopted))
             ).catch(error => probe.failures.push(error)));
         });
@@ -369,6 +376,57 @@ suite('Failed publish retry (#137)', function() {
         );
         const shared = await readShared();
         assert.strictEqual(shared?.version, 1, 'the other window\'s write was not clobbered by the losing retry');
+    });
+
+    test('a failed re-adoption after exhausted retries is retried by the periodic poll (#137)', async () => {
+        const aStore = createLocalStore({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a-old.example:8080' });
+        const aProbe = createProbe();
+        // A short sync interval makes the periodic poll the retry channel
+        // under test — no triggerSync() is called anywhere below.
+        const aManager = await startQuiet('window-a', {
+            publishRetryDelaysMs: [50, 80],
+            publishRetryRandom: () => 0.5,
+            syncIntervalMs: 60
+        });
+        let failNextSave = false;
+        wireReceiver(aManager, aStore, aProbe, async state => {
+            if (failNextSave) {
+                failNextSave = false;
+                throw new Error('transient save failure');
+            }
+            await aStore.saveState(state);
+            return aStore.revision;
+        });
+
+        const bManager = await startQuiet('window-b');
+        await bManager.notifyChange({ mode: ProxyMode.Auto, autoProxyUrl: 'http://proxy.example:8080', revision: 4 });
+
+        // A adopts B's v1 through the poll's own reconcile.
+        await waitFor(() => aProbe.deliveries.length === 1, 'the poll to adopt v1');
+        await Promise.all(aProbe.deliveries);
+        assert.strictEqual(aStore.stored.autoProxyUrl, 'http://proxy.example:8080', 'v1 was adopted');
+
+        // A commits Off; every publish of it fails so the retries exhaust and
+        // the exhaustion path force-delivers the shared state. That forced
+        // adoption's save fails once: the only way back is the periodic poll.
+        failRenames(content => content.includes('"mode": "off"'), () => true);
+        await aStore.saveState({ mode: ProxyMode.Off });
+        failNextSave = true;
+        await aManager.notifyChange(aStore.stored);
+
+        await waitFor(() => aProbe.deliveries.length === 2,
+            'the forced re-adoption to run and fail its save');
+        await Promise.allSettled(aProbe.deliveries);
+        assert.strictEqual(aStore.stored.mode, ProxyMode.Off, 'the failed adoption left the local commit in place');
+
+        // The shared file never changed, so its signature still matches the
+        // last observed one; the poll must still reconcile and re-emit the
+        // delivery the failed adoption dropped (#137).
+        await waitFor(() => aStore.stored.mode === ProxyMode.Auto,
+            'a scheduled poll to re-emit and adopt the shared state');
+        assert.ok(aProbe.deliveries.length >= 3, 'the delivery was re-emitted by a poll-driven reconcile');
+        const shared = await readShared();
+        assert.strictEqual(shared?.version, 1);
     });
 
     test('a newer local publish supersedes the pending retry; stop cancels it', async () => {
