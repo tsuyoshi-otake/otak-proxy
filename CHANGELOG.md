@@ -1,5 +1,12 @@
 # Change Log
 
+## [3.2.21] - 2026-11-14
+
+### Fixed
+- Multi-window sync: when a state that failed to publish was still waiting for its retry and a newer change then lost to another window's write, the retry could later publish the older state over both. The newer change losing now ends the older retry too, and the window takes the state the other window wrote (#145).
+- Multi-window sync: a delayed re-delivery of the shared state can no longer replace a newer state this window already holds; it is taken only when it is at least as new (#145).
+- After a window recovers from failed publishes by taking the shared state again, the status bar no longer keeps showing a sync error (#145).
+
 ## [3.2.20] - 2026-11-14
 
 ### Security
