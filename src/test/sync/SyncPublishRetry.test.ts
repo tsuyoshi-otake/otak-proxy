@@ -418,6 +418,8 @@ suite('Failed publish retry (#137)', function() {
             'the forced re-adoption to run and fail its save');
         await Promise.allSettled(aProbe.deliveries);
         assert.strictEqual(aStore.stored.mode, ProxyMode.Off, 'the failed adoption left the local commit in place');
+        assert.ok(aManager.getSyncStatus().lastError,
+            'a failed forced adoption preserves the publish error (#145)');
 
         // The shared file never changed, so its signature still matches the
         // last observed one; the poll must still reconcile and re-emit the

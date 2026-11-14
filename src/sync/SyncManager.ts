@@ -553,6 +553,16 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 const localRevision = await saveRemoteState(stripConvergencePendingToken({ ...delivery.state }));
                 this.localHistoryRevision = Math.max(this.localHistoryRevision, localRevision);
                 this.highestSharedVersion = Math.max(this.highestSharedVersion, delivery.version);
+                if (delivery.force) {
+                    // A forced delivery exists to recover from an earlier
+                    // failure, so its adoption completing is that recovery's
+                    // success path: the stale publish error is resolved, the
+                    // recovery counts as a sync, and the status bar hears
+                    // about it instead of showing the error forever (#145).
+                    this.lastSyncTime = Date.now();
+                    this.lastError = null;
+                    this.emitStatusChanged();
+                }
                 return true;
             } catch (error) {
                 Logger.error('Failed to adopt remote sync delivery:', error);
