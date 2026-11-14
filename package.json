@@ -346,7 +346,7 @@
     "@vscode/vsce": "^3.9.2",
     "cross-env": "^10.1.0",
     "eslint": "^9.19.0",
-    "fast-check": "^4.3.0",
+    "fast-check": "^4.10.2",
     "mocha": "^11.3.0",
     "ovsx": "^0.10.12",
     "sinon": "^21.1.2",
