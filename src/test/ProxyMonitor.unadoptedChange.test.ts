@@ -183,6 +183,29 @@ suite('ProxyMonitor re-reports a change the listener did not adopt (#136)', () =
         assert.deepStrictEqual(reportedUrls(), [X, Y, Y, Z, Z, Z]);
     });
 
+    test('a report left unanswered at stop() does not count as outstanding in the next lifecycle', async () => {
+        await check(X);
+        await check(Y); // Y reported; the listener never answers before stop()
+
+        monitor.stop();
+
+        assert.strictEqual(
+            (monitor as unknown as { lastReport?: unknown }).lastReport,
+            undefined,
+            'a stopped lifecycle has no outstanding report: a late answer for it is ignored anyway'
+        );
+
+        monitor.start();
+
+        // The late answer for the stale report is ignored, and the new
+        // lifecycle behaves normally: Z reports, settles, stays quiet.
+        monitor.proxyChangeNotAdopted(reports[reports.length - 1]);
+        await check(Z);
+        monitor.proxyChangeSettled(reports[reports.length - 1]);
+        await check(Z);
+        assert.deepStrictEqual(reportedUrls(), [X, Y, Z]);
+    });
+
     test('a settled answer for a report a newer one replaced is ignored', async () => {
         await check(X);
         await check(Y);

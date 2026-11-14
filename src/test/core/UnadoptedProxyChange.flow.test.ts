@@ -12,6 +12,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { ExtensionInitializer } from '../../core/ExtensionInitializer';
 import { InitializerContext } from '../../core/ExtensionInitializerTypes';
+import * as EventHandlers from '../../core/ExtensionProxyEventHandlers';
 import { handleProxyChanged } from '../../core/ExtensionProxyEventHandlers';
 import { captureLogicalGeneration } from '../../core/LogicalGeneration';
 import { ProxyMode, ProxyState } from '../../core/types';
@@ -210,6 +211,35 @@ suite('Proxy change the handler did not adopt (#136)', function() {
         assert.strictEqual((await window.state()).autoProxyUrl, Z);
         assert.deepStrictEqual(window.reported, [X, Y, Z], 'Z is reported once and no check after it reports again');
         assert.deepStrictEqual(window.applies.filter(apply => apply.url === Y), [], 'Y was never applied');
+    });
+
+    test('a handler that throws still answers the report: a bounded not-adopted', async () => {
+        const window = await openWindow(onWith(X));
+        await window.check(X);
+
+        // The report's handler rejects before it can answer: without an
+        // explicit answer the report stays outstanding forever — no re-report,
+        // and the rejection streak can never reset (#136).
+        let thrown = false;
+        const realHandleProxyChanged = EventHandlers.handleProxyChanged;
+        sandbox.stub(EventHandlers, 'handleProxyChanged').callsFake(async (context, result, fallback) => {
+            if (!thrown) {
+                thrown = true;
+                throw new Error('handler boom');
+            }
+            return realHandleProxyChanged(context, result, fallback);
+        });
+
+        await window.check(Y);
+        await window.check(Y);
+
+        assert.deepStrictEqual(
+            window.reported,
+            [X, Y, Y],
+            'the throwing report is answered not-adopted and reported again at the next check'
+        );
+        assert.strictEqual((await window.state()).autoProxyUrl, Y, 'the recovered report adopts the detection');
+        assert.deepStrictEqual(window.applies, [{ url: Y, enabled: true }]);
     });
 });
 

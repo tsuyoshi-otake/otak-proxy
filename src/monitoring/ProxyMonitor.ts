@@ -155,6 +155,10 @@ export class ProxyMonitor extends EventEmitter {
         this.state.setActive(false);
         this.isCheckInProgress = false;
         this.inFlightEpoch = null;
+        // A stopped lifecycle has no outstanding report: a late answer for it
+        // is ignored by the epoch guard anyway, and holding it would only
+        // block the quiet-check streak reset in the next lifecycle (#136).
+        this.lastReport = undefined;
         this.clearPolling();
         this.clearDebounce();
         this.endPendingSleeps();

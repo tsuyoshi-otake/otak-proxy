@@ -113,11 +113,22 @@ export class ExtensionInitializer {
         const monitor = this.proxyMonitor;
         monitor.on('proxyChanged', (result: ProxyDetectionResult) => {
             this.enqueueProxyMonitorEvent(async () => {
-                const outcome = await handleProxyChanged(
-                    this.context,
-                    result,
-                    state => this.systemProxyUpdateService.resolveManualFallback(state)
-                );
+                let outcome: Awaited<ReturnType<typeof handleProxyChanged>>;
+                try {
+                    outcome = await handleProxyChanged(
+                        this.context,
+                        result,
+                        state => this.systemProxyUpdateService.resolveManualFallback(state)
+                    );
+                } catch (error) {
+                    // A report whose handler threw still gets an answer: count
+                    // it not-adopted so the bounded re-report path decides on a
+                    // fresh detection whether the state adopted it — an
+                    // unanswered report would block the streak reset forever
+                    // (#136). The error keeps its existing logged path.
+                    monitor.proxyChangeNotAdopted(result);
+                    throw error;
+                }
                 if (outcome === 'notAdopted') {
                     monitor.proxyChangeNotAdopted(result);
                 } else {
