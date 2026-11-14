@@ -340,14 +340,22 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 Logger.warn(
                     `Discarding stale sync publication (CAS expected version ${String(expectedVersion)}).`
                 );
-                if (retryPending && this.pendingPublish === retryPending) {
-                    // The scheduled retry lost the compare-and-swap: another
-                    // window's write landed between the read and the write, so
-                    // the pending local commit is superseded by what it lost
-                    // to — the same "another window won" a non-retry stale
-                    // means. Resolve it instead of leaving a pending publish
-                    // with no retry scheduled, which would skip every remote
-                    // adoption forever (#137).
+                // A stale CAS means another window's write landed between the
+                // read and the compare-and-swap: the loser is superseded by
+                // what it lost to. The pending record must still reach a
+                // terminal state — resolve it instead of leaving a pending
+                // publish with no retry scheduled, which would skip every
+                // remote adoption forever, and re-deliver the shared state so
+                // the skipped remote versions are adopted (#137). A fresh
+                // snapshot resolves only a pending record no newer than its
+                // own commit: a record newer than it belongs to a later commit
+                // and keeps its own retries (#145).
+                const pendingSuperseded = retryPending
+                    ? this.pendingPublish === retryPending
+                    : snapshotRevision !== undefined &&
+                        this.pendingPublish !== null &&
+                        this.pendingPublish.snapshotRevision <= snapshotRevision;
+                if (pendingSuperseded) {
                     this.clearPendingPublishRetry();
                     void this.redeliverSharedState();
                 }
@@ -510,7 +518,14 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         absorb: (adopted: () => Promise<boolean>) => Promise<unknown>
     ): Promise<void> {
         const adoption: Promise<boolean> = this.enqueue('transitionQueue', async () => {
-            if (!delivery.force && delivery.version <= this.highestSharedVersion) {
+            // A forced delivery exists to re-adopt the version the watermark
+            // already holds, so it bypasses equality only — a version below
+            // the watermark is still older than what this window has and must
+            // never overwrite it (#145).
+            const supersededByWatermark = delivery.force
+                ? delivery.version < this.highestSharedVersion
+                : delivery.version <= this.highestSharedVersion;
+            if (supersededByWatermark) {
                 Logger.warn(
                     `Skipping superseded remote delivery ` +
                     `(version ${delivery.version}, highest ${this.highestSharedVersion}).`
@@ -538,6 +553,16 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 const localRevision = await saveRemoteState(stripConvergencePendingToken({ ...delivery.state }));
                 this.localHistoryRevision = Math.max(this.localHistoryRevision, localRevision);
                 this.highestSharedVersion = Math.max(this.highestSharedVersion, delivery.version);
+                if (delivery.force) {
+                    // A forced delivery exists to recover from an earlier
+                    // failure, so its adoption completing is that recovery's
+                    // success path: the stale publish error is resolved, the
+                    // recovery counts as a sync, and the status bar hears
+                    // about it instead of showing the error forever (#145).
+                    this.lastSyncTime = Date.now();
+                    this.lastError = null;
+                    this.emitStatusChanged();
+                }
                 return true;
             } catch (error) {
                 Logger.error('Failed to adopt remote sync delivery:', error);

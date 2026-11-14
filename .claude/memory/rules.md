@@ -317,6 +317,8 @@
 - **届かなかった publish は、他ウィンドウの state で黙って上書きさせない。** 失敗した publish は 250 ms から 4 s の backoff（jitter ±25%）で再試行し、新しいローカルの publish で置き換え、stop で止める。再試行の間は remote の配信を取り込まず、使い切ったら共有ファイルを取り込み直す。この間に他ウィンドウで行った操作は、再試行が着地すると上書きされる（最大約 8 秒の窓） — verified by: `SyncPublishRetry.test.ts`（#137）。
 - **保留中の publish は、再試行の中の stale CAS でも決着させる。** stale で `return` するだけでは、`pendingPublish` が残ったままタイマーが無くなり、remote の取り込みがずっと止まる。再試行で stale になったら、他ウィンドウが勝ったとみなし、保留を消して共有の state を強制で取り込み直す（再試行でない stale と同じ扱い） — verified by: `SyncPublishRetry.test.ts` の `a stale CAS during a scheduled retry ...` が修正前に 8 秒の timeout で落ちた（#137、`670f259`）。
 - **取り込みが失敗したら、観測済みのファイルの signature も捨てる。** 共有ファイルが変わっていないので、signature が一致したままだと定期の poll は reconcile を飛ばし、file watcher も鳴らない。`lastObservedFileSignature = null` にすると、次の poll が配信をやり直す（新しいタイマーは不要、`stop()` で止まる） — verified by: `triggerSync` を使わない test が修正前に 8 秒の timeout で落ちた（#137、`c9c8067`）。
+- **新しい snapshot の stale CAS は、それより古い保留中の publish も終わらせる。** 他ウィンドウが勝ったのに古い保留のタイマーを残すと、後で古い state を勝者の上に publish し、新しいコミットは再試行されない。保留より新しい snapshot が負けたら、保留を消して共有の state を取り込み直す。保留のほうが新しければ、その保留の再試行に任せる — verified by: `SyncPublishRetry.test.ts` の `(#145)` が修正前に 8 秒の timeout で落ちた（#145）。
+- **強制の配信が素通りしてよいのは、watermark と「同じ版」だけ。** 強制は「版が動かないまま取り込み直す」ためのもので、watermark より古い版まで通すと、遅れて届いた古い版が新しいローカルの state を上書きする。強制の取り込みが成功したら、`lastError` を消し、`lastSyncTime` と status を更新する（版が動かない回復では、他に直す経路が無い） — verified by: `SyncPublishRetry.test.ts` の `(#145)` の 2 件が修正前に `true !== false` と `'EPERM: ...' !== null` で落ちた（#145）。
 
 ## 診断レポート
 

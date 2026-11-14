@@ -2473,3 +2473,18 @@ PR #142 の修正 16 件と、そのレビュー対応を公開した。リリ�
 
 - Learning: 公開の遅延は、workflow の完了から Open VSX 4〜6 分、Marketplace 6〜8.5 分だった。rules.md の実測値を更新した。
 - 残留リスク: PR #142 の 2 回目のレビュー対応（`670f259` 以降）は Codex の再レビューを受けずに公開した。レビューは依頼済み（PR #142 のコメント）で、指摘が届いたら次の版で扱う。
+
+## 2026-11-14 — #145 v3.2.20 の公開後の Codex の指摘（同期 3 件）を直して v3.2.21 で公開
+
+**Issue**: #145
+**コミット**: `5fcf279`、`ce1d628`、`0a12e2f`（ブランチ `fix/145-sync-review-findings`）
+**分担**: 実装は Devin CLI。Claude Code が Issue、指示書、確認、検証、リリースを行った。
+
+- 症状: PR #142 の最後の head（`e6a9a8e`）への Codex のレビューが、v3.2.20 の公開の後に届いた（P1 1 件、P2 2 件、どれも `src/sync/SyncManager.ts`）。ユーザーの判断で、このレビューを待たずに公開していた。
+- 根本原因と修正:
+  - P1: 新しい snapshot の stale CAS が、古い保留中の publish を残した。そのタイマーが古い state を勝者の上に publish し、新しいコミットは再試行されなかった。保留より新しい snapshot の stale CAS で、保留を消して取り込み直す。
+  - P2: 強制の配信が watermark を丸ごと素通りした。同じ版だけ素通りさせる（`version < watermark` は拒む）。失敗した強制の取り込みは watermark を版 - 1 に下げるので、poll の再配信は取り込める。
+  - P2: 強制の取り込みが成功しても `lastError` が残り、status bar が同期のエラーを出し続けた。成功のときだけ同期済みにする。
+- 確認で直したもの: Devin のコミットメッセージの em dash が `?` に化けていた（3 か所）。push の前に `-` に直した（中身は同じ）。
+- Verification: `npm run test:mvp` exit 0（unit 1614 + 90 passing / 5 pending、isolation、smoke 4）。host lane 682 passing、既知の 7 件だけが失敗。`lint:unicode:dist` 0 件。独立した検証役（rubric-verifier、5 項目）は全部合格（別のフォルダのビルドで、3 件の新しいテストが `855f19c` の SyncManager では落ち、修正後は 3 回続けて通ることも確かめた）。
+- Learning: rules.md に 2 件追記した（ウィンドウ間の同期）。プライバシーのリンク（vscan の Metadata の指摘）は、vsce の manifest に項目が無い（`@vscode/vsce` の `package.js` の Links は Source / Getstarted / GitHub / Repository / Support / Learn だけ）ので見送った。
