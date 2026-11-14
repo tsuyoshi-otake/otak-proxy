@@ -292,6 +292,38 @@ suite('Failed publish retry (#137)', function() {
         assert.strictEqual(shared?.proxyState.mode, ProxyMode.Auto);
     });
 
+    test('exhausted retries re-adopt the shared state even when its version never moved', async () => {
+        const aStore = createLocalStore({ mode: ProxyMode.Auto, autoProxyUrl: 'http://a-old.example:8080' });
+        const aProbe = createProbe();
+        const aManager = await startQuiet('window-a', { publishRetryDelaysMs: [50, 80], publishRetryRandom: () => 0.5 });
+        wireReceiver(aManager, aStore, aProbe);
+
+        const bManager = await startQuiet('window-b');
+        await bManager.notifyChange({ mode: ProxyMode.Auto, autoProxyUrl: 'http://proxy.example:8080', revision: 4 });
+
+        // A adopts B's v1: the shared-version watermark is now 1.
+        await aManager.triggerSync();
+        await waitFor(() => aProbe.deliveries.length === 1, 'adoption of v1');
+        await Promise.all(aProbe.deliveries);
+        assert.strictEqual(aStore.stored.autoProxyUrl, 'http://proxy.example:8080', 'v1 was adopted');
+
+        // A commits Off; every attempt to publish it fails, and no other
+        // window writes: the on-disk version stays 1, equal to the watermark.
+        failRenames(content => content.includes('"mode": "off"'), () => true);
+        await aStore.saveState({ mode: ProxyMode.Off });
+        await aManager.notifyChange(aStore.stored);
+
+        // Once the retry budget is spent the window must re-adopt the shared
+        // state even though its version never moved (#137): without a forced
+        // adoption the watermark suppresses exactly this delivery and the
+        // window stays on its unpublished commit forever.
+        await waitFor(() => aStore.stored.mode === ProxyMode.Auto,
+            'A to re-adopt the unchanged shared version after the retries gave out');
+        const shared = await readShared();
+        assert.strictEqual(shared?.version, 1, 'no newer remote version was written');
+        assert.strictEqual(shared?.proxyState.mode, ProxyMode.Auto);
+    });
+
     test('a newer local publish supersedes the pending retry; stop cancels it', async () => {
         const aManager = await startQuiet('window-a', { publishRetryDelaysMs: [80, 160], publishRetryRandom: () => 0.5 });
 

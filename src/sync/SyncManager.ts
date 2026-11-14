@@ -438,8 +438,12 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 return;
             }
             const sharedState = await this.sharedStateFile.read();
-            if (sharedState && sharedState.version > this.highestSharedVersion) {
-                this.emit('remoteChange', { state: sharedState.proxyState, version: sharedState.version });
+            if (sharedState) {
+                // Forced: the on-disk version may equal the watermark —
+                // nothing else wrote while every publish retry failed, and
+                // the normal version check would suppress exactly the
+                // re-delivery the exhaustion path needs (#137).
+                this.emit('remoteChange', { state: sharedState.proxyState, version: sharedState.version, force: true });
             }
         } catch (error) {
             Logger.warn('Failed to re-deliver the shared state:', error);
@@ -485,7 +489,7 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         absorb: (adopted: () => Promise<boolean>) => Promise<unknown>
     ): Promise<void> {
         const adoption: Promise<boolean> = this.enqueue('transitionQueue', async () => {
-            if (delivery.version <= this.highestSharedVersion) {
+            if (!delivery.force && delivery.version <= this.highestSharedVersion) {
                 Logger.warn(
                     `Skipping superseded remote delivery ` +
                     `(version ${delivery.version}, highest ${this.highestSharedVersion}).`

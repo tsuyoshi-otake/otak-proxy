@@ -11,6 +11,14 @@ import { ConflictInfo, ConflictResolver, SyncableState } from './ConflictResolve
 export interface RemoteSyncDelivery {
     state: ProxyState;
     version: number;
+    /**
+     * A forced delivery bypasses the shared-version watermark: the window
+     * re-adopts a version it already holds when its local state diverged
+     * while the file stayed put — the recovery after a pending commit's
+     * retries gave out (#137). It never bypasses the pending-commit check:
+     * a newer unpublished local commit still wins.
+     */
+    force?: boolean;
 }
 
 export interface SyncReconciliationResult {
