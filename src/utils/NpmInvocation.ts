@@ -45,6 +45,16 @@ function canRunCandidate(candidatePath: string, isWindows: boolean): boolean {
     }
 }
 
+/**
+ * Windows tolerates quoting a PATH entry that contains spaces; the quotes are
+ * part of the entry's syntax, not its name (#138).
+ */
+function unquotePathEntry(entry: string): string {
+    return entry.length >= 2 && entry.startsWith('"') && entry.endsWith('"')
+        ? entry.slice(1, -1)
+        : entry;
+}
+
 export function findCommandOnPath(command: string, isWindows: boolean, env: NodeJS.ProcessEnv): string | undefined {
     const pathValue = getPathEnvValue(env);
     if (!pathValue) {
@@ -55,6 +65,7 @@ export function findCommandOnPath(command: string, isWindows: boolean, env: Node
     const pathEntries = pathValue
         .split(delimiter)
         .map(entry => entry.trim())
+        .map(entry => isWindows ? unquotePathEntry(entry) : entry)
         .filter(Boolean);
 
     for (const entry of pathEntries) {

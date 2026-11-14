@@ -105,17 +105,25 @@ export interface FakeNpmConfig {
 export const FAKE_NPM_DEFAULT_USERCONFIG = '/fake-home/.npmrc';
 
 /**
- * npm 10.8 and later `config get` refuse a value they would redact (#85). npm redacts a URL
+ * npm 10.8 and later `config get` refuse a value they would redact (#85): a
+ * URL password, an npm token (`npm_…`), or a UUID, wherever in the value they
+ * appear — including a URL's username or host (#138). npm redacts a URL
  * password only when the raw text matches the WHATWG-normalized password, so
  * this rule refuses a superset of what npm refuses; it never prints a value
  * npm would hide.
  */
+const NPM_TOKEN_PATTERN = /npm_[A-Za-z0-9]{36}/;
+const UUID_PATTERN = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+
 function npmWouldRedact(value: string): boolean {
     try {
-        return new URL(value).password !== '';
+        if (new URL(value).password !== '') {
+            return true;
+        }
     } catch {
-        return false;
+        // Not a URL; the token checks below still apply.
     }
+    return NPM_TOKEN_PATTERN.test(value) || UUID_PATTERN.test(value);
 }
 
 /**
@@ -173,13 +181,21 @@ export function createFakeNpmConfig(
     const globalLayer = new Map(Object.entries(options.global ?? {}) as Array<[FakeNpmProxyKey, string]>);
     const projectLayer = new Map(Object.entries(options.project ?? {}) as Array<[FakeNpmProxyKey, string]>);
     let reportedUserConfig: string | undefined;
+    // The file npm acts on when a caller passes `--userconfig`: that arg names
+    // the user layer directly, without a `config get userconfig` round-trip
+    // (#138).
+    let seenUserConfigArg: string | undefined;
 
     const proxyKeyOf = (args: string[]): FakeNpmProxyKey | undefined =>
         (['proxy', 'https-proxy'] as const).find(key => args.includes(key));
 
     const runner: CommandRunner = async (_command, args) => {
+        const flag = args.indexOf('--userconfig');
+        if (flag >= 0) {
+            seenUserConfigArg = args[flag + 1];
+        }
+
         if (args.includes('get') && args.includes('userconfig')) {
-            const flag = args.indexOf('--userconfig');
             reportedUserConfig = flag >= 0 ? args[flag + 1] : FAKE_NPM_DEFAULT_USERCONFIG;
             return { stdout: options.emptyUserConfigPath ? '' : `${reportedUserConfig}\n`, stderr: '' };
         }
@@ -218,7 +234,8 @@ export function createFakeNpmConfig(
         },
         getGlobal: key => globalLayer.get(key) ?? null,
         readUserConfigFile: async path => {
-            if (options.missingUserConfigFile || reportedUserConfig === undefined || path !== reportedUserConfig) {
+            const expected = reportedUserConfig ?? seenUserConfigArg;
+            if (options.missingUserConfigFile || expected === undefined || path !== expected) {
                 throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
             }
             return [...store].map(([key, value]) => `${key}=${npmIniSafe(value)}\n`).join('');

@@ -12,11 +12,13 @@
  */
 
 import * as assert from 'assert';
+import { npmIniSafe } from './fakeConfigStores';
 import { NpmCommandRunner, NpmConfigManager, NpmProxyKey } from '../config/NpmConfigManager';
 
 const HTTP_URL = 'http://http-side.example:8080';
 const HTTPS_URL = 'http://https-side.example:8443';
 const EXTERNAL = 'http://external.example:3128';
+const USERCONFIG = '/fake-npm-userconfig/.npmrc';
 
 function execError(code: number, stderr: string): Error & { code: number; stderr: string } {
     return Object.assign(new Error('Command failed: npm config'), { code, stderr });
@@ -26,10 +28,14 @@ interface FakeNpm {
     runner: NpmCommandRunner;
     values: Record<NpmProxyKey, string | null>;
     commands: string[][];
+    readUserConfigFile(path: string): Promise<string>;
 }
 
 /**
- * In-memory npm config.
+ * In-memory npm config. `values` is the user layer: `config get` merges (and
+ * `readAs` can shadow it), while `config set`/`delete` and the user config
+ * file `readUserConfigFile` serves all act on `values` alone — the contract
+ * the real npm gives (#138).
  *
  * - `externalizeAfterWrite`: another writer replaces the value right after we
  *   set it, so our write is real but no longer ours.
@@ -47,6 +53,11 @@ function createFakeNpm(options: {
 
     const runner: NpmCommandRunner = async (_command, args) => {
         commands.push([...args]);
+
+        if (args.includes('get') && args.includes('userconfig')) {
+            return { stdout: `${USERCONFIG}\n`, stderr: '' };
+        }
+
         const key: NpmProxyKey = args.includes('https-proxy') ? 'https-proxy' : 'proxy';
 
         if (args.includes('get')) {
@@ -67,7 +78,20 @@ function createFakeNpm(options: {
         return { stdout: '', stderr: '' };
     };
 
-    return { runner, values, commands };
+    return {
+        runner,
+        values,
+        commands,
+        readUserConfigFile: async path => {
+            if (path !== USERCONFIG) {
+                throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
+            }
+            return (Object.entries(values) as Array<[NpmProxyKey, string | null]>)
+                .filter(([, value]) => value !== null)
+                .map(([key, value]) => `${key}=${npmIniSafe(value as string)}\n`)
+                .join('');
+        }
+    };
 }
 
 function managerFor(npm: FakeNpm): NpmConfigManager {
@@ -75,7 +99,8 @@ function managerFor(npm: FakeNpm): NpmConfigManager {
         commandRunner: npm.runner,
         isWindows: false,
         env: {},
-        commandAvailable: () => true
+        commandAvailable: () => true,
+        readUserConfigFile: npm.readUserConfigFile
     });
 }
 

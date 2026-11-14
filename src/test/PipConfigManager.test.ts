@@ -281,4 +281,71 @@ suite('PipConfigManager Test Suite', () => {
         assert.strictEqual(result.errorType, 'TIMEOUT');
         assert.strictEqual(result.error, 'pip command timed out after 5000ms');
     });
+
+    test('classifies py launcher exit 103 "No suitable Python runtime found" as NOT_INSTALLED (#138)', () => {
+        const result = classifyPipConfigError(commandError(
+            'Command failed: py -m pip config --user get global.proxy',
+            {
+                code: 103,
+                stderr: 'No suitable Python runtime found'
+            }
+        ), 5000);
+
+        assert.strictEqual(result.errorType, 'NOT_INSTALLED');
+        assert.strictEqual(result.error, 'pip is not installed or Python is not in PATH');
+    });
+
+    test('py with no suitable runtime falls through to the next candidate (#138)', async () => {
+        const calls: CommandCall[] = [];
+        const pip = createFakePipConfig();
+        const runner: PipCommandRunner = async (command, args, options) => {
+            calls.push({ command, args });
+            if (command === 'py') {
+                throw commandError(`Command failed: ${command} -m pip config --user set global.proxy x`, {
+                    code: 103,
+                    stderr: 'No suitable Python runtime found'
+                });
+            }
+            return pip.runner(command, args, options);
+        };
+        const manager = new PipConfigManager({
+            commandRunner: runner,
+            candidates: [
+                { command: 'py', argsPrefix: ['-m', 'pip'] },
+                { command: 'python', argsPrefix: ['-m', 'pip'] }
+            ]
+        });
+
+        const result = await manager.setProxy('http://proxy.example.com:8080');
+
+        assert.deepStrictEqual(result, { success: true });
+        assert.ok(calls.some(call => call.command === 'py'), 'the py candidate was attempted');
+        assert.ok(
+            calls.some(call => call.command === 'python' && call.args.includes('set')),
+            'the next interpreter runs the write after py reports no runtime'
+        );
+    });
+
+    test('reports NOT_INSTALLED only after every candidate fails the same way (#138)', async () => {
+        const calls: CommandCall[] = [];
+        const manager = new PipConfigManager({
+            commandRunner: async (command, args) => {
+                calls.push({ command, args });
+                throw commandError(`Command failed: ${command} -m pip`, {
+                    code: 103,
+                    stderr: 'No suitable Python runtime found'
+                });
+            },
+            candidates: [
+                { command: 'py', argsPrefix: ['-m', 'pip'] },
+                { command: 'python', argsPrefix: ['-m', 'pip'] }
+            ]
+        });
+
+        const result = await manager.setProxy('http://proxy.example.com:8080');
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.errorType, 'NOT_INSTALLED');
+        assert.deepStrictEqual(calls.map(call => call.command), ['py', 'python']);
+    });
 });

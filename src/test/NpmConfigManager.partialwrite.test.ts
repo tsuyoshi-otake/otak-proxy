@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { NpmCommandRunner, NpmConfigManager, NpmProxyKey } from '../config/NpmConfigManager';
+import { createFakeNpmConfig, FakeNpmConfig, npmIniSafe } from './fakeConfigStores';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,17 +31,26 @@ function isNpmSet(args: string[]): boolean {
     return args.includes('set') || args.includes('config set');
 }
 
+const MEMORY_USERCONFIG = '/memory-npm/.npmrc';
+
 function createMemoryNpm(options: {
     failHttpsWrite?: boolean;
     externalizeProxyAfterWrite?: boolean;
     failProxyDelete?: boolean;
-}): { values: Record<NpmProxyKey, string | null>; runner: NpmCommandRunner } {
+}): {
+    values: Record<NpmProxyKey, string | null>;
+    runner: NpmCommandRunner;
+    readUserConfigFile(path: string): Promise<string>;
+} {
     const values: Record<NpmProxyKey, string | null> = {
         proxy: null,
         'https-proxy': null
     };
 
     const runner: NpmCommandRunner = async (_command, args) => {
+        if (args.includes('get') && args.includes('userconfig')) {
+            return { stdout: `${MEMORY_USERCONFIG}\n`, stderr: '' };
+        }
         const key = npmKeyFromArgs(args);
         if (args.includes('get') && key) {
             return { stdout: `${values[key] ?? 'null'}\n`, stderr: '' };
@@ -66,7 +76,19 @@ function createMemoryNpm(options: {
         return { stdout: '', stderr: '' };
     };
 
-    return { values, runner };
+    // `values` is the user layer: the file npm would report through
+    // `config get userconfig` reflects exactly these keys (#138).
+    const readUserConfigFile = async (path: string): Promise<string> => {
+        if (path !== MEMORY_USERCONFIG) {
+            throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
+        }
+        return (Object.entries(values) as Array<[NpmProxyKey, string | null]>)
+            .filter(([, value]) => value !== null)
+            .map(([key, value]) => `${key}=${npmIniSafe(value as string)}\n`)
+            .join('');
+    };
+
+    return { values, runner, readUserConfigFile };
 }
 
 suite('NpmConfigManager partial multi-key write (#43)', () => {
@@ -75,6 +97,7 @@ suite('NpmConfigManager partial multi-key write (#43)', () => {
         const manager = new NpmConfigManager(undefined, {
             isWindows: false,
             commandRunner: memory.runner,
+            readUserConfigFile: memory.readUserConfigFile,
             commandAvailable: () => true
         });
 
@@ -91,6 +114,7 @@ suite('NpmConfigManager partial multi-key write (#43)', () => {
         const manager = new NpmConfigManager(undefined, {
             isWindows: false,
             commandRunner: memory.runner,
+            readUserConfigFile: memory.readUserConfigFile,
             commandAvailable: () => true
         });
 
@@ -106,6 +130,7 @@ suite('NpmConfigManager partial multi-key write (#43)', () => {
         const manager = new NpmConfigManager(undefined, {
             isWindows: false,
             commandRunner: memory.runner,
+            readUserConfigFile: memory.readUserConfigFile,
             commandAvailable: () => true
         });
 
@@ -122,6 +147,7 @@ suite('NpmConfigManager partial multi-key write (#43)', () => {
         const manager = new NpmConfigManager(undefined, {
             isWindows: false,
             commandRunner: memory.runner,
+            readUserConfigFile: memory.readUserConfigFile,
             commandAvailable: () => true
         });
 
@@ -171,5 +197,57 @@ suite('NpmConfigManager partial multi-key write (#43)', () => {
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
         }
+    });
+});
+
+suite('npm compensation writes only the user layer (#138)', () => {
+    const GLOBAL_ONLY = 'http://global-proxy.example:3128';
+
+    function layeredNpmBacked(npm: FakeNpmConfig, failKey: NpmProxyKey): {
+        manager: NpmConfigManager;
+        calls: string[][];
+    } {
+        const calls: string[][] = [];
+        const manager = new NpmConfigManager(undefined, {
+            isWindows: false,
+            commandAvailable: () => true,
+            commandRunner: async (command, args, options) => {
+                calls.push(args);
+                if (args.includes('set') && args.includes(failKey)) {
+                    throw execError(1, `error: could not write ${failKey}`);
+                }
+                return npm.runner(command, args, options);
+            },
+            readUserConfigFile: npm.readUserConfigFile
+        });
+        return { manager, calls };
+    }
+
+    test('a global-layer value is not copied into the user .npmrc', async () => {
+        // `config get` merges layers, so the snapshot must come from the user
+        // layer alone: a key the user file does not hold is restored by
+        // `config delete`, never by writing the merged value into the file.
+        const npm = createFakeNpmConfig({}, { global: { proxy: GLOBAL_ONLY } });
+        const { manager, calls } = layeredNpmBacked(npm, 'https-proxy');
+
+        const result = await manager.setProxy(OWNED);
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(npm.get('proxy'), null, 'the user config must not gain the global value');
+        assert.strictEqual(npm.getGlobal('proxy'), GLOBAL_ONLY, 'the global layer is untouched');
+        assert.ok(
+            !calls.some(args => args.includes('set') && args.includes('proxy') && args.includes(GLOBAL_ONLY)),
+            'compensation must delete the written key, not restore the merged value'
+        );
+    });
+
+    test('a pre-existing user-layer value is still restored by compensation', async () => {
+        const npm = createFakeNpmConfig({ proxy: EXTERNAL });
+        const { manager } = layeredNpmBacked(npm, 'https-proxy');
+
+        const result = await manager.setProxy(OWNED);
+
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(npm.get('proxy'), EXTERNAL, 'the user value predating the write comes back');
     });
 });

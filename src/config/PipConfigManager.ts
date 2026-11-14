@@ -121,6 +121,10 @@ function hasMissingExecutableSignal(value: string): boolean {
         lower.includes('not recognized') ||
         lower.includes('no installed python') ||
         lower.includes('python was not found') ||
+        // The py launcher exits 103 with this line when no runtime matches
+        // (for example an unsatisfiable PY_PYTHON); the next interpreter
+        // candidate may still work (#138).
+        lower.includes('no suitable python runtime found') ||
         lower.includes('no module named pip');
 }
 
