@@ -17,6 +17,7 @@
 import * as assert from 'assert';
 import Module = require('module');
 import { ProxyMode, ProxyState } from '../core/types';
+import { ProxyCredentialStore } from '../security/ProxyCredentialStore';
 import type { CommandRunner } from '../diagnostics/WindowsProxyDiagnostics';
 import type { ProxyRuntimeDiagnostics } from '../diagnostics/ProxyRuntimeDiagnostics';
 
@@ -217,6 +218,40 @@ suite('Diagnostics credential check agrees with the apply gate (#139)', () => {
         assert.ok(
             !report.issues.some(issue => issue.id === 'git.managedProxyMismatch'),
             'a write the apply gate skipped has no expected value to mismatch'
+        );
+        assert.strictEqual(report.converged, false);
+    });
+
+    test('an unresolved companion scheme credential is reported even when the primary resolves (#139)', async () => {
+        // A per-scheme plan writes two addresses and the apply gate skips the
+        // whole plan when EITHER lacks credentials, so resolving only the
+        // primary URL hides the unresolved companion.
+        const context = contextWithEmptySecrets();
+        await new ProxyCredentialStore(context.secrets)
+            .storeFromProxyUrl('http://user:pw@sysproxy.corp:3128');
+        const diagnostics = new Diagnostics(
+            context,
+            async () => appliedAutoState({
+                autoProxyKind: 'perSchemeProxy',
+                autoHttpProxyUrl: SYSTEM_PROXY_URL,
+                autoHttpsProxyUrl: 'https://secure.corp:3129',
+                requiresAuth: true,
+                authRequiredProxyUrls: [`${SYSTEM_PROXY_URL}/`, 'https://secure.corp:3129/'],
+                lastError: 'Proxy credentials are required but unavailable on this machine'
+            }),
+            { commandRunner: staleGitRunner() }
+        );
+
+        const report = await diagnostics.run({ bypassSlowCache: true });
+        const credentialIssue = report.issues.find(issue => issue.id === 'proxy.localCredential.unresolved');
+        assert.ok(
+            credentialIssue,
+            'the companion address the plan cannot write without credentials must be reported'
+        );
+        assert.strictEqual(
+            credentialIssue!.expectedSanitized,
+            'https://secure.corp:3129/',
+            'the issue names the unresolved address, not the resolvable primary'
         );
         assert.strictEqual(report.converged, false);
     });

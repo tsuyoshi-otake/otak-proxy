@@ -14,7 +14,7 @@ import {
 import { ExecutionContextDetector } from './ExecutionContextDetector';
 import { CommandRunner, WindowsProxyDiagnostics } from './WindowsProxyDiagnostics';
 import { ProxySecretRedactor } from '../security/ProxySecretRedactor';
-import { ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
+import { LocalCredentialResolution, ProxyCredentialStore, splitProxyUrl } from '../security/ProxyCredentialStore';
 import { readV3Settings } from '../core/V3Settings';
 import {
     getProxyPublicUrl,
@@ -759,15 +759,35 @@ export class ProxyRuntimeDiagnostics {
         // decides when present — the aggregate flag would also claim a
         // credential-free active URL needs credentials merely because an
         // unrelated field (the manual fallback, say) carries them.
+        const missingRequired = state.authRequiredProxyUrls && state.authRequiredProxyUrls.length > 0
+            ? planUrlsMissingRequiredCredentials(state, this.applyPlanUrls(state, expected))
+            : [];
         const required = hasProxyCredentials(expected) ||
             (state.authRequiredProxyUrls && state.authRequiredProxyUrls.length > 0
-                ? planUrlsMissingRequiredCredentials(state, this.applyPlanUrls(state, expected)).length > 0
+                ? missingRequired.length > 0
                 : state.requiresAuth === true);
         const publicUrl = getProxyPublicUrl(expected) || expected;
-        const resolution = await new ProxyCredentialStore(this.context.secrets).resolveLocalCredentials(
-            publicUrl,
-            required
-        );
+
+        const credentialStore = new ProxyCredentialStore(this.context.secrets);
+        let resolutionUrl = publicUrl;
+        let resolution: LocalCredentialResolution;
+        if (missingRequired.length > 0) {
+            // The gate skips the whole plan when ANY planned address lacks
+            // credentials, so resolving only the primary hides an unresolved
+            // companion: resolve each missing address and report the first
+            // this machine cannot supply (#139).
+            resolution = { availability: 'availableOnThisMachine' };
+            for (const missingUrl of missingRequired) {
+                const candidate = await credentialStore.resolveLocalCredentials(missingUrl, true);
+                if (candidate.availability !== 'notRequired' && candidate.availability !== 'availableOnThisMachine') {
+                    resolution = candidate;
+                    resolutionUrl = missingUrl;
+                    break;
+                }
+            }
+        } else {
+            resolution = await credentialStore.resolveLocalCredentials(publicUrl, required);
+        }
 
         if (resolution.availability === 'notRequired' || resolution.availability === 'availableOnThisMachine') {
             return [];
@@ -781,7 +801,7 @@ export class ProxyRuntimeDiagnostics {
             'proxy.credentials',
             'workspaceHost',
             {
-                expectedSanitized: publicUrl,
+                expectedSanitized: resolutionUrl,
                 source: 'localCredential',
                 capability: secretStorageUnavailable ? 'unsupported' : 'permissionRequired',
                 autoAction: 'skipped',
