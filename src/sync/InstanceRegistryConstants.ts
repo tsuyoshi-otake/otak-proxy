@@ -32,3 +32,11 @@ export const MUTEX_STALE_MS = 30000;
  * Delay between mutex acquisition attempts.
  */
 export const MUTEX_RETRY_DELAY_MS = 25;
+
+/**
+ * Backoff delays between registry lock-file read retries. A scan holding the
+ * file (EBUSY/EPERM) usually clears in a few hundred ms, so a failed read is
+ * retried on this schedule (with jitter) before the registry is treated as
+ * unreadable — a transient failure must never disable sync (#137).
+ */
+export const REGISTRY_READ_RETRY_DELAYS_MS = [50, 100, 200];

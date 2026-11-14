@@ -95,4 +95,93 @@ suite('Runtime enable adopts the shared state (#137)', function() {
         assert.strictEqual(deliveries[0].state.mode, ProxyMode.Off);
         assert.strictEqual(aManager.getCurrentSharedState()?.mode, ProxyMode.Off);
     });
+
+    /**
+     * #137 follow-up: `readLockFile` rethrows non-ENOENT read errors, so a
+     * transient EBUSY (an AV scan holding `instances.lock`) used to make
+     * `register()` return false — and `SyncManager.start()` treats that as
+     * fatal, disabling sync for the whole session. The read is retried with
+     * bounded backoff inside the registry; a still-unreadable registry makes
+     * register skip its write and report success (the heartbeat re-adds the
+     * entry), never wipe other windows' entries, never take sync down.
+     */
+    suite('transient registry reads do not disable sync', () => {
+        const lockFilePath = () => path.join(testDir, 'otak-proxy-sync', 'instances.lock');
+
+        function seedForeignEntry(): void {
+            fs.mkdirSync(path.dirname(lockFilePath()), { recursive: true });
+            fs.writeFileSync(lockFilePath(), JSON.stringify({
+                schemaVersion: 1,
+                instances: [{
+                    id: 'foreign-instance',
+                    pid: process.pid,
+                    windowId: 'window-b',
+                    registeredAt: 1,
+                    lastHeartbeat: Date.now(),
+                    extensionVersion: 'test'
+                }]
+            }), 'utf-8');
+        }
+
+        // Fail the next `failures` reads of the registry lock file. Patch the
+        // real fs object: `import * as fs` wrappers forward through getters,
+        // so this intercepts the store's calls too.
+        function patchLockFileReads(failures: number): () => void {
+            const fsm = require('fs') as { readFileSync: (p: unknown, ...rest: unknown[]) => unknown };
+            const realReadFileSync = fsm.readFileSync;
+            let remaining = failures;
+            fsm.readFileSync = (p: unknown, ...rest: unknown[]): unknown => {
+                if (remaining > 0 && String(p) === lockFilePath()) {
+                    remaining--;
+                    const error = new Error('EBUSY: resource busy or locked') as NodeJS.ErrnoException;
+                    error.code = 'EBUSY';
+                    throw error;
+                }
+                return realReadFileSync(p, ...rest);
+            };
+            return () => { fsm.readFileSync = realReadFileSync; };
+        }
+
+        function readWindowIds(): string[] {
+            const onDisk = JSON.parse(fs.readFileSync(lockFilePath(), 'utf-8')) as {
+                instances: Array<{ windowId: string }>;
+            };
+            return onDisk.instances.map(instance => instance.windowId);
+        }
+
+        test('a persistent registry read failure neither disables sync nor wipes entries', async () => {
+            seedForeignEntry();
+            const restore = patchLockFileReads(Number.MAX_SAFE_INTEGER);
+            const aManager = new SyncManager(testDir, 'window-a', mockConfig(true) as never, 'test');
+            managers.push(aManager);
+            let started: boolean;
+            try {
+                started = await aManager.start();
+            } finally {
+                restore();
+            }
+
+            assert.strictEqual(started, true, 'a transient registry read failure must not disable sync');
+            assert.strictEqual(aManager.isEnabled(), true, 'sync stays active');
+            assert.deepStrictEqual(readWindowIds(), ['window-b'],
+                'a failed read left the other window\'s entry untouched');
+        });
+
+        test('a first-read failure is retried and the entry is written', async () => {
+            seedForeignEntry();
+            const restore = patchLockFileReads(1);
+            const aManager = new SyncManager(testDir, 'window-a', mockConfig(true) as never, 'test');
+            managers.push(aManager);
+            let started: boolean;
+            try {
+                started = await aManager.start();
+            } finally {
+                restore();
+            }
+
+            assert.strictEqual(started, true);
+            assert.deepStrictEqual(readWindowIds().sort(), ['window-a', 'window-b'],
+                'the retry wrote this window\'s entry alongside the other window\'s');
+        });
+    });
 });
