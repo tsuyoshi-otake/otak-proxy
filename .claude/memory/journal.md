@@ -2440,3 +2440,36 @@ Codex のレビュー（b87d06b に対する P2 が 2 件）:
   - #135: ウィンドウを reload すると、残ったトークンを持つ apply はもういないので、印は次の apply まで立ったまま（トークンを入れる前と同じ）。
   - 2 回目の修正（`670f259` 以降）は Codex のレビューを受けていない。
   - #138 のタイムアウトのテストは注入した子で確かめる。実物の git が期限を越える経路は、Windows の手元のプローブでしか見ていない。
+
+## 2026-11-14 — v3.2.20 リリース（#135〜#140 の修正を公開）
+
+**Issue**: #135、#136、#137、#138、#139、#140
+**PR**: #142（修正、merge `d226cbe`）、#143（版上げ、merge `f5d20a3`）
+**タグ**: `v3.2.20`（annotated、`Release v3.2.20`、`f5d20a3` に打った）
+
+PR #142 の修正 16 件と、そのレビュー対応を公開した。リリースコミット（`b1dbff4`）は `CHANGELOG.md` / `package.json` / `package-lock.json` の 3 ファイルだけ。ユーザーの判断で、2 回目のレビュー対応の後は Codex の再レビューを待たずにマージした（個人リポジトリで、レビューはマージの条件ではない）。
+
+### リリース前チェックの結果（CLAUDE.md の MUST）
+
+| 観点 | 結果 | 対応 |
+| --- | --- | --- |
+| tracked files の個人情報らしき文字列 | v3.2.19..HEAD の追加行（`package-lock.json` を除く、52 files）にメールアドレス・UUID・ローカルのユーザーパス・トークン・社内向け IP の一致なし。既存の `.kiro/specs/domain-verification-assurance/evidence/` の JSON には汎用のアカウント名 `developer` のローカルパスがある（今回の追加ではない） | 今回は変更しない |
+| コミット履歴の author / committer | v3.2.19..HEAD は既存の ID（`otak@odangoo.com`）と GitHub の merge コミットだけ。新しい ID なし | 書き換えない（2026-10-03 の決定） |
+| 公開設定・タグ・リリース | PUBLIC。タグは v3.2.19 まで。GitHub Release の最新は v3.2.19（VSIX 付き） | v3.2.20 も VSIX 付きで作った |
+| LICENSE | MIT あり | — |
+
+### Verification
+
+| ゲート | 結果 |
+| --- | --- |
+| ローカル `npm run test:mvp`（`18308ff`） | exit 0（unit 1611 + 90 passing / 5 pending、isolation、smoke 4） |
+| ローカル host lane | 682 passing、既知の 7 件だけが失敗 |
+| ローカル `lint:unicode:dist` | 0 件（354 files） |
+| CI（#142 `e6a9a8e`、#143） | pass（run 43548395219、43548694804） |
+| publish workflow（run 43548946997） | 4 job とも success（02:55:58Z〜02:59:17Z） |
+| Open VSX API（`/api/odangoo/otak-proxy/latest`） | 12:05:14 JST に 3.2.20（12:03:14 はまだ 3.2.19） |
+| VS Marketplace API（extensionquery） | 12:07:45 JST に 3.2.20（12:05:14 はまだ 3.2.19） |
+| GitHub Release | v3.2.20、`otak-proxy-3.2.20.vsix`（publish の artifact そのもの、sha256 `309192f0f5e8f4040dea6a669e6eb5f2192f750a184a662ee271c06f5be84473`、中の package.json は 3.2.20） |
+
+- Learning: 公開の遅延は、workflow の完了から Open VSX 4〜6 分、Marketplace 6〜8.5 分だった。rules.md の実測値を更新した。
+- 残留リスク: PR #142 の 2 回目のレビュー対応（`670f259` 以降）は Codex の再レビューを受けずに公開した。レビューは依頼済み（PR #142 のコメント）で、指摘が届いたら次の版で扱う。
