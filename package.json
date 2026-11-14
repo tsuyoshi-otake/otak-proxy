@@ -345,7 +345,7 @@
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.9.2",
     "cross-env": "^10.1.0",
-    "eslint": "^9.19.0",
+    "eslint": "^10.12.0",
     "fast-check": "^4.3.0",
     "mocha": "^11.3.0",
     "ovsx": "^0.10.12",
