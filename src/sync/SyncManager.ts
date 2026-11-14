@@ -517,6 +517,20 @@ export class SyncManager extends EventEmitter implements ISyncManager {
                 return true;
             } catch (error) {
                 Logger.error('Failed to adopt remote sync delivery:', error);
+                if (this.currentState?.version === delivery.version) {
+                    // The cache claims a shared state this adoption just
+                    // failed to deliver — the runtime-enable path caches it
+                    // before the adoption runs (#137). Drop it so the next
+                    // reconcile re-emits the delivery instead of judging
+                    // the window already synced.
+                    this.currentState = null;
+                }
+                if (delivery.force) {
+                    // A forced delivery exists because the watermark already
+                    // holds its version; a re-emission only works when the
+                    // watermark lets the same version through again.
+                    this.highestSharedVersion = Math.min(this.highestSharedVersion, delivery.version - 1);
+                }
                 throw error;
             }
         });

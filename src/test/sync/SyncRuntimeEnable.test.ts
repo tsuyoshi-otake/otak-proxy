@@ -96,6 +96,49 @@ suite('Runtime enable adopts the shared state (#137)', function() {
         assert.strictEqual(aManager.getCurrentSharedState()?.mode, ProxyMode.Off);
     });
 
+    test('a failed runtime-enable delivery is re-emitted by the next reconcile (#137)', async () => {
+        // loadInitialState caches the shared file before the enable delivery
+        // is emitted; when that delivery's save fails, the cache must not
+        // keep claiming the window is synced or no reconcile ever re-emits.
+        const bManager = new SyncManager(testDir, 'window-b', mockConfig(true) as never, 'test');
+        managers.push(bManager);
+        await bManager.start();
+        await bManager.notifyChange({ mode: ProxyMode.Off, revision: 7 });
+
+        const cfgA = mockConfig(false);
+        const aManager = new SyncManager(testDir, 'window-a', cfgA as never, 'test');
+        managers.push(aManager);
+        const deliveries: RemoteSyncDelivery[] = [];
+        const saved: string[] = [];
+        let settled = 0;
+        let failNextSave = true;
+        aManager.on('remoteChange', delivery => {
+            deliveries.push(delivery);
+            void aManager.absorbRemoteChange(
+                delivery,
+                async () => {
+                    if (failNextSave) {
+                        failNextSave = false;
+                        throw new Error('transient save failure');
+                    }
+                    saved.push(delivery.state.mode);
+                    return 1;
+                },
+                adopted => adopted()
+            ).catch(() => undefined).finally(() => { settled += 1; });
+        });
+        await aManager.start();
+
+        cfgA.set(true);
+        await waitFor(() => settled === 1, 'the failed enable delivery to settle');
+
+        await aManager.triggerSync();
+        await waitFor(() => saved.length === 1, 'the re-emitted delivery to be adopted');
+        assert.strictEqual(deliveries.length, 2, 'the failed delivery must be re-emitted');
+        assert.strictEqual(deliveries[1].version, 1);
+        assert.strictEqual(saved[0], ProxyMode.Off);
+    });
+
     /**
      * #137 follow-up: `readLockFile` rethrows non-ENOENT read errors, so a
      * transient EBUSY (an AV scan holding `instances.lock`) used to make
