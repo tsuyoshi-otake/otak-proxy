@@ -518,7 +518,14 @@ export class SyncManager extends EventEmitter implements ISyncManager {
         absorb: (adopted: () => Promise<boolean>) => Promise<unknown>
     ): Promise<void> {
         const adoption: Promise<boolean> = this.enqueue('transitionQueue', async () => {
-            if (!delivery.force && delivery.version <= this.highestSharedVersion) {
+            // A forced delivery exists to re-adopt the version the watermark
+            // already holds, so it bypasses equality only — a version below
+            // the watermark is still older than what this window has and must
+            // never overwrite it (#145).
+            const supersededByWatermark = delivery.force
+                ? delivery.version < this.highestSharedVersion
+                : delivery.version <= this.highestSharedVersion;
+            if (supersededByWatermark) {
                 Logger.warn(
                     `Skipping superseded remote delivery ` +
                     `(version ${delivery.version}, highest ${this.highestSharedVersion}).`
