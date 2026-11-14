@@ -15,6 +15,52 @@ export interface ApplyConvergenceContext {
 }
 
 /**
+ * In-memory ownership of a `convergencePending` flag. The flag rides the
+ * shared/persisted state, so it cannot name the apply that set it; the claim
+ * lives here instead, keyed by the per-window object every apply channel
+ * shares (the extension context). When a second apply commits the flag for
+ * the same logical identity, its claim replaces the first's — and the first
+ * apply's clear, retried or not, then sees a foreign claim and leaves the
+ * flag and the unpublished state alone (#135).
+ */
+const pendingClaims = new WeakMap<object, ConvergencePendingClaim>();
+
+/** Opaque ownership of one apply's `convergencePending` commit. */
+export interface ConvergencePendingClaim {
+    readonly key: object;
+    readonly prev: ConvergencePendingClaim | undefined;
+}
+
+/**
+ * Claims the flag the caller is about to commit for `key` — the apply's own
+ * channel key (the extension context). Claim before the pending commit so a
+ * commit that never lands can be released back to the claim it displaced.
+ */
+export function claimConvergencePending(key: object): ConvergencePendingClaim {
+    const claim: ConvergencePendingClaim = { key, prev: pendingClaims.get(key) };
+    pendingClaims.set(key, claim);
+    return claim;
+}
+
+/**
+ * Gives back a claim the owning apply no longer needs — a pending commit
+ * that lost its race, or a flag its clear consumed. Releasing restores the
+ * claim it displaced, so an earlier apply's flag is not orphaned by a commit
+ * that never landed. Releasing a claim a newer one already replaced is a
+ * no-op.
+ */
+export function releaseConvergencePending(claim: ConvergencePendingClaim): void {
+    if (pendingClaims.get(claim.key) !== claim) {
+        return;
+    }
+    if (claim.prev) {
+        pendingClaims.set(claim.key, claim.prev);
+    } else {
+        pendingClaims.delete(claim.key);
+    }
+}
+
+/**
  * Attempts to clear the pending flag. Each one is a read and a compare-and-set
  * on that read, so a loss means a commit landed between the two.
  */
@@ -34,54 +80,80 @@ const CLEAR_PENDING_MAX_ATTEMPTS = 3;
  * attempt loses, the flag stays set and a warning says so: the call ends, the
  * state is never published as converged, and the next apply's own clear owns
  * the flag.
+ *
+ * `pendingClaim` is the apply's own claim on the flag (`claimConvergencePending`
+ * where the flag was committed). The clear only proceeds while that claim is
+ * still the current one: a second apply whose pending commit landed meanwhile
+ * claimed the flag instead, and clearing or publishing over it would release a
+ * still-applying state as converged. The claim is checked again inside the
+ * fold, right before the compare-and-set, so a claim lost mid-commit reports
+ * 'unchanged' and the call leaves the flag alone.
  */
 export async function clearPendingThenPublish(
     context: ApplyConvergenceContext,
     owner: FenceOwner,
-    desired: ProxyState
+    desired: ProxyState,
+    pendingClaim?: ConvergencePendingClaim
 ): Promise<void> {
-    const manager = context.proxyStateManager;
-    const afterApply = await manager.getState();
-    const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
-    const stillDesired = (state: ProxyState): boolean =>
-        sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state));
+    try {
+        const manager = context.proxyStateManager;
+        const afterApply = await manager.getState();
+        const desiredIdentity = captureLogicalGeneration({ ...desired, revision: afterApply.revision });
+        const stillDesired = (state: ProxyState): boolean =>
+            sameLogicalIdentity(desiredIdentity, captureLogicalGeneration(state));
+        // No claim means a call site that cleared before ownership tracking:
+        // it stays allowed. A claim checks the map, so a flag another apply
+        // claimed meanwhile is left to that apply's own clear.
+        const ownsPendingFlag = (): boolean =>
+            pendingClaim === undefined || pendingClaims.get(pendingClaim.key) === pendingClaim;
 
-    let latest = afterApply;
-    let cleared = false;
-    for (let attempt = 0; attempt < CLEAR_PENDING_MAX_ATTEMPTS && !cleared; attempt++) {
-        if (attempt > 0) {
-            latest = await manager.getState();
+        let latest = afterApply;
+        let cleared = false;
+        for (let attempt = 0; attempt < CLEAR_PENDING_MAX_ATTEMPTS && !cleared; attempt++) {
+            if (attempt > 0) {
+                latest = await manager.getState();
+            }
+            if (!stillDesired(latest) || !ownsPendingFlag()) {
+                return;
+            }
+
+            const outcome = await commitUnlessStale(
+                manager,
+                captureLogicalGeneration(latest),
+                owner,
+                current => (ownsPendingFlag() ? { ...current, convergencePending: false } : undefined)
+            );
+            if (outcome === 'unchanged') {
+                // The claim was lost between the guard and the commit: the
+                // flag now belongs to another apply, and retrying would only
+                // see the same foreign claim.
+                return;
+            }
+            cleared = outcome !== 'stale';
         }
-        if (!stillDesired(latest)) {
+        if (!cleared) {
+            Logger.warn(
+                `Could not clear convergencePending after ${CLEAR_PENDING_MAX_ATTEMPTS} attempts ` +
+                `(${owner}): the state kept changing; it stays pending and is not published.`
+            );
             return;
         }
 
-        const outcome = await commitUnlessStale(
-            manager,
-            captureLogicalGeneration(latest),
+        const published = await manager.getState();
+        if (!stillDesired(published)) {
+            return;
+        }
+        await publishUnlessStale(
+            context.publishProxyState,
+            captureLogicalGeneration(published),
             owner,
-            current => ({ ...current, convergencePending: false })
+            published
         );
-        cleared = outcome !== 'stale';
+    } finally {
+        if (pendingClaim) {
+            releaseConvergencePending(pendingClaim);
+        }
     }
-    if (!cleared) {
-        Logger.warn(
-            `Could not clear convergencePending after ${CLEAR_PENDING_MAX_ATTEMPTS} attempts ` +
-            `(${owner}): the state kept changing; it stays pending and is not published.`
-        );
-        return;
-    }
-
-    const published = await manager.getState();
-    if (!stillDesired(published)) {
-        return;
-    }
-    await publishUnlessStale(
-        context.publishProxyState,
-        captureLogicalGeneration(published),
-        owner,
-        published
-    );
 }
 
 /**

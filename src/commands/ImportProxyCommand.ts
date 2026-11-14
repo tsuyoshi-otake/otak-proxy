@@ -20,7 +20,7 @@ import { OutputChannelManager } from '../errors/OutputChannelManager';
 import { removeProxyCredentials, setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
 import { assignDetectedProxyToState } from '../config/DetectedProxyValue';
 import type { ProxyDetectionWithSource } from '../config/SystemProxyDetector';
-import { clearPendingThenPublish, diffProxyState } from '../core/ApplyConvergence';
+import { claimConvergencePending, clearPendingThenPublish, diffProxyState, releaseConvergencePending } from '../core/ApplyConvergence';
 import { commandConvergenceContext, commitCommandPatch } from './CommandStateCommit';
 
 /**
@@ -226,17 +226,27 @@ async function handleUseAutoMode(
         // Set by the fold of the attempt that committed: the monitor restarts
         // only when the state it replaced was Auto.
         const folded = { wasAutoMode: false };
-        const committed = await commitCommandPatch(ctx, latest => {
-            folded.wasAutoMode = latest.mode === ProxyMode.Auto;
-            const decided: ProxyState = { ...latest };
-            useDetectedProxyAsAuto(decided, detected, detectedSource);
-            // The detected URL is applied below: mark the commit pending so
-            // nothing unapplied is published as converged; the post-apply
-            // publish carries the results the apply recorded (#135).
-            return { ...diffProxyState(latest, decided), convergencePending: true };
-        });
+        // The detected URL is applied below: the pending flag this commit
+        // lands is this apply's claim, so only its own clear may release it
+        // (#135).
+        const pendingClaim = claimConvergencePending(ctx.extensionContext ?? ctx);
+        let committed: ProxyState;
+        try {
+            committed = await commitCommandPatch(ctx, latest => {
+                folded.wasAutoMode = latest.mode === ProxyMode.Auto;
+                const decided: ProxyState = { ...latest };
+                useDetectedProxyAsAuto(decided, detected, detectedSource);
+                // The detected URL is applied below: mark the commit pending so
+                // nothing unapplied is published as converged; the post-apply
+                // publish carries the results the apply recorded (#135).
+                return { ...diffProxyState(latest, decided), convergencePending: true };
+            });
+        } catch (error) {
+            releaseConvergencePending(pendingClaim);
+            throw error;
+        }
         const applied = await ctx.applyProxySettings(detectedProxy, true);
-        await clearPendingThenPublish(commandConvergenceContext(ctx), 'importProxy', committed);
+        await clearPendingThenPublish(commandConvergenceContext(ctx), 'importProxy', committed, pendingClaim);
         ctx.updateStatusBar(await ctx.getProxyState());
         if (folded.wasAutoMode) {
             await ctx.stopSystemProxyMonitoring();

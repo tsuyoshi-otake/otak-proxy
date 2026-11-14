@@ -6,7 +6,11 @@
  * meanwhile still wins.
  */
 import * as assert from 'assert';
-import { clearPendingThenPublish } from '../../core/ApplyConvergence';
+import {
+    claimConvergencePending,
+    clearPendingThenPublish,
+    ConvergencePendingClaim
+} from '../../core/ApplyConvergence';
 import { StateWriter } from '../../core/GenerationFence';
 import { ProxyMode, ProxyState, StateCommitResult, stateRevision } from '../../core/types';
 import { createRealStateManager } from '../realProxyStateManager';
@@ -70,10 +74,23 @@ suite('clearPendingThenPublish under the generation fences (#135)', () => {
                 autoProxyUrl: 'http://other.example:9090',
                 convergencePending: true
             })),
-            run: () => clearPendingThenPublish(
+            /** A second apply's pending commit for the same logical state: identity unchanged, flag re-asserted. */
+            landSameIdentityPending: () => change(current => ({
+                ...current,
+                lastTestTimestamp: Date.now(),
+                convergencePending: true
+            })),
+            /** A commit that only re-routes the same primary URL: bypass changed, URLs did not. */
+            landOtherBypass: () => change(current => ({
+                ...current,
+                detectedBypass: 'localhost;*.internal.example',
+                convergencePending: true
+            })),
+            run: (pendingClaim?: ConvergencePendingClaim, desiredOverride?: ProxyState) => clearPendingThenPublish(
                 { proxyStateManager: writer, publishProxyState: async state => { published.push({ ...state }); } },
                 'toggle',
-                desired
+                desiredOverride ?? desired,
+                pendingClaim
             )
         };
     }
@@ -141,5 +158,47 @@ suite('clearPendingThenPublish under the generation fences (#135)', () => {
         assert.strictEqual(after.mode, ProxyMode.Auto);
         assert.strictEqual(after.convergencePending, true);
         assert.deepStrictEqual(h.published, [], 'its owner publishes it once it converged');
+    });
+
+    test('a pending flag another apply claimed meanwhile is left to that apply', async () => {
+        const h = await harness();
+        const key = {};
+        // The flag the harness saved belongs to this apply's claim — the
+        // clear below presents it, like every wired call site does.
+        const ownClaim = claimConvergencePending(key);
+        let foreignClaim: ConvergencePendingClaim | undefined;
+        h.hooks.afterRead.push(async () => {
+            // A second apply lands a pending commit for the same logical
+            // state while this clear is in flight: its claim replaces ours.
+            foreignClaim = claimConvergencePending(key);
+            await h.landSameIdentityPending();
+        });
+
+        await h.run(ownClaim);
+
+        const after = await h.read();
+        assert.strictEqual(after.convergencePending, true, 'the flag belongs to the apply whose claim replaced ours');
+        assert.strictEqual(h.commits.length, 0, 'no commit may be issued over another apply\'s flag');
+        assert.deepStrictEqual(h.published, [], 'a flag this apply does not own publishes nothing');
+
+        // The owning apply's own clear still ends its apply: flag cleared,
+        // converged state published.
+        const owned = await h.read();
+        await h.run(foreignClaim, owned);
+        assert.strictEqual((await h.read()).convergencePending, false, 'the owner clears its flag');
+        assert.strictEqual(h.published.length, 1, 'the owning apply publishes its converged state');
+    });
+
+    test('a commit that only re-routes the same URL is a different generation: the flag is not cleared here', async () => {
+        const h = await harness();
+        h.hooks.afterRead.push(h.landOtherBypass);
+
+        await h.run();
+
+        const after = await h.read();
+        assert.strictEqual(after.detectedBypass, 'localhost;*.internal.example');
+        assert.strictEqual(after.convergencePending, true, 'a changed split routing is a different generation: its flag stays');
+        assert.strictEqual(h.commits.length, 0, 'no commit may be issued over another writer\'s state');
+        assert.deepStrictEqual(h.published, []);
     });
 });

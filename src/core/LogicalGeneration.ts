@@ -1,14 +1,16 @@
+import { splitRoutingIdentity } from '../config/DetectedProxyValue';
 import { ProxyMode, ProxyState, stateRevision } from './types';
 
 /**
  * In-memory identity of a logical proxy generation.
  *
- * The identity covers the revision, the mode, and the identities of the
+ * The identity covers the revision, the mode, the identities of the
  * auto, manual and fallback proxy URLs — credentials included, so credential
- * rotation and a different user are not treated as "the same URL".
- * Per-scheme URLs and the bypass list are not part of it: the detection
- * paths compare them through `splitRoutingIdentity` (`handleProxyChanged`,
- * and `updateAutoProxyState`). This object is never persisted.
+ * rotation and a different user are not treated as "the same URL" — and the
+ * split-routing plan (`splitRoutingIdentity`: kind, per-scheme URLs, bypass),
+ * so a state that only re-routes the same primary URL is still a different
+ * generation to a pending-flag clear or a publish (#135). This object is
+ * never persisted.
  */
 export interface LogicalGeneration {
     revision: number;
@@ -16,6 +18,7 @@ export interface LogicalGeneration {
     autoProxyIdentity: string;
     manualProxyIdentity: string;
     fallbackProxyIdentity: string;
+    splitRoutingIdentity: string;
 }
 
 /**
@@ -48,7 +51,8 @@ export function captureLogicalGeneration(state: ProxyState): LogicalGeneration {
         mode: state.mode,
         autoProxyIdentity: proxyUrlIdentity(state.autoProxyUrl),
         manualProxyIdentity: proxyUrlIdentity(state.manualProxyUrl),
-        fallbackProxyIdentity: proxyUrlIdentity(state.fallbackProxyUrl)
+        fallbackProxyIdentity: proxyUrlIdentity(state.fallbackProxyUrl),
+        splitRoutingIdentity: splitRoutingIdentity(state)
     };
 }
 
@@ -63,7 +67,8 @@ export function sameLogicalIdentity(left: LogicalGeneration, right: LogicalGener
     return left.mode === right.mode
         && left.autoProxyIdentity === right.autoProxyIdentity
         && left.manualProxyIdentity === right.manualProxyIdentity
-        && left.fallbackProxyIdentity === right.fallbackProxyIdentity;
+        && left.fallbackProxyIdentity === right.fallbackProxyIdentity
+        && left.splitRoutingIdentity === right.splitRoutingIdentity;
 }
 
 export function isStaleGeneration(started: LogicalGeneration, current: ProxyState): boolean {

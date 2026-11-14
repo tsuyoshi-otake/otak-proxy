@@ -5,9 +5,10 @@ import { assignDetectedProxyToState, clearDetectedSplitFields, splitApplyOptions
 import { isUnsupportedAutoConfig, type ProxyDetectionWithSource } from '../config/SystemProxyDetector';
 import { unsupportedAutoConfigKindLabel } from '../diagnostics/unsupportedAutoConfig';
 import { detectSystemProxySettingsWithSource, isProxyEndpointReachable } from '../utils/ProxyUtils';
+import { claimConvergencePending, clearPendingThenPublish, releaseConvergencePending } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import { commitUnlessStale, publishUnlessStale } from './GenerationFence';
-import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration, sameLogicalIdentity } from './LogicalGeneration';
+import { LogicalGeneration, captureLogicalGeneration, isStaleGeneration } from './LogicalGeneration';
 import { applyProxyThroughContext } from './ProxyApplyInvoker';
 import { AppliedProxySource, ProxyMode, ProxyState, SystemProxyCheckOutcome } from './types';
 import { setRequiresAuthFromLiveUrls } from '../utils/ProxyStateSanitizer';
@@ -191,6 +192,7 @@ export class SystemProxyUpdateService {
         state: ProxyState,
         previousProxy: string | undefined
     ): Promise<void> {
+        const pendingClaim = claimConvergencePending(this.context.extensionContext ?? this.context);
         const pending = await commitUnlessStale(this.context.proxyStateManager, started, 'detection', current => ({
             ...current,
             ...state,
@@ -198,6 +200,7 @@ export class SystemProxyUpdateService {
             convergencePending: true
         }));
         if (pending === 'stale') {
+            releaseConvergencePending(pendingClaim);
             return;
         }
 
@@ -209,22 +212,11 @@ export class SystemProxyUpdateService {
             activeProxyUrl ? splitApplyOptionsFromState(state) : { silent: true }
         );
 
-        const afterApply = await this.context.proxyStateManager.getState();
-        if (!sameLogicalIdentity(
-            captureLogicalGeneration({ ...state, revision: afterApply.revision }),
-            captureLogicalGeneration(afterApply)
-        )) {
-            return;
-        }
-
-        await commitUnlessStale(
-            this.context.proxyStateManager,
-            captureLogicalGeneration(afterApply),
-            'detection',
-            current => ({ ...current, convergencePending: false })
-        );
+        // The pending flag is this apply's claim: the bounded clear publishes
+        // the post-apply state, and a foreign flag another apply committed
+        // meanwhile is left to its owner (#135).
+        await clearPendingThenPublish(this.context, 'detection', state, pendingClaim);
         const published = await this.context.proxyStateManager.getState();
-        await publishUnlessStale(this.context.publishProxyState, captureLogicalGeneration(published), 'detection', published);
         if (applied) {
             this.notifyAutoProxyChange(state, previousProxy);
         }

@@ -20,7 +20,7 @@ import {
     setRequiresAuthFromLiveUrls
 } from '../utils/ProxyStateSanitizer';
 import { I18nManager } from '../i18n/I18nManager';
-import { clearPendingThenPublish, diffProxyState } from '../core/ApplyConvergence';
+import { claimConvergencePending, clearPendingThenPublish, ConvergencePendingClaim, diffProxyState, releaseConvergencePending } from '../core/ApplyConvergence';
 import { commandConvergenceContext, commitCommandPatch } from './CommandStateCommit';
 
 export async function showInvalidProxyUrl(ctx: CommandContext, proxyUrl: string, i18n: I18nManager): Promise<void> {
@@ -53,35 +53,49 @@ export async function showInvalidProxyUrl(ctx: CommandContext, proxyUrl: string,
 async function saveManualProxyUrl(
     ctx: CommandContext,
     proxyUrl: string
-): Promise<{ committed: ProxyState; droppedManual: boolean }> {
-    const folded = { droppedManual: false };
-    const committed = await commitCommandPatch(ctx, latest => {
-        const decided: ProxyState = { ...latest, manualProxyUrl: proxyUrl };
-        // Recompute the credential bookkeeping from the URLs actually present so
-        // replacing or dropping a credential-bearing address cannot leave a stale
-        // requiresAuth/authRequiredProxyUrls behind (#108).
-        setRequiresAuthFromLiveUrls(decided);
-        folded.droppedManual = latest.mode === ProxyMode.Manual && !proxyUrl;
-        if (folded.droppedManual) {
-            decided.mode = ProxyMode.Off;
+): Promise<{ committed: ProxyState; droppedManual: boolean; pendingClaim: ConvergencePendingClaim | undefined }> {
+    const folded: { droppedManual: boolean; pendingClaim: ConvergencePendingClaim | undefined } = {
+        droppedManual: false,
+        pendingClaim: undefined
+    };
+    let committed: ProxyState;
+    try {
+        committed = await commitCommandPatch(ctx, latest => {
+            const decided: ProxyState = { ...latest, manualProxyUrl: proxyUrl };
+            // Recompute the credential bookkeeping from the URLs actually present so
+            // replacing or dropping a credential-bearing address cannot leave a stale
+            // requiresAuth/authRequiredProxyUrls behind (#108).
+            setRequiresAuthFromLiveUrls(decided);
+            folded.droppedManual = latest.mode === ProxyMode.Manual && !proxyUrl;
+            if (folded.droppedManual) {
+                decided.mode = ProxyMode.Off;
+            }
+            const patch = diffProxyState(latest, decided);
+            // A commit out of Manual is applied below (the URL enable, or the
+            // disable after the drop): mark it pending so nothing unapplied is
+            // published as converged; the post-apply publish carries the results
+            // the apply recorded (#135).
+            if (latest.mode === ProxyMode.Manual) {
+                patch.convergencePending = true;
+                // The flag rides the shared state; its owner travels as an
+                // in-memory claim this apply's clear presents later (#135).
+                folded.pendingClaim = claimConvergencePending(ctx.extensionContext ?? ctx);
+            }
+            return patch;
+        });
+    } catch (error) {
+        if (folded.pendingClaim) {
+            releaseConvergencePending(folded.pendingClaim);
         }
-        const patch = diffProxyState(latest, decided);
-        // A commit out of Manual is applied below (the URL enable, or the
-        // disable after the drop): mark it pending so nothing unapplied is
-        // published as converged; the post-apply publish carries the results
-        // the apply recorded (#135).
-        if (latest.mode === ProxyMode.Manual) {
-            patch.convergencePending = true;
-        }
-        return patch;
-    });
+        throw error;
+    }
 
     await vscode.workspace.getConfiguration('otakProxy').update(
         'proxyUrl',
         removeProxyCredentials(proxyUrl) || proxyUrl,
         vscode.ConfigurationTarget.Global
     );
-    return { committed, droppedManual: folded.droppedManual };
+    return { committed, droppedManual: folded.droppedManual, pendingClaim: folded.pendingClaim };
 }
 
 /**
@@ -93,18 +107,24 @@ async function applyManualModeChange(
     ctx: CommandContext,
     committed: ProxyState,
     droppedManual: boolean,
-    proxyUrl: string
+    proxyUrl: string,
+    pendingClaim?: ConvergencePendingClaim
 ): Promise<void> {
     if (committed.mode === ProxyMode.Manual) {
         await ctx.applyProxySettings(proxyUrl, true);
     } else if (droppedManual) {
         await ctx.applyProxySettings('', false);
     } else {
+        if (pendingClaim) {
+            releaseConvergencePending(pendingClaim);
+        }
         return;
     }
 
     if (committed.convergencePending) {
-        await clearPendingThenPublish(commandConvergenceContext(ctx), 'configureUrl', committed);
+        await clearPendingThenPublish(commandConvergenceContext(ctx), 'configureUrl', committed, pendingClaim);
+    } else if (pendingClaim) {
+        releaseConvergencePending(pendingClaim);
     }
     ctx.updateStatusBar(await ctx.getProxyState());
 }
@@ -143,8 +163,8 @@ async function handleProxyUrlInput(
         canonicalUrl = shownManualUrl;
     }
 
-    const { committed, droppedManual } = await saveManualProxyUrl(ctx, canonicalUrl);
-    await applyManualModeChange(ctx, committed, droppedManual, canonicalUrl);
+    const { committed, droppedManual, pendingClaim } = await saveManualProxyUrl(ctx, canonicalUrl);
+    await applyManualModeChange(ctx, committed, droppedManual, canonicalUrl, pendingClaim);
     return { success: true };
 }
 

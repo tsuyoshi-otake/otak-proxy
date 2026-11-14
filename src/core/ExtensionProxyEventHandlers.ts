@@ -11,7 +11,7 @@ import {
     TestResult
 } from '../utils/ProxyUtils';
 import type { ReportedProxyChange } from '../utils/ProxyTestTypes';
-import { clearPendingThenPublish } from './ApplyConvergence';
+import { claimConvergencePending, clearPendingThenPublish, ConvergencePendingClaim, releaseConvergencePending } from './ApplyConvergence';
 import { InitializerContext } from './ExtensionInitializerTypes';
 import {
     FenceCommitResult,
@@ -272,6 +272,7 @@ export async function handleProxyTestComplete(
     }
 
     let recoveredFromAutoOff = false;
+    let pendingClaim: ConvergencePendingClaim | undefined;
     const commit = await commitUnlessStaleWithRevision(context.proxyStateManager, started, 'connectionTest', state => {
         if (state.mode !== ProxyMode.Auto) {
             return undefined;
@@ -287,10 +288,18 @@ export async function handleProxyTestComplete(
         // A recovery is published only once its apply finished, as on every
         // other apply path: until then the proxy is not active (#97).
         next.convergencePending = isProxyEndpointUnreachable(testResult) || recoveredFromAutoOff;
+        if (next.convergencePending) {
+            // The flag rides the shared state, so its owner travels as an
+            // in-memory claim this apply's clear presents later (#135).
+            pendingClaim = claimConvergencePending(context.extensionContext ?? context);
+        }
         return next;
     });
 
     if (commit.outcome === 'stale') {
+        if (pendingClaim) {
+            releaseConvergencePending(pendingClaim);
+        }
         clearStartupPendingIfNeeded(startupTestState, testResult);
         return;
     }
@@ -323,7 +332,7 @@ export async function handleProxyTestComplete(
         }
         await applyProxyThroughContext(context, latest.autoProxyUrl, true, { silent: true });
         Logger.info(`Proxy ${context.sanitizer.maskPassword(latest.autoProxyUrl)} proved reachable, Auto Mode back on`);
-        await clearPendingThenPublish(context, 'connectionTest', latest);
+        await clearPendingThenPublish(context, 'connectionTest', latest, pendingClaim);
         context.updateStatusBar?.(await context.proxyStateManager.getState());
     }
 }
@@ -404,6 +413,7 @@ async function saveApplyThenPublish(
     desired: ProxyState,
     apply: () => Promise<void>
 ): Promise<'applied' | 'stale'> {
+    const pendingClaim = claimConvergencePending(context.extensionContext ?? context);
     const pending = await commitUnlessStale(context.proxyStateManager, started, owner, current => ({
         ...current,
         ...desired,
@@ -411,11 +421,12 @@ async function saveApplyThenPublish(
         convergencePending: true
     }));
     if (pending === 'stale') {
+        releaseConvergencePending(pendingClaim);
         return 'stale';
     }
 
     await apply();
-    await clearPendingThenPublish(context, owner, desired);
+    await clearPendingThenPublish(context, owner, desired, pendingClaim);
     return 'applied';
 }
 
