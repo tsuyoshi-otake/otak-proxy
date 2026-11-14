@@ -434,7 +434,7 @@
   タグは annotated で `Release vX.Y.Z`。PR を main に merge してから main HEAD に打つ。
 
 - **`vsce publish` / `ovsx publish` の成功ログは「アップロード成功」であって「公開反映」ではない。**
-  実測で Open VSX 約 3〜4 分 / Marketplace 約 5〜7 分の遅延がある（v3.2.14 は約 7 分）。
+  実測で Open VSX 約 3〜6 分 / Marketplace 約 5〜9 分の遅延がある（v3.2.14 は約 7 分。v3.2.20 は workflow の完了から Open VSX 4〜6 分、Marketplace 6〜8.5 分）。
   レジストリ API でバージョンが切り替わるまで「公開済み」と報告しない。
   Marketplace の判定は `https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery`（POST、
   `filterType: 7` に `<publisher>.<name>`）の `versions[0].version` で行う。版別アセット
