@@ -20,8 +20,8 @@ import {
     setRequiresAuthFromLiveUrls
 } from '../utils/ProxyStateSanitizer';
 import { I18nManager } from '../i18n/I18nManager';
-import { diffProxyState } from '../core/ApplyConvergence';
-import { commitCommandPatch } from './CommandStateCommit';
+import { clearPendingThenPublish, diffProxyState } from '../core/ApplyConvergence';
+import { commandConvergenceContext, commitCommandPatch } from './CommandStateCommit';
 
 export async function showInvalidProxyUrl(ctx: CommandContext, proxyUrl: string, i18n: I18nManager): Promise<void> {
     const errorDetails = {
@@ -65,7 +65,15 @@ async function saveManualProxyUrl(
         if (folded.droppedManual) {
             decided.mode = ProxyMode.Off;
         }
-        return diffProxyState(latest, decided);
+        const patch = diffProxyState(latest, decided);
+        // A commit out of Manual is applied below (the URL enable, or the
+        // disable after the drop): mark it pending so nothing unapplied is
+        // published as converged; the post-apply publish carries the results
+        // the apply recorded (#135).
+        if (latest.mode === ProxyMode.Manual) {
+            patch.convergencePending = true;
+        }
+        return patch;
     });
 
     await vscode.workspace.getConfiguration('otakProxy').update(
@@ -95,6 +103,9 @@ async function applyManualModeChange(
         return;
     }
 
+    if (committed.convergencePending) {
+        await clearPendingThenPublish(commandConvergenceContext(ctx), 'configureUrl', committed);
+    }
     ctx.updateStatusBar(await ctx.getProxyState());
 }
 

@@ -665,6 +665,38 @@ suite('ImportProxyCommand Unit Tests', () => {
             assert.strictEqual(h.counters.monitoringStops, 0, 'it was Off when committed: nothing to stop');
         });
 
+        test('Use Auto Mode publishes the committed state only after its apply finishes (#135)', async () => {
+            detectStub.resolves('http://detected.example:8080');
+            const h = await realContext({ mode: ProxyMode.Off });
+            showInformationMessageStub.resolves(i18n.t('action.useAutoMode'));
+            let publishedBeforeApply: ProxyState[] = [];
+            h.ctx.applyProxySettings = async (url, enabled) => {
+                h.applyCalls.push({ url, enabled });
+                publishedBeforeApply = [...h.published];
+                // The real applier records per-target results on the stored
+                // state; a failed target shows up as lastError plus its flag.
+                await h.commitFromAnotherWriter(current => ({
+                    ...current,
+                    gitConfigured: false,
+                    lastError: 'git config failed'
+                }));
+                return false;
+            };
+
+            await executeImportProxy(h.ctx);
+            const after = await h.readState();
+
+            assert.deepStrictEqual(publishedBeforeApply, [],
+                'peers must not see a converged state before its apply finished');
+            assert.strictEqual(h.published.length, 1, 'only the post-apply state is published');
+            assert.strictEqual(h.published[0].mode, ProxyMode.Auto);
+            assert.strictEqual(h.published[0].convergencePending, false,
+                'the pending flag is cleared before the publish');
+            assert.strictEqual(h.published[0].lastError, 'git config failed',
+                'the publish carries the failure the apply recorded');
+            assert.strictEqual(after.convergencePending, false);
+        });
+
         test('a save that loses every compare-and-set race reports failure and writes no setting', async () => {
             detectStub.resolves('http://detected.example:8080');
             showInformationMessageStub.resolves(i18n.t('action.saveAsManual'));

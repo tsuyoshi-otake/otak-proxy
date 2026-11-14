@@ -3,7 +3,7 @@
  * @description How a command that prompts the user saves its decision (#135)
  */
 
-import { DecidedPatch, commitDecidedPatch, publishCommitted } from '../core/ApplyConvergence';
+import { ApplyConvergenceContext, DecidedPatch, commitDecidedPatch, publishCommitted } from '../core/ApplyConvergence';
 import { ProxyState } from '../core/types';
 import { CommandContext } from './types';
 
@@ -33,4 +33,25 @@ export async function commitCommandPatch(ctx: CommandContext, patch: DecidedPatc
 
     await publishCommitted(ctx.publishProxyState, outcome.state);
     return outcome.state;
+}
+
+/**
+ * The CommandContext seen as the apply-and-converge seam
+ * `clearPendingThenPublish` needs. A command whose commit is followed by an
+ * apply folds `convergencePending: true` into its patch — the publish inside
+ * `commitCommandPatch` then stays silent — and calls
+ * `clearPendingThenPublish` once the apply finished, so peers only ever see
+ * the post-apply state, with the per-target results the applier recorded
+ * (#135). A command that applies nothing leaves the flag unset and its save
+ * keeps publishing at commit.
+ */
+export function commandConvergenceContext(ctx: CommandContext): ApplyConvergenceContext {
+    return {
+        proxyStateManager: {
+            getState: ctx.getProxyState,
+            saveState: ctx.saveProxyState,
+            commitState: ctx.commitProxyState
+        },
+        publishProxyState: ctx.publishProxyState
+    };
 }

@@ -13,9 +13,9 @@ import {
     clearPendingThenPublish,
     commitDecidedPatch,
     diffProxyState,
-    ApplyConvergenceContext,
     DecidedPatchWriter
 } from '../core/ApplyConvergence';
+import { commandConvergenceContext } from './CommandStateCommit';
 import { captureLogicalGeneration, sameLogicalIdentity } from '../core/LogicalGeneration';
 import { ProxyMode, type ProxyState, type ProxyTestResult } from '../core/types';
 import { I18nManager } from '../i18n/I18nManager';
@@ -287,15 +287,8 @@ function toggleWriter(ctx: CommandContext): DecidedPatchWriter {
     };
 }
 
-function toggleConvergenceContext(ctx: CommandContext): ApplyConvergenceContext {
-    return {
-        proxyStateManager: {
-            getState: ctx.getProxyState,
-            saveState: ctx.saveProxyState,
-            commitState: ctx.commitProxyState
-        },
-        publishProxyState: ctx.publishProxyState
-    };
+function toggleConvergenceContext(ctx: CommandContext) {
+    return commandConvergenceContext(ctx);
 }
 
 /**
