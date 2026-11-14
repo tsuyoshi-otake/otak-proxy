@@ -2488,3 +2488,34 @@ PR #142 の修正 16 件と、そのレビュー対応を公開した。リリ�
 - 確認で直したもの: Devin のコミットメッセージの em dash が `?` に化けていた（3 か所）。push の前に `-` に直した（中身は同じ）。
 - Verification: `npm run test:mvp` exit 0（unit 1614 + 90 passing / 5 pending、isolation、smoke 4）。host lane 682 passing、既知の 7 件だけが失敗。`lint:unicode:dist` 0 件。独立した検証役（rubric-verifier、5 項目）は全部合格（別のフォルダのビルドで、3 件の新しいテストが `855f19c` の SyncManager では落ち、修正後は 3 回続けて通ることも確かめた）。
 - Learning: rules.md に 2 件追記した（ウィンドウ間の同期）。プライバシーのリンク（vscan の Metadata の指摘）は、vsce の manifest に項目が無い（`@vscode/vsce` の `package.js` の Links は Source / Getstarted / GitHub / Repository / Support / Learn だけ）ので見送った。
+
+## 2026-11-14 — v3.2.21 リリース（#145 の同期の修正を公開）
+
+**Issue**: #145
+**PR**: #146（修正、merge `350ccd3`）、#147（版上げ、merge `318cc75`）
+**タグ**: `v3.2.21`（annotated、`Release v3.2.21`、`318cc75` に打った）
+
+v3.2.20 の公開後に届いた Codex の指摘 3 件（同期）の修正を公開した。リリースコミットは `CHANGELOG.md` / `package.json` / `package-lock.json` の 3 ファイルだけ。
+
+### リリース前チェックの結果（CLAUDE.md の MUST）
+
+| 観点 | 結果 | 対応 |
+| --- | --- | --- |
+| tracked files の個人情報らしき文字列 | v3.2.20..HEAD の追加行（`package-lock.json` を除く、4 files）の一致は、journal の既存の author ID の記述だけ | — |
+| コミット履歴の author / committer | v3.2.20..HEAD は既存の ID（`otak@odangoo.com`）と GitHub の merge コミットだけ | 書き換えない（2026-10-03 の決定） |
+| 公開設定・タグ・リリース | PUBLIC。タグは v3.2.20 まで。GitHub Release の最新は v3.2.20 | v3.2.21 も VSIX 付きで作った |
+| LICENSE | MIT あり | — |
+
+### Verification
+
+| ゲート | 結果 |
+| --- | --- |
+| ローカル（#146 の head） | `test:mvp` exit 0（unit 1614 + 90）、host lane 682 passing / 既知の 7 件、`lint:unicode:dist` 0 件 |
+| CI | #146（run 43555560342）、#147（run 43555858929）とも pass |
+| publish workflow（run 43556083602） | 4 job とも success（04:22:39Z に完了） |
+| Open VSX API | 13:28:16 JST に 3.2.21（13:26:46 はまだ 3.2.20） |
+| VS Marketplace API | 13:30:17 JST に 3.2.21（13:28:16 はまだ 3.2.20） |
+| GitHub Release | v3.2.21、`otak-proxy-3.2.21.vsix`（publish の artifact そのもの、sha256 `c5de40a8ef2a8c226c1e56513893e0945fd832f1349b571e0361b1fc00860e21`、中の package.json は 3.2.21） |
+
+- Learning: 公開の遅延は、workflow の完了から Open VSX 4〜6 分、Marketplace 6〜8 分で、v3.2.20 と同じ範囲だった（rules.md の値の中）。
+- 片付けの注意: 検証役が別のフォルダに作ったビルドに、リポジトリの `node_modules` への junction があった（`otak-proxy-verifier4/base/node_modules`）。フォルダを消す前に `rmdir`（中身を辿らない）で junction だけを外した。
