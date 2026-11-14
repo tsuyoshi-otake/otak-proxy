@@ -11,6 +11,8 @@
  * production modules are required; `__importStar` binds top-level keys once at
  * require time, so any module that may already be cached from an earlier file
  * in this worker is dropped and re-required against the patched shim.
+ * Everything patched or dropped is recorded and restored in suiteTeardown so
+ * the next file in this Mocha worker sees the shim and cache as before.
  */
 import * as assert from 'assert';
 import Module = require('module');
@@ -35,6 +37,27 @@ type VscodeStub = {
 
 const vscode = (Module as unknown as { _load(request: string, parent: unknown): unknown })
     ._load('vscode', module) as VscodeStub;
+
+// Record every shim member this file touches before mutating it; a --parallel
+// worker reuses the shim singleton for the files that run after this one.
+const changedShimMembers: Array<{
+    target: Record<string, unknown>;
+    key: string;
+    existed: boolean;
+    value: unknown;
+}> = [];
+const rememberShimMember = (target: object, key: string): void => {
+    const record = target as Record<string, unknown>;
+    changedShimMembers.push({ target: record, key, existed: key in record, value: record[key] });
+};
+rememberShimMember(vscode, 'UIKind');
+rememberShimMember(vscode, 'ExtensionKind');
+rememberShimMember(vscode.env, 'uiKind');
+rememberShimMember(vscode.env, 'remoteName');
+rememberShimMember(vscode.window, 'terminals');
+rememberShimMember(vscode.workspace, 'isTrusted');
+rememberShimMember(vscode.workspace, 'getConfiguration');
+
 vscode.UIKind = { Desktop: 1, Web: 2 };
 vscode.ExtensionKind = { UI: 1, Workspace: 2 };
 vscode.env.uiKind = vscode.UIKind.Desktop;
@@ -47,11 +70,14 @@ vscode.workspace.getConfiguration = () => ({
     update: async () => undefined
 });
 
+const droppedCacheEntries: Array<{ resolved: string; previous: NodeModule | undefined }> = [];
 for (const specifier of [
     '../diagnostics/ExecutionContextDetector',
     '../diagnostics/ProxyRuntimeDiagnostics'
 ]) {
-    delete require.cache[require.resolve(specifier)];
+    const resolved = require.resolve(specifier);
+    droppedCacheEntries.push({ resolved, previous: require.cache[resolved] });
+    delete require.cache[resolved];
 }
 const { ProxyRuntimeDiagnostics: Diagnostics } =
     require('../diagnostics/ProxyRuntimeDiagnostics') as { ProxyRuntimeDiagnostics: typeof ProxyRuntimeDiagnostics };
@@ -109,6 +135,27 @@ function appliedAutoState(overrides: Partial<ProxyState>): ProxyState {
 }
 
 suite('Diagnostics credential check agrees with the apply gate (#139)', () => {
+    // Put the shim singleton and the require cache back the way this file
+    // found them: members it added are deleted, members it replaced get their
+    // original value, and evicted cache entries are restored (or the freshly
+    // patched modules removed when nothing was cached before).
+    suiteTeardown(() => {
+        for (const { target, key, existed, value } of changedShimMembers) {
+            if (existed) {
+                target[key] = value;
+            } else {
+                delete target[key];
+            }
+        }
+        for (const { resolved, previous } of droppedCacheEntries) {
+            if (previous) {
+                require.cache[resolved] = previous;
+            } else {
+                delete require.cache[resolved];
+            }
+        }
+    });
+
     test('an unrelated credentialed URL does not hide a real git mismatch or claim the active URL needs credentials', async () => {
         // Issue repro: a credential-free system proxy is active while a
         // credential-bearing manual URL raised the aggregate flag.
